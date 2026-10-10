@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cleanzo</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="logo" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+            <defs>
+              <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#10b981" />
+                <stop offset="1" stop-color="#2563eb" />
+              </linearGradient>
+            </defs>
+            <rect x="1" y="1" width="22" height="22" rx="6.5" fill="url(#lg)" />
+            <path d="M12 4.5c.65 4.2 3.1 6.65 7.3 7.3-4.2.65-6.65 3.1-7.3 7.3-.65-4.2-3.1-6.65-7.3-7.3 4.2-.65 6.65-3.1 7.3-7.3z" fill="#fff" />
+            <circle cx="15.6" cy="8" r="1.35" fill="#fff" />
+            <circle cx="8.4" cy="16.4" r="0.9" fill="#fff" opacity="0.9" />
+          </svg>
+          <span class="brand-name">Cleanzo</span>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-view="clean" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.7 4.4 3.3 7 7.7 7.7-4.4.7-7 3.3-7.7 7.7-.7-4.4-3.3-7-7.7-7.7 4.4-.7 7-3.3 7.7-7.7z"/><circle cx="17.5" cy="17.5" r="1.4"/></svg>
+            <span data-i18n="nav.clean">垃圾清理</span>
+          </button>
+          <button class="nav-item" data-view="fullscan" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/><path d="M8.5 11h5M11 8.5v5"/></svg>
+            <span data-i18n="nav.fullscan">全盘扫描</span>
+          </button>
+          <button class="nav-item" data-view="large" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 15h4.5L11 8l3 9 2.5-5H20"/><circle cx="12" cy="12" r="9"/></svg>
+            <span data-i18n="nav.large">大文件</span>
+          </button>
+          <button class="nav-item" data-view="orphans" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h4l1.5-2h7L17 6h4v13H3z"/><circle cx="12" cy="12" r="2.6"/><path d="M12 8.5a3.5 3.5 0 0 0 0 7"/></svg>
+            <span data-i18n="nav.orphans">残留清理</span>
+          </button>
+          <button class="nav-item" data-view="apps" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="2"/><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="2"/><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="2"/><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="2"/></svg>
+            <span data-i18n="nav.apps">应用卸载</span>
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>
+            <span data-i18n="nav.settings">设置</span>
+          </button>
+        </nav>
+        <div class="sidebar-foot muted">Cleanzo v0.1.0</div>
+      </aside>
+
+      <main class="content">
+        <!-- 垃圾清理 -->
+        <section id="view-clean" class="view">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.clean">垃圾清理</h2>
+              <p class="muted" data-i18n="clean.sub">扫描缓存、日志、临时文件等垃圾，一键释放空间</p>
+            </div>
+            <div class="head-actions">
+              <button id="scan" class="btn ghost" type="button" data-i18n="fs.rescan">重新扫描</button>
+              <button id="clean-all" class="btn danger" type="button" data-i18n="clean.allBtn">清理全部</button>
+            </div>
+          </header>
+
+          <div class="hero">
+            <div class="hero-left">
+              <div class="hero-label" data-i18n="hero.ready">可释放空间</div>
+              <div id="total" class="hero-num">--</div>
+              <div id="hero-sub" class="hero-sub">正在扫描…</div>
+            </div>
+            <div class="hero-spark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="84" height="84" fill="rgba(255,255,255,0.28)">
+                <path d="M12 2c.9 6 4.4 9.5 10.4 10.4-6 .9-9.5 4.4-10.4 10.4-.9-6-4.4-9.5-10.4-10.4 6-.9 9.5-4.4 10.4-10.4z"/>
+                <circle cx="17.6" cy="6" r="1.7"/>
+                <circle cx="6.4" cy="17.6" r="1.2"/>
+              </svg>
+            </div>
+          </div>
+
+          <section id="list" class="cat-grid" aria-live="polite"></section>
+        </section>
+
+        <!-- 全盘扫描 -->
+        <section id="view-fullscan" class="view hidden">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.fullscan">全盘扫描</h2>
+              <p class="muted" data-i18n="fs.sub">扫描整个磁盘，找出最占空间的位置</p>
+            </div>
+            <div class="head-actions">
+              <button id="fs-scan" class="btn primary" type="button" data-i18n="fs.scanBtn">开始扫描</button>
+            </div>
+          </header>
+
+          <div class="disk-card card">
+            <div class="disk-stats">
+              <div class="disk-stat"><span class="label" data-i18n="fs.used">已用</span><span id="fs-used" class="value">--</span></div>
+              <div class="disk-stat"><span class="label" data-i18n="fs.free">可用</span><span id="fs-free" class="value">--</span></div>
+              <div class="disk-stat"><span class="label" data-i18n="fs.total">总量</span><span id="fs-total" class="value">--</span></div>
+            </div>
+            <div class="bar"><div id="fs-bar" class="bar-fill"></div></div>
+            <p class="muted small fs-hint" data-i18n="fs.hint">全盘扫描会遍历磁盘上的主要目录，通常需要一两分钟，完成后可按占用排行清理。</p>
+          </div>
+
+          <div id="fs-progress" class="fs-progress hidden">
+            <div class="spinner"></div>
+            <div class="fs-progress-text">
+              <div id="fs-current">准备扫描…</div>
+              <div id="fs-count" class="muted small"></div>
+            </div>
+          </div>
+
+          <section id="fs-list" class="fs-list" aria-live="polite"></section>
+        </section>
+
+        <!-- 大文件专清 -->
+        <section id="view-large" class="view hidden">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.large">大文件专清</h2>
+              <p class="muted" data-i18n="large.sub">找出占用最大的单个文件，快速清理磁盘</p>
+            </div>
+            <div class="head-actions">
+              <button id="lg-scan" class="btn primary" type="button" data-i18n="large.scanBtn">扫描大文件</button>
+            </div>
+          </header>
+          <p id="lg-threshold" class="muted small fs-hint"></p>
+          <div id="lg-progress" class="fs-progress hidden">
+            <div class="spinner"></div>
+            <div class="fs-progress-text">
+              <div id="lg-current">准备扫描…</div>
+              <div id="lg-count" class="muted small"></div>
+            </div>
+          </div>
+          <section id="lg-list" class="fs-list" aria-live="polite"></section>
+        </section>
+
+        <!-- 残留清理 -->
+        <section id="view-orphans" class="view hidden">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.orphans">残留清理</h2>
+              <p class="muted" data-i18n="orphans.sub">找出已卸载应用留下的残留文件</p>
+            </div>
+            <div class="head-actions">
+              <button id="or-scan" class="btn primary" type="button" data-i18n="orphans.scanBtn">扫描残留</button>
+            </div>
+          </header>
+          <div id="or-summary" class="orphan-summary hidden">
+            <div id="or-total" class="orphan-total"></div>
+            <div id="or-note" class="muted small" data-i18n="orphans.safeNote">残留项可能包含仍在使用的数据，移入废纸篓前请先确认。</div>
+          </div>
+          <div id="or-progress" class="fs-progress hidden">
+            <div class="spinner"></div>
+            <div class="fs-progress-text">
+              <div id="or-current" class="muted small"></div>
+            </div>
+          </div>
+          <section id="or-list" class="fs-list" aria-live="polite"></section>
+        </section>
+
+        <!-- 应用卸载 -->
+        <section id="view-apps" class="view hidden">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.apps">应用卸载</h2>
+              <p class="muted" data-i18n="apps.sub">卸载应用时，连同偏好设置、缓存等关联文件一起移入废纸篓</p>
+            </div>
+          </header>
+          <input id="app-search" class="search" data-i18n-ph="apps.search" placeholder="搜索应用…" autocomplete="off" />
+          <section id="app-list" class="app-list" aria-live="polite"></section>
+        </section>
+
+        <!-- 设置 -->
+        <section id="view-settings" class="view hidden">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.settings">设置</h2>
+              <p class="muted" data-i18n="settings.sub">管理清理分类与扫描目录，可自由增删改</p>
+            </div>
+            <div class="head-actions">
+              <button id="save-cats" class="btn primary" type="button" data-i18n="settings.save">保存设置</button>
+            </div>
+          </header>
+          <div class="setting-block card">
+            <div class="setting-row">
+              <div class="setting-label" data-i18n="settings.lang">界面语言</div>
+              <select id="lang-select" class="select">
+                <option value="system" data-i18n="settings.langSystem">跟随系统</option>
+                <option value="zh" data-i18n="settings.langZh">中文</option>
+                <option value="en" data-i18n="settings.langEn">English</option>
+              </select>
+            </div>
+          </div>
+          <div id="cat-editor" class="cat-editor"></div>
+          <button id="add-cat" class="btn ghost add-cat" type="button" data-i18n="settings.add">＋ 添加分类</button>
+          <p id="settings-status" class="settings-status muted"></p>
+        </section>
+      </main>
+    </div>
+
+    <div id="overlay" class="overlay hidden">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h2 id="modal-title">确认</h2>
+        <div id="modal-body"></div>
+        <div class="modal-actions">
+          <button id="modal-cancel" class="btn ghost" type="button" data-i18n="btn.cancel">取消</button>
+          <button id="modal-ok" class="btn danger" type="button" data-i18n="btn.ok">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

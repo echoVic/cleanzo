@@ -1,0 +1,357 @@
+// Minimal i18n for Cleanzo. Dictionary-based, supports a manual override
+// (Chinese / English) that persists, or "system" which follows the OS language.
+
+export type Lang = "zh" | "en";
+export type LangPref = "system" | Lang;
+
+const dict = {
+  zh: {
+    // nav
+    "nav.clean": "垃圾清理",
+    "nav.fullscan": "全盘扫描",
+    "nav.large": "大文件",
+    "nav.orphans": "残留清理",
+    "nav.apps": "应用卸载",
+    "nav.settings": "设置",
+    "nav.scanTip": "扫描中请稍候",
+    // clean view
+    "clean.sub": "扫描缓存、日志、临时文件等垃圾，一键释放空间",
+    "hero.ready": "可释放空间",
+    "clean.allBtn": "清理全部",
+    "scan.busy": "扫描中…",
+    "scan.hero": "正在扫描…",
+    "scan.start": "扫描",
+    "clean.idleSub": "尚未扫描",
+    "clean.idle.title": "一键扫描，找出可清理的垃圾",
+    "clean.idle.desc": "扫描仅在本机进行，安全私密，不会上传任何数据",
+    "clean.idle.cta": "开始扫描",
+    "scan.failed": "扫描失败",
+    "scan.retryHint": "请重试",
+    "scan.error": "扫描失败：{msg}",
+    "clean.nothing": "一切干净，无需清理",
+    "clean.usable": "{n} 个分类有待清理 · {f} 个文件",
+    "cat.files": "{n} 个文件",
+    "cat.clean": "清理",
+    "cat.risk": "重建耗时",
+    "cat.missing": "目录不存在",
+    "cat.tops": "占用最多的目录",
+    "clean.one.title": "清理「{name}」",
+    "clean.one.body": "将永久删除 {size} 的{desc}内容（{files} 个文件），删除后不会进入废纸篓。确定继续吗？",
+    "clean.all.title": "清理全部",
+    "clean.all.body": "将永久删除 {n} 个分类、共 {size} 的内容，删除后不会进入废纸篓。确定继续吗？",
+    "clean.confirm": "确认清理",
+    "clean.one.ok": "已清理「{name}」，释放 {size}",
+    "clean.one.partial": "「{name}」部分清理失败：{err}",
+    "clean.all.ok": "清理完成，释放 {size}",
+    "clean.all.partial": "部分分类清理失败：{names}",
+    "clean.fail": "清理失败：{msg}",
+    "btn.cancel": "取消",
+    "btn.ok": "确定",
+    "btn.retry": "重试",
+    "btn.close": "知道了",
+    // full scan
+    "fs.sub": "扫描整个磁盘，找出最占空间的位置",
+    "fs.title": "磁盘用量",
+    "fs.used": "已用",
+    "fs.free": "可用",
+    "fs.total": "总容量",
+    "fs.scanBtn": "开始扫描",
+    "fs.rescan": "重新扫描",
+    "fs.busy": "扫描中…",
+    "fs.prep": "准备扫描…",
+    "fs.scanning": "正在扫描 {path}",
+    "fs.count": "已统计 {n} 个目录",
+    "fs.live": "实时排行，扫描完成后排序",
+    "fs.empty": "没有找到大目录",
+    "fs.trash": "移到废纸篓",
+    "fs.items": "项",
+    "fs.foot": "共扫描 {n} 个目录 · 用时 {t}s · {s} 项跳过",
+    "fs.hint": "全盘扫描会遍历磁盘上的主要目录，通常需要一两分钟，完成后可按占用排行清理。",
+    "fs.trash.title": "移到废纸篓",
+    "fs.trash.body": "将「{path}」及其中全部内容（{size}）移入废纸篓，可从废纸篓恢复。确定吗？",
+    "fs.trash.confirm": "移到废纸篓",
+    "fs.trash.ok": "已移到废纸篓：{path}（{size}）",
+    "fs.fail": "扫描失败：{msg}",
+    "fs.actionFail": "操作失败：{msg}",
+    // apps
+    "apps.sub": "卸载应用时，连同偏好设置、缓存等关联文件一起移入废纸篓",
+    "apps.search": "搜索应用…",
+    "apps.loadFail": "读取应用列表失败：{msg}",
+    "apps.empty": "未读取到应用",
+    "apps.noMatch": "没有匹配「{q}」的应用",
+    "apps.never": "从未打开",
+    "apps.detail": "卸载详情",
+    "apps.analyzing": "正在分析…",
+    "apps.analyzingBody": "正在查找关联文件…",
+    "apps.wait": "请稍候",
+    "apps.title": "卸载「{name}」",
+    "apps.body": "共 {n} 项、{size}，将移入废纸篓（可从废纸篓恢复）。确定卸载吗？",
+    "apps.confirm": "移到废纸篓",
+    "apps.ok": "已卸载「{name}」，释放 {size}",
+    "apps.partial": "「{name}」有 {n} 项未能删除",
+    "apps.fail": "卸载失败：{msg}",
+    "apps.analyzeFail": "分析失败：{msg}",
+    // kinds
+    "kind.app": "应用本体",
+    "kind.prefs": "偏好设置",
+    "kind.cache": "缓存",
+    "kind.webkit": "WebKit 数据",
+    "kind.http": "网络存储",
+    "kind.container": "沙盒容器",
+    "kind.savedState": "界面状态",
+    "kind.scripts": "应用脚本",
+    "kind.launchAgent": "自启项",
+    "kind.logs": "日志",
+    "kind.support": "应用支持",
+    // settings
+    "settings.sub": "管理清理分类与扫描目录，可自由增删改",
+    "settings.readFail": "读取配置失败：{msg}",
+    "settings.name": "名称",
+    "settings.desc": "描述",
+    "settings.paths": "每行一个目录路径",
+    "settings.enabled": "启用",
+    "settings.remove": "删除",
+    "settings.add": "添加分类",
+    "settings.save": "保存设置",
+    "settings.saved": "已保存，分类将在下次扫描时生效",
+    "settings.saveFail": "保存失败：{msg}",
+    "settings.lang": "界面语言",
+    "settings.langSystem": "跟随系统",
+    "settings.langZh": "中文",
+    "settings.langEn": "English",
+    // large files
+    "large.sub": "找出占用最大的单个文件，快速清理磁盘",
+    "large.scanBtn": "扫描大文件",
+    "large.rescan": "重新扫描",
+    "large.threshold": "只显示大于 {size} 的文件",
+    "large.count": "已找到 {n} 个大文件",
+    "large.foot": "共扫描 {n} 个目录 · 用时 {t}s · {s} 项跳过",
+    "large.empty": "没有找到大于 {size} 的文件",
+    "large.live": "实时排行，扫描完成后排序",
+    "large.busy": "扫描中…",
+    "large.prep": "准备扫描…",
+    "large.scanning": "正在扫描 {path}",
+    "large.fail": "扫描失败：{msg}",
+    // leftovers
+    "orphans.sub": "找出已卸载应用留下的残留文件",
+    "orphans.scanBtn": "扫描残留",
+    "orphans.rescan": "重新扫描",
+    "orphans.count": "已发现 {n} 项残留",
+    "orphans.live": "扫描中，结果实时更新…",
+    "orphans.busy": "扫描中…",
+    "orphans.foot": "共 {n} 项残留 · {size} · 用时 {t}s",
+    "orphans.empty": "没有发现残留",
+    "orphans.fail": "扫描失败：{msg}",
+    "orphans.safeNote": "残留项可能包含仍在使用的数据，移入废纸篓前请先确认。",
+    // built-in category descriptions (shown when the built-in is untouched)
+    "desc.caches": "应用与浏览器缓存",
+    "desc.logs": "系统与应用日志",
+    "desc.temp": "临时文件",
+    "desc.trash": "废纸篓",
+    "desc.npm": "npm 缓存与残留",
+    "desc.go": "Go 构建缓存",
+    "desc.pip": "pip 缓存",
+    "desc.homebrew": "Homebrew 清理",
+    "desc.xcode": "Xcode 派生数据",
+  },
+  en: {
+    "nav.clean": "Cleaner",
+    "nav.fullscan": "Full Scan",
+    "nav.large": "Large Files",
+    "nav.orphans": "Leftovers",
+    "nav.apps": "Apps",
+    "nav.settings": "Settings",
+    "nav.scanTip": "Scanning…",
+    "clean.sub": "Scan caches, logs, temp files and more, free space in one click",
+    "hero.ready": "Reclaimable",
+    "clean.allBtn": "Clean All",
+    "scan.busy": "Scanning…",
+    "scan.hero": "Scanning…",
+    "scan.start": "Scan",
+    "clean.idleSub": "Not scanned yet",
+    "clean.idle.title": "Scan once, find cleanable junk",
+    "clean.idle.desc": "The scan runs entirely on your Mac — safe, private, nothing uploaded",
+    "clean.idle.cta": "Start Scan",
+    "scan.failed": "Scan failed",
+    "scan.retryHint": "Retry",
+    "scan.error": "Scan failed: {msg}",
+    "clean.nothing": "All clean",
+    "clean.usable": "{n} categories · {f} files",
+    "cat.files": "{n} files",
+    "cat.clean": "Clean",
+    "cat.risk": "Rebuilds slowly",
+    "cat.missing": "Missing",
+    "cat.tops": "Largest directories",
+    "clean.one.title": "Clean “{name}”",
+    "clean.one.body": "This permanently deletes {size} of {desc} ({files} files). It will NOT go to the Trash. Continue?",
+    "clean.all.title": "Clean All",
+    "clean.all.body": "This permanently deletes {n} categories, {size} in total. They will NOT go to the Trash. Continue?",
+    "clean.confirm": "Clean",
+    "clean.one.ok": "Cleaned “{name}”, freed {size}",
+    "clean.one.partial": "“{name}” partially failed: {err}",
+    "clean.all.ok": "Cleaned, freed {size}",
+    "clean.all.partial": "Some categories failed: {names}",
+    "clean.fail": "Clean failed: {msg}",
+    "btn.cancel": "Cancel",
+    "btn.ok": "OK",
+    "btn.retry": "Retry",
+    "btn.close": "Got it",
+    "fs.sub": "Scan the whole disk and find what takes up the most space",
+    "fs.title": "Disk Usage",
+    "fs.used": "Used",
+    "fs.free": "Free",
+    "fs.total": "Total",
+    "fs.scanBtn": "Start Scan",
+    "fs.rescan": "Rescan",
+    "fs.busy": "Scanning…",
+    "fs.prep": "Preparing…",
+    "fs.scanning": "Scanning {path}",
+    "fs.count": "{n} directories",
+    "fs.live": "Live ranking while scanning",
+    "fs.empty": "No large directories found",
+    "fs.trash": "Move to Trash",
+    "fs.items": "items",
+    "fs.foot": "{n} directories · {t}s · {s} skipped",
+    "fs.hint": "A full scan walks the main directories of your disk and usually takes one to two minutes. You can clean the largest ones when it finishes.",
+    "fs.trash.title": "Move to Trash",
+    "fs.trash.body": "Move “{path}” and everything inside it ({size}) to the Trash? You can restore it later.",
+    "fs.trash.confirm": "Move to Trash",
+    "fs.trash.ok": "Moved to Trash: {path} ({size})",
+    "fs.fail": "Scan failed: {msg}",
+    "fs.actionFail": "Failed: {msg}",
+    "apps.sub": "Uninstall apps together with their preferences, caches and related files (moved to Trash)",
+    "apps.search": "Search apps…",
+    "apps.loadFail": "Failed to load apps: {msg}",
+    "apps.empty": "No apps found",
+    "apps.noMatch": "No apps match “{q}”",
+    "apps.never": "Never opened",
+    "apps.detail": "Details",
+    "apps.analyzing": "Analyzing…",
+    "apps.analyzingBody": "Looking for associated files…",
+    "apps.wait": "Please wait",
+    "apps.title": "Uninstall “{name}”",
+    "apps.body": "{n} items, {size} in total, will move to the Trash (restorable). Continue?",
+    "apps.confirm": "Move to Trash",
+    "apps.ok": "Uninstalled “{name}”, freed {size}",
+    "apps.partial": "“{name}”: {n} items could not be removed",
+    "apps.fail": "Uninstall failed: {msg}",
+    "apps.analyzeFail": "Analysis failed: {msg}",
+    "kind.app": "App bundle",
+    "kind.prefs": "Preferences",
+    "kind.cache": "Caches",
+    "kind.webkit": "WebKit data",
+    "kind.http": "HTTP storage",
+    "kind.container": "Sandbox container",
+    "kind.savedState": "Saved state",
+    "kind.scripts": "App scripts",
+    "kind.launchAgent": "Launch agent",
+    "kind.logs": "Logs",
+    "kind.support": "App support",
+    "settings.sub": "Manage cleaning categories and scan directories",
+    "settings.readFail": "Failed to read config: {msg}",
+    "settings.name": "Name",
+    "settings.desc": "Description",
+    "settings.paths": "One directory per line",
+    "settings.enabled": "Enabled",
+    "settings.remove": "Remove",
+    "settings.add": "Add Category",
+    "settings.save": "Save Settings",
+    "settings.saved": "Saved. Categories take effect on next scan.",
+    "settings.saveFail": "Save failed: {msg}",
+    "settings.lang": "Language",
+    "settings.langSystem": "System",
+    "settings.langZh": "中文",
+    "settings.langEn": "English",
+    "large.sub": "Find the largest single files and free disk space fast",
+    "large.scanBtn": "Scan Large Files",
+    "large.rescan": "Rescan",
+    "large.threshold": "Only files larger than {size}",
+    "large.count": "{n} large files found",
+    "large.foot": "{n} directories · {t}s · {s} skipped",
+    "large.empty": "No files larger than {size}",
+    "large.live": "Live ranking while scanning",
+    "large.busy": "Scanning…",
+    "large.prep": "Preparing…",
+    "large.scanning": "Scanning {path}",
+    "large.fail": "Scan failed: {msg}",
+    "orphans.sub": "Find leftover files from apps that are no longer installed",
+    "orphans.scanBtn": "Scan Leftovers",
+    "orphans.rescan": "Rescan",
+    "orphans.count": "{n} leftovers found",
+    "orphans.live": "Scanning, results update live…",
+    "orphans.busy": "Scanning…",
+    "orphans.foot": "{n} leftovers · {size} · {t}s",
+    "orphans.empty": "No leftovers found",
+    "orphans.fail": "Scan failed: {msg}",
+    "orphans.safeNote": "Leftovers may include data still in use; please verify before moving to Trash.",
+    "desc.caches": "App & browser caches",
+    "desc.logs": "System & app logs",
+    "desc.temp": "Temporary files",
+    "desc.trash": "Trash",
+    "desc.npm": "npm cache & leftovers",
+    "desc.go": "Go build cache",
+    "desc.pip": "pip cache",
+    "desc.homebrew": "Homebrew cleanup",
+    "desc.xcode": "Xcode derived data",
+  },
+} as const;
+
+const STORAGE_KEY = "cleanzo.lang";
+
+export function getPref(): LangPref {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === "zh" || v === "en") return v;
+  } catch {
+    /* ignore */
+  }
+  return "system";
+}
+
+export function setPref(p: LangPref) {
+  try {
+    localStorage.setItem(STORAGE_KEY, p);
+  } catch {
+    /* ignore */
+  }
+}
+
+function resolveLang(): Lang {
+  const pref = getPref();
+  if (pref !== "system") return pref;
+  try {
+    return (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+export function currentLang(): Lang {
+  return resolveLang();
+}
+
+/** t(key, vars) returns the localized string for the current language. */
+export function t(key: keyof (typeof dict)["zh"] & keyof (typeof dict)["en"], vars?: Record<string, string | number>): string {
+  const lang = resolveLang();
+  let s: string = dict[lang][key] ?? dict.en[key] ?? key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      s = s.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return s;
+}
+
+/** categoryDescription maps a built-in category name to its localized description. */
+export function categoryDescription(name: string, fallback: string): string {
+  const key = `desc.${name}` as keyof (typeof dict)["zh"];
+  if (key in dict.zh) return t(key);
+  return fallback;
+}
+
+/** kindLabel maps a Go uninstall kind key to a localized label. */
+export function kindLabel(kind: string): string {
+  const key = `kind.${kind}` as keyof (typeof dict)["zh"];
+  if (key in dict.zh) return t(key);
+  return kind;
+}
