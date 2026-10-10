@@ -4,6 +4,14 @@ import { call, type Channel } from "mygo-runtime";
 
 // ---- Types ----
 
+/** AppCacheItem is one application's cache footprint under ~/Library/Caches. */
+export interface AppCacheItem {
+  name: string;
+  path: string;
+  size: number;
+  files: number;
+}
+
 /** AppInfo describes an installed application. */
 export interface AppInfo {
   name: string;
@@ -137,6 +145,36 @@ export interface OrphanItem {
   trashable: boolean;
 }
 
+/** PathsCleanResult reports what CleanPaths moved to the Trash. */
+export interface PathsCleanResult {
+  moved: number;
+  freed: number;
+  files: number;
+  failed: string[];
+}
+
+/** PhotoCluster groups visually near-identical photos together. */
+export interface PhotoCluster {
+  id: number;
+  items: PhotoItem[];
+  totalSize: number;
+}
+
+/** PhotoItem is one image discovered by the similar-photo scan. */
+export interface PhotoItem {
+  path: string;
+  size: number;
+  width: number;
+  height: number;
+}
+
+/** SimilarPhotosResult is the outcome of a similar-photo scan. */
+export interface SimilarPhotosResult {
+  clusters: PhotoCluster[];
+  scanned: number;
+  elapsedMs: number;
+}
+
 /** SystemInfo describes the machine the app runs on. */
 export interface SystemInfo {
   os: string;
@@ -195,6 +233,14 @@ export const Cleaner = {
     return call("Cleaner.Clean", names);
   },
   /**
+   * CleanPaths moves the given individual paths (e.g. one app's cache folder,
+   * or selected photos) into the Trash, honoring the safeToClean gate. It is
+   * the fine-grained counterpart to Clean (which works on whole categories).
+   */
+  cleanPaths(paths: string[]): Promise<PathsCleanResult> {
+    return call("Cleaner.CleanPaths", paths);
+  },
+  /**
    * DirChildren lists the direct children of path with sizes: directories are
    * measured with du (8s timeout), files with a quick stat. Unreadable or
    * timed-out entries report Size = -1 so the UI can show them as unknown.
@@ -241,9 +287,25 @@ export const Cleaner = {
   scan(): Promise<Category[]> {
     return call("Cleaner.Scan");
   },
+  /**
+   * ScanAppCaches measures every direct subdirectory of ~/Library/Caches (one
+   * row per application) so the frontend can let the user pick apps to clean.
+   * Sizing runs concurrently under a bounded semaphore; results are sorted by
+   * size descending.
+   */
+  scanAppCaches(): Promise<AppCacheItem[]> {
+    return call("Cleaner.ScanAppCaches");
+  },
   /** ScanOrphans streams leftover files from apps that are no longer installed. */
   scanOrphans(ch: Channel<OrphanItem>): Promise<void> {
     return call("Cleaner.ScanOrphans", ch);
+  },
+  /**
+   * ScanSimilarPhotos scans ~/Pictures (and ~/Desktop) for near-duplicate
+   * photos, hashes them concurrently, and returns the similar clusters.
+   */
+  scanSimilarPhotos(): Promise<SimilarPhotosResult> {
+    return call("Cleaner.ScanSimilarPhotos");
   },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {

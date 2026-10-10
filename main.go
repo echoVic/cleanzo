@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"log"
+	"math/bits"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,9 +263,21 @@ func safeToClean(p string) bool {
 	return true
 }
 
-// topItems returns the largest direct children of a category's paths.
+// scanConcurrency bounds how many directory walks run at once during a scan.
+// WalkDir is I/O bound; keeping a small fixed pool avoids thrashing the disk.
+const scanConcurrency = 8
+
+// topItems returns the largest direct children of a category's paths. The
+// per-child sizing runs concurrently (bounded by scanConcurrency); the
+// result is still sorted by size descending and capped at 5, so the reported
+// "top" is identical to the sequential version.
 func topItems(cat Category) []TopItem {
-	var tops []TopItem
+	var (
+		mu  sync.Mutex
+		tops []TopItem
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, scanConcurrency)
+	)
 	for _, p := range cat.paths {
 		entries, err := os.ReadDir(p)
 		if err != nil {
@@ -268,10 +285,19 @@ func topItems(cat Category) []TopItem {
 		}
 		for _, e := range entries {
 			child := filepath.Join(p, e.Name())
-			size, _ := scanPath(child)
-			tops = append(tops, TopItem{Name: e.Name(), Path: child, Size: size})
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(name, child string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				size, _ := scanPath(child)
+				mu.Lock()
+				tops = append(tops, TopItem{Name: name, Path: child, Size: size})
+				mu.Unlock()
+			}(e.Name(), child)
 		}
 	}
+	wg.Wait()
 	sort.Slice(tops, func(i, j int) bool { return tops[i].Size > tops[j].Size })
 	if len(tops) > 5 {
 		tops = tops[:5]
@@ -279,18 +305,39 @@ func topItems(cat Category) []TopItem {
 	return tops
 }
 
-// scanCategories fills in Size/Files/Missing/Top for every category.
+// scanCategories fills in Size/Files/Missing/Top for every category. Each
+// (category, path) walk runs concurrently under a bounded semaphore; results
+// are accumulated behind a mutex. The per-category totals and the top list are
+// numerically identical to the sequential scan, just much faster.
 func scanCategories(cats []Category) []Category {
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, scanConcurrency)
+	)
 	for i := range cats {
 		for _, p := range cats[i].paths {
-			if _, err := os.Lstat(p); err != nil {
-				cats[i].Missing = append(cats[i].Missing, p)
-				continue
-			}
-			size, files := scanPath(p)
-			cats[i].Size += size
-			cats[i].Files += files
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, p string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if _, err := os.Lstat(p); err != nil {
+					mu.Lock()
+					cats[i].Missing = append(cats[i].Missing, p)
+					mu.Unlock()
+					return
+				}
+				size, files := scanPath(p)
+				mu.Lock()
+				cats[i].Size += size
+				cats[i].Files += files
+				mu.Unlock()
+			}(i, p)
 		}
+	}
+	wg.Wait()
+	for i := range cats {
 		cats[i].Top = topItems(cats[i])
 	}
 	return cats
@@ -301,9 +348,22 @@ func (Cleaner) Scan() []Category {
 	return scanCategories(loadCategories())
 }
 
-// cleanCategory removes the contents of a category's paths.
+// userTrashDir is the macOS Trash directory for the current user. Files moved
+// here are recoverable until the user empties the Trash.
+func userTrashDir() string {
+	return filepath.Join(homeDir(), ".Trash")
+}
+
+// cleanCategory moves the contents of a category's paths into the Trash so they
+// stay recoverable (they are NOT permanently deleted). The Trash directory
+// itself (the built-in "trash" category) is emptied permanently, because its
+// contents are already in the Trash and emptying it is what actually frees
+// space. The safeToClean gate and the per-category failure bookkeeping are
+// unchanged.
 func cleanCategory(cat Category) CleanResult {
 	res := CleanResult{Name: cat.Name}
+	trash := userTrashDir()
+	_ = os.MkdirAll(trash, 0o755)
 	for _, p := range cat.paths {
 		if !safeToClean(p) {
 			res.Failed = append(res.Failed, p+": blocked")
@@ -317,11 +377,19 @@ func cleanCategory(cat Category) CleanResult {
 			res.Failed = append(res.Failed, p+": "+err.Error())
 			continue
 		}
+		// Cleaning the Trash itself means emptying it: free the space now.
+		emptyTrash := p == trash
 		for _, e := range entries {
 			child := filepath.Join(p, e.Name())
 			size, files := scanPath(child)
-			if err := os.RemoveAll(child); err != nil {
-				res.Failed = append(res.Failed, child+": "+err.Error())
+			var moveErr error
+			if emptyTrash {
+				moveErr = os.RemoveAll(child)
+			} else {
+				_, moveErr = moveToTrash(child, trash)
+			}
+			if moveErr != nil {
+				res.Failed = append(res.Failed, child+": "+moveErr.Error())
 				continue
 			}
 			res.Freed += size
@@ -355,6 +423,96 @@ func (Cleaner) Clean(names []string) CleanSummary {
 // Info returns basic system information.
 func (Cleaner) Info() SystemInfo {
 	return SystemInfo{OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version()}
+}
+
+// ---------------------------------------------------------------------------
+// Per-application cache cleanup
+// ---------------------------------------------------------------------------
+
+// AppCacheItem is one application's cache footprint under ~/Library/Caches.
+type AppCacheItem struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	Files int64  `json:"files"`
+}
+
+// PathsCleanResult reports what CleanPaths moved to the Trash.
+type PathsCleanResult struct {
+	Moved  int64    `json:"moved"`
+	Freed  int64    `json:"freed"`
+	Files  int64    `json:"files"`
+	Failed []string `json:"failed"`
+}
+
+// ScanAppCaches measures every direct subdirectory of ~/Library/Caches (one
+// row per application) so the frontend can let the user pick apps to clean.
+// Sizing runs concurrently under a bounded semaphore; results are sorted by
+// size descending.
+func (Cleaner) ScanAppCaches() []AppCacheItem {
+	dir := filepath.Join(homeDir(), "Library", "Caches")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var (
+		mu    sync.Mutex
+		items []AppCacheItem
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, scanConcurrency)
+	)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		child := filepath.Join(dir, name)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			size, files := scanPath(child)
+			mu.Lock()
+			items = append(items, AppCacheItem{Name: name, Path: child, Size: size, Files: files})
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	sort.Slice(items, func(i, j int) bool { return items[i].Size > items[j].Size })
+	return items
+}
+
+// CleanPaths moves the given individual paths (e.g. one app's cache folder,
+// or selected photos) into the Trash, honoring the safeToClean gate. It is
+// the fine-grained counterpart to Clean (which works on whole categories).
+func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
+	trash := userTrashDir()
+	_ = os.MkdirAll(trash, 0o755)
+	res := PathsCleanResult{}
+	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			res.Failed = append(res.Failed, p+": "+err.Error())
+			continue
+		}
+		if !safeToClean(abs) {
+			res.Failed = append(res.Failed, abs+": blocked")
+			continue
+		}
+		if _, err := os.Lstat(abs); err != nil {
+			continue // already gone
+		}
+		size, files := scanPath(abs)
+		if _, err := moveToTrash(abs, trash); err != nil {
+			res.Failed = append(res.Failed, abs+": "+err.Error())
+			continue
+		}
+		res.Moved++
+		res.Freed += size
+		res.Files += files
+	}
+	return res
 }
 
 // ---------------------------------------------------------------------------
@@ -1143,6 +1301,208 @@ func (Cleaner) RevealInFinder(path string) error {
 		return fmt.Errorf("open failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Similar photo cleanup (MVP)
+// ---------------------------------------------------------------------------
+
+// photoExts are the only image formats this scan decodes (standard library
+// only). HEIC/RAW/etc. are intentionally skipped.
+var photoExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+
+// similarPhotoCap bounds how many files the discovery step reads, so a huge
+// ~/Pictures never blocks the app indefinitely.
+const similarPhotoCap = 2000
+
+// similarHashThreshold is the max hamming distance (out of 64 bits) for two
+// photos to be considered near-identical. Tuned for near-duplicates, similar
+// screenshots and burst shots, not semantic similarity.
+const similarHashThreshold = 6
+
+// PhotoItem is one image discovered by the similar-photo scan.
+type PhotoItem struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// PhotoCluster groups visually near-identical photos together.
+type PhotoCluster struct {
+	ID        int         `json:"id"`
+	Items     []PhotoItem `json:"items"`
+	TotalSize int64       `json:"totalSize"`
+}
+
+// SimilarPhotosResult is the outcome of a similar-photo scan.
+type SimilarPhotosResult struct {
+	Clusters  []PhotoCluster `json:"clusters"`
+	Scanned   int            `json:"scanned"`
+	ElapsedMs int64          `json:"elapsedMs"`
+}
+
+// dHash computes a 64-bit difference hash by sampling the image on a 9x8 grid
+// of luminance values and recording whether each sample is brighter than the
+// one to its right. Nearest-neighbor sampling avoids any resampling dependency.
+func dHash(path string) (hash uint64, width, height int, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return 0, 0, 0, err
+	}
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	const gw, gh = 9, 8
+	var lum [gh][gw]float64
+	for y := 0; y < gh; y++ {
+		for x := 0; x < gw; x++ {
+			sx := x * (cfg.Width - 1) / (gw - 1)
+			sy := y * (cfg.Height - 1) / (gh - 1)
+			r, g, b, _ := img.At(sx, sy).RGBA()
+			lum[y][x] = (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 65535.0
+		}
+	}
+	for y := 0; y < gh; y++ {
+		for x := 0; x < gw-1; x++ {
+			hash <<= 1
+			if lum[y][x] < lum[y][x+1] {
+				hash |= 1
+			}
+		}
+	}
+	return hash, cfg.Width, cfg.Height, nil
+}
+
+// collectPhotoFiles walks the given roots (non-recursive-friendly: directories
+// are walked recursively but only known image extensions are collected) and
+// stops once cap files are found.
+func collectPhotoFiles(roots []string, cap int) []string {
+	var out []string
+	stop := errors.New("stop")
+	for _, root := range roots {
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d == nil || d.IsDir() {
+				return nil
+			}
+			if photoExts[strings.ToLower(filepath.Ext(p))] {
+				out = append(out, p)
+				if len(out) >= cap {
+					return stop
+				}
+			}
+			return nil
+		})
+		if len(out) >= cap {
+			break
+		}
+	}
+	return out
+}
+
+// clusterPhotos groups photos whose dHash is within similarHashThreshold of an
+// already-seen cluster representative. Clusters with a single item are dropped.
+func clusterPhotos(photos []PhotoItem, hashes []uint64) []PhotoCluster {
+	type acc struct {
+		rep   uint64
+		items []int
+	}
+	var clusters []*acc
+	for i := range photos {
+		placed := false
+		for _, c := range clusters {
+			if bits.OnesCount64(c.rep^hashes[i]) <= similarHashThreshold {
+				c.items = append(c.items, i)
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			clusters = append(clusters, &acc{rep: hashes[i], items: []int{i}})
+		}
+	}
+	var out []PhotoCluster
+	id := 0
+	for _, c := range clusters {
+		if len(c.items) < 2 {
+			continue
+		}
+		id++
+		cl := PhotoCluster{ID: id, Items: make([]PhotoItem, 0, len(c.items))}
+		for _, idx := range c.items {
+			cl.Items = append(cl.Items, photos[idx])
+			cl.TotalSize += photos[idx].Size
+		}
+		out = append(out, cl)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TotalSize > out[j].TotalSize })
+	return out
+}
+
+// ScanSimilarPhotos scans ~/Pictures (and ~/Desktop) for near-duplicate
+// photos, hashes them concurrently, and returns the similar clusters.
+func (Cleaner) ScanSimilarPhotos() SimilarPhotosResult {
+	start := time.Now()
+	h := homeDir()
+	roots := []string{
+		filepath.Join(h, "Pictures"),
+		filepath.Join(h, "Desktop"),
+	}
+	files := collectPhotoFiles(roots, similarPhotoCap)
+	type decoded struct {
+		item PhotoItem
+		hash uint64
+	}
+	var (
+		mu  sync.Mutex
+		dec []decoded
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, scanConcurrency)
+	)
+	for _, p := range files {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			hash, w, hgt, err := dHash(p)
+			if err != nil {
+				return
+			}
+			fi, err := os.Stat(p)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			dec = append(dec, decoded{item: PhotoItem{Path: p, Size: fi.Size(), Width: w, Height: hgt}, hash: hash})
+			mu.Unlock()
+		}(p)
+	}
+	wg.Wait()
+	photos := make([]PhotoItem, len(dec))
+	hashes := make([]uint64, len(dec))
+	for i, d := range dec {
+		photos[i] = d.item
+		hashes[i] = d.hash
+	}
+	return SimilarPhotosResult{
+		Clusters:  clusterPhotos(photos, hashes),
+		Scanned:   len(files),
+		ElapsedMs: time.Since(start).Milliseconds(),
+	}
 }
 
 func main() {

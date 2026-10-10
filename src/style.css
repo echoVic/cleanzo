@@ -1044,3 +1044,36 @@ button, input, select, textarea { font: inherit; color: inherit; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Similar photo clusters ---- */
+.photo-clusters { gap: 12px; }
+.photo-cluster { padding: 12px 14px; }
+.photo-cluster-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.photo-cluster-title { font-weight: 600; font-size: 13.5px; }
+.photo-cluster-meta { font-size: 12px; }
+.photo-cluster-rows { display: flex; flex-direction: column; }
+.photo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--border);
+}
+.photo-row:first-child { border-top: none; }
+.photo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.photo-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.photo-sub { font-size: 11.5px; }
+@media (max-width: 720px) {
+  .photo-cluster-head { flex-direction: column; gap: 2px; }
+}

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,8 +11,9 @@ import (
 )
 
 func TestScanPathAndClean(t *testing.T) {
-	dir := t.TempDir()
-	junk := filepath.Join(dir, "junk")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	junk := filepath.Join(home, "junk")
 	if err := os.MkdirAll(filepath.Join(junk, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -37,14 +41,52 @@ func TestScanPathAndClean(t *testing.T) {
 	if _, err := os.Stat(junk); err != nil {
 		t.Fatalf("root dir should remain: %v", err)
 	}
+	// moved to trash, not deleted in place
+	if _, err := os.Stat(filepath.Join(junk, "a.bin")); !os.IsNotExist(err) {
+		t.Fatalf("a.bin should have moved out of the source dir: %v", err)
+	}
 	entries, _ := os.ReadDir(junk)
 	if len(entries) != 0 {
 		t.Fatalf("junk dir should be empty, got %d entries", len(entries))
+	}
+	// ...and it must actually be in the (temp) trash now
+	trash := filepath.Join(home, ".Trash")
+	if _, err := os.Stat(filepath.Join(trash, "a.bin")); err != nil {
+		t.Fatalf("a.bin should be in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trash, "sub", "b.bin")); err != nil {
+		t.Fatalf("sub/b.bin should be in trash: %v", err)
 	}
 
 	res2 := cleanCategory(cat)
 	if res2.Freed != 0 || res2.Files != 0 {
 		t.Fatalf("second clean should free 0, got freed=%d files=%d", res2.Freed, res2.Files)
+	}
+}
+
+// TestCleanCategoryEmptiesTrash verifies the built-in "trash" category is
+// emptied permanently (its contents are already in the Trash), while other
+// categories move recoverable copies in.
+func TestCleanCategoryEmptiesTrash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	trash := filepath.Join(home, ".Trash")
+	mustMkdir(t, trash)
+	// something already sitting in the trash
+	if err := os.WriteFile(filepath.Join(trash, "old.bin"), make([]byte, 1500), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat := Category{Name: "trash", paths: []string{trash}}
+	res := cleanCategory(cat)
+	if res.Freed != 1500 {
+		t.Fatalf("freed = %d, want 1500", res.Freed)
+	}
+	if len(res.Failed) != 0 {
+		t.Fatalf("unexpected failures: %v", res.Failed)
+	}
+	entries, _ := os.ReadDir(trash)
+	if len(entries) != 0 {
+		t.Fatalf("trash should be empty after emptying, got %d", len(entries))
 	}
 }
 
@@ -553,5 +595,207 @@ func TestCollectOrphans(t *testing.T) {
 	}
 	if total < 3<<20 {
 		t.Fatalf("total = %d", total)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-application cache cleanup
+// ---------------------------------------------------------------------------
+
+func TestScanAppCaches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	caches := filepath.Join(home, "Library", "Caches")
+	for _, name := range []string{"AppA", "AppB"} {
+		d := filepath.Join(caches, name)
+		mustMkdir(t, d)
+		if err := os.WriteFile(filepath.Join(d, "c.bin"), make([]byte, 2048), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := Cleaner{}.ScanAppCaches()
+	if len(items) != 2 {
+		t.Fatalf("want 2 app cache rows, got %+v", items)
+	}
+	// sorted by size descending (equal sizes, order not asserted beyond presence)
+	byName := map[string]AppCacheItem{}
+	for _, it := range items {
+		byName[it.Name] = it
+	}
+	if byName["AppA"].Size < 2048 || byName["AppB"].Size < 2048 {
+		t.Fatalf("unexpected sizes: %+v", byName)
+	}
+	if byName["AppA"].Path != filepath.Join(caches, "AppA") {
+		t.Fatalf("bad path: %+v", byName["AppA"])
+	}
+}
+
+func TestCleanPathsMovesToTrash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	app := filepath.Join(home, "Library", "Caches", "AppA")
+	mustMkdir(t, app)
+	if err := os.WriteFile(filepath.Join(app, "c.bin"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := Cleaner{}.CleanPaths([]string{app})
+	if res.Moved != 1 || res.Freed < 4096 || len(res.Failed) != 0 {
+		t.Fatalf("res = %+v", res)
+	}
+	// original location must be gone
+	if _, err := os.Lstat(app); !os.IsNotExist(err) {
+		t.Fatalf("source should be gone: %v", err)
+	}
+	// ...and present in the (temp) trash
+	if _, err := os.Lstat(filepath.Join(home, ".Trash", "AppA", "c.bin")); err != nil {
+		t.Fatalf("should be in trash: %v", err)
+	}
+	// protected path is rejected, not moved
+	bad := filepath.Join(home, "Library")
+	res2 := Cleaner{}.CleanPaths([]string{bad})
+	if res2.Moved != 0 || len(res2.Failed) == 0 {
+		t.Fatalf("protected path should be rejected: %+v", res2)
+	}
+	if _, err := os.Lstat(bad); err != nil {
+		t.Fatalf("protected path must not be touched: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Similar photo cleanup
+// ---------------------------------------------------------------------------
+
+// writePNG writes a solid-color PNG of the given size to path (used for the
+// discovery test, which does not inspect hashes).
+func writePNG(t *testing.T, path string, w, h int, v uint8) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: v, G: v, B: v, A: 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeGradientPNG writes a horizontal-gradient PNG. A monotonic gradient gives
+// dHash a clean, deterministic signal: the same gradient always hashes the same,
+// and a reversed gradient hashes to the bitwise complement.
+func writeGradientPNG(t *testing.T, path string, w, h int, reverse bool) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			v := uint8(40 + 200*x/(w-1))
+			if reverse {
+				v = uint8(240 - 200*x/(w-1))
+			}
+			img.SetRGBA(x, y, color.RGBA{R: v, G: v, B: v, A: 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDHashAndCluster(t *testing.T) {
+	dir := t.TempDir()
+	same1 := filepath.Join(dir, "same1.png")
+	same2 := filepath.Join(dir, "same2.png")
+	diff := filepath.Join(dir, "diff.png")
+	writeGradientPNG(t, same1, 32, 24, false)
+	writeGradientPNG(t, same2, 32, 24, false) // identical content
+	writeGradientPNG(t, diff, 32, 24, true)  // reversed, bitwise complement
+
+	h1, w1, h1h, err := dHash(same1)
+	if err != nil || w1 != 32 || h1h != 24 {
+		t.Fatalf("dHash err=%v w=%d h=%d", err, w1, h1h)
+	}
+	h2, _, _, err := dHash(same2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h3, _, _, err := dHash(diff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dist := popcount(h1 ^ h2); dist > similarHashThreshold {
+		t.Fatalf("identical images should cluster, hamming=%d", dist)
+	}
+	if dist := popcount(h1 ^ h3); dist <= similarHashThreshold {
+		t.Fatalf("very different images must not cluster, hamming=%d", dist)
+	}
+
+	photos := []PhotoItem{
+		{Path: same1, Size: 1},
+		{Path: same2, Size: 1},
+		{Path: diff, Size: 1},
+	}
+	clusters := clusterPhotos(photos, []uint64{h1, h2, h3})
+	if len(clusters) != 1 {
+		t.Fatalf("want 1 cluster (the pair), got %+v", clusters)
+	}
+	if len(clusters[0].Items) != 2 {
+		t.Fatalf("cluster should hold the 2 near-dups, got %+v", clusters[0])
+	}
+}
+
+func popcount(x uint64) int {
+	n := 0
+	for x != 0 {
+		n += int(x & 1)
+		x >>= 1
+	}
+	return n
+}
+
+func TestCollectPhotoFiles(t *testing.T) {
+	home := t.TempDir()
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	writePNG(t, filepath.Join(pics, "a.png"), 8, 8, 100)
+	writePNG(t, filepath.Join(pics, "b.jpg"), 8, 8, 100) // not a real jpeg ext, but ext filter still matches
+	mustMkdir(t, filepath.Join(pics, "sub"))
+	writePNG(t, filepath.Join(pics, "sub", "c.png"), 8, 8, 100)
+	// non-image should be skipped
+	if err := os.WriteFile(filepath.Join(pics, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := collectPhotoFiles([]string{pics}, 100)
+	if len(got) != 3 {
+		t.Fatalf("want 3 image files, got %v", got)
+	}
+}
+
+func TestScanSimilarPhotosEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	writeGradientPNG(t, filepath.Join(pics, "one.png"), 16, 16, false)
+	writeGradientPNG(t, filepath.Join(pics, "two.png"), 16, 16, false) // near-dup
+	writeGradientPNG(t, filepath.Join(pics, "three.png"), 16, 16, true) // distinct
+
+	res := Cleaner{}.ScanSimilarPhotos()
+	if res.Scanned != 3 {
+		t.Fatalf("scanned = %d, want 3", res.Scanned)
+	}
+	if len(res.Clusters) != 1 {
+		t.Fatalf("want 1 cluster, got %+v", res.Clusters)
+	}
+	if len(res.Clusters[0].Items) != 2 {
+		t.Fatalf("cluster should contain the 2 similar, got %+v", res.Clusters[0])
 	}
 }
