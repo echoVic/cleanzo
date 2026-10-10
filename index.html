@@ -13,8 +13,8 @@
           <svg class="logo" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
             <defs>
               <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#10b981" />
-                <stop offset="1" stop-color="#2563eb" />
+                <stop offset="0" stop-color="#0fb986" />
+                <stop offset="1" stop-color="#0a9e8e" />
               </linearGradient>
             </defs>
             <rect x="1" y="1" width="22" height="22" rx="6.5" fill="url(#lg)" />
@@ -74,7 +74,7 @@
               <div id="hero-sub" class="hero-sub">正在扫描…</div>
             </div>
             <div class="hero-spark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="84" height="84" fill="rgba(255,255,255,0.28)">
+              <svg viewBox="0 0 24 24" width="60" height="60" fill="currentColor">
                 <path d="M12 2c.9 6 4.4 9.5 10.4 10.4-6 .9-9.5 4.4-10.4 10.4-.9-6-4.4-9.5-10.4-10.4 6-.9 9.5-4.4 10.4-10.4z"/>
                 <circle cx="17.6" cy="6" r="1.7"/>
                 <circle cx="6.4" cy="17.6" r="1.2"/>
@@ -175,7 +175,10 @@
               <p class="muted" data-i18n="apps.sub">卸载应用时，连同偏好设置、缓存等关联文件一起移入废纸篓</p>
             </div>
           </header>
-          <input id="app-search" class="search" data-i18n-ph="apps.search" placeholder="搜索应用…" autocomplete="off" />
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+            <input id="app-search" class="search" data-i18n-ph="apps.search" placeholder="搜索应用…" autocomplete="off" />
+          </div>
           <section id="app-list" class="app-list" aria-live="polite"></section>
         </section>
 

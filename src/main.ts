@@ -192,7 +192,7 @@ const IDLE_ICON = ` <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hi
   <path d="M12 2c.9 6 4.4 9.5 10.4 10.4-6 .9-9.5 4.4-10.4 10.4-.9-6-4.4-9.5-10.4-10.4 6-.9 9.5-4.4 10.4-10.4z" fill="url(#eg-grad)"/>
   <circle cx="17.2" cy="6.6" r="0.9" fill="#fff" opacity="0.85"/>
   <circle cx="6.6" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
-  <defs><linearGradient id="eg-grad" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs>
+  <defs><linearGradient id="eg-grad" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
 </svg>`;
 
 function initIdleClean() {
@@ -210,16 +210,19 @@ function initIdleClean() {
   const idleScan = document.getElementById("idle-scan");
   if (idleScan) idleScan.addEventListener("click", () => scan());
   cleanAllBtn.disabled = true;
-  scanBtn.textContent = t("scan.start");
-  scanBtn.disabled = false;
+  // 空状态下唯一入口是中间的大 CTA，隐藏右上角重复的操作按钮
+  cleanAllBtn.style.display = "none";
+  scanBtn.style.display = "none";
 }
 
 async function scan() {
+  scanBtn.style.display = "";
+  cleanAllBtn.style.display = "";
   setBusy(scanBtn, true);
   cleanAllBtn.disabled = true;
   totalEl.textContent = "--";
   heroSub.textContent = t("scan.hero");
-  listEl.innerHTML = skeletonRows(6);
+  listEl.innerHTML = skeletonRows(window.innerWidth >= 1600 ? 9 : window.innerWidth >= 1200 ? 8 : 6);
   try {
     categories = await Cleaner.scan();
     render();
@@ -263,7 +266,7 @@ const CAT_ICONS: Record<string, { icon: string; color: string }> = {
   logs: { icon: "≣", color: "#0ea5e9" },
   temp: { icon: "⏱", color: "#f59e0b" },
   trash: { icon: "🗑", color: "#64748b" },
-  npm: { icon: "⬢", color: "#ef4444" },
+  npm: { icon: "⬢", color: "#8b5cf6" },
   go: { icon: "🐹", color: "#22c55e" },
   pip: { icon: "🐍", color: "#eab308" },
   homebrew: { icon: "🍺", color: "#f97316" },
