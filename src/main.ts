@@ -912,11 +912,27 @@ async function startPhotoScan() {
   phProgress.classList.remove("hidden");
   phList.innerHTML = "";
   phCurrent.textContent = t("photos.busy");
+  const ch = new Channel<import("./mygo").SimilarPhotoEvent>();
   try {
-    const res = await Cleaner.scanSimilarPhotos();
-    phClusters = res.clusters;
-    phScanned = res.scanned;
-    renderPhotoClusters();
+    const done = Cleaner.scanSimilarPhotos(ch);
+    for await (const ev of ch) {
+      if (ev.kind === "progress") {
+        phCurrent.textContent = t("photos.progress", {
+          n: (ev.processed ?? 0).toLocaleString(),
+          total: (ev.total ?? 0).toLocaleString(),
+        });
+      } else if (ev.kind === "done" && ev.result) {
+        phClusters = ev.result.clusters;
+        phScanned = ev.result.scanned;
+        // default: keep the recommended copy unchecked, trash everything else
+        checkedPaths.clear();
+        for (const cl of phClusters) {
+          for (const it of cl.items) if (!it.keep) checkedPaths.add(it.path);
+        }
+        renderPhotoClusters();
+      }
+    }
+    await done;
   } catch (e) {
     phClusters = [];
     phList.innerHTML = errorState(t("photos.fail", { msg: msg(e) }), startPhotoScan);
@@ -938,26 +954,39 @@ function renderPhotoClusters() {
   }
   const cards = phClusters
     .map((cl) => {
-      const rows = cl.items
-        .map(
-          (it) => `
-        <div class="photo-row">
-          ${checkHtml(it.path)}
-          <div class="photo-main" title="${esc(it.path)}">
+      const badge =
+        cl.kind === "exact"
+          ? `<span class="ph-badge exact">${esc(t("photos.kindExact"))}</span>`
+          : `<span class="ph-badge similar">${esc(t("photos.kindSimilar"))}</span>`;
+      const cells = cl.items
+        .map((it) => {
+          const keepCls = it.keep ? " keep" : "";
+          const keepTag = it.keep
+            ? `<span class="ph-keep-tag">${esc(t("photos.keep"))}</span>`
+            : "";
+          return `
+        <figure class="photo-cell${keepCls}">
+          <div class="photo-thumb-wrap">
+            ${checkHtml(it.path)}
+            ${keepTag}
+            <img class="photo-thumb" src="${it.thumb}" alt="" loading="lazy">
+          </div>
+          <figcaption class="photo-meta" title="${esc(it.path)}">
             <div class="photo-name">${esc(baseName(it.path))}</div>
             <div class="photo-sub muted small">${esc(t("photos.sizeDim", { w: it.width, h: it.height }))} · ${human(it.size)}</div>
-          </div>
+          </figcaption>
           ${revealBtnHtml(it.path)}
-        </div>`,
-        )
+        </figure>`;
+        })
         .join("");
       return `
-      <div class="photo-cluster card">
+      <div class="photo-cluster card" data-cluster="${cl.id}">
         <div class="photo-cluster-head">
-          <span class="photo-cluster-title">${esc(t("photos.cluster", { id: cl.id }))}</span>
-          <span class="photo-cluster-meta muted">${esc(t("photos.photoCount", { n: cl.items.length, size: human(cl.totalSize) }))}</span>
+          <span class="photo-cluster-title">${esc(t("photos.cluster", { id: cl.id }))} ${badge}</span>
+          <span class="photo-cluster-meta muted">${esc(t("photos.photoCount", { n: cl.items.length }))} · ${esc(t("photos.waste", { size: human(cl.waste) }))}</span>
+          <button class="btn small ghost ph-keep-only" type="button" data-cluster="${cl.id}">${esc(t("photos.keepOnly"))}</button>
         </div>
-        <div class="photo-cluster-rows">${rows}</div>
+        <div class="photo-grid">${cells}</div>
       </div>`;
     })
     .join("");
@@ -981,6 +1010,17 @@ function bindPhotoList() {
       Cleaner.revealInFinder(b.dataset.reveal!).catch((e) =>
         toast(t("fs.revealFail", { msg: msg(e) }), "err"),
       );
+    });
+  });
+  phList.querySelectorAll<HTMLButtonElement>(".ph-keep-only").forEach((b) => {
+    b.addEventListener("click", () => {
+      const cl = phClusters.find((c) => String(c.id) === b.dataset.cluster);
+      if (!cl) return;
+      for (const it of cl.items) {
+        if (it.keep) checkedPaths.delete(it.path);
+        else checkedPaths.add(it.path);
+      }
+      renderPhotoClusters();
     });
   });
 }

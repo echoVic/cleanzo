@@ -3,7 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
-	"image/png"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -665,30 +665,10 @@ func TestCleanPathsMovesToTrash(t *testing.T) {
 // Similar photo cleanup
 // ---------------------------------------------------------------------------
 
-// writePNG writes a solid-color PNG of the given size to path (used for the
-// discovery test, which does not inspect hashes).
-func writePNG(t *testing.T, path string, w, h int, v uint8) {
-	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			img.SetRGBA(x, y, color.RGBA{R: v, G: v, B: v, A: 255})
-		}
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// writeGradientPNG writes a horizontal-gradient PNG. A monotonic gradient gives
-// dHash a clean, deterministic signal: the same gradient always hashes the same,
-// and a reversed gradient hashes to the bitwise complement.
-func writeGradientPNG(t *testing.T, path string, w, h int, reverse bool) {
+// writeGradientJPEG writes a horizontal-gradient JPEG (width >= minPhotoDim so
+// it passes the tiny-image filter). A monotonic gradient gives dHash a clean,
+// deterministic signal: same gradient hashes the same; reversed is the inverse.
+func writeGradientJPEG(t *testing.T, path string, w, h int, reverse bool) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
@@ -705,50 +685,20 @@ func writeGradientPNG(t *testing.T, path string, w, h int, reverse bool) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 85}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestDHashAndCluster(t *testing.T) {
-	dir := t.TempDir()
-	same1 := filepath.Join(dir, "same1.png")
-	same2 := filepath.Join(dir, "same2.png")
-	diff := filepath.Join(dir, "diff.png")
-	writeGradientPNG(t, same1, 32, 24, false)
-	writeGradientPNG(t, same2, 32, 24, false) // identical content
-	writeGradientPNG(t, diff, 32, 24, true)  // reversed, bitwise complement
-
-	h1, w1, h1h, err := dHash(same1)
-	if err != nil || w1 != 32 || h1h != 24 {
-		t.Fatalf("dHash err=%v w=%d h=%d", err, w1, h1h)
-	}
-	h2, _, _, err := dHash(same2)
+// copyFile copies src to dst byte-for-byte (used to make exact duplicates).
+func copyFile(t *testing.T, src, dst string) {
+	t.Helper()
+	b, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h3, _, _, err := dHash(diff)
-	if err != nil {
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
 		t.Fatal(err)
-	}
-	if dist := popcount(h1 ^ h2); dist > similarHashThreshold {
-		t.Fatalf("identical images should cluster, hamming=%d", dist)
-	}
-	if dist := popcount(h1 ^ h3); dist <= similarHashThreshold {
-		t.Fatalf("very different images must not cluster, hamming=%d", dist)
-	}
-
-	photos := []PhotoItem{
-		{Path: same1, Size: 1},
-		{Path: same2, Size: 1},
-		{Path: diff, Size: 1},
-	}
-	clusters := clusterPhotos(photos, []uint64{h1, h2, h3})
-	if len(clusters) != 1 {
-		t.Fatalf("want 1 cluster (the pair), got %+v", clusters)
-	}
-	if len(clusters[0].Items) != 2 {
-		t.Fatalf("cluster should hold the 2 near-dups, got %+v", clusters[0])
 	}
 }
 
@@ -761,15 +711,85 @@ func popcount(x uint64) int {
 	return n
 }
 
+// TestDecodeImageAndHash exercises the standard-library decode path (the same
+// path sips output feeds into for HEIC) and dHashImage: identical visuals hash
+// alike, reversed gradient is far.
+func TestDecodeImageAndHash(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jpg")
+	b := filepath.Join(dir, "b.jpg")
+	c := filepath.Join(dir, "c.jpg")
+	writeGradientJPEG(t, a, 128, 96, false)
+	writeGradientJPEG(t, b, 128, 96, false)
+	writeGradientJPEG(t, c, 128, 96, true)
+
+	imgA, cfgA, closeA, err := decodeImageFile(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeA()
+	if cfgA.Width != 128 || cfgA.Height != 96 {
+		t.Fatalf("cfg = %+v", cfgA)
+	}
+	hA := dHashImage(imgA, cfgA)
+
+	imgB, cfgB, closeB, _ := decodeImageFile(b)
+	defer closeB()
+	hB := dHashImage(imgB, cfgB)
+
+	imgC, cfgC, closeC, _ := decodeImageFile(c)
+	defer closeC()
+	hC := dHashImage(imgC, cfgC)
+
+	if dist := popcount(hA ^ hB); dist > similarHashThreshold {
+		t.Fatalf("identical visuals should hash close, hamming=%d", dist)
+	}
+	if dist := popcount(hA ^ hC); dist <= similarHashThreshold {
+		t.Fatalf("reversed gradient must hash far, hamming=%d", dist)
+	}
+}
+
+func TestThumbDataURL(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "p.jpg")
+	writeGradientJPEG(t, p, 800, 600, false)
+	img, cfg, close, err := decodeImageFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close()
+	url := thumbDataURL(img)
+	if !strings.HasPrefix(url, "data:image/jpeg;base64,") {
+		t.Fatalf("not a jpeg data url: %.40q", url)
+	}
+	if len(url) < 100 {
+		t.Fatalf("thumbnail suspiciously small: %d chars", len(url))
+	}
+	_ = cfg
+}
+
+// TestClusterCompleteLinkage ensures no chaining: A≈B, B≈C but A≠C must not be
+// merged into one cluster.
+func TestClusterCompleteLinkage(t *testing.T) {
+	// 15=bits0-3, 60=bits2-5, 240=bits4-7. AB=4, BC=4, AC=8.
+	hashes := map[int]uint64{0: 15, 1: 60, 2: 240}
+	got := clusterPhotosComplete([]int{0, 1, 2}, hashes)
+	if len(got) != 1 {
+		t.Fatalf("want 1 cluster {0,1}, got %+v", got)
+	}
+	if len(got[0]) != 2 || got[0][0] != 0 || got[0][1] != 1 {
+		t.Fatalf("unexpected cluster: %+v", got[0])
+	}
+}
+
 func TestCollectPhotoFiles(t *testing.T) {
 	home := t.TempDir()
 	pics := filepath.Join(home, "Pictures")
 	mustMkdir(t, pics)
-	writePNG(t, filepath.Join(pics, "a.png"), 8, 8, 100)
-	writePNG(t, filepath.Join(pics, "b.jpg"), 8, 8, 100) // not a real jpeg ext, but ext filter still matches
+	writeGradientJPEG(t, filepath.Join(pics, "a.png"), 80, 80, false) // ext doesn't matter for discovery
+	writeGradientJPEG(t, filepath.Join(pics, "b.heic"), 80, 80, false) // heic now discovered
 	mustMkdir(t, filepath.Join(pics, "sub"))
-	writePNG(t, filepath.Join(pics, "sub", "c.png"), 8, 8, 100)
-	// non-image should be skipped
+	writeGradientJPEG(t, filepath.Join(pics, "sub", "c.png"), 80, 80, false)
 	if err := os.WriteFile(filepath.Join(pics, "notes.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -779,23 +799,136 @@ func TestCollectPhotoFiles(t *testing.T) {
 	}
 }
 
-func TestScanSimilarPhotosEndToEnd(t *testing.T) {
+// TestSimilarEndToEnd covers exact-duplicate detection, perceptual grouping,
+// keep recommendation, waste and thumbnails.
+func TestSimilarEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	pics := filepath.Join(home, "Pictures")
 	mustMkdir(t, pics)
-	writeGradientPNG(t, filepath.Join(pics, "one.png"), 16, 16, false)
-	writeGradientPNG(t, filepath.Join(pics, "two.png"), 16, 16, false) // near-dup
-	writeGradientPNG(t, filepath.Join(pics, "three.png"), 16, 16, true) // distinct
 
-	res := Cleaner{}.ScanSimilarPhotos()
-	if res.Scanned != 3 {
-		t.Fatalf("scanned = %d, want 3", res.Scanned)
+	// exact duplicates: byte-for-byte copies
+	exact1 := filepath.Join(pics, "exact1.jpg")
+	writeGradientJPEG(t, exact1, 128, 96, false)
+	exact2 := filepath.Join(pics, "exact2.jpg")
+	copyFile(t, exact1, exact2)
+
+	// near-dups: same gradient direction, different dimensions (not byte-identical)
+	near1 := filepath.Join(pics, "near1.jpg")
+	writeGradientJPEG(t, near1, 140, 100, false)
+	near2 := filepath.Join(pics, "near2.jpg")
+	writeGradientJPEG(t, near2, 160, 120, false)
+
+	// distinct, alone
+	distinct := filepath.Join(pics, "distinct.jpg")
+	writeGradientJPEG(t, distinct, 128, 96, true)
+
+	res := buildSimilarPhotos([]string{pics}, nil)
+	if res.Scanned != 5 {
+		t.Fatalf("scanned = %d, want 5", res.Scanned)
 	}
+
+	var exact, similar *PhotoCluster
+	for i := range res.Clusters {
+		switch res.Clusters[i].Kind {
+		case "exact":
+			c := res.Clusters[i]
+			exact = &c
+		case "similar":
+			c := res.Clusters[i]
+			similar = &c
+		}
+	}
+	if exact == nil || len(exact.Items) != 2 {
+		t.Fatalf("expected exact cluster of 2, got %+v", res.Clusters)
+	}
+	if similar == nil || len(similar.Items) != 2 {
+		t.Fatalf("expected similar cluster of 2, got %+v", res.Clusters)
+	}
+	// exactly one keep per cluster, thumbnails present, waste = total - keep
+	for _, cl := range res.Clusters {
+		keeps := 0
+		for _, it := range cl.Items {
+			if it.Keep {
+				keeps++
+			}
+			if !strings.HasPrefix(it.Thumb, "data:image/jpeg;base64,") {
+				t.Fatalf("item missing thumbnail: %s", it.Path)
+			}
+		}
+		if keeps != 1 {
+			t.Fatalf("cluster %s has %d keeps, want 1", cl.Kind, keeps)
+		}
+	}
+}
+
+// TestSimilarKeepPicksLargest ensures the recommended keep is the highest
+// resolution copy, and waste excludes it.
+func TestSimilarKeepPicksLargest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	small := filepath.Join(pics, "small.jpg")
+	writeGradientJPEG(t, small, 128, 96, false)
+	large := filepath.Join(pics, "large.jpg")
+	writeGradientJPEG(t, large, 1024, 768, false)
+
+	res := buildSimilarPhotos([]string{pics}, nil)
+	if len(res.Clusters) != 1 || res.Clusters[0].Kind != "similar" {
+		t.Fatalf("want one similar cluster, got %+v", res.Clusters)
+	}
+	cl := res.Clusters[0]
+	var keep PhotoItem
+	for _, it := range cl.Items {
+		if it.Keep {
+			keep = it
+		}
+	}
+	if keep.Path != large {
+		t.Fatalf("keep should be the high-res copy, got %s", keep.Path)
+	}
+	if cl.Waste != cl.TotalSize-keep.Size {
+		t.Fatalf("waste = %d, want %d", cl.Waste, cl.TotalSize-keep.Size)
+	}
+}
+
+// TestSimilarPhotosMoveToTrash ensures trashing cluster items really empties
+// the source and lands them in the (temp) Trash.
+func TestSimilarPhotosMoveToTrash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	a := filepath.Join(pics, "a.jpg")
+	b := filepath.Join(pics, "b.jpg")
+	writeGradientJPEG(t, a, 128, 96, false)
+	writeGradientJPEG(t, b, 160, 120, false)
+
+	res := buildSimilarPhotos([]string{pics}, nil)
 	if len(res.Clusters) != 1 {
 		t.Fatalf("want 1 cluster, got %+v", res.Clusters)
 	}
-	if len(res.Clusters[0].Items) != 2 {
-		t.Fatalf("cluster should contain the 2 similar, got %+v", res.Clusters[0])
+	var trashThese []string
+	for _, it := range res.Clusters[0].Items {
+		if !it.Keep {
+			trashThese = append(trashThese, it.Path)
+		}
+	}
+	if len(trashThese) != 1 {
+		t.Fatalf("expected 1 non-keep item, got %v", trashThese)
+	}
+	r := Cleaner{}.CleanPaths(trashThese)
+	if r.Moved != 1 || len(r.Failed) != 0 {
+		t.Fatalf("cleanPaths = %+v", r)
+	}
+	// original gone, present in temp trash
+	if _, err := os.Stat(trashThese[0]); !os.IsNotExist(err) {
+		t.Fatalf("source should be gone: %v", err)
+	}
+	trash := filepath.Join(home, ".Trash")
+	entries, _ := os.ReadDir(trash)
+	if len(entries) < 1 {
+		t.Fatalf("expected item in trash, got %d entries", len(entries))
 	}
 }

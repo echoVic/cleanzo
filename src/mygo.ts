@@ -156,8 +156,12 @@ export interface PathsCleanResult {
 /** PhotoCluster groups visually near-identical photos together. */
 export interface PhotoCluster {
   id: number;
+  /** "exact" (byte-identical) | "similar" */
+  kind: string;
   items: PhotoItem[];
   totalSize: number;
+  /** space freed if the non-keep copies are trashed */
+  waste: number;
 }
 
 /** PhotoItem is one image discovered by the similar-photo scan. */
@@ -166,6 +170,19 @@ export interface PhotoItem {
   size: number;
   width: number;
   height: number;
+  /** data: URL JPEG preview */
+  thumb: string;
+  /** recommended to keep (best copy in the cluster) */
+  keep: boolean;
+}
+
+/** SimilarPhotoEvent streams scan progress and the final result. */
+export interface SimilarPhotoEvent {
+  /** "progress" | "done" */
+  kind: string;
+  processed?: number;
+  total?: number;
+  result?: SimilarPhotosResult;
 }
 
 /** SimilarPhotosResult is the outcome of a similar-photo scan. */
@@ -301,11 +318,12 @@ export const Cleaner = {
     return call("Cleaner.ScanOrphans", ch);
   },
   /**
-   * ScanSimilarPhotos scans ~/Pictures (and ~/Desktop) for near-duplicate
-   * photos, hashes them concurrently, and returns the similar clusters.
+   * ScanSimilarPhotos streams progress and finishes with near-duplicate photo
+   * clusters. Exact byte-identical copies are grouped first, then remaining photos
+   * are grouped by perceptual hash. Each cluster marks its recommended keep copy.
    */
-  scanSimilarPhotos(): Promise<SimilarPhotosResult> {
-    return call("Cleaner.ScanSimilarPhotos");
+  scanSimilarPhotos(ch: Channel<SimilarPhotoEvent>): Promise<void> {
+    return call("Cleaner.ScanSimilarPhotos", ch);
   },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {

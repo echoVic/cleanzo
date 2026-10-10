@@ -1,15 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"image"
-	_ "image/jpeg"
+	_ "image/gif"
+	"image/jpeg"
 	_ "image/png"
 	"log"
+	"math"
 	"math/bits"
 	"os"
 	"os/exec"
@@ -1307,18 +1314,29 @@ func (Cleaner) RevealInFinder(path string) error {
 // Similar photo cleanup (MVP)
 // ---------------------------------------------------------------------------
 
-// photoExts are the only image formats this scan decodes (standard library
-// only). HEIC/RAW/etc. are intentionally skipped.
-var photoExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+// photoExts are the image formats the similar-photo scan understands. JPEG,
+// PNG and GIF decode via the standard library; HEIC/HEIF are transcoded by
+// macOS's /usr/bin/sips first.
+var photoExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+	".heic": true, ".heif": true,
+}
 
 // similarPhotoCap bounds how many files the discovery step reads, so a huge
 // ~/Pictures never blocks the app indefinitely.
 const similarPhotoCap = 2000
 
 // similarHashThreshold is the max hamming distance (out of 64 bits) for two
-// photos to be considered near-identical. Tuned for near-duplicates, similar
+// photos to be considered near-identical, applied only within a fully
+// consistent cluster (complete linkage). Tuned for near-duplicates, similar
 // screenshots and burst shots, not semantic similarity.
 const similarHashThreshold = 6
+
+// thumbMaxEdge is the longest side of the generated preview thumbnail.
+const thumbMaxEdge = 200
+
+// minPhotoDim skips tiny placeholder / 1x1 images that are not real photos.
+const minPhotoDim = 64
 
 // PhotoItem is one image discovered by the similar-photo scan.
 type PhotoItem struct {
@@ -1326,13 +1344,17 @@ type PhotoItem struct {
 	Size   int64  `json:"size"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
+	Thumb  string `json:"thumb"` // data: URL JPEG preview
+	Keep   bool   `json:"keep"`  // recommended to keep (best copy in the cluster)
 }
 
 // PhotoCluster groups visually near-identical photos together.
 type PhotoCluster struct {
 	ID        int         `json:"id"`
+	Kind      string      `json:"kind"` // "exact" (byte-identical) | "similar"
 	Items     []PhotoItem `json:"items"`
 	TotalSize int64       `json:"totalSize"`
+	Waste     int64       `json:"waste"` // space freed if the non-keep copies are trashed
 }
 
 // SimilarPhotosResult is the outcome of a similar-photo scan.
@@ -1342,26 +1364,75 @@ type SimilarPhotosResult struct {
 	ElapsedMs int64          `json:"elapsedMs"`
 }
 
-// dHash computes a 64-bit difference hash by sampling the image on a 9x8 grid
-// of luminance values and recording whether each sample is brighter than the
-// one to its right. Nearest-neighbor sampling avoids any resampling dependency.
-func dHash(path string) (hash uint64, width, height int, err error) {
+// SimilarPhotoEvent streams scan progress and the final result.
+type SimilarPhotoEvent struct {
+	Kind      string               `json:"kind"` // "progress" | "done"
+	Processed int                  `json:"processed,omitempty"`
+	Total     int                  `json:"total,omitempty"`
+	Result    *SimilarPhotosResult `json:"result,omitempty"`
+}
+
+// loadPhotoImage decodes an image into memory, transcoding HEIC via sips into
+// a temporary JPEG first. The returned cleanup removes any temp file and must
+// be run by the caller.
+func loadPhotoImage(path string) (image.Image, image.Config, func(), error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".heic" || ext == ".heif" {
+		tmp, err := os.CreateTemp("", "cleanzo-heic-*.jpg")
+		if err != nil {
+			return nil, image.Config{}, nil, err
+		}
+		tmp.Close()
+		cleanup := func() { os.Remove(tmp.Name()) }
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "/usr/bin/sips", "-s", "format", "jpeg", "--out", tmp.Name(), path).CombinedOutput()
+		if err != nil {
+			cleanup()
+			return nil, image.Config{}, nil, fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+		img, cfg, close, err := decodeImageFile(tmp.Name())
+		if err != nil {
+			cleanup()
+			return nil, image.Config{}, nil, err
+		}
+		return img, cfg, func() { close(); cleanup() }, nil
+	}
+	img, cfg, close, err := decodeImageFile(path)
+	if err != nil {
+		return nil, image.Config{}, nil, err
+	}
+	return img, cfg, close, nil
+}
+
+// decodeImageFile opens a registered-format image (jpeg/png/gif) and decodes
+// both its config and full image, returning a cleanup that closes the handle.
+func decodeImageFile(path string) (image.Image, image.Config, func(), error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, 0, 0, err
+		return nil, image.Config{}, nil, err
 	}
-	defer f.Close()
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil {
-		return 0, 0, 0, err
+		f.Close()
+		return nil, image.Config{}, nil, err
 	}
 	if _, err := f.Seek(0, 0); err != nil {
-		return 0, 0, 0, err
+		f.Close()
+		return nil, image.Config{}, nil, err
 	}
 	img, _, err := image.Decode(f)
 	if err != nil {
-		return 0, 0, 0, err
+		f.Close()
+		return nil, image.Config{}, nil, err
 	}
+	return img, cfg, func() { f.Close() }, nil
+}
+
+// dHashImage computes a 64-bit difference hash by sampling the image on a 9x8
+// grid of luminance values and recording whether each sample is brighter than
+// the one to its right. Nearest-neighbor sampling avoids resampling deps.
+func dHashImage(img image.Image, cfg image.Config) uint64 {
 	const gw, gh = 9, 8
 	var lum [gh][gw]float64
 	for y := 0; y < gh; y++ {
@@ -1372,6 +1443,7 @@ func dHash(path string) (hash uint64, width, height int, err error) {
 			lum[y][x] = (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 65535.0
 		}
 	}
+	var hash uint64
 	for y := 0; y < gh; y++ {
 		for x := 0; x < gw-1; x++ {
 			hash <<= 1
@@ -1380,12 +1452,68 @@ func dHash(path string) (hash uint64, width, height int, err error) {
 			}
 		}
 	}
-	return hash, cfg.Width, cfg.Height, nil
+	return hash
 }
 
-// collectPhotoFiles walks the given roots (non-recursive-friendly: directories
-// are walked recursively but only known image extensions are collected) and
-// stops once cap files are found.
+// resizeMaxEdge returns a nearest-neighbor downscale of src whose longest edge
+// is at most maxEdge.
+func resizeMaxEdge(src image.Image, maxEdge int) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return src
+	}
+	if w <= maxEdge && h <= maxEdge {
+		return src
+	}
+	scale := float64(maxEdge) / math.Max(float64(w), float64(h))
+	nw := max(int(round(float64(w)*scale)), 1)
+	nh := max(int(round(float64(h)*scale)), 1)
+	out := image.NewRGBA(image.Rect(0, 0, nw, nh))
+	for y := 0; y < nh; y++ {
+		sy := b.Min.Y + y*h/nh
+		for x := 0; x < nw; x++ {
+			sx := b.Min.X + x*w/nw
+			out.Set(x, y, src.At(sx, sy))
+		}
+	}
+	return out
+}
+
+func round(v float64) float64 { return math.Floor(v + 0.5) }
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// thumbDataURL renders a JPEG data URL preview (longest edge thumbMaxEdge).
+func thumbDataURL(img image.Image) string {
+	thumb := resizeMaxEdge(img, thumbMaxEdge)
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 55}); err != nil {
+		return ""
+	}
+	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// fileSHA1 returns the hex sha1 of a file's contents.
+func fileSHA1(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha1.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// collectPhotoFiles walks the given roots recursively and collects known image
+// files, stopping once cap files are found.
 func collectPhotoFiles(roots []string, cap int) []string {
 	var out []string
 	stop := errors.New("stop")
@@ -1413,64 +1541,86 @@ func collectPhotoFiles(roots []string, cap int) []string {
 	return out
 }
 
-// clusterPhotos groups photos whose dHash is within similarHashThreshold of an
-// already-seen cluster representative. Clusters with a single item are dropped.
-func clusterPhotos(photos []PhotoItem, hashes []uint64) []PhotoCluster {
-	type acc struct {
-		rep   uint64
-		items []int
-	}
-	var clusters []*acc
-	for i := range photos {
+// clusterIdx is an internal list of decoded-photo indices forming one cluster.
+type clusterIdx struct {
+	kind string
+	idxs []int
+}
+
+// decodeRow is one concurrently-processed photo.
+type decodeRow struct {
+	item PhotoItem
+	hash uint64
+	sha  string
+	size int64
+	mod  time.Time
+}
+
+// clusterPhotosComplete groups photos by perceptual hash using complete
+// linkage: a photo joins a cluster only when its hash is within
+// similarHashThreshold of EVERY member already in the cluster. This prevents
+// A≈B≈C chains where A and C are actually unrelated.
+func clusterPhotosComplete(idxs []int, hashes map[int]uint64) [][]int {
+	var clusters [][]int
+	for _, i := range idxs {
+		h := hashes[i]
 		placed := false
-		for _, c := range clusters {
-			if bits.OnesCount64(c.rep^hashes[i]) <= similarHashThreshold {
-				c.items = append(c.items, i)
+		for ci := range clusters {
+			ok := true
+			for _, m := range clusters[ci] {
+				if bits.OnesCount64(h^hashes[m]) > similarHashThreshold {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				clusters[ci] = append(clusters[ci], i)
 				placed = true
 				break
 			}
 		}
 		if !placed {
-			clusters = append(clusters, &acc{rep: hashes[i], items: []int{i}})
+			clusters = append(clusters, []int{i})
 		}
 	}
-	var out []PhotoCluster
-	id := 0
+	out := [][]int{}
 	for _, c := range clusters {
-		if len(c.items) < 2 {
-			continue
+		if len(c) >= 2 {
+			out = append(out, c)
 		}
-		id++
-		cl := PhotoCluster{ID: id, Items: make([]PhotoItem, 0, len(c.items))}
-		for _, idx := range c.items {
-			cl.Items = append(cl.Items, photos[idx])
-			cl.TotalSize += photos[idx].Size
-		}
-		out = append(out, cl)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].TotalSize > out[j].TotalSize })
 	return out
 }
 
-// ScanSimilarPhotos scans ~/Pictures (and ~/Desktop) for near-duplicate
-// photos, hashes them concurrently, and returns the similar clusters.
-func (Cleaner) ScanSimilarPhotos() SimilarPhotosResult {
-	start := time.Now()
+// ScanSimilarPhotos streams progress and finishes with near-duplicate photo
+// clusters. Exact byte-identical copies are grouped first, then remaining photos
+// are grouped by perceptual hash. Each cluster marks its recommended keep copy.
+func (Cleaner) ScanSimilarPhotos(ch *mygo.Channel[SimilarPhotoEvent]) error {
 	h := homeDir()
 	roots := []string{
 		filepath.Join(h, "Pictures"),
 		filepath.Join(h, "Desktop"),
 	}
+	res := buildSimilarPhotos(roots, func(done, total int) {
+		_ = ch.Send(SimilarPhotoEvent{Kind: "progress", Processed: done, Total: total})
+	})
+	return ch.Send(SimilarPhotoEvent{Kind: "done", Result: &res})
+}
+
+// buildSimilarPhotos is the testable core of ScanSimilarPhotos: it discovers,
+// decodes, hashes, thumbnails and clusters photos under roots, calling
+// onProgress after each file.
+func buildSimilarPhotos(roots []string, onProgress func(done, total int)) SimilarPhotosResult {
+	start := time.Now()
 	files := collectPhotoFiles(roots, similarPhotoCap)
-	type decoded struct {
-		item PhotoItem
-		hash uint64
-	}
+	total := len(files)
+
 	var (
-		mu  sync.Mutex
-		dec []decoded
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, scanConcurrency)
+		mu        sync.Mutex
+		rows      []decodeRow
+		processed int64
+		wg        sync.WaitGroup
+		sem       = make(chan struct{}, scanConcurrency)
 	)
 	for _, p := range files {
 		wg.Add(1)
@@ -1478,29 +1628,108 @@ func (Cleaner) ScanSimilarPhotos() SimilarPhotosResult {
 		go func(p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			hash, w, hgt, err := dHash(p)
-			if err != nil {
-				return
-			}
+			defer func() {
+				n := atomic.AddInt64(&processed, 1)
+				if onProgress != nil {
+					onProgress(int(n), total)
+				}
+			}()
 			fi, err := os.Stat(p)
 			if err != nil {
 				return
 			}
+			img, cfg, cleanup, err := loadPhotoImage(p)
+			if err != nil {
+				return
+			}
+			defer cleanup()
+			if cfg.Width < minPhotoDim || cfg.Height < minPhotoDim {
+				return // tiny placeholder / 1x1
+			}
+			hash := dHashImage(img, cfg)
+			thumb := thumbDataURL(img)
+			sha, _ := fileSHA1(p)
 			mu.Lock()
-			dec = append(dec, decoded{item: PhotoItem{Path: p, Size: fi.Size(), Width: w, Height: hgt}, hash: hash})
+			rows = append(rows, decodeRow{
+				item: PhotoItem{Path: p, Size: fi.Size(), Width: cfg.Width, Height: cfg.Height, Thumb: thumb},
+				hash: hash, sha: sha, size: fi.Size(), mod: fi.ModTime(),
+			})
 			mu.Unlock()
 		}(p)
 	}
 	wg.Wait()
-	photos := make([]PhotoItem, len(dec))
-	hashes := make([]uint64, len(dec))
-	for i, d := range dec {
-		photos[i] = d.item
-		hashes[i] = d.hash
+
+	// 1) Exact duplicates: same size + same sha1.
+	type exactKey struct {
+		size int64
+		sha  string
 	}
+	byExact := map[exactKey][]int{}
+	for i := range rows {
+		k := exactKey{rows[i].size, rows[i].sha}
+		byExact[k] = append(byExact[k], i)
+	}
+	used := map[int]bool{}
+	var builders []clusterIdx
+	for _, idxs := range byExact {
+		if len(idxs) < 2 {
+			continue
+		}
+		for _, i := range idxs {
+			used[i] = true
+		}
+		builders = append(builders, clusterIdx{kind: "exact", idxs: idxs})
+	}
+
+	// 2) Perceptual clusters among the remaining files.
+	hashMap := map[int]uint64{}
+	var rest []int
+	for i := range rows {
+		if used[i] {
+			continue
+		}
+		hashMap[i] = rows[i].hash
+		rest = append(rest, i)
+	}
+	for _, c := range clusterPhotosComplete(rest, hashMap) {
+		builders = append(builders, clusterIdx{kind: "similar", idxs: c})
+	}
+
+	// 3) Materialize clusters, pick the recommended keep copy, compute waste.
+	clusters := make([]PhotoCluster, 0, len(builders))
+	for _, b := range builders {
+		best := 0
+		bestArea := -1
+		for k, di := range b.idxs {
+			it := rows[di].item
+			area := it.Width * it.Height
+			bi := b.idxs[best]
+			better := area > bestArea ||
+				(area == bestArea && it.Size > rows[bi].item.Size) ||
+				(area == bestArea && it.Size == rows[bi].item.Size && rows[di].mod.After(rows[bi].mod))
+			if better {
+				best = k
+				bestArea = area
+			}
+		}
+		cl := PhotoCluster{Kind: b.kind}
+		for k, di := range b.idxs {
+			it := rows[di].item
+			it.Keep = k == best
+			cl.Items = append(cl.Items, it)
+			cl.TotalSize += it.Size
+		}
+		cl.Waste = cl.TotalSize - cl.Items[best].Size
+		clusters = append(clusters, cl)
+	}
+	sort.Slice(clusters, func(i, j int) bool { return clusters[i].Waste > clusters[j].Waste })
+	for i := range clusters {
+		clusters[i].ID = i + 1
+	}
+
 	return SimilarPhotosResult{
-		Clusters:  clusterPhotos(photos, hashes),
-		Scanned:   len(files),
+		Clusters:  clusters,
+		Scanned:   total,
 		ElapsedMs: time.Since(start).Milliseconds(),
 	}
 }
