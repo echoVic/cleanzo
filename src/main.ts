@@ -8,6 +8,7 @@ const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
 
 const listEl = $("#list");
 const totalEl = $("#total");
+const totalPrefix = $("#total-prefix");
 const heroSub = $("#hero-sub");
 const hero = $(".hero");
 const scanBtn = $<HTMLButtonElement>("#scan");
@@ -196,10 +197,12 @@ const IDLE_ICON = ` <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hi
 </svg>`;
 
 function initIdleClean() {
+  totalPrefix.textContent = t("hero.ready");
   totalEl.textContent = "--";
   heroSub.textContent = t("clean.idleSub");
   hero.classList.add("compact");
-  listEl.classList.add("idle-list");
+  listEl.classList.remove("grouped");
+  listEl.classList.add("cat-grid", "idle-list");
   listEl.innerHTML = `
     <div class="empty-guide">
       ${IDLE_ICON}
@@ -210,18 +213,18 @@ function initIdleClean() {
   const idleScan = document.getElementById("idle-scan");
   if (idleScan) idleScan.addEventListener("click", () => scan());
   cleanAllBtn.disabled = true;
-  // 空状态下唯一入口是中间的大 CTA，隐藏右上角重复的操作按钮
-  cleanAllBtn.style.display = "none";
-  scanBtn.style.display = "none";
+  scanBtn.textContent = t("scan.start");
+  scanBtn.disabled = false;
 }
 
 async function scan() {
-  scanBtn.style.display = "";
-  cleanAllBtn.style.display = "";
   setBusy(scanBtn, true);
   cleanAllBtn.disabled = true;
+  totalPrefix.textContent = t("hero.ready");
   totalEl.textContent = "--";
   heroSub.textContent = t("scan.hero");
+  listEl.classList.remove("grouped", "idle-list");
+  listEl.classList.add("cat-grid");
   listEl.innerHTML = skeletonRows(window.innerWidth >= 1600 ? 9 : window.innerWidth >= 1200 ? 8 : 6);
   try {
     categories = await Cleaner.scan();
@@ -229,14 +232,29 @@ async function scan() {
   } catch (e) {
     totalEl.textContent = t("scan.failed");
     heroSub.textContent = t("scan.retryHint");
+    cleanAllBtn.disabled = true;
     listEl.innerHTML = errorState(t("scan.error", { msg: msg(e) }), scan);
     toast(t("scan.error", { msg: msg(e) }), "err");
   } finally {
     setBusy(scanBtn, false);
     scanBtn.textContent = categories.length > 0 ? t("fs.rescan") : t("scan.start");
-    cleanAllBtn.disabled = categories.length === 0;
   }
 }
+
+type ScanCat = Awaited<ReturnType<typeof Cleaner.scan>>[number];
+
+const CAT_GROUPS: { key: string; icon: string; color: string; names: string[] }[] = [
+  { key: "group.system", icon: "⚙", color: "#0ea5e9", names: ["caches", "logs", "temp", "trash"] },
+  { key: "group.dev", icon: "⌘", color: "#10b981", names: ["npm", "go", "pip", "homebrew", "xcode"] },
+];
+
+/** 分类所属分组下标；未命中内置分组的自定义分类归入「其他」 */
+function groupIndexOf(name: string): number {
+  const gi = CAT_GROUPS.findIndex((g) => g.names.includes(name));
+  return gi === -1 ? CAT_GROUPS.length : gi;
+}
+
+const selectedCats = new Set<string>();
 
 function render() {
   if (categories.length === 0) {
@@ -244,21 +262,53 @@ function render() {
     return;
   }
   hero.classList.remove("compact");
-  listEl.classList.remove("idle-list");
-  const usable = categories.filter((c) => c.size > 0);
+  listEl.classList.remove("idle-list", "cat-grid");
+  listEl.classList.add("grouped");
   const total = categories.reduce((s, c) => s + c.size, 0);
-  const files = categories.reduce((s, c) => s + c.files, 0);
+  totalPrefix.textContent = t("clean.foundPrefix");
   totalEl.textContent = human(total);
-  heroSub.textContent = usable.length
-    ? t("clean.usable", { n: usable.length, f: files.toLocaleString() })
-    : t("clean.nothing");
-  cleanAllBtn.disabled = usable.length === 0;
 
-  listEl.innerHTML = categories.map(cardHtml).join("");
-  listEl.querySelectorAll<HTMLButtonElement>(".clean-one").forEach((b) => {
-    b.addEventListener("click", () => askCleanOne(b.dataset.name!));
+  // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
+  selectedCats.clear();
+  categories.forEach((c) => {
+    if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
   });
+
+  const groups: { key: string; icon: string; color: string; cats: ScanCat[] }[] = [
+    ...CAT_GROUPS.map((g) => ({ ...g, cats: [] as ScanCat[] })),
+    { key: "group.other", icon: "✦", color: "#64748b", names: [], cats: [] as ScanCat[] },
+  ];
+  categories.forEach((c) => groups[groupIndexOf(c.name)]?.cats.push(c));
+  listEl.innerHTML = groups
+    .filter((g) => g.cats.length > 0)
+    .map((g) => groupHtml(g.key, g.icon, g.color, g.cats))
+    .join("");
+
+  listEl.querySelectorAll<HTMLInputElement>("input[data-cat]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const n = cb.dataset.cat!;
+      if (cb.checked) selectedCats.add(n);
+      else selectedCats.delete(n);
+      updateSelection();
+    });
+  });
+  updateSelection();
   scanBtn.textContent = t("fs.rescan");
+}
+
+/** 勾选变化时联动：横幅「已选择」、各分组小计、立即清理按钮可用态 */
+function updateSelection() {
+  const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
+  const total = sel.reduce((s, c) => s + c.size, 0);
+  heroSub.textContent = t("clean.selected", { size: human(total) });
+  cleanAllBtn.disabled = sel.length === 0;
+  listEl.querySelectorAll<HTMLElement>(".group-sel").forEach((el) => {
+    const names = (el.dataset.names ?? "").split(",").filter(Boolean);
+    const inGroup = (c: ScanCat) => names.includes(c.name);
+    const gtotal = categories.filter(inGroup).reduce((s, c) => s + c.size, 0);
+    const gsel = categories.filter((c) => inGroup(c) && selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
+    el.textContent = t("group.summary", { total: human(gtotal), sel: human(gsel) });
+  });
 }
 
 const CAT_ICONS: Record<string, { icon: string; color: string }> = {
@@ -274,13 +324,33 @@ const CAT_ICONS: Record<string, { icon: string; color: string }> = {
 };
 const fallbackIcon = { icon: "🧹", color: "#64748b" };
 
-function cardHtml(c: Awaited<ReturnType<typeof Cleaner.scan>>[number]): string {
+function groupHtml(key: string, icon: string, color: string, cats: ScanCat[]): string {
+  const total = cats.reduce((s, c) => s + c.size, 0);
+  const sel = cats.filter((c) => selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
+  const names = cats.map((c) => c.name).join(",");
+  return `
+    <details class="cat-group" open>
+      <summary>
+        <div class="tile group-tile" style="--c:${color}"><span>${icon}</span></div>
+        <span class="group-name">${esc(t(key as never))}</span>
+        <span class="group-sel" data-names="${esc(names)}">${esc(t("group.summary", { total: human(total), sel: human(sel) }))}</span>
+        <span class="group-caret" aria-hidden="true">▾</span>
+      </summary>
+      <div class="group-rows">${cats.map(rowHtml).join("")}</div>
+    </details>`;
+}
+
+function rowHtml(c: ScanCat): string {
   const meta = CAT_ICONS[c.name] ?? fallbackIcon;
-  const missing = c.missing.length > 0;
-  const tags = [
-    c.risk === "moderate" ? `<span class="tag warn">${esc(t("cat.risk"))}</span>` : "",
-    missing ? `<span class="tag dim">${esc(t("cat.missing"))}</span>` : "",
-  ].join("");
+  const empty = c.size === 0;
+  const caution = !empty && c.risk === "moderate";
+  const checked = selectedCats.has(c.name);
+  const note = empty
+    ? `<span class="tag ok">${esc(t("cat.cleanState"))}</span>`
+    : caution
+      ? `<span class="cat-note-text caution">${esc(t("cat.sizeCaution", { size: human(c.size) }))}</span>`
+      : `<span class="cat-note-text">${esc(t("cat.sizeSafe", { size: human(c.size) }))}</span>`;
+  const missingTag = c.missing.length > 0 ? `<span class="tag dim">${esc(t("cat.missing"))}</span>` : "";
   const tops = (c.top ?? [])
     .map(
       (item) =>
@@ -288,56 +358,25 @@ function cardHtml(c: Awaited<ReturnType<typeof Cleaner.scan>>[number]): string {
     )
     .join("");
   return `
-    <div class="cat-card card">
-      <div class="cat-top">
-        <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
-        <div class="cat-info">
-          <div class="cat-name">${esc(c.name)}${tags}</div>
-          <div class="cat-desc muted">${esc(categoryDescription(c.name, c.description))}</div>
-        </div>
-        <div class="cat-size">${human(c.size)}</div>
+    <div class="cat-row${empty ? " empty" : ""}${caution ? " caution" : ""}">
+      <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${empty ? "disabled" : ""} ${checked ? "checked" : ""}></label>
+      <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
+      <div class="cat-info">
+        <div class="cat-name">${esc(c.name)}${missingTag}</div>
+        <div class="cat-desc muted">${esc(categoryDescription(c.name, c.description))}</div>
       </div>
-      <div class="cat-foot">
-        <span class="muted small">${t("cat.files", { n: c.files.toLocaleString() })}</span>
-        <button class="btn small clean-one" data-name="${esc(c.name)}" ${c.size === 0 ? "disabled" : ""}>${esc(t("cat.clean"))}</button>
-      </div>
+      <div class="cat-note">${note}</div>
       ${tops ? `<details class="cat-details"><summary>${esc(t("cat.tops"))}</summary>${tops}</details>` : ""}
     </div>`;
 }
 
-function askCleanOne(name: string) {
-  const c = categories.find((x) => x.name === name);
-  if (!c || c.size === 0) return;
-  pending = async () => {
-    try {
-      const res = await Cleaner.clean([name]);
-      if (res.errors.length > 0) {
-        toast(t("clean.one.partial", { name, err: res.errors.map((e) => e.error).join("; ") }), "err");
-      } else {
-        toast(t("clean.one.ok", { name, size: human(res.totalFreed) }));
-      }
-    } catch (e) {
-      toast(t("clean.fail", { msg: msg(e) }), "err");
-    }
-    await scan();
-  };
-  modalTitle.textContent = t("clean.one.title", { name });
-  modalBody.textContent = t("clean.one.body", {
-    size: human(c.size),
-    desc: categoryDescription(c.name, c.description),
-    files: c.files.toLocaleString(),
-  });
-  modalOk.textContent = t("clean.confirm");
-  showModal();
-}
-
 function askCleanAll() {
-  const usable = categories.filter((c) => c.size > 0);
-  if (usable.length === 0) return;
-  const total = usable.reduce((s, c) => s + c.size, 0);
+  const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
+  if (sel.length === 0) return;
+  const total = sel.reduce((s, c) => s + c.size, 0);
   pending = async () => {
     try {
-      const res = await Cleaner.clean(usable.map((c) => c.name));
+      const res = await Cleaner.clean(sel.map((c) => c.name));
       if (res.errors.length > 0) {
         toast(t("clean.all.partial", { names: res.errors.map((e) => e.name).join("、") }), "err");
       } else {
@@ -348,8 +387,8 @@ function askCleanAll() {
     }
     await scan();
   };
-  modalTitle.textContent = t("clean.all.title");
-  modalBody.textContent = t("clean.all.body", { n: usable.length, size: human(total) });
+  modalTitle.textContent = t("clean.sel.title");
+  modalBody.textContent = t("clean.all.body", { n: sel.length, size: human(total) });
   modalOk.textContent = t("clean.confirm");
   showModal();
 }

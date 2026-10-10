@@ -63,15 +63,19 @@
             </div>
             <div class="head-actions">
               <button id="scan" class="btn ghost" type="button" data-i18n="fs.rescan">重新扫描</button>
-              <button id="clean-all" class="btn danger" type="button" data-i18n="clean.allBtn">清理全部</button>
             </div>
           </header>
 
           <div class="hero">
             <div class="hero-left">
-              <div class="hero-label" data-i18n="hero.ready">可释放空间</div>
-              <div id="total" class="hero-num">--</div>
+              <div class="banner-title">
+                <span id="total-prefix" data-i18n="hero.ready">可释放空间</span>
+                <span id="total" class="hero-num">--</span>
+              </div>
               <div id="hero-sub" class="hero-sub">正在扫描…</div>
+            </div>
+            <div class="banner-actions">
+              <button id="clean-all" class="btn danger big" type="button" data-i18n="clean.now">立即清理</button>
             </div>
             <div class="hero-spark" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="60" height="60" fill="currentColor">
