@@ -12,4 +12,11 @@ export default defineConfig({
   frontendDist: "dist",
   bindings: "src/mygo.ts",
   out: "build",
+  // `mygo build` signs the app and the dmg with this Developer ID (hardened
+  // runtime + timestamp), notarizes the dmg and staples both; `mygo dev`
+  // stays ad hoc. The profile is from `xcrun notarytool store-credentials`.
+  macos: {
+    signingIdentity: "Developer ID Application: Zijie Hu (8LH7PFQJ89)",
+    notarize: { keychainProfile: "notary" },
+  },
 });
