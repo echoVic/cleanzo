@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
+	"math/rand/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -206,7 +210,7 @@ func TestListAppsIn(t *testing.T) {
 func TestUninstallPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	appPath := makeFakeApp(t, home, "TestApp")
+	appPath := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
 	app := AppInfo{Name: "TestApp", Path: appPath, BundleID: "com.example.testapp"}
 
 	// create associated files
@@ -243,7 +247,7 @@ func TestUninstallPaths(t *testing.T) {
 func TestUninstallApp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	appPath := makeFakeApp(t, home, "TestApp")
+	appPath := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
 	// associated file
 	pref := filepath.Join(home, "Library", "Preferences", "com.example.testapp.plist")
 	if err := os.MkdirAll(filepath.Dir(pref), 0o755); err != nil {
@@ -427,7 +431,7 @@ func TestCollectFullScan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, done, _ := collectFullScan(nil)
+	items, done, _ := collectFullScan(context.Background(), nil)
 	if done < 1 {
 		t.Fatalf("done = %d", done)
 	}
@@ -468,7 +472,7 @@ func TestFindLargeFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "small.bin"), make([]byte, 100<<10), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	files, err := findLargeFiles(target, 1<<20)
+	files, err := findLargeFiles(context.Background(), target, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +501,7 @@ func TestCollectLargeScanStreaming(t *testing.T) {
 		t.Fatal(err)
 	}
 	var streamed []LargeFile
-	items, done, _ := collectLargeScan(1<<20, func(f LargeFile) {
+	items, done, _ := collectLargeScan(context.Background(), 1<<20, func(f LargeFile) {
 		streamed = append(streamed, f)
 	})
 	if done < 1 {
@@ -553,7 +557,7 @@ func TestCollectOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, total := collectOrphans(nil)
+	items, total := collectOrphans(context.Background(), nil)
 	found := false
 	for _, it := range items {
 		if it.Path == orphan {
@@ -707,15 +711,19 @@ func TestDecodeImageAndHash(t *testing.T) {
 	if cfgA.Width != 128 || cfgA.Height != 96 {
 		t.Fatalf("cfg = %+v", cfgA)
 	}
-	hA := dHashImage(imgA, cfgA)
+	hA, okA := dHashImage(imgA)
 
-	imgB, cfgB, closeB, _ := decodeImageFile(b)
+	imgB, _, closeB, _ := decodeImageFile(b)
 	defer closeB()
-	hB := dHashImage(imgB, cfgB)
+	hB, okB := dHashImage(imgB)
 
-	imgC, cfgC, closeC, _ := decodeImageFile(c)
+	imgC, _, closeC, _ := decodeImageFile(c)
 	defer closeC()
-	hC := dHashImage(imgC, cfgC)
+	hC, okC := dHashImage(imgC)
+
+	if !okA || !okB || !okC {
+		t.Fatalf("gradients have structure, so their hashes must be usable: %v %v %v", okA, okB, okC)
+	}
 
 	if dist := popcount(hA ^ hB); dist > similarHashThreshold {
 		t.Fatalf("identical visuals should hash close, hamming=%d", dist)
@@ -799,7 +807,7 @@ func TestSimilarEndToEnd(t *testing.T) {
 	distinct := filepath.Join(pics, "distinct.jpg")
 	writeGradientJPEG(t, distinct, 128, 96, true)
 
-	res := buildSimilarPhotos([]string{pics}, nil)
+	res := buildSimilarPhotos(context.Background(), []string{pics}, nil)
 	if res.Scanned != 5 {
 		t.Fatalf("scanned = %d, want 5", res.Scanned)
 	}
@@ -850,7 +858,7 @@ func TestSimilarKeepPicksLargest(t *testing.T) {
 	large := filepath.Join(pics, "large.jpg")
 	writeGradientJPEG(t, large, 1024, 768, false)
 
-	res := buildSimilarPhotos([]string{pics}, nil)
+	res := buildSimilarPhotos(context.Background(), []string{pics}, nil)
 	if len(res.Clusters) != 1 || res.Clusters[0].Kind != "similar" {
 		t.Fatalf("want one similar cluster, got %+v", res.Clusters)
 	}
@@ -881,7 +889,7 @@ func TestSimilarPhotosMoveToTrash(t *testing.T) {
 	writeGradientJPEG(t, a, 128, 96, false)
 	writeGradientJPEG(t, b, 160, 120, false)
 
-	res := buildSimilarPhotos([]string{pics}, nil)
+	res := buildSimilarPhotos(context.Background(), []string{pics}, nil)
 	if len(res.Clusters) != 1 {
 		t.Fatalf("want 1 cluster, got %+v", res.Clusters)
 	}
@@ -1011,7 +1019,7 @@ func TestParseBundleIDs(t *testing.T) {
 	}
 }
 
-func TestOwnedByRunningApp(t *testing.T) {
+func TestNamedAfterBundle(t *testing.T) {
 	running := map[string]bool{"com.microsoft.vscode": true, "com.google.chrome": true}
 	cases := map[string]bool{
 		"com.microsoft.VSCode":        true,
@@ -1022,8 +1030,8 @@ func TestOwnedByRunningApp(t *testing.T) {
 		"go-build":                    false,
 	}
 	for name, want := range cases {
-		if got := ownedByRunningApp(name, running); got != want {
-			t.Errorf("ownedByRunningApp(%q) = %v, want %v", name, got, want)
+		if got := namedAfterBundle(name, running); got != want {
+			t.Errorf("namedAfterBundle(%q) = %v, want %v", name, got, want)
 		}
 	}
 }
@@ -1345,5 +1353,382 @@ func TestScanAppCachesFlagsInUse(t *testing.T) {
 	}
 	if !inUse["busy"] || inUse["idle"] {
 		t.Fatalf("inUse = %v", inUse)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Similar photos: what gets scanned and what counts as similar
+// ---------------------------------------------------------------------------
+
+// TestCollectPhotoFilesSkipsPackages leaves libraries and bundles, whose
+// images their apps manage, and hidden folders out of the scan.
+func TestCollectPhotoFilesSkipsPackages(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{
+		"Photos Library.photoslibrary/originals/A/x.jpg",
+		"Old.photolibrary/Masters/y.jpg",
+		"Some.app/Contents/Resources/icon.png",
+		"Photo Booth Library/Pictures/z.jpg",
+		".hidden/h.jpg",
+		"trip/real.jpg",
+		"real2.png",
+	} {
+		writeFile(t, filepath.Join(root, p), 10)
+	}
+	got := collectPhotoFiles([]string{root}, 100)
+	slices.Sort(got)
+	want := []string{filepath.Join(root, "real2.png"), filepath.Join(root, "trip", "real.jpg")}
+	if !slices.Equal(got, want) {
+		t.Fatalf("collected %v, want %v", got, want)
+	}
+}
+
+// writeDocPNG draws a white page with dark bars, as screenshots of documents
+// look.
+func writeDocPNG(t *testing.T, path string, w, h int, bars [][4]int) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	for _, b := range bars {
+		for y := b[1]; y < min(b[3], h); y++ {
+			for x := b[0]; x < min(b[2], w); x++ {
+				img.SetRGBA(x, y, color.RGBA{R: 30, G: 30, B: 30, A: 255})
+			}
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBlankImagesAreNotSimilar: images with nothing in them carry no visual
+// fingerprint, so only byte-identical copies may group them.
+func TestBlankImagesAreNotSimilar(t *testing.T) {
+	pics := t.TempDir()
+	writeDocPNG(t, filepath.Join(pics, "blank1.png"), 400, 300, [][4]int{{10, 10, 30, 12}})
+	writeDocPNG(t, filepath.Join(pics, "blank2.png"), 400, 300, [][4]int{{300, 250, 340, 252}})
+	if res := buildSimilarPhotos(context.Background(), []string{pics}, nil); len(res.Clusters) != 0 {
+		t.Fatalf("different blank images must not group: %+v", res.Clusters)
+	}
+}
+
+// TestTextDocumentsAreNotSimilar: unrelated document screenshots differ in
+// layout, which the fingerprint has to see.
+func TestTextDocumentsAreNotSimilar(t *testing.T) {
+	pics := t.TempDir()
+	rng := rand.New(rand.NewPCG(1, 2))
+	for i := range 8 {
+		var bars [][4]int
+		for range 25 {
+			x, y := rng.IntN(300), rng.IntN(290)
+			bars = append(bars, [4]int{x, y, x + 20 + rng.IntN(80), y + 6})
+		}
+		writeDocPNG(t, filepath.Join(pics, fmt.Sprintf("doc%d.png", i)), 400, 300, bars)
+	}
+	if res := buildSimilarPhotos(context.Background(), []string{pics}, nil); len(res.Clusters) != 0 {
+		t.Fatalf("unrelated documents must not group, got %d clusters", len(res.Clusters))
+	}
+}
+
+// TestDirChildrenReportsTotal: the listing is capped, and says how many
+// entries there are, so the UI knows when it shows only part of a folder.
+func TestDirChildrenReportsTotal(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 70 {
+		writeFile(t, filepath.Join(dir, fmt.Sprintf("f%02d", i)), i+1)
+	}
+	got, err := (Cleaner{}).DirChildren(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 60 || got.Total != 70 {
+		t.Fatalf("items = %d, total = %d; want 60, 70", len(got.Items), got.Total)
+	}
+	if got.Items[0].Name != "f69" {
+		t.Fatalf("largest first, got %s", got.Items[0].Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Uninstall: only apps ListApps lists, and nothing outside their folders
+// ---------------------------------------------------------------------------
+
+// TestUninstallPathsStayInLibrary: names from Info.plist cannot climb out of
+// the Library folders uninstall cleans.
+func TestUninstallPathsStayInLibrary(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	docs := filepath.Join(home, "Documents")
+	mustMkdir(t, docs)
+	mustMkdir(t, filepath.Join(home, "Library", "Preferences"))
+	apps := filepath.Join(home, "Applications")
+	for _, tc := range []struct{ app, bid string }{
+		{"Evil.app", "../../Documents"},
+		{"Evil.app", ".."},
+		{"Evil.app", "."},
+		{"...app", "com.example.ok"},
+	} {
+		appPath := filepath.Join(apps, tc.app)
+		mustMkdir(t, appPath)
+		for _, it := range uninstallPaths(AppInfo{Name: "Evil", Path: appPath, BundleID: tc.bid}) {
+			if it.Path != appPath && !strings.HasPrefix(it.Path, filepath.Join(home, "Library")+"/") {
+				t.Errorf("%s / %q reaches %s", tc.app, tc.bid, it.Path)
+			}
+			if it.Path == filepath.Join(home, "Library") || it.Path == filepath.Join(home, "Library", "Preferences") {
+				t.Errorf("%s / %q reaches a whole Library folder: %s", tc.app, tc.bid, it.Path)
+			}
+		}
+		os.RemoveAll(appPath)
+	}
+}
+
+// TestUninstallOnlyInstalledApps: a path that is not an app in an
+// Applications folder is not uninstalled.
+func TestUninstallOnlyInstalledApps(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	docs := filepath.Join(home, "Documents")
+	writeFile(t, filepath.Join(docs, "a.txt"), 10)
+	notInApps := makeFakeApp(t, home, "Stray")
+	for _, p := range []string{docs, notInApps} {
+		res := Cleaner{}.UninstallApp(p)
+		if res.Moved != 0 || len(res.Failed) == 0 {
+			t.Errorf("UninstallApp(%s) = %+v, want a refusal", p, res)
+		}
+		if !exists(p) {
+			t.Errorf("%s must stay", p)
+		}
+	}
+}
+
+// TestUninstallStopsWhenAppCannotMove: an app that cannot move keeps its
+// data, instead of losing its settings while it stays installed.
+func TestUninstallStopsWhenAppCannotMove(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	apps := filepath.Join(home, "Applications")
+	appPath := makeFakeApp(t, apps, "TestApp")
+	pref := filepath.Join(home, "Library", "Preferences", "com.example.testapp.plist")
+	writeFile(t, pref, 256)
+	if err := os.Chmod(apps, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(apps, 0o755) })
+	res := Cleaner{}.UninstallApp(appPath)
+	if res.Moved != 0 || len(res.Failed) != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	if !exists(appPath) || !exists(pref) {
+		t.Fatal("the app and its preferences must both stay")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leftovers: live data is not a leftover
+// ---------------------------------------------------------------------------
+
+// makeApp creates an app bundle with its own bundle ID and display name.
+func makeApp(t *testing.T, dir, folder, bid, display string) string {
+	t.Helper()
+	appPath := filepath.Join(dir, folder)
+	plist := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleDisplayName</key><string>` + display + `</string>
+<key>CFBundleIdentifier</key><string>` + bid + `</string>
+</dict></plist>`
+	mustMkdir(t, filepath.Join(appPath, "Contents"))
+	if err := os.WriteFile(filepath.Join(appPath, "Contents", "Info.plist"), []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return appPath
+}
+
+// TestOrphansSkipLiveData: data of Apple's own services, input methods,
+// apps in subfolders, apps whose folders are named after their vendor or
+// bundle ID, and hidden entries are not leftovers.
+func TestOrphansSkipLiveData(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	apps := filepath.Join(home, "Applications")
+	makeApp(t, filepath.Join(home, "Library", "Input Methods"), "WeType.app", "com.tencent.inputmethod.wetype", "WeType")
+	makeApp(t, filepath.Join(apps, "Vendor Suite"), "Tool.app", "com.vendor.tool", "Tool")
+	makeApp(t, apps, "语雀.app", "com.yuque.desktop", "语雀")
+	makeApp(t, apps, "Fusion.app", "com.citrolabs.fusion", "Fusion")
+	support := filepath.Join(home, "Library", "Application Support")
+	for _, n := range []string{"Animoji", "networkserviceproxy", "MobileSync", "WeType", "Tool", "yuque-desktop", "Citro Labs", "TrulyGone"} {
+		writeFile(t, filepath.Join(support, n, "data.bin"), 2<<20)
+	}
+	// hidden entries are command line tools' settings, such as wrangler's login
+	writeFile(t, filepath.Join(home, "Library", "Preferences", ".wrangler", "config.toml"), 2<<20)
+	items, _ := collectOrphans(context.Background(), nil)
+	var got []string
+	for _, it := range items {
+		got = append(got, filepath.Base(it.Path))
+	}
+	if !slices.Equal(got, []string{"TrulyGone"}) {
+		t.Fatalf("leftovers = %v, want [TrulyGone]", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// du and find: partial results and other volumes
+// ---------------------------------------------------------------------------
+
+// lockedTree makes dir hold a readable 1 MiB file and a folder du and find
+// cannot read, which makes both exit with status 1.
+func lockedTree(t *testing.T, dir string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "big.bin"), 1<<20)
+	locked := filepath.Join(dir, "locked")
+	writeFile(t, filepath.Join(locked, "x"), 10)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+}
+
+func TestDuSizeKeepsPartialResult(t *testing.T) {
+	dir := t.TempDir()
+	lockedTree(t, dir)
+	size, err := duSize(context.Background(), dir, 10*time.Second)
+	if err != nil || size < 1<<20 {
+		t.Fatalf("duSize = %d, %v; want at least 1 MiB", size, err)
+	}
+}
+
+func TestFindLargeFilesKeepsPartialResult(t *testing.T) {
+	dir := t.TempDir()
+	lockedTree(t, dir)
+	files, err := findLargeFiles(context.Background(), dir, 512<<10)
+	if err != nil || len(files) != 1 || filepath.Base(files[0].Path) != "big.bin" {
+		t.Fatalf("findLargeFiles = %+v, %v", files, err)
+	}
+}
+
+// TestScansStayOnOneVolume: a disk mounted inside a scanned folder, such as
+// a VM's or a container runtime's, is not counted as part of it.
+func TestScansStayOnOneVolume(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(t.TempDir(), "vol.dmg")
+	if out, err := exec.Command("hdiutil", "create", "-quiet", "-size", "8m", "-fs", "HFS+", "-volname", "cleanzo-test", img).CombinedOutput(); err != nil {
+		t.Skipf("hdiutil create: %v %s", err, out)
+	}
+	mnt := filepath.Join(dir, "mnt")
+	mustMkdir(t, mnt)
+	if out, err := exec.Command("hdiutil", "attach", "-quiet", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil {
+		t.Skipf("hdiutil attach: %v %s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("hdiutil", "detach", "-quiet", "-force", mnt).Run() })
+	writeFile(t, filepath.Join(mnt, "on-volume.bin"), 2<<20)
+	writeFile(t, filepath.Join(dir, "here.bin"), 1<<20)
+
+	size, err := duSize(context.Background(), dir, 10*time.Second)
+	if err != nil || size >= 2<<20 {
+		t.Errorf("duSize = %d, %v; the mounted volume must not count", size, err)
+	}
+	files, err := findLargeFiles(context.Background(), dir, 512<<10)
+	if err != nil || len(files) != 1 || filepath.Base(files[0].Path) != "here.bin" {
+		t.Errorf("findLargeFiles = %+v, %v; want only here.bin", files, err)
+	}
+}
+
+// TestRevealArgs: packages are revealed (selected) in Finder rather than
+// opened, which would launch an app, boot a VM or mount a disk image.
+func TestRevealArgs(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "Projects")
+	mustMkdir(t, plain)
+	file := filepath.Join(dir, "a.txt")
+	writeFile(t, file, 1)
+	app := makeApp(t, dir, "Foo.app", "com.example.foo", "Foo")
+	unnamed := makeApp(t, dir, "Bundle Without Extension", "com.example.bare", "Bare")
+	vm := filepath.Join(dir, "Windows.pvm")
+	mustMkdir(t, vm)
+	cases := map[string][]string{
+		plain:   {plain},
+		file:    {"-R", file},
+		app:     {"-R", app},
+		unnamed: {"-R", unnamed},
+		vm:      {"-R", vm},
+	}
+	for p, want := range cases {
+		got, err := revealArgs(p)
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("revealArgs(%s) = %q, %v; want %q", filepath.Base(p), got, err, want)
+		}
+	}
+	if _, err := revealArgs(filepath.Join(dir, "missing")); err == nil {
+		t.Error("a missing path should be an error")
+	}
+}
+
+// TestScansStopWhenCanceled: when the page goes away, mygo cancels the
+// call's context, and the scans stop instead of running du, find and sips on.
+func TestScansStopWhenCanceled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeFile(t, filepath.Join(home, "AAA", "big"), 2<<20)
+	writeFile(t, filepath.Join(home, "Library", "Caches", "Leftover", "x"), 2<<20)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	writeGradientJPEG(t, filepath.Join(pics, "a.jpg"), 128, 96, false)
+	copyFile(t, filepath.Join(pics, "a.jpg"), filepath.Join(pics, "b.jpg"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := duSize(ctx, home, 10*time.Second); err == nil {
+		t.Error("duSize ran on a canceled context")
+	}
+	if _, err := findLargeFiles(ctx, home, 1<<20); err == nil {
+		t.Error("findLargeFiles ran on a canceled context")
+	}
+	if items, done, _ := collectFullScan(ctx, nil); len(items) != 0 || done != 0 {
+		t.Errorf("collectFullScan measured %d targets", done)
+	}
+	if items, done, _ := collectLargeScan(ctx, 1<<20, nil); len(items) != 0 || done != 0 {
+		t.Errorf("collectLargeScan scanned %d targets", done)
+	}
+	if items, _ := collectOrphans(ctx, nil); len(items) != 0 {
+		t.Errorf("collectOrphans found %d", len(items))
+	}
+	if res := buildSimilarPhotos(ctx, []string{pics}, nil); len(res.Clusters) != 0 {
+		t.Errorf("buildSimilarPhotos grouped %d clusters", len(res.Clusters))
+	}
+}
+
+// TestLargePhotosAreDecodedSmall: photos above the pixel budget, and HEIC
+// photos, are decoded from a small copy, while their real size still
+// decides which copy to keep.
+func TestLargePhotosAreDecodedSmall(t *testing.T) {
+	defer func(old int) { maxDecodePixels = old }(maxDecodePixels)
+	maxDecodePixels = 1_000_000
+	dir := t.TempDir()
+	big := filepath.Join(dir, "big.png")
+	writeDocPNG(t, big, 1600, 1200, [][4]int{{100, 100, 900, 700}})
+	heic := filepath.Join(dir, "photo.heic")
+	if out, err := exec.Command("/usr/bin/sips", "-s", "format", "heic", big, "--out", heic).CombinedOutput(); err != nil {
+		t.Fatalf("sips: %v %s", err, out)
+	}
+	for _, p := range []string{big, heic} {
+		img, cfg, cleanup, err := loadPhotoImage(context.Background(), p)
+		if err != nil {
+			t.Fatalf("%s: %v", filepath.Base(p), err)
+		}
+		cleanup()
+		if cfg.Width != 1600 || cfg.Height != 1200 {
+			t.Errorf("%s: size = %dx%d, want the real 1600x1200", filepath.Base(p), cfg.Width, cfg.Height)
+		}
+		if b := img.Bounds(); max(b.Dx(), b.Dy()) > photoDecodeEdge {
+			t.Errorf("%s: decoded at %dx%d, want at most %d px", filepath.Base(p), b.Dx(), b.Dy(), photoDecodeEdge)
+		}
 	}
 }

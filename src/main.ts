@@ -1,7 +1,7 @@
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanSummary, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanSummary, DirItem, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
 import { t, categoryName, categoryDescription, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -70,8 +70,10 @@ let fsRunning = false;
 let fsItems: BigItem[] = [];
 let lgRunning = false;
 let lgItems: LargeFile[] = [];
+let lgResult: LargeScanResult | null = null;
 let orRunning = false;
 let orItems: OrphanItem[] = [];
+let orFoot: { n: string; size: string; t: string } | null = null;
 let acRunning = false;
 let acItems: AppCacheItem[] = [];
 let phRunning = false;
@@ -125,21 +127,25 @@ function applyStaticI18n() {
 /** Re-render the current view so all dynamic text follows the new language. */
 function refreshI18n() {
   applyStaticI18n();
-  const active = navItems.find((b) => b.classList.contains("active"))?.dataset.view;
-  if (active === "clean" || active === undefined) render();
-  else if (active === "apps") renderApps();
-  else if (active === "settings") renderCatEditor();
-  else if (active === "fullscan") {
-    if (fsResult) renderFullScan(fsResult);
-  } else if (active === "large") {
-    lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
-    if (lgItems.length > 0) renderLargeRows(lgItems, false);
-  } else if (active === "orphans") {
-    if (orItems.length > 0) renderOrphanRows(orItems);
-  } else if (active === "appcaches") {
-    if (acItems.length > 0) renderAppCacheRows();
-  } else if (active === "photos") {
-    if (phClusters.length > 0) renderPhotoClusters();
+  // 每个已有内容的视图都按新语言重绘，不只是当前这个；扫描中的视图等它结束后自己会重绘
+  if (categories.length > 0) render();
+  else if (!scanBtn.disabled) initIdleClean();
+  if (apps.length > 0) renderApps();
+  if (catConfig.length > 0) renderCatEditor();
+  if (fsResult && !fsRunning) renderFullScan(fsResult);
+  lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
+  if (lgResult && !lgRunning) renderLargeDone(lgResult);
+  if (orFoot && !orRunning) {
+    orTotal.textContent = t("orphans.foot", orFoot);
+    renderOrphanRows(orItems);
+  }
+  if (acItems.length > 0 && !acRunning) {
+    renderAppCacheRows();
+    acScanBtn.textContent = t("appcaches.rescan");
+  }
+  if (phClusters.length > 0 && !phRunning) {
+    renderPhotoClusters();
+    phScanBtn.textContent = t("photos.rescan");
   }
 }
 
@@ -167,14 +173,13 @@ function toast(text: string, kind: "ok" | "err" = "ok") {
 
 function setBusy(btn: HTMLButtonElement, busy: boolean, label?: string) {
   if (busy) {
-    btn.dataset.orig = btn.dataset.origText ?? btn.textContent ?? "";
-    btn.dataset.origText = btn.dataset.orig;
+    btn.dataset.orig = btn.textContent ?? "";
     btn.disabled = true;
     btn.innerHTML = `<span class="spin"></span>${esc(label ?? t("scan.busy"))}`;
   } else {
     btn.disabled = false;
-    const orig = btn.dataset.origText ?? btn.textContent ?? "";
-    btn.innerHTML = orig;
+    // 文案取当前语言：忙碌期间可能切换过语言
+    btn.textContent = btn.dataset.i18n ? t(btn.dataset.i18n as never) : (btn.dataset.orig ?? "");
   }
 }
 
@@ -186,8 +191,25 @@ function emptyState(text: string): string {
   return `<div class="empty">${esc(text)}</div>`;
 }
 
+/** 错误态的「重试」按钮：errorState 只产出 HTML，点击由文档级监听找回回调 */
+const retryFns = new Map<string, () => void>();
+let retrySeq = 0;
+document.addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>(".retry-btn");
+  const fn = b && retryFns.get(b.dataset.retry ?? "");
+  if (fn) {
+    retryFns.delete(b.dataset.retry!);
+    fn();
+  }
+});
+
 function errorState(text: string, retry?: () => void): string {
-  const btn = retry ? `<button class="btn ghost retry-btn" type="button">${esc(t("btn.retry"))}</button>` : "";
+  let btn = "";
+  if (retry) {
+    const id = `r${++retrySeq}`;
+    retryFns.set(id, retry);
+    btn = `<button class="btn ghost retry-btn" data-retry="${id}" type="button">${esc(t("btn.retry"))}</button>`;
+  }
   return `<div class="empty err"><div class="err-icon">⚠</div><div>${esc(text)}</div>${btn}</div>`;
 }
 
@@ -469,7 +491,7 @@ function renderFsRows(items: BigItem[], live: boolean, foot = "") {
   const rows = sorted
     .map(
       (it, i) =>
-        fsRowHtml({
+        fsRowHtml(lists.fullscan, {
           path: it.path,
           name: esc(displayPath(it.path)),
           size: it.size,
@@ -481,12 +503,12 @@ function renderFsRows(items: BigItem[], live: boolean, foot = "") {
     )
     .join("");
   const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("fs.live"))}</div>` : "") + foot;
-  renderFsListInto(fsList, fsToolbar, rows + footHtml, () => renderFsRows(fsItems, false), startFullScan);
+  renderFsListInto({ st: lists.fullscan, list: fsList, toolbar: fsToolbar, rerender: () => renderFsRows(fsItems, false), afterTrash: startFullScan }, rows + footHtml);
 }
 
 async function startFullScan() {
-  checkedPaths.clear();
   if (fsRunning) return;
+  resetList("fullscan");
   fsRunning = true;
   fsItems = [];
   setBusy(fsScanBtn, true, t("fs.busy"));
@@ -521,52 +543,82 @@ async function startFullScan() {
   }
 }
 
-// ---- 勾选与展开（全盘 / 大文件 / 残留 通用） ----
+// ---- 勾选与展开（全盘扫描 / 大文件 / 残留 / 应用缓存 / 相似照片） ----
 
-const checkedPaths = new Set<string>();
-const expandedPaths = new Set<string>();
-const expandedChildren = new Map<string, string>();
-const expandedChildPaths = new Map<string, string[]>();
+/** 展开后的子项：存数据而不是 HTML，每次重绘都按当前勾选状态生成 */
+type ChildList = { items: DirItem[]; total: number } | { error: string };
 
-function checkHtml(path: string, parent?: string): string {
-  const par = parent ? ` data-parent="${esc(parent)}"` : "";
-  return `<label class="fs-check" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}"${par} ${checkedPaths.has(path) ? "checked" : ""}></label>`;
+/** 每个列表视图自己的勾选和展开状态，视图之间互不影响 */
+interface ListState {
+  sel: Set<string>;
+  expanded: Set<string>;
+  children: Map<string, ChildList>;
 }
 
-function setParentChecked(path: string, checked: boolean) {
-  if (checked) {
-    checkedPaths.add(path);
-    const kids = expandedChildPaths.get(path);
-    if (kids) kids.forEach((k) => checkedPaths.add(k));
-  } else {
-    checkedPaths.delete(path);
-    const kids = expandedChildPaths.get(path);
-    if (kids) kids.forEach((k) => checkedPaths.delete(k));
+const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map() });
+const lists = { fullscan: newList(), large: newList(), orphans: newList(), appcaches: newList(), photos: newList() };
+const resetList = (v: keyof typeof lists) => (lists[v] = newList());
+
+/** 一个列表视图的上下文：状态、容器、重绘，以及移到废纸篓之后的刷新 */
+interface ListCtx {
+  st: ListState;
+  list: HTMLElement;
+  toolbar: HTMLElement;
+  rerender: () => void;
+  afterTrash: () => Promise<void>;
+}
+
+function checkHtml(st: ListState, path: string, parent?: string): string {
+  const par = parent ? ` data-parent="${esc(parent)}"` : "";
+  return `<label class="fs-check" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}"${par} ${st.sel.has(path) ? "checked" : ""}></label>`;
+}
+
+/** 展开的文件夹里已经加载出来的子项 */
+function loadedKids(st: ListState, path: string): string[] {
+  const c = st.children.get(path);
+  return c && "items" in c ? c.items.map((i) => i.path) : [];
+}
+
+/** 勾选一整行：文件夹连同已加载的子项一起勾上或取消 */
+function toggleRow(st: ListState, path: string, on: boolean) {
+  for (const p of [path, ...loadedKids(st, path)]) {
+    if (on) st.sel.add(p);
+    else st.sel.delete(p);
   }
 }
 
-function syncParent(listEl: HTMLElement, parentPath: string) {
-  const kids = expandedChildPaths.get(parentPath);
-  if (!kids || kids.length === 0) return;
-  const n = kids.filter((k) => checkedPaths.has(k)).length;
-  if (n === kids.length) checkedPaths.add(parentPath);
-  else if (n === 0) checkedPaths.delete(parentPath);
+/**
+ * 勾选文件夹里的一项。取消其中一项时，文件夹不再整个移走，改为勾选其余已加载
+ * 的子项；子项全部勾上也不会变回整个文件夹，因为可能还有没显示出来的子项。
+ */
+function toggleChild(st: ListState, parent: string, child: string, on: boolean) {
+  if (on) {
+    st.sel.add(child);
+    return;
+  }
+  if (st.sel.delete(parent)) {
+    for (const k of loadedKids(st, parent)) st.sel.add(k);
+  }
+  st.sel.delete(child);
 }
 
-function applyIndeterminate(listEl: HTMLElement) {
-  listEl.querySelectorAll<HTMLDivElement>(".fs-row-wrap").forEach((wrap) => {
+/** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项 */
+function pickedPaths(st: ListState): string[] {
+  const all = [...st.sel];
+  return all.filter((p) => !all.some((q) => q !== p && p.startsWith(q + "/")));
+}
+
+function applyIndeterminate(ctx: ListCtx) {
+  ctx.list.querySelectorAll<HTMLDivElement>(".fs-row-wrap").forEach((wrap) => {
     const p = wrap.dataset.path!;
-    const kids = expandedChildPaths.get(p);
-    if (!kids || kids.length === 0) return;
     const cb = wrap.querySelector<HTMLInputElement>("input[data-check]");
-    if (!cb) return;
-    const n = kids.filter((k) => checkedPaths.has(k)).length;
-    cb.indeterminate = n > 0 && n < kids.length;
+    if (!cb || ctx.st.sel.has(p)) return;
+    cb.indeterminate = loadedKids(ctx.st, p).some((k) => ctx.st.sel.has(k));
   });
 }
 
-function expandBtnHtml(path: string): string {
-  const open = expandedPaths.has(path);
+function expandBtnHtml(st: ListState, path: string): string {
+  const open = st.expanded.has(path);
   return `<button class="btn small ghost fs-expand" data-expand="${esc(path)}" type="button">${open ? esc(t("fs.collapse")) : esc(t("fs.expand"))} <span class="caret">▸</span></button>`;
 }
 
@@ -574,7 +626,7 @@ function revealBtnHtml(path: string): string {
   return `<button class="btn small ghost icon fs-reveal" data-reveal="${esc(path)}" type="button" title="${esc(t("fs.reveal"))}" aria-label="${esc(t("fs.reveal"))}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></button>`;
 }
 
-function fsRowHtml(o: {
+function fsRowHtml(st: ListState, o: {
   path: string;
   name: string;
   size: number;
@@ -583,90 +635,90 @@ function fsRowHtml(o: {
   expandable?: boolean;
   trashable: boolean;
 }): string {
-  const open = expandedPaths.has(o.path);
+  const open = st.expanded.has(o.path);
   return `
       <div class="fs-row-wrap" data-path="${esc(o.path)}">
         <div class="fs-row card ${open ? "open" : ""}">
-          ${checkHtml(o.path)}
+          ${checkHtml(st, o.path)}
           ${o.rank ? `<div class="fs-rank">${o.rank}</div>` : ""}
           <div class="fs-main">
             <div class="fs-path" title="${esc(o.path)}">${o.name}</div>
             ${o.sub ? `<div class="fs-sub">${o.sub}</div>` : ""}
           </div>
           <div class="fs-size">${o.size >= 0 ? human(o.size) : "--"}</div>
-          ${o.expandable ? expandBtnHtml(o.path) : ""}
+          ${o.expandable ? expandBtnHtml(st, o.path) : ""}
           ${revealBtnHtml(o.path)}
           ${o.trashable ? `<button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
         </div>
-        ${expandedPaths.has(o.path) ? `<div class="fs-children">${expandedChildren.get(o.path) ?? `<span class="muted small">${esc(t("fs.children"))}</span>`}</div>` : ""}
+        ${open ? `<div class="fs-children">${childrenHtml(st, o.path)}</div>` : ""}
       </div>`;
 }
 
-function childRowsHtml(items: { name: string; path: string; size: number; trashable: boolean }[], parentPath: string): string {
-  if (items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
-  return items
+function childrenHtml(st: ListState, parent: string): string {
+  const c = st.children.get(parent);
+  if (!c) return `<span class="muted small">${esc(t("fs.children"))}</span>`;
+  if ("error" in c) return `<div class="fs-child err-inline">${esc(t("fs.childrenFail", { msg: c.error }))}</div>`;
+  if (c.items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
+  const rows = c.items
     .map(
-      (c) => `
+      (it) => `
       <div class="fs-child">
-        ${checkHtml(c.path, parentPath)}
-        <span class="fs-child-name" title="${esc(c.path)}">${esc(c.name)}${c.trashable ? "" : ` <span class="tag dim">${esc(t("fs.locked"))}</span>`}</span>
-        <span class="fs-child-size">${c.size >= 0 ? human(c.size) : "--"}</span>
-        ${revealBtnHtml(c.path)}
-        ${c.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(c.path)}" data-size="${c.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
+        ${checkHtml(st, it.path, parent)}
+        <span class="fs-child-name" title="${esc(it.path)}">${esc(it.name)}${it.trashable ? "" : ` <span class="tag dim">${esc(t("fs.locked"))}</span>`}</span>
+        <span class="fs-child-size">${it.size >= 0 ? human(it.size) : "--"}</span>
+        ${revealBtnHtml(it.path)}
+        ${it.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(it.path)}" data-size="${it.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
       </div>`,
     )
     .join("");
+  const more = c.total > c.items.length ? `<div class="fs-child muted small">${esc(t("fs.childrenMore", { n: c.items.length, total: c.total }))}</div>` : "";
+  return rows + more;
 }
 
-async function toggleExpand(path: string, rerender: () => void) {
-  if (expandedPaths.has(path)) {
-    expandedPaths.delete(path);
-    expandedChildren.delete(path);
-    expandedChildPaths.delete(path);
-    rerender();
+async function toggleExpand(ctx: ListCtx, path: string) {
+  const { st } = ctx;
+  if (st.expanded.delete(path)) {
+    st.children.delete(path);
+    ctx.rerender();
     return;
   }
-  expandedPaths.add(path);
-  expandedChildren.delete(path);
-  rerender();
+  st.expanded.add(path);
+  ctx.rerender();
   try {
-    const items = await Cleaner.dirChildren(path);
-    expandedChildPaths.set(path, items.map((i) => i.path));
-    if (checkedPaths.has(path)) items.forEach((i) => checkedPaths.add(i.path));
-    expandedChildren.set(path, childRowsHtml(items, path));
+    const r = await Cleaner.dirChildren(path);
+    st.children.set(path, { items: r.items, total: r.total });
+    if (st.sel.has(path)) toggleRow(st, path, true);
   } catch (e) {
-    expandedChildren.set(path, `<div class="fs-child err-inline">${esc(t("fs.childrenFail", { msg: msg(e) }))}</div>`);
+    st.children.set(path, { error: msg(e) });
   }
-  rerender();
+  if (st.expanded.has(path)) ctx.rerender();
 }
 
-function updateToolbar(toolbar: HTMLElement, listEl: HTMLElement, rerender: () => void, afterTrash: () => Promise<void>) {
-  const visible = Array.from(listEl.querySelectorAll<HTMLInputElement>("input[data-check]")).map((i) => i.dataset.check!);
-  const n = checkedPaths.size;
+function updateToolbar(ctx: ListCtx) {
+  const { st, toolbar } = ctx;
+  const rows = Array.from(ctx.list.querySelectorAll<HTMLInputElement>("input[data-check]:not([data-parent])")).map((i) => i.dataset.check!);
+  const n = pickedPaths(st).length;
   if (n === 0) {
     toolbar.classList.add("hidden");
     toolbar.innerHTML = "";
     return;
   }
-  const all = visible.length > 0 && visible.every((p) => checkedPaths.has(p));
+  const all = rows.length > 0 && rows.every((p) => st.sel.has(p));
   toolbar.classList.remove("hidden");
   toolbar.innerHTML = `
     <label class="fs-check"><input type="checkbox" class="fs-checkall" ${all ? "checked" : ""}></label>
     <span class="fs-toolbar-count">${esc(t("fs.checked", { n }))}</span>
     <button class="btn danger small fs-toolbar-trash" type="button">${esc(t("fs.trashChecked"))}</button>`;
   const allBox = toolbar.querySelector<HTMLInputElement>(".fs-checkall");
-  if (allBox) {
-    allBox.addEventListener("change", () => {
-      visible.forEach((p) => (allBox.checked ? checkedPaths.add(p) : checkedPaths.delete(p)));
-      rerender();
-      updateToolbar(toolbar, listEl, rerender, afterTrash);
-    });
-  }
-  toolbar.querySelector<HTMLButtonElement>(".fs-toolbar-trash")?.addEventListener("click", () => trashChecked(afterTrash, rerender));
+  allBox?.addEventListener("change", () => {
+    rows.forEach((p) => toggleRow(st, p, allBox.checked));
+    ctx.rerender();
+  });
+  toolbar.querySelector<HTMLButtonElement>(".fs-toolbar-trash")?.addEventListener("click", () => trashChecked(ctx));
 }
 
-async function trashChecked(after: () => Promise<void>, rerender: () => void) {
-  const paths = [...checkedPaths].filter((p) => ![...checkedPaths].some((q) => p !== q && p.startsWith(q + "/")));
+async function trashChecked(ctx: ListCtx) {
+  const paths = pickedPaths(ctx.st);
   if (paths.length === 0) return;
   pending = async () => {
     let ok = 0;
@@ -681,11 +733,11 @@ async function trashChecked(after: () => Promise<void>, rerender: () => void) {
         fail++;
       }
     }
-    checkedPaths.clear();
+    ctx.st.sel.clear();
     if (ok > 0) toast(t("fs.trashChecked.ok", { n: ok, size: human(freed) }));
     if (fail > 0) toast(t("fs.trashChecked.fail", { n: fail }), "err");
-    if (after) await after();
-    rerender();
+    await ctx.afterTrash();
+    ctx.rerender();
   };
   modalTitle.textContent = t("fs.trashChecked.title");
   modalBody.textContent = t("fs.trashChecked.body", { n: paths.length });
@@ -693,42 +745,36 @@ async function trashChecked(after: () => Promise<void>, rerender: () => void) {
   showModal();
 }
 
-function bindFsList(listEl: HTMLElement, rerender: () => void, afterTrash: () => Promise<void>) {
-  listEl.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
+function bindFsList(ctx: ListCtx) {
+  const { st, list } = ctx;
+  list.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
     cb.addEventListener("change", () => {
       const p = cb.dataset.check!;
       const parent = cb.dataset.parent;
-      if (parent) {
-        if (cb.checked) checkedPaths.add(p);
-        else checkedPaths.delete(p);
-        syncParent(listEl, parent);
-      } else if (cb.checked) {
-        setParentChecked(p, true);
-      } else {
-        setParentChecked(p, false);
-      }
-      rerender();
+      if (parent) toggleChild(st, parent, p, cb.checked);
+      else toggleRow(st, p, cb.checked);
+      ctx.rerender();
     });
   });
-  listEl.querySelectorAll<HTMLButtonElement>(".fs-expand").forEach((b) => {
-    b.addEventListener("click", () => toggleExpand(b.dataset.expand!, rerender));
+  list.querySelectorAll<HTMLButtonElement>(".fs-expand").forEach((b) => {
+    b.addEventListener("click", () => toggleExpand(ctx, b.dataset.expand!));
   });
-  listEl.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
+  list.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
     b.addEventListener("click", () => {
       const path = b.dataset.reveal!;
       Cleaner.revealInFinder(path).catch((e) => toast(t("fs.revealFail", { msg: msg(e) }), "err"));
     });
   });
-  listEl.querySelectorAll<HTMLButtonElement>(".fs-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), afterTrash));
+  list.querySelectorAll<HTMLButtonElement>(".fs-trash, .fs-child-trash").forEach((b) => {
+    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), ctx.afterTrash));
   });
 }
 
-function renderFsListInto(listEl: HTMLElement, toolbar: HTMLElement, html: string, rerender: () => void, afterTrash: () => Promise<void>) {
-  listEl.innerHTML = html;
-  bindFsList(listEl, rerender, afterTrash);
-  applyIndeterminate(listEl);
-  updateToolbar(toolbar, listEl, rerender, afterTrash);
+function renderFsListInto(ctx: ListCtx, html: string) {
+  ctx.list.innerHTML = html;
+  bindFsList(ctx);
+  applyIndeterminate(ctx);
+  updateToolbar(ctx);
 }
 
 function renderFullScan(r: FullScanResult) {
@@ -760,8 +806,9 @@ function askTrash(path: string, size: number, after?: () => Promise<void>) {
 // ---- 大文件专清 ----
 
 async function startLargeScan() {
-  checkedPaths.clear();
   if (lgRunning) return;
+  resetList("large");
+  lgResult = null;
   lgRunning = true;
   lgItems = [];
   setBusy(lgScanBtn, true, t("large.busy"));
@@ -780,6 +827,7 @@ async function startLargeScan() {
         renderLargeRows(lgItems, true);
       } else if (ev.kind === "done" && ev.result) {
         lgItems = ev.result.items;
+        lgResult = ev.result;
         renderLargeDone(ev.result);
       }
     }
@@ -807,7 +855,7 @@ function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
   const rows = sorted
     .map(
       (it, i) =>
-        fsRowHtml({
+        fsRowHtml(lists.large, {
           path: it.path,
           name: esc(displayPath(it.path)),
           size: it.size,
@@ -818,7 +866,8 @@ function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
     )
     .join("");
   const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") + foot;
-  renderFsListInto(lgList, lgToolbar, rows + footHtml, () => renderLargeRows(lgItems, false), startLargeScan);
+  const rerender = () => (lgResult ? renderLargeDone(lgResult) : renderLargeRows(lgItems, false));
+  renderFsListInto({ st: lists.large, list: lgList, toolbar: lgToolbar, rerender, afterTrash: startLargeScan }, rows + footHtml);
 }
 
 function renderLargeDone(r: LargeScanResult) {
@@ -829,8 +878,9 @@ function renderLargeDone(r: LargeScanResult) {
 // ---- 残留清理 ----
 
 async function startOrphanScan() {
-  checkedPaths.clear();
   if (orRunning) return;
+  resetList("orphans");
+  orFoot = null;
   orRunning = true;
   orItems = [];
   setBusy(orScanBtn, true, t("orphans.busy"));
@@ -847,7 +897,8 @@ async function startOrphanScan() {
         const elapsed = Number(o.path ?? 0) / 1000;
         orProgress.classList.add("hidden");
         orSummary.classList.remove("hidden");
-        orTotal.textContent = t("orphans.foot", { n: orItems.length.toLocaleString(), size: human(total), t: elapsed.toFixed(1) });
+        orFoot = { n: orItems.length.toLocaleString(), size: human(total), t: elapsed.toFixed(1) };
+        orTotal.textContent = t("orphans.foot", orFoot);
         if (orItems.length === 0) {
           orList.innerHTML = emptyState(t("orphans.empty"));
         }
@@ -876,7 +927,7 @@ function renderOrphanRows(items: OrphanItem[]) {
   const rows = sorted
     .map(
       (o, i) =>
-        fsRowHtml({
+        fsRowHtml(lists.orphans, {
           path: o.path,
           name: `${esc(displayPath(o.path))} <span class="tag dim">${esc(kindLabel(o.kind))}</span>`,
           size: o.size,
@@ -887,7 +938,7 @@ function renderOrphanRows(items: OrphanItem[]) {
         }),
     )
     .join("");
-  renderFsListInto(orList, orToolbar, rows, () => renderOrphanRows(orItems), startOrphanScan);
+  renderFsListInto({ st: lists.orphans, list: orList, toolbar: orToolbar, rerender: () => renderOrphanRows(orItems), afterTrash: startOrphanScan }, rows);
 }
 
 // ---- 应用缓存（按应用拆分） ----
@@ -895,8 +946,8 @@ function renderOrphanRows(items: OrphanItem[]) {
 const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
 async function startAppCacheScan() {
-  checkedPaths.clear();
   if (acRunning) return;
+  resetList("appcaches");
   acRunning = true;
   setBusy(acScanBtn, true, t("appcaches.busy"));
   acProgress.classList.remove("hidden");
@@ -929,7 +980,7 @@ function renderAppCacheRows() {
   const rows = sorted
     .map(
       (it, i) =>
-        fsRowHtml({
+        fsRowHtml(lists.appcaches, {
           path: it.path,
           name: esc(it.name),
           size: it.size,
@@ -940,14 +991,14 @@ function renderAppCacheRows() {
     )
     .join("");
   const foot = `<div class="fs-foot muted small">${esc(t("appcaches.count", { n: acItems.length }))}</div>`;
-  renderFsListInto(acList, acToolbar, rows + foot, renderAppCacheRows, startAppCacheScan);
+  renderFsListInto({ st: lists.appcaches, list: acList, toolbar: acToolbar, rerender: renderAppCacheRows, afterTrash: startAppCacheScan }, rows + foot);
 }
 
 // ---- 相似照片 ----
 
 async function startPhotoScan() {
-  checkedPaths.clear();
   if (phRunning) return;
+  resetList("photos");
   phRunning = true;
   setBusy(phScanBtn, true, t("photos.busy"));
   phProgress.classList.remove("hidden");
@@ -965,10 +1016,12 @@ async function startPhotoScan() {
       } else if (ev.kind === "done" && ev.result) {
         phClusters = ev.result.clusters;
         phScanned = ev.result.scanned;
-        // default: keep the recommended copy unchecked, trash everything else
-        checkedPaths.clear();
+        // 默认只勾选「完全相同」的副本（推荐保留的那份不勾）；「相似」的分组由用户自己挑
+        const sel = lists.photos.sel;
+        sel.clear();
         for (const cl of phClusters) {
-          for (const it of cl.items) if (!it.keep) checkedPaths.add(it.path);
+          if (cl.kind !== "exact") continue;
+          for (const it of cl.items) if (!it.keep) sel.add(it.path);
         }
         renderPhotoClusters();
       }
@@ -997,18 +1050,18 @@ function renderPhotoClusters() {
     .map((cl) => {
       const badge =
         cl.kind === "exact"
-          ? `<span class="ph-badge exact">${esc(t("photos.kindExact"))}</span>`
-          : `<span class="ph-badge similar">${esc(t("photos.kindSimilar"))}</span>`;
+          ? `<span class="photo-badge exact">${esc(t("photos.kindExact"))}</span>`
+          : `<span class="photo-badge similar">${esc(t("photos.kindSimilar"))}</span>`;
       const cells = cl.items
         .map((it) => {
           const keepCls = it.keep ? " keep" : "";
           const keepTag = it.keep
-            ? `<span class="ph-keep-tag">${esc(t("photos.keep"))}</span>`
+            ? `<span class="photo-keep-tag">${esc(t("photos.keep"))}</span>`
             : "";
           return `
         <figure class="photo-cell${keepCls}">
           <div class="photo-thumb-wrap">
-            ${checkHtml(it.path)}
+            ${checkHtml(lists.photos, it.path)}
             ${keepTag}
             <img class="photo-thumb" src="${it.thumb}" alt="" loading="lazy">
           </div>
@@ -1041,8 +1094,8 @@ function bindPhotoList() {
   phList.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
     cb.addEventListener("change", () => {
       const p = cb.dataset.check!;
-      if (cb.checked) checkedPaths.add(p);
-      else checkedPaths.delete(p);
+      if (cb.checked) lists.photos.sel.add(p);
+      else lists.photos.sel.delete(p);
       renderPhotoClusters();
     });
   });
@@ -1058,8 +1111,8 @@ function bindPhotoList() {
       const cl = phClusters.find((c) => String(c.id) === b.dataset.cluster);
       if (!cl) return;
       for (const it of cl.items) {
-        if (it.keep) checkedPaths.delete(it.path);
-        else checkedPaths.add(it.path);
+        if (it.keep) lists.photos.sel.delete(it.path);
+        else lists.photos.sel.add(it.path);
       }
       renderPhotoClusters();
     });
@@ -1072,13 +1125,14 @@ function visiblePhotoPaths(): string[] {
 
 function updatePhotoToolbar() {
   const visible = visiblePhotoPaths();
-  const n = checkedPaths.size;
+  const sel = lists.photos.sel;
+  const n = sel.size;
   if (n === 0) {
     phToolbar.classList.add("hidden");
     phToolbar.innerHTML = "";
     return;
   }
-  const all = visible.length > 0 && visible.every((p) => checkedPaths.has(p));
+  const all = visible.length > 0 && visible.every((p) => sel.has(p));
   phToolbar.classList.remove("hidden");
   phToolbar.innerHTML = `
     <label class="fs-check"><input type="checkbox" class="ph-checkall" ${all ? "checked" : ""}></label>
@@ -1086,14 +1140,14 @@ function updatePhotoToolbar() {
     <button class="btn danger small ph-trash" type="button">${esc(t("photos.clean"))}</button>`;
   phToolbar.querySelector<HTMLInputElement>(".ph-checkall")?.addEventListener("change", (e) => {
     const on = (e.target as HTMLInputElement).checked;
-    visible.forEach((p) => (on ? checkedPaths.add(p) : checkedPaths.delete(p)));
+    visible.forEach((p) => (on ? sel.add(p) : sel.delete(p)));
     renderPhotoClusters();
   });
   phToolbar.querySelector<HTMLButtonElement>(".ph-trash")?.addEventListener("click", askTrashPhotos);
 }
 
 function askTrashPhotos() {
-  const paths = [...checkedPaths];
+  const paths = [...lists.photos.sel];
   if (paths.length === 0) return;
   pending = async () => {
     try {
@@ -1108,7 +1162,7 @@ function askTrashPhotos() {
     } catch (e) {
       toast(t("fs.actionFail", { msg: msg(e) }), "err");
     }
-    checkedPaths.clear();
+    lists.photos.sel.clear();
     await startPhotoScan();
   };
   modalTitle.textContent = t("photos.clean");
@@ -1172,8 +1226,10 @@ async function showUninstallDetail(path: string) {
   modalOk.disabled = true;
   modalOk.textContent = t("apps.wait");
   showModal();
+  const seq = modalSeq;
   try {
     const d = await Cleaner.appUninstallDetail(path);
+    if (seq !== modalSeq) return; // 这个框已经关掉或换成了别的
     modalTitle.textContent = t("apps.title", { name: d.app.name });
     const rows = d.items
       .map(
@@ -1198,11 +1254,12 @@ async function showUninstallDetail(path: string) {
     };
     modalOk.textContent = t("apps.confirm");
   } catch (e) {
+    if (seq !== modalSeq) return;
     modalBody.innerHTML = `<div class="err-inline">${esc(t("apps.analyzeFail", { msg: msg(e) }))}</div>`;
     pending = null;
     modalOk.textContent = t("btn.close");
   } finally {
-    modalOk.disabled = false;
+    if (seq === modalSeq) modalOk.disabled = false;
   }
 }
 
@@ -1286,11 +1343,15 @@ saveCatsBtn.addEventListener("click", async () => {
 
 // ---- 弹窗 ----
 
+/** 每次打开或关闭确认框都换一个编号；晚到的异步结果凭它判断这个框是否还是自己的 */
+let modalSeq = 0;
 function showModal() {
+  modalSeq++;
   overlay.classList.remove("hidden");
   modalOk.focus();
 }
 function hideModal() {
+  modalSeq++;
   overlay.classList.add("hidden");
   pending = null;
 }

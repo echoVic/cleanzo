@@ -111,6 +111,13 @@ export interface DirItem {
   trashable: boolean;
 }
 
+/** DirListing is the largest children of a folder, and how many it has. */
+export interface DirListing {
+  items: DirItem[];
+  /** more than len(Items) when the list is capped */
+  total: number;
+}
+
 /** DiskStat is the capacity usage of the boot volume. */
 export interface DiskStat {
   total: number;
@@ -293,12 +300,15 @@ export const Cleaner = {
    * DirChildren lists the direct children of path with sizes: directories are
    * measured with du (8s timeout), files with a quick stat. Unreadable or
    * timed-out entries report Size = -1 so the UI can show them as unknown.
-   * The result is sorted by size descending and capped at 60 entries.
+   * The items are sorted by size descending and capped at 60 entries.
    */
-  dirChildren(path: string): Promise<DirItem[]> {
+  dirChildren(path: string): Promise<DirListing> {
     return call("Cleaner.DirChildren", path);
   },
-  /** FullScan streams per-directory results and the final summary of a full scan. */
+  /**
+   * FullScan streams per-directory results and the final summary of a full scan.
+   * ctx is canceled when the page goes away, which stops the scan.
+   */
   fullScan(ch: Channel<FullScanEvent>): Promise<void> {
     return call("Cleaner.FullScan", ch);
   },
@@ -329,9 +339,8 @@ export const Cleaner = {
     return call("Cleaner.OpenFullDiskAccessSettings");
   },
   /**
-   * RevealInFinder opens path in Finder. Directories open in place; files are
-   * revealed (selected) in their parent folder. The call returns an error when
-   * the path does not exist.
+   * RevealInFinder shows path in Finder (see revealArgs). The call returns an
+   * error when the path does not exist.
    */
   revealInFinder(path: string): Promise<void> {
     return call("Cleaner.RevealInFinder", path);
@@ -369,7 +378,11 @@ export const Cleaner = {
   trashPath(path: string): Promise<TrashResult> {
     return call("Cleaner.TrashPath", path);
   },
-  /** UninstallApp moves an app and its associated files to the Trash. */
+  /**
+   * UninstallApp moves an app to the Trash, then its associated files. When
+   * the app itself cannot move, its files stay too, rather than leaving it
+   * installed without its settings and data.
+   */
   uninstallApp(path: string): Promise<UninstallResult> {
     return call("Cleaner.UninstallApp", path);
   },

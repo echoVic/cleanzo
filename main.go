@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/egoist/mygo"
 )
@@ -407,6 +408,12 @@ func safeToClean(p string) bool {
 	return within(path, strings.ToLower(resolvePath(os.TempDir())))
 }
 
+// fileExists reports whether p exists.
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 // within reports whether path is dir or inside it.
 func within(path, dir string) bool {
 	return path == dir || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
@@ -466,15 +473,15 @@ func (g *usageGuard) inUse(path string) bool {
 	if i := sort.SearchStrings(g.open, p+"/"); i < len(g.open) && strings.HasPrefix(g.open[i], p+"/") {
 		return true
 	}
-	return ownedByRunningApp(filepath.Base(p), g.running)
+	return namedAfterBundle(filepath.Base(p), g.running)
 }
 
-// ownedByRunningApp reports whether name is a running app's bundle ID, or
-// starts with one, as helpers do (com.microsoft.VSCode.ShipIt).
-func ownedByRunningApp(name string, running map[string]bool) bool {
+// namedAfterBundle reports whether name is one of the lower-cased bundle IDs,
+// or starts with one, as helpers' folders do (com.microsoft.VSCode.ShipIt).
+func namedAfterBundle(name string, ids map[string]bool) bool {
 	name = strings.ToLower(name)
 	for {
-		if running[name] {
+		if ids[name] {
 			return true
 		}
 		i := strings.LastIndexByte(name, '.')
@@ -948,19 +955,130 @@ func listAppsIn(dir string) []AppInfo {
 	return apps
 }
 
-// installedKeys returns the set of bundle ids and app names of installed apps.
-func installedKeys() (bids, names map[string]bool) {
-	bids = map[string]bool{}
-	names = map[string]bool{}
-	for _, dir := range []string{"/Applications", filepath.Join(homeDir(), "Applications")} {
-		for _, a := range listAppsIn(dir) {
-			if a.BundleID != "" {
-				bids[a.BundleID] = true
+// appDirs are the folders installed apps live in: the Applications folders
+// and the suites one level down in them (/Applications/Adobe Photoshop 2026),
+// Apple's own apps and services, and input methods.
+func appDirs() []string {
+	h := homeDir()
+	dirs := []string{
+		"/Applications", filepath.Join(h, "Applications"), "/Applications/Utilities",
+		"/System/Applications", "/System/Applications/Utilities",
+		"/System/Library/CoreServices", "/System/Library/CoreServices/Applications",
+		"/Library/Input Methods", filepath.Join(h, "Library", "Input Methods"), "/System/Library/Input Methods",
+	}
+	for _, root := range []string{"/Applications", filepath.Join(h, "Applications")} {
+		entries, _ := os.ReadDir(root)
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasSuffix(e.Name(), ".app") {
+				dirs = append(dirs, filepath.Join(root, e.Name()))
 			}
-			names[strings.TrimSuffix(filepath.Base(a.Path), ".app")] = true
 		}
 	}
-	return bids, names
+	return dirs
+}
+
+// appKeys identifies installed apps in the names of their ~/Library entries.
+type appKeys struct {
+	bids  map[string]bool // lower-cased bundle IDs
+	names map[string]bool // normalized app and bundle folder names
+	words map[string]bool // normalized words of bundle IDs, such as "yuque" in com.yuque.desktop
+}
+
+// genericBundleWords are bundle ID words too common to tie a folder to an app.
+var genericBundleWords = map[string]bool{"desktop": true, "macos": true, "client": true, "helper": true, "agent": true, "apps": true, "inputmethod": true, "launcher": true}
+
+// normalized lower-cases s and drops all but letters and digits, so that
+// "Citro Labs" and "citrolabs" compare equal.
+func normalized(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, s)
+}
+
+func (k appKeys) addName(name string) {
+	if n := normalized(name); n != "" {
+		k.names[n] = true
+	}
+}
+
+func (k appKeys) addBundleID(bid string) {
+	if bid == "" {
+		return
+	}
+	k.bids[strings.ToLower(bid)] = true
+	for i, part := range strings.Split(bid, ".") {
+		if w := normalized(part); i > 0 && len(w) >= 4 && !genericBundleWords[w] {
+			k.words[w] = true
+		}
+	}
+}
+
+// installedKeys collects the bundle IDs, names and bundle ID words of the
+// installed apps, and of the running ones, wherever they live.
+func installedKeys() appKeys {
+	k := appKeys{bids: map[string]bool{}, names: map[string]bool{}, words: map[string]bool{}}
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, 16)
+	)
+	for _, dir := range appDirs() {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".app") {
+				continue
+			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				name, bid, _ := readBundleInfo(filepath.Join(dir, e.Name(), "Contents", "Info.plist"))
+				mu.Lock()
+				defer mu.Unlock()
+				k.addName(strings.TrimSuffix(e.Name(), ".app"))
+				k.addName(name)
+				k.addBundleID(bid)
+			}()
+		}
+	}
+	wg.Wait()
+	if running, err := runningBundleIDs(); err == nil {
+		for bid := range running {
+			k.addBundleID(bid)
+		}
+	}
+	return k
+}
+
+// owns reports whether the ~/Library entry base belongs to an installed app:
+// it is the app's bundle ID or one of its helpers' (com.vendor.app.helper),
+// or it shares a distinctive name or bundle ID word with the app.
+func (k appKeys) owns(base string) bool {
+	if namedAfterBundle(base, k.bids) {
+		return true
+	}
+	b := normalized(base)
+	if b == "" {
+		return false
+	}
+	if k.names[b] {
+		return true
+	}
+	for n := range k.names {
+		if len(n) >= 4 && (strings.Contains(b, n) || len(b) >= 4 && strings.Contains(n, b)) {
+			return true
+		}
+	}
+	for w := range k.words {
+		if strings.Contains(b, w) || len(b) >= 4 && strings.Contains(w, b) {
+			return true
+		}
+	}
+	return false
 }
 
 func (Cleaner) ListApps() []AppInfo {
@@ -993,11 +1111,37 @@ func appInfoFromPath(appPath string) AppInfo {
 	return AppInfo{Name: name, Path: appPath, BundleID: bid, Version: version, Size: size, LastOpened: lastOpened(appPath)}
 }
 
-// uninstallPaths collects the app bundle plus its user-level associated files.
+// installedApp reports whether path is an app ListApps lists: a .app bundle
+// directly in /Applications or ~/Applications.
+func installedApp(path string) bool {
+	p := canonical(path)
+	dir := filepath.Dir(p)
+	return strings.HasSuffix(p, ".app") &&
+		(dir == canonical("/Applications") || dir == canonical(filepath.Join(homeDir(), "Applications")))
+}
+
+// fileName reports whether s can name a single file in a folder. The names
+// uninstall builds paths from come from the app's bundle, which must not
+// lead them out of the Library folders it cleans.
+func fileName(s string) bool {
+	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\x00")
+}
+
+// uninstallPaths collects the app bundle plus its user-level associated
+// files; nothing for paths that are not installed apps.
 func uninstallPaths(app AppInfo) []UninstallItem {
+	if !installedApp(app.Path) {
+		return nil
+	}
 	h := homeDir()
 	name := strings.TrimSuffix(filepath.Base(app.Path), ".app")
 	bid := app.BundleID
+	if !fileName(name) {
+		name = ""
+	}
+	if !fileName(bid) {
+		bid = ""
+	}
 
 	var items []UninstallItem
 	add := func(p, kind string) {
@@ -1025,11 +1169,13 @@ func uninstallPaths(app AppInfo) []UninstallItem {
 		add(filepath.Join(h, "Library", "LaunchAgents", bid+".plist"), "launchAgent")
 		add(filepath.Join(h, "Library", "Logs", bid), "logs")
 	}
-	add(filepath.Join(h, "Library", "Application Support", name), "support")
-	add(filepath.Join(h, "Library", "Caches", name), "cache")
-	add(filepath.Join(h, "Library", "Logs", name), "logs")
-	add(filepath.Join(h, "Library", "Preferences", name+".plist"), "prefs")
-	add(filepath.Join(h, "Library", "Preferences", name), "prefs")
+	if name != "" {
+		add(filepath.Join(h, "Library", "Application Support", name), "support")
+		add(filepath.Join(h, "Library", "Caches", name), "cache")
+		add(filepath.Join(h, "Library", "Logs", name), "logs")
+		add(filepath.Join(h, "Library", "Preferences", name+".plist"), "prefs")
+		add(filepath.Join(h, "Library", "Preferences", name), "prefs")
+	}
 	return items
 }
 
@@ -1044,14 +1190,24 @@ func (Cleaner) AppUninstallDetail(path string) UninstallDetail {
 	return UninstallDetail{App: app, Items: items, TotalSize: total}
 }
 
-// UninstallApp moves an app and its associated files to the Trash.
+// UninstallApp moves an app to the Trash, then its associated files. When
+// the app itself cannot move, its files stay too, rather than leaving it
+// installed without its settings and data.
 func (Cleaner) UninstallApp(path string) UninstallResult {
 	app := appInfoFromPath(path)
 	res := UninstallResult{Path: path}
-	for _, item := range uninstallPaths(app) {
+	items := uninstallPaths(app)
+	if len(items) == 0 || items[0].Kind != "app" {
+		res.Failed = append(res.Failed, path+": 不是「应用程序」文件夹里的应用")
+		return res
+	}
+	for _, item := range items {
 		size, _ := scanPath(item.Path)
 		if err := trashItem(item.Path); err != nil {
 			res.Failed = append(res.Failed, item.Path+": "+err.Error())
+			if item.Kind == "app" {
+				return res
+			}
 			continue
 		}
 		res.Moved++
@@ -1204,14 +1360,15 @@ func trashable(path string) bool {
 	return strings.HasPrefix(path, h+string(filepath.Separator))
 }
 
-// duSize returns the disk usage of path in bytes using /usr/bin/du.
-// du is a C implementation and is several times faster than a Go walker on
-// large trees. A timeout guards against pathological directories.
-func duSize(path string, timeout time.Duration) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+// duSize returns the disk usage of path in bytes using /usr/bin/du, staying
+// on path's volume. du is a C implementation and is several times faster
+// than a Go walker on large trees. A timeout guards against pathological
+// directories.
+func duSize(ctx context.Context, path string, timeout time.Duration) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/du", "-sk", path).Output()
-	if err != nil {
+	out, err := exec.CommandContext(ctx, "/usr/bin/du", "-skx", path).Output()
+	if err != nil && !partialRun(ctx, err, out) {
 		return 0, err
 	}
 	fields := strings.Fields(string(out))
@@ -1235,14 +1392,20 @@ type DirItem struct {
 	Trashable bool   `json:"trashable"`
 }
 
+// DirListing is the largest children of a folder, and how many it has.
+type DirListing struct {
+	Items []DirItem `json:"items"`
+	Total int       `json:"total"` // more than len(Items) when the list is capped
+}
+
 // DirChildren lists the direct children of path with sizes: directories are
 // measured with du (8s timeout), files with a quick stat. Unreadable or
 // timed-out entries report Size = -1 so the UI can show them as unknown.
-// The result is sorted by size descending and capped at 60 entries.
-func (Cleaner) DirChildren(path string) ([]DirItem, error) {
+// The items are sorted by size descending and capped at 60 entries.
+func (Cleaner) DirChildren(ctx context.Context, path string) (DirListing, error) {
 	ents, err := os.ReadDir(path)
 	if err != nil {
-		return nil, err
+		return DirListing{}, err
 	}
 	type job struct {
 		name  string
@@ -1266,7 +1429,7 @@ func (Cleaner) DirChildren(path string) ([]DirItem, error) {
 			defer func() { <-sem }()
 			size := int64(-1)
 			if j.isDir {
-				if sz, err := duSize(j.full, 8*time.Second); err == nil {
+				if sz, err := duSize(ctx, j.full, 8*time.Second); err == nil {
 					size = sz
 				}
 			} else if st, err := os.Stat(j.full); err == nil {
@@ -1279,17 +1442,15 @@ func (Cleaner) DirChildren(path string) ([]DirItem, error) {
 	}
 	wg.Wait()
 	sort.Slice(items, func(i, k int) bool { return items[i].Size > items[k].Size })
-	if len(items) > 60 {
-		items = items[:60]
-	}
-	return items, nil
+	return DirListing{Items: items[:min(60, len(items))], Total: len(items)}, nil
 }
 
 // collectFullScan measures every full-scan target concurrently with du and
-// invokes onItem for each completed target so the frontend can stream the
-// ranking as it is discovered. It returns the sorted top items, the number of
-// measured targets and the number of failed/skipped ones.
-func collectFullScan(onItem func(path string, size int64, trashable bool)) ([]BigItem, int64, int64) {
+// invokes onItem for each completed target, one call at a time, so the
+// frontend can stream the ranking as it is discovered. It returns the sorted
+// top items, the number of measured targets and the number of failed or
+// skipped ones. It stops when ctx is canceled.
+func collectFullScan(ctx context.Context, onItem func(path string, size int64, trashable bool)) ([]BigItem, int64, int64) {
 	targets := fullScanTargets()
 	items := make([]BigItem, 0, len(targets))
 	var (
@@ -1299,12 +1460,15 @@ func collectFullScan(onItem func(path string, size int64, trashable bool)) ([]Bi
 	)
 	var done, skipped int64
 	for _, t := range targets {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(target string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			size, err := duSize(target, 120*time.Second)
+			size, err := duSize(ctx, target, 120*time.Second)
 			if err != nil {
 				atomic.AddInt64(&skipped, 1)
 				return
@@ -1313,11 +1477,11 @@ func collectFullScan(onItem func(path string, size int64, trashable bool)) ([]Bi
 			tr := trashable(target)
 			it := BigItem{Path: target, Size: size, Trashable: tr}
 			mu.Lock()
-			items = append(items, it)
-			mu.Unlock()
 			if onItem != nil {
 				onItem(target, size, tr)
 			}
+			items = append(items, it)
+			mu.Unlock()
 		}(t)
 	}
 	wg.Wait()
@@ -1329,9 +1493,10 @@ func collectFullScan(onItem func(path string, size int64, trashable bool)) ([]Bi
 }
 
 // FullScan streams per-directory results and the final summary of a full scan.
-func (Cleaner) FullScan(ch *mygo.Channel[FullScanEvent]) error {
+// ctx is canceled when the page goes away, which stops the scan.
+func (Cleaner) FullScan(ctx context.Context, ch *mygo.Channel[FullScanEvent]) error {
 	start := time.Now()
-	items, scanned, skipped := collectFullScan(func(path string, size int64, trashable bool) {
+	items, scanned, skipped := collectFullScan(ctx, func(path string, size int64, trashable bool) {
 		_ = ch.Send(FullScanEvent{Kind: "item", Path: path, Size: size, Trashable: trashable})
 	})
 	res := FullScanResult{
@@ -1347,14 +1512,24 @@ func (Cleaner) FullScan(ch *mygo.Channel[FullScanEvent]) error {
 // largeFileThreshold is the minimum size for the large-file scan.
 const largeFileThreshold int64 = 1 << 30 // 1GB
 
+// partialRun reports whether a du or find that failed still produced its
+// result: both exit with status 1 when some folder inside is unreadable, as
+// privacy-protected ones are, yet print what they could read. A timeout is
+// a real failure.
+func partialRun(ctx context.Context, err error, out []byte) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && ctx.Err() == nil && len(out) > 0
+}
+
 // findLargeFiles lists regular files under root that are larger than
-// threshold, using BSD find (-size supports k/M/G suffixes on macOS).
-func findLargeFiles(root string, threshold int64) ([]LargeFile, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+// threshold, using BSD find (-size supports k/M/G suffixes on macOS) without
+// leaving root's volume.
+func findLargeFiles(ctx context.Context, root string, threshold int64) ([]LargeFile, error) {
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	kb := threshold / 1024
-	out, err := exec.CommandContext(ctx, "/usr/bin/find", root, "-type", "f", "-size", fmt.Sprintf("+%dk", kb), "-print0").Output()
-	if err != nil {
+	out, err := exec.CommandContext(ctx, "/usr/bin/find", "-x", root, "-type", "f", "-size", fmt.Sprintf("+%dk", kb), "-print0").Output()
+	if err != nil && !partialRun(ctx, err, out) {
 		return nil, err
 	}
 	var files []LargeFile
@@ -1375,8 +1550,9 @@ func findLargeFiles(root string, threshold int64) ([]LargeFile, error) {
 }
 
 // collectLargeScan scans every full-scan target for large files concurrently
-// and streams each discovered file through onItem.
-func collectLargeScan(threshold int64, onItem func(f LargeFile)) ([]LargeFile, int64, int64) {
+// and streams each discovered file through onItem, one call at a time. It
+// stops when ctx is canceled.
+func collectLargeScan(ctx context.Context, threshold int64, onItem func(f LargeFile)) ([]LargeFile, int64, int64) {
 	targets := fullScanTargets()
 	var (
 		mu  sync.Mutex
@@ -1386,25 +1562,28 @@ func collectLargeScan(threshold int64, onItem func(f LargeFile)) ([]LargeFile, i
 	)
 	var done, skipped int64
 	for _, t := range targets {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(target string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			files, err := findLargeFiles(target, threshold)
+			files, err := findLargeFiles(ctx, target, threshold)
 			if err != nil {
 				atomic.AddInt64(&skipped, 1)
 				return
 			}
 			atomic.AddInt64(&done, 1)
 			mu.Lock()
-			all = append(all, files...)
-			mu.Unlock()
 			if onItem != nil {
 				for _, f := range files {
 					onItem(f)
 				}
 			}
+			all = append(all, files...)
+			mu.Unlock()
 		}(t)
 	}
 	wg.Wait()
@@ -1417,9 +1596,9 @@ func collectLargeScan(threshold int64, onItem func(f LargeFile)) ([]LargeFile, i
 
 // LargeScan streams per-file results and the final summary of a large-file
 // scan across the same targets as the full scan.
-func (Cleaner) LargeScan(ch *mygo.Channel[LargeScanEvent]) error {
+func (Cleaner) LargeScan(ctx context.Context, ch *mygo.Channel[LargeScanEvent]) error {
 	start := time.Now()
-	items, scanned, skipped := collectLargeScan(largeFileThreshold, func(f LargeFile) {
+	items, scanned, skipped := collectLargeScan(ctx, largeFileThreshold, func(f LargeFile) {
 		_ = ch.Send(LargeScanEvent{Kind: "item", Path: f.Path, Size: f.Size, Trashable: f.Trashable})
 	})
 	res := LargeScanResult{
@@ -1472,34 +1651,24 @@ var toolCacheNames = map[string]bool{
 	"com.apple.Safari": true, "com.apple.dt.Xcode": true,
 }
 
-// orphanMatch reports whether an orphan candidate is actually owned by an
-// installed app. It matches exact names/bundle ids first, then falls back to
-// substring matching between the candidate and the installed app name.
-func orphanMatch(base string, bids, names map[string]bool, namesList []string) bool {
-	if bids[base] || names[base] {
-		return true
-	}
-	lb := strings.ToLower(base)
-	for _, n := range namesList {
-		ln := strings.ToLower(n)
-		if len(n) >= 4 && (strings.Contains(lb, ln) || strings.Contains(ln, lb)) {
-			return true
-		}
-	}
-	return false
+// appleDataNames are folders of Apple's own services that do not carry the
+// com.apple. prefix, normalized.
+var appleDataNames = map[string]bool{
+	"animoji": true, "networkserviceproxy": true, "addressbook": true, "clouddocs": true,
+	"knowledge": true, "callhistorydb": true, "callhistorytransactions": true, "mobilesync": true,
+	"crashreporter": true, "icloud": true, "fileprovider": true, "coreparsec": true,
+	"differentialprivacy": true, "accounts": true, "syncservices": true, "icdd": true,
+	"dock": true, "familycircled": true, "cloudkit": true, "quicklook": true,
 }
 
 // collectOrphans inspects ~/Library subdirectories one level deep and reports
 // entries that do not correspond to an installed app. Orphan directories are
 // measured concurrently with du (60s each); plain files use stat. Each
-// completed measurement is streamed through onItem.
-func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
+// completed measurement is streamed through onItem, one call at a time. It
+// stops when ctx is canceled.
+func collectOrphans(ctx context.Context, onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 	h := homeDir()
-	bids, names := installedKeys()
-	var namesList []string
-	for n := range names {
-		namesList = append(namesList, n)
-	}
+	keys := installedKeys()
 	type candidate struct {
 		path  string
 		kind  string
@@ -1518,13 +1687,13 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 			if root == "Preferences" || root == "LaunchAgents" {
 				base = strings.TrimSuffix(name, ".plist")
 			}
-			if toolCacheNames[base] {
-				continue // build/tool cache, not app leftovers
+			if toolCacheNames[base] || strings.HasPrefix(base, ".") {
+				continue // build/tool caches and command line tools' settings, not app leftovers
 			}
-			if strings.HasPrefix(base, "com.apple.") {
+			if strings.HasPrefix(base, "com.apple.") || appleDataNames[normalized(base)] {
 				continue // system data
 			}
-			if orphanMatch(base, bids, names, namesList) {
+			if keys.owns(base) {
 				continue // owned by an installed app
 			}
 			cands = append(cands, candidate{path: filepath.Join(dir, name), kind: orphanKind(root), isDir: e.IsDir()})
@@ -1537,6 +1706,9 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 		sem = make(chan struct{}, 16)
 	)
 	for _, c := range cands {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(c candidate) {
@@ -1544,7 +1716,7 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 			defer func() { <-sem }()
 			var size int64
 			if c.isDir {
-				size, _ = duSize(c.path, 60*time.Second)
+				size, _ = duSize(ctx, c.path, 60*time.Second)
 			} else if fi, err := os.Stat(c.path); err == nil {
 				size = fi.Size()
 			}
@@ -1553,11 +1725,11 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 			}
 			it := OrphanItem{Path: c.path, Size: size, Kind: c.kind, Trashable: trashable(c.path)}
 			mu.Lock()
-			items = append(items, it)
-			mu.Unlock()
 			if onItem != nil {
 				onItem(it)
 			}
+			items = append(items, it)
+			mu.Unlock()
 		}(c)
 	}
 	wg.Wait()
@@ -1570,9 +1742,9 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 }
 
 // ScanOrphans streams leftover files from apps that are no longer installed.
-func (Cleaner) ScanOrphans(ch *mygo.Channel[OrphanItem]) error {
+func (Cleaner) ScanOrphans(ctx context.Context, ch *mygo.Channel[OrphanItem]) error {
 	start := time.Now()
-	_, total := collectOrphans(func(o OrphanItem) {
+	_, total := collectOrphans(ctx, func(o OrphanItem) {
 		_ = ch.Send(o)
 	})
 	// send a terminal sentinel so the frontend knows the scan finished
@@ -1602,23 +1774,32 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 	return TrashResult{Moved: 1, Freed: freed}, nil
 }
 
-// RevealInFinder opens path in Finder. Directories open in place; files are
-// revealed (selected) in their parent folder. The call returns an error when
-// the path does not exist.
-func (Cleaner) RevealInFinder(path string) error {
+// revealArgs returns the arguments of open that show path in Finder. Plain
+// folders open in place; files and packages (apps, VMs, disk images,
+// libraries), which open would launch or mount, are revealed (selected) in
+// their parent folder.
+func revealArgs(path string) ([]string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fi, err := os.Stat(abs)
 	if err != nil {
-		return fmt.Errorf("路径不存在")
+		return nil, fmt.Errorf("路径不存在")
 	}
-	args := []string{}
-	if fi.IsDir() {
-		args = append(args, abs)
-	} else {
-		args = append(args, "-R", abs)
+	if fi.IsDir() && !isPackage(fi.Name()) && !fileExists(filepath.Join(abs, "Contents", "Info.plist")) {
+		return []string{abs}, nil
+	}
+	return []string{"-R", abs}, nil
+}
+
+// RevealInFinder shows path in Finder: plain folders open in place; files
+// and packages, which opening would launch or mount, are selected in their
+// parent folder. The call returns an error when the path does not exist.
+func (Cleaner) RevealInFinder(path string) error {
+	args, err := revealArgs(path)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -1691,37 +1872,105 @@ type SimilarPhotoEvent struct {
 	Result    *SimilarPhotosResult `json:"result,omitempty"`
 }
 
-// loadPhotoImage decodes an image into memory, transcoding HEIC via sips into
-// a temporary JPEG first. The returned cleanup removes any temp file and must
-// be run by the caller.
-func loadPhotoImage(path string) (image.Image, image.Config, func(), error) {
+// Photos are decoded at full size only up to maxDecodePixels. Past that, and
+// for HEIC, which Go cannot decode, sips first writes a copy at most
+// photoDecodeEdge pixels on its longest side, which is all hashing and
+// thumbnails need: a 12000x12000 PNG would otherwise take over half a GB.
+var maxDecodePixels = 24_000_000
+
+const photoDecodeEdge = 1024
+
+// loadPhotoImage decodes a photo for hashing and its thumbnail. cfg is the
+// photo's real size, while img may be a smaller copy (see maxDecodePixels).
+// The returned cleanup removes any temporary file and must be run by the
+// caller.
+func loadPhotoImage(ctx context.Context, path string) (image.Image, image.Config, func(), error) {
 	ext := strings.ToLower(filepath.Ext(path))
+	var cfg image.Config
 	if ext == ".heic" || ext == ".heif" {
-		tmp, err := os.CreateTemp("", "cleanzo-heic-*.jpg")
+		w, h, err := sipsSize(ctx, path)
 		if err != nil {
 			return nil, image.Config{}, nil, err
 		}
-		tmp.Close()
-		cleanup := func() { os.Remove(tmp.Name()) }
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, "/usr/bin/sips", "-s", "format", "jpeg", "--out", tmp.Name(), path).CombinedOutput()
+		cfg = image.Config{Width: w, Height: h}
+	} else {
+		c, err := decodeConfigFile(path)
 		if err != nil {
-			cleanup()
-			return nil, image.Config{}, nil, fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
-		}
-		img, cfg, close, err := decodeImageFile(tmp.Name())
-		if err != nil {
-			cleanup()
 			return nil, image.Config{}, nil, err
 		}
-		return img, cfg, func() { close(); cleanup() }, nil
+		if c.Width*c.Height <= maxDecodePixels {
+			return decodeImageFile(path)
+		}
+		cfg = c
 	}
-	img, cfg, close, err := decodeImageFile(path)
+	img, cleanup, err := decodeSmallCopy(ctx, path, max(cfg.Width, cfg.Height) > photoDecodeEdge)
 	if err != nil {
 		return nil, image.Config{}, nil, err
 	}
-	return img, cfg, close, nil
+	return img, cfg, cleanup, nil
+}
+
+// decodeSmallCopy has sips write path as a JPEG, shrunk to photoDecodeEdge
+// pixels on its longest side when shrink is set, and decodes that copy.
+func decodeSmallCopy(ctx context.Context, path string, shrink bool) (image.Image, func(), error) {
+	tmp, err := os.CreateTemp("", "cleanzo-photo-*.jpg")
+	if err != nil {
+		return nil, nil, err
+	}
+	tmp.Close()
+	cleanup := func() { os.Remove(tmp.Name()) }
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	args := []string{"-s", "format", "jpeg", path, "--out", tmp.Name()}
+	if shrink {
+		args = append([]string{"-Z", strconv.Itoa(photoDecodeEdge)}, args...)
+	}
+	if out, err := exec.CommandContext(ctx, "/usr/bin/sips", args...).CombinedOutput(); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	img, _, close, err := decodeImageFile(tmp.Name())
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return img, func() { close(); cleanup() }, nil
+}
+
+// sipsSize returns the pixel size of an image sips reads, such as HEIC.
+func sipsSize(ctx context.Context, path string) (w, h int, err error) {
+	out, err := exec.CommandContext(ctx, "/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", path).Output()
+	if err != nil {
+		return 0, 0, fmt.Errorf("sips: %v", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), ": ")
+		if !ok {
+			continue
+		}
+		n, _ := strconv.Atoi(val)
+		switch key {
+		case "pixelWidth":
+			w = n
+		case "pixelHeight":
+			h = n
+		}
+	}
+	if w <= 0 || h <= 0 {
+		return 0, 0, fmt.Errorf("sips: no pixel size for %s", path)
+	}
+	return w, h, nil
+}
+
+// decodeConfigFile reads the size and format of an image from its header.
+func decodeConfigFile(path string) (image.Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return image.Config{}, err
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	return cfg, err
 }
 
 // decodeImageFile opens a registered-format image (jpeg/png/gif) and decodes
@@ -1748,30 +1997,53 @@ func decodeImageFile(path string) (image.Image, image.Config, func(), error) {
 	return img, cfg, func() { f.Close() }, nil
 }
 
-// dHashImage computes a 64-bit difference hash by sampling the image on a 9x8
-// grid of luminance values and recording whether each sample is brighter than
-// the one to its right. Nearest-neighbor sampling avoids resampling deps.
-func dHashImage(img image.Image, cfg image.Config) uint64 {
-	const gw, gh = 9, 8
+// A difference of minLumStep in average luminance between neighbouring cells
+// is visible; a hash needs minSignificantBits such differences to describe a
+// picture at all.
+const (
+	minLumStep         = 0.02
+	minSignificantBits = 10
+)
+
+// dHashImage computes a 64-bit difference hash: it reduces the image to a 9x8
+// grid of average luminance, each cell averaging a 6x6 lattice of samples,
+// and sets a bit where a cell is visibly brighter than the one to its left.
+// ok is false when too few neighbours differ visibly, as in blank pages and
+// flat screenshots: such hashes say nothing about the picture, so only
+// byte-identical copies may group those images.
+func dHashImage(img image.Image) (hash uint64, ok bool) {
+	const gw, gh, sub = 9, 8, 6
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
 	var lum [gh][gw]float64
 	for y := 0; y < gh; y++ {
 		for x := 0; x < gw; x++ {
-			sx := x * (cfg.Width - 1) / (gw - 1)
-			sy := y * (cfg.Height - 1) / (gh - 1)
-			r, g, b, _ := img.At(sx, sy).RGBA()
-			lum[y][x] = (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 65535.0
+			var sum float64
+			for sy := 0; sy < sub; sy++ {
+				py := b.Min.Y + ((y*sub+sy)*h+h/2)/(gh*sub)
+				for sx := 0; sx < sub; sx++ {
+					px := b.Min.X + ((x*sub+sx)*w+w/2)/(gw*sub)
+					r, g, bl, _ := img.At(px, py).RGBA()
+					sum += (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(bl)) / 65535.0
+				}
+			}
+			lum[y][x] = sum / (sub * sub)
 		}
 	}
-	var hash uint64
+	significant := 0
 	for y := 0; y < gh; y++ {
 		for x := 0; x < gw-1; x++ {
 			hash <<= 1
-			if lum[y][x] < lum[y][x+1] {
+			d := lum[y][x+1] - lum[y][x]
+			if d >= minLumStep {
 				hash |= 1
+			}
+			if math.Abs(d) >= minLumStep {
+				significant++
 			}
 		}
 	}
-	return hash
+	return hash, significant >= minSignificantBits
 }
 
 // resizeMaxEdge returns a nearest-neighbor downscale of src whose longest edge
@@ -1831,8 +2103,26 @@ func fileSHA1(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// packageExts are folder extensions macOS shows as single files. The images
+// inside belong to the app that manages them, such as the originals and
+// previews of a Photos library, so the photo scan leaves them alone.
+var packageExts = map[string]bool{
+	".photoslibrary": true, ".photolibrary": true, ".aplibrary": true, ".migratedphotolibrary": true,
+	".app": true, ".bundle": true, ".framework": true, ".plugin": true,
+	".imovielibrary": true, ".fcpbundle": true, ".theater": true, ".tvlibrary": true, ".musiclibrary": true,
+	".logicx": true, ".band": true, ".pages": true, ".numbers": true, ".key": true, ".rtfd": true,
+	".sparsebundle": true, ".pvm": true, ".vmwarevm": true, ".xcarchive": true,
+}
+
+// isPackage reports whether a folder name is a package's, such as
+// "Photos Library.photoslibrary" or Photo Booth's library.
+func isPackage(name string) bool {
+	return packageExts[strings.ToLower(filepath.Ext(name))] || name == "Photo Booth Library"
+}
+
 // collectPhotoFiles walks the given roots recursively and collects known image
-// files, stopping once cap files are found.
+// files, stopping once cap files are found. Packages and hidden folders are
+// skipped.
 func collectPhotoFiles(roots []string, cap int) []string {
 	var out []string
 	stop := errors.New("stop")
@@ -1842,7 +2132,13 @@ func collectPhotoFiles(roots []string, cap int) []string {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d == nil || d.IsDir() {
+			if err != nil || d == nil {
+				return nil
+			}
+			if d.IsDir() {
+				if p != root && (strings.HasPrefix(d.Name(), ".") || isPackage(d.Name())) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if photoExts[strings.ToLower(filepath.Ext(p))] {
@@ -1868,11 +2164,12 @@ type clusterIdx struct {
 
 // decodeRow is one concurrently-processed photo.
 type decodeRow struct {
-	item PhotoItem
-	hash uint64
-	sha  string
-	size int64
-	mod  time.Time
+	item   PhotoItem
+	hash   uint64
+	hashOK bool // the hash describes the picture (see dHashImage)
+	sha    string
+	size   int64
+	mod    time.Time
 }
 
 // clusterPhotosComplete groups photos by perceptual hash using complete
@@ -1914,13 +2211,13 @@ func clusterPhotosComplete(idxs []int, hashes map[int]uint64) [][]int {
 // ScanSimilarPhotos streams progress and finishes with near-duplicate photo
 // clusters. Exact byte-identical copies are grouped first, then remaining photos
 // are grouped by perceptual hash. Each cluster marks its recommended keep copy.
-func (Cleaner) ScanSimilarPhotos(ch *mygo.Channel[SimilarPhotoEvent]) error {
+func (Cleaner) ScanSimilarPhotos(ctx context.Context, ch *mygo.Channel[SimilarPhotoEvent]) error {
 	h := homeDir()
 	roots := []string{
 		filepath.Join(h, "Pictures"),
 		filepath.Join(h, "Desktop"),
 	}
-	res := buildSimilarPhotos(roots, func(done, total int) {
+	res := buildSimilarPhotos(ctx, roots, func(done, total int) {
 		_ = ch.Send(SimilarPhotoEvent{Kind: "progress", Processed: done, Total: total})
 	})
 	return ch.Send(SimilarPhotoEvent{Kind: "done", Result: &res})
@@ -1929,7 +2226,7 @@ func (Cleaner) ScanSimilarPhotos(ch *mygo.Channel[SimilarPhotoEvent]) error {
 // buildSimilarPhotos is the testable core of ScanSimilarPhotos: it discovers,
 // decodes, hashes, thumbnails and clusters photos under roots, calling
 // onProgress after each file.
-func buildSimilarPhotos(roots []string, onProgress func(done, total int)) SimilarPhotosResult {
+func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(done, total int)) SimilarPhotosResult {
 	start := time.Now()
 	files := collectPhotoFiles(roots, similarPhotoCap)
 	total := len(files)
@@ -1942,6 +2239,9 @@ func buildSimilarPhotos(roots []string, onProgress func(done, total int)) Simila
 		sem       = make(chan struct{}, scanConcurrency)
 	)
 	for _, p := range files {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(p string) {
@@ -1957,7 +2257,7 @@ func buildSimilarPhotos(roots []string, onProgress func(done, total int)) Simila
 			if err != nil {
 				return
 			}
-			img, cfg, cleanup, err := loadPhotoImage(p)
+			img, cfg, cleanup, err := loadPhotoImage(ctx, p)
 			if err != nil {
 				return
 			}
@@ -1965,13 +2265,13 @@ func buildSimilarPhotos(roots []string, onProgress func(done, total int)) Simila
 			if cfg.Width < minPhotoDim || cfg.Height < minPhotoDim {
 				return // tiny placeholder / 1x1
 			}
-			hash := dHashImage(img, cfg)
+			hash, hashOK := dHashImage(img)
 			thumb := thumbDataURL(img)
 			sha, _ := fileSHA1(p)
 			mu.Lock()
 			rows = append(rows, decodeRow{
 				item: PhotoItem{Path: p, Size: fi.Size(), Width: cfg.Width, Height: cfg.Height, Thumb: thumb},
-				hash: hash, sha: sha, size: fi.Size(), mod: fi.ModTime(),
+				hash: hash, hashOK: hashOK, sha: sha, size: fi.Size(), mod: fi.ModTime(),
 			})
 			mu.Unlock()
 		}(p)
@@ -2000,11 +2300,12 @@ func buildSimilarPhotos(roots []string, onProgress func(done, total int)) Simila
 		builders = append(builders, clusterIdx{kind: "exact", idxs: idxs})
 	}
 
-	// 2) Perceptual clusters among the remaining files.
+	// 2) Perceptual clusters among the remaining files whose hashes say
+	// something about the picture.
 	hashMap := map[int]uint64{}
 	var rest []int
 	for i := range rows {
-		if used[i] {
+		if used[i] || !rows[i].hashOK {
 			continue
 		}
 		hashMap[i] = rows[i].hash
