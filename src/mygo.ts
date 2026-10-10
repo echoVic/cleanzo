@@ -10,6 +10,8 @@ export interface AppCacheItem {
   path: string;
   size: number;
   files: number;
+  /** a running app uses it, so it is not cleanable */
+  inUse: boolean;
 }
 
 /** AppInfo describes an installed application. */
@@ -38,7 +40,22 @@ export interface Category {
   risk: string;
   size: number;
   files: number;
+  /** Missing lists the paths that do not exist. */
   missing: string[];
+  /**
+   * Denied lists the paths macOS does not let the app read, such as the
+   * Trash without Full Disk Access.
+   */
+  denied: string[];
+  /** Blocked lists the paths the safety rules keep the app away from. */
+  blocked: string[];
+  /** InUse counts the entries left alone because they are in use. */
+  inUse: number;
+  /**
+   * Permanent reports that cleaning deletes the entries instead of moving
+   * them to the Trash.
+   */
+  permanent: boolean;
   top: TopItem[];
 }
 
@@ -57,18 +74,28 @@ export interface CleanError {
   error: string;
 }
 
-/** CleanResult reports how much a clean pass freed. */
+/** CleanResult reports what a clean pass did. */
 export interface CleanResult {
   name: string;
+  /** bytes deleted */
   freed: number;
+  /** bytes moved to the Trash */
+  trashed: number;
   files: number;
+  /** entries left alone because they are in use */
+  inUse: number;
   failed: string[];
 }
 
 /** CleanSummary aggregates the results of a clean pass. */
 export interface CleanSummary {
   results: CleanResult[];
+  /** bytes deleted */
   totalFreed: number;
+  /** bytes moved to the Trash */
+  totalTrashed: number;
+  /** entries left alone because they are in use */
+  inUse: number;
   errors: CleanError[];
 }
 
@@ -150,6 +177,8 @@ export interface PathsCleanResult {
   moved: number;
   freed: number;
   files: number;
+  /** paths left alone because they are in use */
+  inUse: number;
   failed: string[];
 }
 
@@ -245,14 +274,17 @@ export const Cleaner = {
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
-  /** Clean deletes the contents of the named categories (all if names is empty). */
+  /**
+   * Clean cleans the named categories (all if names is empty). The Trash is
+   * emptied first, so what the other categories move there stays recoverable.
+   */
   clean(names: string[]): Promise<CleanSummary> {
     return call("Cleaner.Clean", names);
   },
   /**
-   * CleanPaths moves the given individual paths (e.g. one app's cache folder,
-   * or selected photos) into the Trash, honoring the safeToClean gate. It is
-   * the fine-grained counterpart to Clean (which works on whole categories).
+   * CleanPaths moves the given individual paths (e.g. selected photos) to the
+   * Trash, honoring the safeToClean gate and leaving alone what is in use. It
+   * is the fine-grained counterpart to Clean (which works on whole categories).
    */
   cleanPaths(paths: string[]): Promise<PathsCleanResult> {
     return call("Cleaner.CleanPaths", paths);
@@ -289,6 +321,14 @@ export const Cleaner = {
     return call("Cleaner.ListApps");
   },
   /**
+   * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
+   * System Settings, where the user can let Cleanzo read protected folders
+   * such as the Trash.
+   */
+  openFullDiskAccessSettings(): Promise<void> {
+    return call("Cleaner.OpenFullDiskAccessSettings");
+  },
+  /**
    * RevealInFinder opens path in Finder. Directories open in place; files are
    * revealed (selected) in their parent folder. The call returns an error when
    * the path does not exist.
@@ -300,7 +340,7 @@ export const Cleaner = {
   saveCategories(cfg: CategoryConfig[]): Promise<void> {
     return call("Cleaner.SaveCategories", cfg);
   },
-  /** Scan returns every category with its current footprint. */
+  /** Scan returns every category with what cleaning it would remove now. */
   scan(): Promise<Category[]> {
     return call("Cleaner.Scan");
   },

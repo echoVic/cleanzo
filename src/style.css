@@ -447,7 +447,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   accent-color: var(--accent);
   cursor: pointer;
 }
-.cat-row.empty .cat-check input { cursor: default; }
+.cat-row.is-empty .cat-check input { cursor: default; }
 .cat-info { min-width: 0; }
 .tile {
   width: 38px;
@@ -469,6 +469,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   flex-wrap: wrap;
 }
 .cat-desc { font-size: 12px; margin-top: 1px; }
+.cat-sub {
+  font-size: 11.5px;
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .cat-note {
   text-align: right;
@@ -480,6 +487,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .cat-note .caution { color: var(--warn); font-weight: 640; }
 .cat-note-text { font-variant-numeric: tabular-nums; }
+.cat-note .cat-grant { margin-left: 8px; }
 
 .tag {
   font-size: 11px;
@@ -892,6 +900,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .modal h2 { margin: 0 0 10px; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 .modal p { color: var(--muted); line-height: 1.6; font-size: 13px; margin: 0; }
+.modal p + p { margin-top: 6px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 .detail-list {

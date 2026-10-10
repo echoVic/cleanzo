@@ -9,19 +9,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"image"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"io"
+	"io/fs"
 	"log"
 	"math"
 	"math/bits"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,14 +37,26 @@ import (
 
 // Category describes one kind of junk the app can scan and clean.
 type Category struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Risk        string    `json:"risk"` // "safe" or "moderate"
-	Size        int64     `json:"size"`
-	Files       int64     `json:"files"`
-	Missing     []string  `json:"missing"`
-	Top         []TopItem `json:"top"`
-	paths       []string
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Risk        string `json:"risk"` // "safe" or "moderate"
+	Size        int64  `json:"size"`
+	Files       int64  `json:"files"`
+	// Missing lists the paths that do not exist.
+	Missing []string `json:"missing"`
+	// Denied lists the paths macOS does not let the app read, such as the
+	// Trash without Full Disk Access.
+	Denied []string `json:"denied"`
+	// Blocked lists the paths the safety rules keep the app away from.
+	Blocked []string `json:"blocked"`
+	// InUse counts the entries left alone because they are in use.
+	InUse int64 `json:"inUse"`
+	// Permanent reports that cleaning deletes the entries instead of moving
+	// them to the Trash.
+	Permanent bool      `json:"permanent"`
+	Top       []TopItem `json:"top"`
+	paths     []string
+	exclude   []string // canonical paths of the categories nested in this one
 }
 
 // TopItem is one of the largest direct children inside a category.
@@ -61,12 +75,14 @@ type CategoryConfig struct {
 	Enabled     bool     `json:"enabled"`
 }
 
-// CleanResult reports how much a clean pass freed.
+// CleanResult reports what a clean pass did.
 type CleanResult struct {
-	Name   string   `json:"name"`
-	Freed  int64    `json:"freed"`
-	Files  int64    `json:"files"`
-	Failed []string `json:"failed"`
+	Name    string   `json:"name"`
+	Freed   int64    `json:"freed"`   // bytes deleted
+	Trashed int64    `json:"trashed"` // bytes moved to the Trash
+	Files   int64    `json:"files"`
+	InUse   int64    `json:"inUse"` // entries left alone because they are in use
+	Failed  []string `json:"failed"`
 }
 
 // CleanError reports a category whose clean pass had failures.
@@ -77,9 +93,11 @@ type CleanError struct {
 
 // CleanSummary aggregates the results of a clean pass.
 type CleanSummary struct {
-	Results    []CleanResult `json:"results"`
-	TotalFreed int64         `json:"totalFreed"`
-	Errors     []CleanError  `json:"errors"`
+	Results      []CleanResult `json:"results"`
+	TotalFreed   int64         `json:"totalFreed"`   // bytes deleted
+	TotalTrashed int64         `json:"totalTrashed"` // bytes moved to the Trash
+	InUse        int64         `json:"inUse"`        // entries left alone because they are in use
+	Errors       []CleanError  `json:"errors"`
 }
 
 // AppInfo describes an installed application.
@@ -181,9 +199,9 @@ func defaultCategoryConfigs() []CategoryConfig {
 	return []CategoryConfig{
 		{Name: "caches", Description: "应用与浏览器缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches")}},
 		{Name: "logs", Description: "系统与应用日志", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Logs")}},
-		{Name: "temp", Description: "用户临时文件", Risk: "safe", Enabled: true, Paths: []string{os.TempDir()}},
-		{Name: "trash", Description: "废纸篓", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, ".Trash")}},
-		{Name: "npm", Description: "npm / pnpm 缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, ".npm", "_cacache"), filepath.Join(h, "Library", "Caches", "pnpm")}},
+		{Name: "temp", Description: "7 天未改动的临时文件", Risk: "moderate", Enabled: true, Paths: []string{os.TempDir()}},
+		{Name: "trash", Description: "废纸篓（清空后不可恢复）", Risk: "moderate", Enabled: true, Paths: []string{filepath.Join(h, ".Trash")}},
+		{Name: "npm", Description: "npm / pnpm 下载缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, ".npm", "_cacache"), filepath.Join(h, "Library", "Caches", "pnpm")}},
 		{Name: "go", Description: "Go 构建缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "go-build")}},
 		{Name: "pip", Description: "pip 缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "pip")}},
 		{Name: "homebrew", Description: "Homebrew 下载缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "Homebrew")}},
@@ -191,240 +209,553 @@ func defaultCategoryConfigs() []CategoryConfig {
 	}
 }
 
+// configVersion is the version of config.json. Version 1 was a bare array of
+// categories.
+const configVersion = 2
+
+type configFile struct {
+	Version    int              `json:"version"`
+	Categories []CategoryConfig `json:"categories"`
+}
+
 func saveCategoryConfigs(cfg []CategoryConfig) error {
 	dir := filepath.Dir(configPath())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := json.MarshalIndent(configFile{Version: configVersion, Categories: cfg}, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(configPath(), b, 0o644)
 }
 
-// loadCategories returns the effective categories: the persisted config when
-// present, otherwise the defaults (which are then persisted on first run).
-func loadCategories() []Category {
-	cfg := defaultCategoryConfigs()
-	if b, err := os.ReadFile(configPath()); err == nil {
-		var saved []CategoryConfig
-		if json.Unmarshal(b, &saved) == nil && len(saved) > 0 {
-			cfg = saved
+// savedCategoryConfigs returns the saved categories, migrated to the current
+// version, or nil when nothing usable is saved.
+func savedCategoryConfigs() []CategoryConfig {
+	b, err := os.ReadFile(configPath())
+	if err != nil {
+		return nil
+	}
+	var f configFile
+	if json.Unmarshal(b, &f) == nil && f.Version >= configVersion {
+		return f.Categories
+	}
+	var v1 []CategoryConfig
+	if json.Unmarshal(b, &v1) != nil || len(v1) == 0 {
+		return nil
+	}
+	cfg := migrateV1(v1)
+	_ = saveCategoryConfigs(cfg)
+	return cfg
+}
+
+// migrateV1 updates the built-in categories that are still as version 1
+// shipped them: the temporary folder and the Trash are no longer picked by
+// default.
+func migrateV1(cfg []CategoryConfig) []CategoryConfig {
+	for i, c := range cfg {
+		for _, d := range defaultCategoryConfigs() {
+			if (d.Name == "temp" || d.Name == "trash") && c.Name == d.Name && samePaths(c.Paths, d.Paths) && c.Risk == "safe" {
+				cfg[i].Risk = d.Risk
+			}
 		}
-	} else {
-		_ = saveCategoryConfigs(cfg)
+	}
+	return cfg
+}
+
+// loadCategories returns the effective categories: the saved config when
+// present, otherwise the defaults (which are then saved on first run).
+func loadCategories() []Category {
+	cfg := savedCategoryConfigs()
+	if len(cfg) == 0 {
+		cfg = defaultCategoryConfigs()
+		if _, err := os.Stat(configPath()); errors.Is(err, fs.ErrNotExist) {
+			_ = saveCategoryConfigs(cfg)
+		}
 	}
 	cats := make([]Category, 0, len(cfg))
 	for _, c := range cfg {
 		if !c.Enabled {
 			continue
 		}
-		cats = append(cats, Category{Name: c.Name, Description: c.Description, Risk: c.Risk, paths: c.Paths})
+		cats = append(cats, Category{Name: c.Name, Description: c.Description, Risk: c.Risk, Permanent: builtinPermanent(c), paths: c.Paths})
+	}
+	return excludeNested(cats)
+}
+
+// builtinPermanent reports whether c is a built-in category at its built-in
+// paths. Their contents regenerate, so cleaning deletes them; whatever a
+// user points a category at goes to the Trash instead.
+func builtinPermanent(c CategoryConfig) bool {
+	for _, d := range defaultCategoryConfigs() {
+		if c.Name == d.Name && samePaths(c.Paths, d.Paths) {
+			return true
+		}
+	}
+	return false
+}
+
+// samePaths reports whether a and b list the same folders in order.
+func samePaths(a, b []string) bool {
+	return slices.EqualFunc(a, b, func(x, y string) bool { return filepath.Clean(x) == filepath.Clean(y) })
+}
+
+// excludeNested gives each category the paths of the categories nested in
+// it, such as go-build inside ~/Library/Caches, so every file belongs to one
+// category: it is counted once, and cleaned only with its own.
+func excludeNested(cats []Category) []Category {
+	for i := range cats {
+		cats[i].exclude = nil
+		for j := range cats {
+			if i == j {
+				continue
+			}
+			for _, inner := range cats[j].paths {
+				in := canonical(inner)
+				for _, outer := range cats[i].paths {
+					if out := canonical(outer); in != out && within(in, out) {
+						cats[i].exclude = append(cats[i].exclude, in)
+					}
+				}
+			}
+		}
 	}
 	return cats
 }
 
+// canonical returns p absolute, resolved and lower-cased, the form paths are
+// compared in.
+func canonical(p string) string {
+	abs, _ := filepath.Abs(p)
+	return strings.ToLower(resolvePath(abs))
+}
+
 // scanPath sums the size and count of regular files under p.
 func scanPath(p string) (size, files int64) {
+	size, files, _ = measure(p)
+	return size, files
+}
+
+// measure sums the size and count of regular files under p, and finds when
+// anything there last changed.
+func measure(p string) (size, files int64, newest time.Time) {
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d == nil || !d.Type().IsRegular() {
+		if err != nil || d == nil {
 			return nil
 		}
-		if info, ierr := d.Info(); ierr == nil {
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if t := info.ModTime(); t.After(newest) {
+			newest = t
+		}
+		if d.Type().IsRegular() {
 			size += info.Size()
 			files++
 		}
 		return nil
 	})
-	return size, files
+	return size, files, newest
 }
 
-// safeToClean guards against cleaning critical system paths.
+// Inside the home folder, cleaning never reaches these folders themselves
+// (their contents are the user's data), nor anything in the subtrees below.
+var (
+	protectedHomeDirs = []string{
+		"/library", "/library/application support", "/library/containers",
+		"/library/group containers", "/library/preferences",
+		"/desktop", "/documents", "/downloads", "/movies", "/music", "/pictures",
+	}
+	protectedHomeTrees = []string{
+		"/library/keychains", "/library/mobile documents", "/library/mail",
+		"/library/messages", "/.ssh", "/.gnupg",
+	}
+)
+
+// safeToClean guards against cleaning system paths and irreplaceable user
+// data. It judges a path by where it really is: links are resolved, and
+// paths are compared in lower case because macOS volumes are
+// case-insensitive. Only the home folder and the user's temporary folder
+// can be cleaned.
 func safeToClean(p string) bool {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return false
 	}
-	h := homeDir()
-	// Never allow cleaning the home dir or the user's Library itself.
-	if abs == h || abs == filepath.Join(h, "Library") {
-		return false
-	}
-	// Paths inside the user's home (other than ~/Library itself) are fine.
-	if strings.HasPrefix(abs, h+string(filepath.Separator)) {
+	path := strings.ToLower(resolvePath(abs))
+	home := strings.ToLower(resolvePath(homeDir()))
+	if within(path, home) {
+		rel := strings.TrimPrefix(path, home)
+		if rel == "" || slices.Contains(protectedHomeDirs, rel) {
+			return false
+		}
+		for _, tree := range protectedHomeTrees {
+			if within(rel, tree) {
+				return false
+			}
+		}
+		// Photos and iPhoto libraries are packages the apps manage themselves.
+		for _, part := range strings.Split(rel, "/") {
+			if strings.HasSuffix(part, ".photoslibrary") || strings.HasSuffix(part, ".photolibrary") {
+				return false
+			}
+		}
 		return true
 	}
-	// Outside home: block critical system roots, exact or by prefix,
-	// and other users' homes.
-	for _, r := range []string{"/", "/System", "/Library", "/Applications", "/Volumes", "/private", "/Users"} {
-		if abs == r {
+	return within(path, strings.ToLower(resolvePath(os.TempDir())))
+}
+
+// within reports whether path is dir or inside it.
+func within(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
+}
+
+// resolvePath resolves the links of the longest existing prefix of p, an
+// absolute path, and appends the rest.
+func resolvePath(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
+}
+
+// usageGuard tells whether something on disk is in use: it holds a file a
+// process has open, or it is named after an app that is running, such as
+// ~/Library/Caches/com.google.Chrome. Deleting files under a running app
+// can break it, so cleaning leaves those alone. When a probe fails the
+// guard reports everything as in use, so nothing is cleaned blind.
+type usageGuard struct {
+	open    []string        // lower-cased paths of open files, sorted
+	running map[string]bool // lower-cased bundle IDs of running apps
+	failed  bool
+}
+
+// probeUsage takes a snapshot of the open files and the running apps.
+func probeUsage() *usageGuard {
+	open, err := openFiles()
+	if err != nil {
+		return &usageGuard{failed: true}
+	}
+	running, err := runningBundleIDs()
+	if err != nil {
+		return &usageGuard{failed: true}
+	}
+	return &usageGuard{open: open, running: running}
+}
+
+// inUse reports whether path, as resolved by resolvePath, is in use.
+func (g *usageGuard) inUse(path string) bool {
+	if g.failed {
+		return true
+	}
+	p := strings.ToLower(path)
+	if i := sort.SearchStrings(g.open, p); i < len(g.open) && g.open[i] == p {
+		return true
+	}
+	if i := sort.SearchStrings(g.open, p+"/"); i < len(g.open) && strings.HasPrefix(g.open[i], p+"/") {
+		return true
+	}
+	return ownedByRunningApp(filepath.Base(p), g.running)
+}
+
+// ownedByRunningApp reports whether name is a running app's bundle ID, or
+// starts with one, as helpers do (com.microsoft.VSCode.ShipIt).
+func ownedByRunningApp(name string, running map[string]bool) bool {
+	name = strings.ToLower(name)
+	for {
+		if running[name] {
+			return true
+		}
+		i := strings.LastIndexByte(name, '.')
+		if i <= 0 {
 			return false
 		}
+		name = name[:i]
 	}
-	for _, r := range []string{"/System/", "/Library/", "/Applications/", "/Volumes/", "/private/", "/Users/"} {
-		if strings.HasPrefix(abs, r) {
-			return false
+}
+
+// openFiles lists the files the user's processes have open, lower-cased and
+// sorted, from lsof.
+func openFiles() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-w", "-Fn").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseLsofNames(out), nil
+}
+
+// parseLsofNames extracts the file paths from lsof -Fn output, whose name
+// lines start with "n"; sockets and pipes have names that are not paths.
+func parseLsofNames(out []byte) []string {
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "n/") {
+			paths = append(paths, strings.ToLower(line[1:]))
 		}
 	}
-	return true
+	sort.Strings(paths)
+	return paths
+}
+
+// runningBundleIDs returns the lower-cased bundle IDs of the running apps.
+func runningBundleIDs() (map[string]bool, error) {
+	out, err := exec.Command("/usr/bin/lsappinfo", "list").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseBundleIDs(out), nil
+}
+
+var bundleIDRe = regexp.MustCompile(`bundleID="([^"]+)"`)
+
+// parseBundleIDs extracts the bundle IDs from lsappinfo list output.
+func parseBundleIDs(out []byte) map[string]bool {
+	ids := map[string]bool{}
+	for _, m := range bundleIDRe.FindAllSubmatch(out, -1) {
+		ids[strings.ToLower(string(m[1]))] = true
+	}
+	return ids
 }
 
 // scanConcurrency bounds how many directory walks run at once during a scan.
 // WalkDir is I/O bound; keeping a small fixed pool avoids thrashing the disk.
 const scanConcurrency = 8
 
-// topItems returns the largest direct children of a category's paths. The
-// per-child sizing runs concurrently (bounded by scanConcurrency); the
-// result is still sorted by size descending and capped at 5, so the reported
-// "top" is identical to the sequential version.
-func topItems(cat Category) []TopItem {
-	var (
-		mu  sync.Mutex
-		tops []TopItem
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, scanConcurrency)
-	)
-	for _, p := range cat.paths {
-		entries, err := os.ReadDir(p)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			child := filepath.Join(p, e.Name())
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(name, child string) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				size, _ := scanPath(child)
-				mu.Lock()
-				tops = append(tops, TopItem{Name: name, Path: child, Size: size})
-				mu.Unlock()
-			}(e.Name(), child)
-		}
-	}
-	wg.Wait()
-	sort.Slice(tops, func(i, j int) bool { return tops[i].Size > tops[j].Size })
-	if len(tops) > 5 {
-		tops = tops[:5]
-	}
-	return tops
+// tempMinAge is how long an entry of the temporary folder must sit untouched
+// before cleaning takes it: apps keep files there while they run.
+const tempMinAge = 7 * 24 * time.Hour
+
+// cleanEntry is one item cleaning a category removes.
+type cleanEntry struct {
+	path        string
+	size, files int64
 }
 
-// scanCategories fills in Size/Files/Missing/Top for every category. Each
-// (category, path) walk runs concurrently under a bounded semaphore; results
-// are accumulated behind a mutex. The per-category totals and the top list are
-// numerically identical to the sequential scan, just much faster.
-func scanCategories(cats []Category) []Category {
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, scanConcurrency)
-	)
-	for i := range cats {
-		for _, p := range cats[i].paths {
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(i int, p string) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				if _, err := os.Lstat(p); err != nil {
-					mu.Lock()
-					cats[i].Missing = append(cats[i].Missing, p)
-					mu.Unlock()
-					return
-				}
-				size, files := scanPath(p)
-				mu.Lock()
-				cats[i].Size += size
-				cats[i].Files += files
-				mu.Unlock()
-			}(i, p)
+// categoryPlan is what cleaning a category would do now.
+type categoryPlan struct {
+	entries                  []cleanEntry // largest first
+	inUse                    int64
+	missing, denied, blocked []string
+}
+
+// planCategory lists what cleaning cat would remove: the direct children of
+// its paths, except the folders of nested categories (it descends into
+// their parents instead), entries in use, sockets and other special files,
+// and in the temporary folder, entries touched within tempMinAge. Sizing
+// walks share sem.
+func planCategory(cat Category, g *usageGuard, sem chan struct{}) categoryPlan {
+	var plan categoryPlan
+	type candidate struct {
+		path   string
+		minAge time.Duration
+	}
+	var cands []candidate
+	var collect func(dir string, minAge time.Duration)
+	collect = func(dir string, minAge time.Duration) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				plan.denied = append(plan.denied, dir)
+			}
+			return
+		}
+		for _, e := range entries {
+			child := filepath.Join(dir, e.Name())
+			key := strings.ToLower(child)
+			switch {
+			case slices.Contains(cat.exclude, key):
+				// another category's folder
+			case slices.ContainsFunc(cat.exclude, func(x string) bool { return within(x, key) }):
+				collect(child, minAge)
+			case e.Type()&(fs.ModeSocket|fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeIrregular) != 0:
+				// live endpoints, not junk
+			case g.inUse(child):
+				plan.inUse++
+			default:
+				cands = append(cands, candidate{child, minAge})
+			}
 		}
 	}
-	wg.Wait()
-	for i := range cats {
-		cats[i].Top = topItems(cats[i])
+	tmp := canonical(os.TempDir())
+	for _, p := range cat.paths {
+		if !safeToClean(p) {
+			plan.blocked = append(plan.blocked, p)
+			continue
+		}
+		if _, err := os.Lstat(p); err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				plan.denied = append(plan.denied, p)
+			} else {
+				plan.missing = append(plan.missing, p)
+			}
+			continue
+		}
+		var minAge time.Duration
+		if canonical(p) == tmp {
+			minAge = tempMinAge
+		}
+		abs, _ := filepath.Abs(p)
+		collect(resolvePath(abs), minAge)
 	}
+
+	measured := make([]cleanEntry, len(cands))
+	newest := make([]time.Time, len(cands))
+	var wg sync.WaitGroup
+	for i, c := range cands {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			size, files, t := measure(c.path)
+			measured[i], newest[i] = cleanEntry{c.path, size, files}, t
+		}()
+	}
+	wg.Wait()
+	now := time.Now()
+	for i, e := range measured {
+		if age := cands[i].minAge; age > 0 && now.Sub(newest[i]) < age {
+			continue
+		}
+		plan.entries = append(plan.entries, e)
+	}
+	sort.Slice(plan.entries, func(i, j int) bool { return plan.entries[i].size > plan.entries[j].size })
+	return plan
+}
+
+// scanCategories fills in what cleaning each category would remove now.
+// Categories are planned concurrently; their walks share one bounded pool.
+func scanCategories(cats []Category, g *usageGuard) []Category {
+	sem := make(chan struct{}, scanConcurrency)
+	var wg sync.WaitGroup
+	for i := range cats {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			plan := planCategory(cats[i], g, sem)
+			c := &cats[i]
+			c.Size, c.Files, c.Top = 0, 0, nil
+			for _, e := range plan.entries {
+				c.Size += e.size
+				c.Files += e.files
+			}
+			for _, e := range plan.entries[:min(5, len(plan.entries))] {
+				c.Top = append(c.Top, TopItem{Name: filepath.Base(e.path), Path: e.path, Size: e.size})
+			}
+			c.InUse, c.Missing, c.Denied, c.Blocked = plan.inUse, plan.missing, plan.denied, plan.blocked
+		}()
+	}
+	wg.Wait()
 	return cats
 }
 
-// Scan returns every category with its current footprint.
+// Scan returns every category with what cleaning it would remove now.
 func (Cleaner) Scan() []Category {
-	return scanCategories(loadCategories())
+	return scanCategories(loadCategories(), probeUsage())
 }
 
-// userTrashDir is the macOS Trash directory for the current user. Files moved
-// here are recoverable until the user empties the Trash.
+// userTrashDir is the macOS Trash directory for the current user.
 func userTrashDir() string {
 	return filepath.Join(homeDir(), ".Trash")
 }
 
-// cleanCategory moves the contents of a category's paths into the Trash so they
-// stay recoverable (they are NOT permanently deleted). The Trash directory
-// itself (the built-in "trash" category) is emptied permanently, because its
-// contents are already in the Trash and emptying it is what actually frees
-// space. The safeToClean gate and the per-category failure bookkeeping are
-// unchanged.
-func cleanCategory(cat Category) CleanResult {
+// trashItem moves a file or folder to the Trash the way Finder does: macOS
+// picks the Trash of its volume and a free name there. Tests replace it.
+var trashItem = mygo.Shell.TrashItem
+
+// cleanCategory removes what planCategory lists. Built-in junk and the
+// Trash's own contents are deleted; everything else moves to the Trash, so
+// it stays recoverable.
+func cleanCategory(cat Category, g *usageGuard) CleanResult {
 	res := CleanResult{Name: cat.Name}
-	trash := userTrashDir()
-	_ = os.MkdirAll(trash, 0o755)
-	for _, p := range cat.paths {
-		if !safeToClean(p) {
-			res.Failed = append(res.Failed, p+": blocked")
-			continue
+	plan := planCategory(cat, g, make(chan struct{}, scanConcurrency))
+	res.InUse = plan.inUse
+	for _, p := range plan.blocked {
+		res.Failed = append(res.Failed, p+": blocked")
+	}
+	for _, p := range plan.denied {
+		res.Failed = append(res.Failed, p+": "+fs.ErrPermission.Error())
+	}
+	trash := canonical(userTrashDir())
+	for _, e := range plan.entries {
+		permanent := cat.Permanent || within(strings.ToLower(e.path), trash)
+		var err error
+		if permanent {
+			err = os.RemoveAll(e.path)
+		} else {
+			err = trashItem(e.path)
 		}
-		if _, err := os.Lstat(p); err != nil {
-			continue // already missing
-		}
-		entries, err := os.ReadDir(p)
 		if err != nil {
-			res.Failed = append(res.Failed, p+": "+err.Error())
+			res.Failed = append(res.Failed, e.path+": "+err.Error())
 			continue
 		}
-		// Cleaning the Trash itself means emptying it: free the space now.
-		emptyTrash := p == trash
-		for _, e := range entries {
-			child := filepath.Join(p, e.Name())
-			size, files := scanPath(child)
-			var moveErr error
-			if emptyTrash {
-				moveErr = os.RemoveAll(child)
-			} else {
-				_, moveErr = moveToTrash(child, trash)
-			}
-			if moveErr != nil {
-				res.Failed = append(res.Failed, child+": "+moveErr.Error())
-				continue
-			}
-			res.Freed += size
-			res.Files += files
+		if permanent {
+			res.Freed += e.size
+		} else {
+			res.Trashed += e.size
 		}
+		res.Files += e.files
 	}
 	return res
 }
 
-// Clean deletes the contents of the named categories (all if names is empty).
+// Clean cleans the named categories (all if names is empty). The Trash is
+// emptied first, so what the other categories move there stays recoverable.
 func (Cleaner) Clean(names []string) CleanSummary {
 	selected := make(map[string]bool, len(names))
 	for _, n := range names {
 		selected[n] = true
 	}
+	g := probeUsage()
+	cats := loadCategories()
+	trash := canonical(userTrashDir())
+	holdsTrash := func(c Category) bool {
+		return slices.ContainsFunc(c.paths, func(p string) bool { return canonical(p) == trash })
+	}
+	slices.SortStableFunc(cats, func(a, b Category) int {
+		switch ta, tb := holdsTrash(a), holdsTrash(b); {
+		case ta && !tb:
+			return -1
+		case tb && !ta:
+			return 1
+		}
+		return 0
+	})
 	summary := CleanSummary{}
-	for _, cat := range loadCategories() {
+	for _, cat := range cats {
 		if len(names) > 0 && !selected[cat.Name] {
 			continue
 		}
-		res := cleanCategory(cat)
+		res := cleanCategory(cat, g)
 		summary.Results = append(summary.Results, res)
 		summary.TotalFreed += res.Freed
+		summary.TotalTrashed += res.Trashed
+		summary.InUse += res.InUse
 		if len(res.Failed) > 0 {
 			summary.Errors = append(summary.Errors, CleanError{Name: cat.Name, Error: strings.Join(res.Failed, "; ")})
 		}
 	}
 	return summary
+}
+
+// OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
+// System Settings, where the user can let Cleanzo read protected folders
+// such as the Trash.
+func (Cleaner) OpenFullDiskAccessSettings() error {
+	return exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Run()
 }
 
 // Info returns basic system information.
@@ -442,6 +773,7 @@ type AppCacheItem struct {
 	Path  string `json:"path"`
 	Size  int64  `json:"size"`
 	Files int64  `json:"files"`
+	InUse bool   `json:"inUse"` // a running app uses it, so it is not cleanable
 }
 
 // PathsCleanResult reports what CleanPaths moved to the Trash.
@@ -449,6 +781,7 @@ type PathsCleanResult struct {
 	Moved  int64    `json:"moved"`
 	Freed  int64    `json:"freed"`
 	Files  int64    `json:"files"`
+	InUse  int64    `json:"inUse"` // paths left alone because they are in use
 	Failed []string `json:"failed"`
 }
 
@@ -462,6 +795,7 @@ func (Cleaner) ScanAppCaches() []AppCacheItem {
 	if err != nil {
 		return nil
 	}
+	g := probeUsage()
 	var (
 		mu    sync.Mutex
 		items []AppCacheItem
@@ -481,7 +815,7 @@ func (Cleaner) ScanAppCaches() []AppCacheItem {
 			defer func() { <-sem }()
 			size, files := scanPath(child)
 			mu.Lock()
-			items = append(items, AppCacheItem{Name: name, Path: child, Size: size, Files: files})
+			items = append(items, AppCacheItem{Name: name, Path: child, Size: size, Files: files, InUse: g.inUse(resolvePath(child))})
 			mu.Unlock()
 		}()
 	}
@@ -490,12 +824,11 @@ func (Cleaner) ScanAppCaches() []AppCacheItem {
 	return items
 }
 
-// CleanPaths moves the given individual paths (e.g. one app's cache folder,
-// or selected photos) into the Trash, honoring the safeToClean gate. It is
-// the fine-grained counterpart to Clean (which works on whole categories).
+// CleanPaths moves the given individual paths (e.g. selected photos) to the
+// Trash, honoring the safeToClean gate and leaving alone what is in use. It
+// is the fine-grained counterpart to Clean (which works on whole categories).
 func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
-	trash := userTrashDir()
-	_ = os.MkdirAll(trash, 0o755)
+	g := probeUsage()
 	res := PathsCleanResult{}
 	for _, p := range paths {
 		abs, err := filepath.Abs(p)
@@ -510,8 +843,12 @@ func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 		if _, err := os.Lstat(abs); err != nil {
 			continue // already gone
 		}
+		if g.inUse(resolvePath(abs)) {
+			res.InUse++
+			continue
+		}
 		size, files := scanPath(abs)
-		if _, err := moveToTrash(abs, trash); err != nil {
+		if err := trashItem(abs); err != nil {
 			res.Failed = append(res.Failed, abs+": "+err.Error())
 			continue
 		}
@@ -707,37 +1044,13 @@ func (Cleaner) AppUninstallDetail(path string) UninstallDetail {
 	return UninstallDetail{App: app, Items: items, TotalSize: total}
 }
 
-// moveToTrash moves src into trashDir, picking a unique name if needed.
-func moveToTrash(src, trashDir string) (int64, error) {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return 0, err
-	}
-	_ = info
-	size, _ := scanPath(src)
-	base := filepath.Base(src)
-	dst := filepath.Join(trashDir, base)
-	for i := 2; ; i++ {
-		if _, err := os.Lstat(dst); os.IsNotExist(err) {
-			break
-		}
-		dst = filepath.Join(trashDir, fmt.Sprintf("%s %d", base, i))
-	}
-	if err := os.Rename(src, dst); err != nil {
-		return 0, err
-	}
-	return size, nil
-}
-
 // UninstallApp moves an app and its associated files to the Trash.
 func (Cleaner) UninstallApp(path string) UninstallResult {
 	app := appInfoFromPath(path)
-	trash := filepath.Join(homeDir(), ".Trash")
 	res := UninstallResult{Path: path}
-	_ = os.MkdirAll(trash, 0o755)
 	for _, item := range uninstallPaths(app) {
-		size, err := moveToTrash(item.Path, trash)
-		if err != nil {
+		size, _ := scanPath(item.Path)
+		if err := trashItem(item.Path); err != nil {
 			res.Failed = append(res.Failed, item.Path+": "+err.Error())
 			continue
 		}
@@ -749,22 +1062,25 @@ func (Cleaner) UninstallApp(path string) UninstallResult {
 
 // GetCategories returns the current (persisted or default) category config.
 func (Cleaner) GetCategories() []CategoryConfig {
-	cfg := defaultCategoryConfigs()
-	if b, err := os.ReadFile(configPath()); err == nil {
-		var saved []CategoryConfig
-		if json.Unmarshal(b, &saved) == nil && len(saved) > 0 {
-			return saved
-		}
+	if saved := savedCategoryConfigs(); len(saved) > 0 {
+		return saved
 	}
-	return cfg
+	return defaultCategoryConfigs()
 }
 
 // SaveCategories validates and persists the category configuration.
 func (Cleaner) SaveCategories(cfg []CategoryConfig) error {
+	names := map[string]bool{}
+	owners := map[string]string{} // canonical folder -> category
 	for _, c := range cfg {
 		if strings.TrimSpace(c.Name) == "" {
 			return fmt.Errorf("分类名称不能为空")
 		}
+		name := strings.ToLower(strings.TrimSpace(c.Name))
+		if names[name] {
+			return fmt.Errorf("分类名称重复：%s", c.Name)
+		}
+		names[name] = true
 		if len(c.Paths) == 0 {
 			return fmt.Errorf("分类 %s 至少需要一个目录", c.Name)
 		}
@@ -775,6 +1091,10 @@ func (Cleaner) SaveCategories(cfg []CategoryConfig) error {
 			if !safeToClean(p) {
 				return fmt.Errorf("路径 %s 受保护，不能作为清理目录", p)
 			}
+			if owner, ok := owners[canonical(p)]; ok {
+				return fmt.Errorf("目录 %s 重复出现在分类 %s 和 %s 中", p, owner, c.Name)
+			}
+			owners[canonical(p)] = c.Name
 		}
 	}
 	return saveCategoryConfigs(cfg)
@@ -1272,12 +1592,11 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 	if _, err := os.Lstat(abs); err != nil {
 		return TrashResult{}, fmt.Errorf("路径不存在")
 	}
-	trash := filepath.Join(homeDir(), ".Trash")
-	if err := os.MkdirAll(trash, 0o755); err != nil {
-		return TrashResult{}, err
+	if probeUsage().inUse(resolvePath(abs)) {
+		return TrashResult{}, fmt.Errorf("正被运行中的应用使用，请先退出该应用")
 	}
-	freed, err := moveToTrash(abs, trash)
-	if err != nil {
+	freed, _ := scanPath(abs)
+	if err := trashItem(abs); err != nil {
 		return TrashResult{}, err
 	}
 	return TrashResult{Moved: 1, Freed: freed}, nil

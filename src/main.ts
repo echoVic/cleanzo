@@ -1,8 +1,8 @@
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
-import { t, categoryDescription, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
+import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanSummary, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import { t, categoryName, categoryDescription, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
 
@@ -313,6 +313,11 @@ function render() {
       updateSelection();
     });
   });
+  listEl.querySelectorAll<HTMLButtonElement>(".cat-grant").forEach((b) => {
+    b.addEventListener("click", () => {
+      Cleaner.openFullDiskAccessSettings().catch((e) => toast(t("grant.fail", { msg: msg(e) }), "err"));
+    });
+  });
   updateSelection();
   scanBtn.textContent = t("fs.rescan");
 }
@@ -361,17 +366,34 @@ function groupHtml(key: string, icon: string, color: string, cats: ScanCat[]): s
     </details>`;
 }
 
+const grantBtn = () => `<button class="btn small ghost cat-grant" type="button">${esc(t("cat.grant"))}</button>`;
+
+/** 分类右侧的状态：没有权限、受保护、未找到、很干净，或大小与清理建议 */
+function catNote(c: ScanCat): string {
+  if (c.size > 0) {
+    return c.risk === "moderate"
+      ? `<span class="cat-note-text caution">${esc(t("cat.sizeCaution", { size: human(c.size) }))}</span>`
+      : `<span class="cat-note-text">${esc(t("cat.sizeSafe", { size: human(c.size) }))}</span>`;
+  }
+  if (c.denied.length > 0) return `<span class="tag warn">${esc(t("cat.denied"))}</span>${grantBtn()}`;
+  if (c.blocked.length > 0) return `<span class="tag dim">${esc(t("cat.blocked"))}</span>`;
+  if (c.missing.length > 0) return `<span class="tag dim">${esc(t("cat.missing"))}</span>`;
+  return `<span class="tag ok">${esc(t("cat.cleanState"))}</span>`;
+}
+
 function rowHtml(c: ScanCat): string {
   const meta = CAT_ICONS[c.name] ?? fallbackIcon;
   const empty = c.size === 0;
   const caution = !empty && c.risk === "moderate";
   const checked = selectedCats.has(c.name);
-  const note = empty
-    ? `<span class="tag ok">${esc(t("cat.cleanState"))}</span>`
-    : caution
-      ? `<span class="cat-note-text caution">${esc(t("cat.sizeCaution", { size: human(c.size) }))}</span>`
-      : `<span class="cat-note-text">${esc(t("cat.sizeSafe", { size: human(c.size) }))}</span>`;
-  const missingTag = c.missing.length > 0 ? `<span class="tag dim">${esc(t("cat.missing"))}</span>` : "";
+  const trashTag = c.permanent ? "" : `<span class="tag dim">${esc(t("cat.toTrash"))}</span>`;
+  const subs = [
+    c.inUse > 0 ? esc(t("cat.inUse", { n: c.inUse })) : "",
+    !empty && c.denied.length > 0 ? `${esc(t("cat.deniedPart"))}${grantBtn()}` : "",
+  ]
+    .filter(Boolean)
+    .map((s) => `<div class="cat-sub muted">${s}</div>`)
+    .join("");
   const tops = (c.top ?? [])
     .map(
       (item) =>
@@ -379,29 +401,48 @@ function rowHtml(c: ScanCat): string {
     )
     .join("");
   return `
-    <div class="cat-row${empty ? " empty" : ""}${caution ? " caution" : ""}">
+    <div class="cat-row${empty ? " is-empty" : ""}${caution ? " caution" : ""}">
       <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${empty ? "disabled" : ""} ${checked ? "checked" : ""}></label>
       <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
       <div class="cat-info">
-        <div class="cat-name">${esc(c.name)}${missingTag}</div>
+        <div class="cat-name">${esc(categoryName(c.name))}${trashTag}</div>
         <div class="cat-desc muted">${esc(categoryDescription(c.name, c.description))}</div>
+        ${subs}
       </div>
-      <div class="cat-note">${note}</div>
+      <div class="cat-note">${catNote(c)}</div>
       ${tops ? `<details class="cat-details"><summary>${esc(t("cat.tops"))}</summary>${tops}</details>` : ""}
     </div>`;
+}
+
+/** 清理结果：释放了多少、移到废纸篓多少、跳过了几项 */
+function cleanDoneText(res: CleanSummary): string {
+  const parts: string[] = [];
+  if (res.totalFreed > 0) parts.push(t("clean.done.freed", { size: human(res.totalFreed) }));
+  if (res.totalTrashed > 0) parts.push(t("clean.done.trashed", { size: human(res.totalTrashed) }));
+  if (res.inUse > 0) parts.push(t("clean.done.inUse", { n: res.inUse }));
+  return parts.length > 0 ? parts.join(t("phrase.sep")) : t("clean.nothing");
 }
 
 function askCleanAll() {
   const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
   if (sel.length === 0) return;
-  const total = sel.reduce((s, c) => s + c.size, 0);
+  // 内置垃圾直接删除；用户自定义的分类移到废纸篓
+  const sum = (cs: ScanCat[]) => human(cs.reduce((s, c) => s + c.size, 0));
+  const names = (cs: ScanCat[]) => cs.map((c) => categoryName(c.name)).join(t("list.sep"));
+  const del = sel.filter((c) => c.permanent);
+  const keep = sel.filter((c) => !c.permanent);
+  const lines = [
+    del.length > 0 ? t("clean.body.delete", { size: sum(del), names: names(del) }) : "",
+    keep.length > 0 ? t("clean.body.trash", { size: sum(keep), names: names(keep) }) : "",
+    t("clean.body.inUse"),
+  ].filter(Boolean);
   pending = async () => {
     try {
       const res = await Cleaner.clean(sel.map((c) => c.name));
       if (res.errors.length > 0) {
-        toast(t("clean.all.partial", { names: res.errors.map((e) => e.name).join("、") }), "err");
+        toast(t("clean.all.partial", { names: res.errors.map((e) => categoryName(e.name)).join(t("list.sep")) }), "err");
       } else {
-        toast(t("clean.all.ok", { size: human(res.totalFreed) }));
+        toast(cleanDoneText(res));
       }
     } catch (e) {
       toast(t("clean.fail", { msg: msg(e) }), "err");
@@ -409,7 +450,7 @@ function askCleanAll() {
     await scan();
   };
   modalTitle.textContent = t("clean.sel.title");
-  modalBody.textContent = t("clean.all.body", { n: sel.length, size: human(total) });
+  modalBody.innerHTML = lines.map((l) => `<p>${esc(l)}</p>`).join("");
   modalOk.textContent = t("clean.confirm");
   showModal();
 }
@@ -893,8 +934,8 @@ function renderAppCacheRows() {
           name: esc(it.name),
           size: it.size,
           rank: `${i + 1}`,
-          trashable: true,
-          sub: `<div class="fs-sub muted small">${esc(displayPath(it.path))}</div>`,
+          trashable: !it.inUse,
+          sub: `<div class="fs-sub muted small">${it.inUse ? `<span class="tag dim">${esc(t("appcaches.inUse"))}</span> ` : ""}${esc(displayPath(it.path))}</div>`,
         }),
     )
     .join("");
@@ -1058,7 +1099,12 @@ function askTrashPhotos() {
     try {
       const r = await Cleaner.cleanPaths(paths);
       if (r.failed.length > 0) toast(t("photos.trashFail", { n: r.failed.length }), "err");
-      else toast(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
+      else {
+        const parts: string[] = [];
+        if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
+        if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
+        toast(parts.join(t("phrase.sep")), r.moved === 0 ? "err" : "ok");
+      }
     } catch (e) {
       toast(t("fs.actionFail", { msg: msg(e) }), "err");
     }

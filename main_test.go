@@ -1,13 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestScanPathAndClean(t *testing.T) {
@@ -31,9 +36,9 @@ func TestScanPathAndClean(t *testing.T) {
 		t.Fatalf("scanPath got size=%d files=%d, want 3072/2", size, files)
 	}
 
-	res := cleanCategory(cat)
-	if res.Freed != 3072 || res.Files != 2 {
-		t.Fatalf("clean got freed=%d files=%d, want 3072/2", res.Freed, res.Files)
+	res := cleanCategory(cat, &usageGuard{})
+	if res.Trashed != 3072 || res.Freed != 0 || res.Files != 2 {
+		t.Fatalf("clean got trashed=%d freed=%d files=%d, want 3072/0/2", res.Trashed, res.Freed, res.Files)
 	}
 	if len(res.Failed) != 0 {
 		t.Fatalf("unexpected failures: %v", res.Failed)
@@ -58,9 +63,9 @@ func TestScanPathAndClean(t *testing.T) {
 		t.Fatalf("sub/b.bin should be in trash: %v", err)
 	}
 
-	res2 := cleanCategory(cat)
-	if res2.Freed != 0 || res2.Files != 0 {
-		t.Fatalf("second clean should free 0, got freed=%d files=%d", res2.Freed, res2.Files)
+	res2 := cleanCategory(cat, &usageGuard{})
+	if res2.Trashed != 0 || res2.Files != 0 {
+		t.Fatalf("second clean should move nothing, got trashed=%d files=%d", res2.Trashed, res2.Files)
 	}
 }
 
@@ -77,7 +82,7 @@ func TestCleanCategoryEmptiesTrash(t *testing.T) {
 		t.Fatal(err)
 	}
 	cat := Category{Name: "trash", paths: []string{trash}}
-	res := cleanCategory(cat)
+	res := cleanCategory(cat, &usageGuard{})
 	if res.Freed != 1500 {
 		t.Fatalf("freed = %d, want 1500", res.Freed)
 	}
@@ -120,7 +125,7 @@ func TestScanCategoriesMissing(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "nope")
 	cat := Category{Name: "x", paths: []string{missing}}
-	got := scanCategories([]Category{cat})
+	got := scanCategories([]Category{cat}, &usageGuard{})
 	if len(got[0].Missing) != 1 || got[0].Missing[0] != missing {
 		t.Fatalf("expected missing path recorded, got %v", got[0].Missing)
 	}
@@ -232,35 +237,6 @@ func TestUninstallPaths(t *testing.T) {
 	}
 	if !foundApp {
 		t.Fatal("app bundle not in items")
-	}
-}
-
-func TestMoveToTrash(t *testing.T) {
-	dir := t.TempDir()
-	trash := filepath.Join(dir, ".Trash")
-	if err := os.MkdirAll(trash, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	src := filepath.Join(dir, "a.txt")
-	if err := os.WriteFile(src, make([]byte, 512), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// pre-place a file with the same name
-	if err := os.WriteFile(filepath.Join(trash, "a.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	size, err := moveToTrash(src, trash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if size != 512 {
-		t.Fatalf("moved size = %d", size)
-	}
-	if _, err := os.Stat(src); !os.IsNotExist(err) {
-		t.Fatalf("src should be gone: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(trash, "a.txt 2")); err != nil {
-		t.Fatalf("expected unique trash name: %v", err)
 	}
 }
 
@@ -786,7 +762,7 @@ func TestCollectPhotoFiles(t *testing.T) {
 	home := t.TempDir()
 	pics := filepath.Join(home, "Pictures")
 	mustMkdir(t, pics)
-	writeGradientJPEG(t, filepath.Join(pics, "a.png"), 80, 80, false) // ext doesn't matter for discovery
+	writeGradientJPEG(t, filepath.Join(pics, "a.png"), 80, 80, false)  // ext doesn't matter for discovery
 	writeGradientJPEG(t, filepath.Join(pics, "b.heic"), 80, 80, false) // heic now discovered
 	mustMkdir(t, filepath.Join(pics, "sub"))
 	writeGradientJPEG(t, filepath.Join(pics, "sub", "c.png"), 80, 80, false)
@@ -930,5 +906,444 @@ func TestSimilarPhotosMoveToTrash(t *testing.T) {
 	entries, _ := os.ReadDir(trash)
 	if len(entries) < 1 {
 		t.Fatalf("expected item in trash, got %d entries", len(entries))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Junk cleaning safety
+// ---------------------------------------------------------------------------
+
+// TestSafeToCleanResistsAliases covers other spellings of protected places:
+// APFS is case-insensitive, and /etc, /tmp and /var are links into /private.
+func TestSafeToCleanResistsAliases(t *testing.T) {
+	h, _ := os.UserHomeDir()
+	me := filepath.Base(h)
+	cases := map[string]bool{
+		"/users/" + me:                     false,
+		"/USERS/" + me + "/library":        false,
+		filepath.Join(h, "library"):        false,
+		"/applications":                    false,
+		"/system/library":                  false,
+		"/etc":                             false,
+		"/etc/hosts":                       false,
+		"/var/db":                          false,
+		"/tmp":                             false,
+		"/usr/local":                       false,
+		"/opt/homebrew":                    false,
+		"/bin":                             false,
+		filepath.Join(os.TempDir(), "old"): true,
+	}
+	for p, want := range cases {
+		if got := safeToClean(p); got != want {
+			t.Errorf("safeToClean(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+// TestSafeToCleanProtectsUserData keeps irreplaceable data out of reach,
+// while single items inside user folders stay cleanable.
+func TestSafeToCleanProtectsUserData(t *testing.T) {
+	h, _ := os.UserHomeDir()
+	cases := map[string]bool{
+		filepath.Join(h, "Library", "Keychains"):                                                 false,
+		filepath.Join(h, "library", "keychains", "login.keychain-db"):                            false,
+		filepath.Join(h, ".ssh", "id_ed25519"):                                                   false,
+		filepath.Join(h, "Library", "Mobile Documents", "com~apple~CloudDocs", "a.txt"):          false,
+		filepath.Join(h, "Pictures", "Photos Library.photoslibrary", "originals", "A", "x.heic"): false,
+		filepath.Join(h, "Documents"):                                                            false,
+		filepath.Join(h, "Desktop"):                                                              false,
+		filepath.Join(h, "Library", "Application Support"):                                       false,
+		filepath.Join(h, "Library", "Preferences"):                                               false,
+		filepath.Join(h, "Desktop", "IMG_0001.jpg"):                                              true,
+		filepath.Join(h, "Library", "Application Support", "SomeApp", "Cache"):                   true,
+	}
+	for p, want := range cases {
+		if got := safeToClean(p); got != want {
+			t.Errorf("safeToClean(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+// TestSafeToCleanFollowsLinks judges a link by where it points.
+func TestSafeToCleanFollowsLinks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, "Library", "Caches"))
+	if err := os.Symlink("/System", filepath.Join(home, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "Library"), filepath.Join(home, "lib")); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{
+		filepath.Join(home, "escape"):            false,
+		filepath.Join(home, "escape", "Library"): false,
+		filepath.Join(home, "lib"):               false,
+		filepath.Join(home, "lib", "Caches"):     true,
+	}
+	for p, want := range cases {
+		if got := safeToClean(p); got != want {
+			t.Errorf("safeToClean(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+func TestParseLsofNames(t *testing.T) {
+	out := []byte("p501\nfcwd\nn/Users/Me/Library/Caches/com.App/db.sqlite\nf12\nn/private/var/folders/x/T/a.lock\nf13\nn->0x1234\np502\nf3\nnpipe\n")
+	got := parseLsofNames(out)
+	want := []string{"/private/var/folders/x/t/a.lock", "/users/me/library/caches/com.app/db.sqlite"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("parseLsofNames = %q, want %q", got, want)
+	}
+}
+
+func TestParseBundleIDs(t *testing.T) {
+	out := []byte(`  1) "Finder" ASN:0x0-0x1001:
+    bundleID="com.apple.finder"
+  2) "Code" ASN:0x0-0x2002:
+    bundleID="com.microsoft.VSCode"
+  3) "helper" ASN:0x0-0x3003:
+    bundleID=[ NULL ]
+`)
+	got := parseBundleIDs(out)
+	if len(got) != 2 || !got["com.apple.finder"] || !got["com.microsoft.vscode"] {
+		t.Fatalf("parseBundleIDs = %v", got)
+	}
+}
+
+func TestOwnedByRunningApp(t *testing.T) {
+	running := map[string]bool{"com.microsoft.vscode": true, "com.google.chrome": true}
+	cases := map[string]bool{
+		"com.microsoft.VSCode":        true,
+		"com.microsoft.VSCode.ShipIt": true,
+		"com.google.Chrome":           true,
+		"com.google.ChromeX":          false,
+		"com.microsoft":               false,
+		"go-build":                    false,
+	}
+	for name, want := range cases {
+		if got := ownedByRunningApp(name, running); got != want {
+			t.Errorf("ownedByRunningApp(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestUsageGuardInUse(t *testing.T) {
+	g := &usageGuard{open: parseLsofNames([]byte(
+		"n/Users/me/Library/Caches/App/db\nn/Users/me/Library/Caches/Cache-x/f\nn/private/tmp/sock\n"))}
+	cases := map[string]bool{
+		"/Users/me/Library/Caches/App":    true,  // holds an open file
+		"/Users/me/Library/Caches/app/DB": true,  // the open file itself, other case
+		"/Users/me/Library/Caches/Cache":  false, // only a sibling with a longer name is open
+		"/Users/me/Library/Caches/Other":  false,
+		"/private/tmp/sock":               true,
+	}
+	for p, want := range cases {
+		if got := g.inUse(p); got != want {
+			t.Errorf("inUse(%q) = %v, want %v", p, got, want)
+		}
+	}
+	if !(&usageGuard{failed: true}).inUse("/Users/me/anything") {
+		t.Error("a guard whose probe failed must report everything in use")
+	}
+}
+
+// TestOpenFilesSeesOpenFile checks the lsof wiring against a file this test
+// holds open.
+func TestOpenFilesSeesOpenFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "held.db")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	open, err := openFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ToLower(resolvePath(p))
+	if !slices.Contains(open, want) {
+		t.Fatalf("openFiles() lacks %s (%d paths)", want, len(open))
+	}
+}
+
+// TestMain swaps the system Trash, which needs the running app, for a
+// stand-in that moves items into $HOME/.Trash.
+func TestMain(m *testing.M) {
+	trashItem = func(p string) error {
+		trash := filepath.Join(homeDir(), ".Trash")
+		if err := os.MkdirAll(trash, 0o755); err != nil {
+			return err
+		}
+		dst := filepath.Join(trash, filepath.Base(p))
+		for i := 2; ; i++ {
+			if _, err := os.Lstat(dst); os.IsNotExist(err) {
+				break
+			}
+			dst = filepath.Join(trash, fmt.Sprintf("%s %d", filepath.Base(p), i))
+		}
+		return os.Rename(p, dst)
+	}
+	os.Exit(m.Run())
+}
+
+func writeFile(t *testing.T, p string, size int) {
+	t.Helper()
+	mustMkdir(t, filepath.Dir(p))
+	if err := os.WriteFile(p, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// TestNestedCategoriesCountOnce: a category inside another one owns its
+// folder, so its files are counted once and cleaned only with it.
+func TestNestedCategoriesCountOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	caches := filepath.Join(home, "Library", "Caches")
+	writeFile(t, filepath.Join(caches, "com.app", "blob"), 2000)
+	writeFile(t, filepath.Join(caches, "go-build", "ab", "obj"), 1000)
+	writeFile(t, filepath.Join(caches, "foo", "x"), 300)
+	writeFile(t, filepath.Join(caches, "foo", "bar", "y"), 400)
+	cats := excludeNested([]Category{
+		{Name: "caches", paths: []string{caches}},
+		{Name: "go", paths: []string{filepath.Join(caches, "go-build")}},
+		{Name: "bar", paths: []string{filepath.Join(caches, "foo", "bar")}},
+	})
+	got := scanCategories(cats, &usageGuard{})
+	if got[0].Size != 2300 || got[1].Size != 1000 || got[2].Size != 400 {
+		t.Fatalf("sizes = %d, %d, %d; want 2300, 1000, 400", got[0].Size, got[1].Size, got[2].Size)
+	}
+	if len(got[0].Top) == 0 || got[0].Top[0].Name != "com.app" {
+		t.Fatalf("top of caches = %+v", got[0].Top)
+	}
+	res := cleanCategory(cats[0], &usageGuard{})
+	if len(res.Failed) != 0 {
+		t.Fatalf("failed: %v", res.Failed)
+	}
+	if exists(filepath.Join(caches, "com.app")) || exists(filepath.Join(caches, "foo", "x")) {
+		t.Fatal("caches' own entries should be cleaned")
+	}
+	if !exists(filepath.Join(caches, "go-build", "ab", "obj")) || !exists(filepath.Join(caches, "foo", "bar", "y")) {
+		t.Fatal("folders of other categories must be left alone")
+	}
+}
+
+// TestTempCleansOnlyStaleEntries: the temporary folder only loses entries
+// nothing has touched for a week, and never sockets or pipes.
+func TestTempCleansOnlyStaleEntries(t *testing.T) {
+	base := t.TempDir()
+	home, tmp := filepath.Join(base, "home"), filepath.Join(base, "tmp")
+	mustMkdir(t, home)
+	mustMkdir(t, tmp)
+	t.Setenv("HOME", home)
+	t.Setenv("TMPDIR", tmp)
+	old := time.Now().Add(-10 * 24 * time.Hour)
+	age := func(paths ...string) {
+		for _, p := range paths {
+			if err := os.Chtimes(p, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	writeFile(t, filepath.Join(tmp, "stale", "a.bin"), 1000)
+	age(filepath.Join(tmp, "stale", "a.bin"), filepath.Join(tmp, "stale"))
+	writeFile(t, filepath.Join(tmp, "fresh.bin"), 500)
+	writeFile(t, filepath.Join(tmp, "mixed", "old.bin"), 300)
+	writeFile(t, filepath.Join(tmp, "mixed", "new.bin"), 200)
+	age(filepath.Join(tmp, "mixed", "old.bin"), filepath.Join(tmp, "mixed"))
+	if err := syscall.Mkfifo(filepath.Join(tmp, "pipe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	age(filepath.Join(tmp, "pipe"))
+
+	cat := Category{Name: "temp", paths: []string{tmp}}
+	got := scanCategories([]Category{cat}, &usageGuard{})
+	if got[0].Size != 1000 || got[0].Files != 1 {
+		t.Fatalf("scan = %d bytes, %d files; want 1000, 1", got[0].Size, got[0].Files)
+	}
+	cleanCategory(cat, &usageGuard{})
+	if exists(filepath.Join(tmp, "stale")) {
+		t.Fatal("stale entry should be cleaned")
+	}
+	for _, keep := range []string{"fresh.bin", "mixed", "pipe"} {
+		if !exists(filepath.Join(tmp, keep)) {
+			t.Errorf("%s must be kept", keep)
+		}
+	}
+}
+
+// TestCleanSkipsOpenFiles: a folder holding a file a process has open is
+// in use, so cleaning leaves it and counts it.
+func TestCleanSkipsOpenFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "junk")
+	writeFile(t, filepath.Join(dir, "busy", "db.sqlite"), 800)
+	writeFile(t, filepath.Join(dir, "idle", "x"), 300)
+	f, err := os.Open(filepath.Join(dir, "busy", "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cat := Category{Name: "junk", paths: []string{dir}}
+	g := probeUsage()
+	if got := scanCategories([]Category{cat}, g); got[0].Size != 300 || got[0].InUse != 1 {
+		t.Fatalf("scan = %d bytes, %d in use; want 300, 1", got[0].Size, got[0].InUse)
+	}
+	res := cleanCategory(cat, g)
+	if res.InUse != 1 || !exists(filepath.Join(dir, "busy", "db.sqlite")) || exists(filepath.Join(dir, "idle")) {
+		t.Fatalf("res = %+v; busy must stay, idle must go", res)
+	}
+}
+
+// TestScanReportsUnreadableFolder: a folder macOS will not let the app read
+// is reported as denied, not as empty.
+func TestScanReportsUnreadableFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	locked := filepath.Join(home, "locked")
+	writeFile(t, filepath.Join(locked, "a"), 100)
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	got := scanCategories([]Category{{Name: "x", paths: []string{locked}}}, &usageGuard{})
+	if len(got[0].Denied) != 1 || got[0].Size != 0 || len(got[0].Missing) != 0 {
+		t.Fatalf("got denied=%v missing=%v size=%d", got[0].Denied, got[0].Missing, got[0].Size)
+	}
+}
+
+// TestBuiltinJunkIsDeleted: built-in categories at their built-in paths
+// hold regenerable junk, which is deleted rather than moved to the Trash.
+func TestBuiltinJunkIsDeleted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeFile(t, filepath.Join(home, "Library", "Caches", "com.example.app", "blob"), 4096)
+	sum := Cleaner{}.Clean([]string{"caches"})
+	if sum.TotalFreed != 4096 || sum.TotalTrashed != 0 || len(sum.Errors) != 0 {
+		t.Fatalf("summary = %+v", sum)
+	}
+	if exists(filepath.Join(home, "Library", "Caches", "com.example.app")) {
+		t.Fatal("cache should be deleted")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(home, ".Trash")); len(entries) != 0 {
+		t.Fatalf("nothing should reach the Trash, got %d entries", len(entries))
+	}
+}
+
+// TestCleanEmptiesTrashFirst: emptying the Trash in the same pass happens
+// first, so what the pass moves to the Trash stays recoverable.
+func TestCleanEmptiesTrashFirst(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	trash := filepath.Join(home, ".Trash")
+	writeFile(t, filepath.Join(trash, "old.bin"), 1500)
+	mine := filepath.Join(home, "mydir")
+	writeFile(t, filepath.Join(mine, "a.bin"), 700)
+	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
+		{Name: "mine", Risk: "safe", Enabled: true, Paths: []string{mine}},
+		{Name: "trash", Risk: "moderate", Enabled: true, Paths: []string{trash}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sum := Cleaner{}.Clean(nil)
+	if !exists(filepath.Join(trash, "a.bin")) || exists(filepath.Join(trash, "old.bin")) {
+		t.Fatal("a.bin should be in the Trash, old.bin gone")
+	}
+	if sum.TotalFreed != 1500 || sum.TotalTrashed != 700 {
+		t.Fatalf("summary = %+v", sum)
+	}
+}
+
+// TestConfigMigratesV1Defaults: version 1 files keep the user's edits, while
+// built-ins still at their old defaults adopt the new ones.
+func TestConfigMigratesV1Defaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Dir(configPath()))
+	v1 := `[
+  {"name":"temp","description":"用户临时文件","risk":"safe","paths":[` + strconv.Quote(os.TempDir()) + `],"enabled":true},
+  {"name":"trash","description":"废纸篓","risk":"safe","paths":[` + strconv.Quote(filepath.Join(home, ".Trash")) + `],"enabled":true},
+  {"name":"logs","description":"日志","risk":"safe","paths":["/elsewhere/logs"],"enabled":true}
+]`
+	if err := os.WriteFile(configPath(), []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Cleaner{}.GetCategories()
+	risks := map[string]string{}
+	for _, c := range got {
+		risks[c.Name] = c.Risk
+	}
+	if risks["temp"] != "moderate" || risks["trash"] != "moderate" || risks["logs"] != "safe" {
+		t.Fatalf("risks = %v", risks)
+	}
+	b, _ := os.ReadFile(configPath())
+	if !strings.HasPrefix(strings.TrimSpace(string(b)), "{") || !strings.Contains(string(b), `"version": 2`) {
+		t.Fatalf("config should be rewritten as version 2:\n%s", b)
+	}
+}
+
+func TestSaveCategoriesRejectsDuplicates(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	a, b := filepath.Join(home, "a"), filepath.Join(home, "b")
+	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
+		{Name: "dup", Enabled: true, Paths: []string{a}},
+		{Name: "Dup", Enabled: true, Paths: []string{b}},
+	}); err == nil {
+		t.Error("two categories with one name should be rejected")
+	}
+	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
+		{Name: "a", Enabled: true, Paths: []string{a}},
+		{Name: "b", Enabled: true, Paths: []string{a + "/"}},
+	}); err == nil {
+		t.Error("two categories with one folder should be rejected")
+	}
+}
+
+// TestTrashPathRefusesFolderInUse and its CleanPaths counterpart leave what
+// a process has open where it is.
+func TestTrashPathRefusesFolderInUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	app := filepath.Join(home, "Library", "Caches", "AppA")
+	writeFile(t, filepath.Join(app, "c.db"), 512)
+	f, err := os.Open(filepath.Join(app, "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := (Cleaner{}).TrashPath(app); err == nil {
+		t.Fatal("expected an in-use error")
+	}
+	res := Cleaner{}.CleanPaths([]string{filepath.Join(app, "c.db")})
+	if res.InUse != 1 || res.Moved != 0 || !exists(filepath.Join(app, "c.db")) {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestScanAppCachesFlagsInUse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	caches := filepath.Join(home, "Library", "Caches")
+	writeFile(t, filepath.Join(caches, "busy", "db"), 100)
+	writeFile(t, filepath.Join(caches, "idle", "x"), 100)
+	f, err := os.Open(filepath.Join(caches, "busy", "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	inUse := map[string]bool{}
+	for _, it := range (Cleaner{}).ScanAppCaches() {
+		inUse[it.Name] = it.InUse
+	}
+	if !inUse["busy"] || inUse["idle"] {
+		t.Fatalf("inUse = %v", inUse)
 	}
 }
