@@ -183,6 +183,36 @@ function setBusy(btn: HTMLButtonElement, busy: boolean, label?: string) {
   }
 }
 
+/** 正在进行的流式扫描各自的 Channel；扫描期间扫描按钮变成「停止扫描」 */
+const scanChans = new Map<HTMLButtonElement, { close(): void }>();
+const stoppedScans = new Set<HTMLButtonElement>();
+
+/** 扫描开始：按钮保持可点，显示「停止扫描」 */
+function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
+  btn.dataset.orig = btn.textContent ?? "";
+  btn.disabled = false;
+  btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`;
+  scanChans.set(btn, ch);
+  stoppedScans.delete(btn);
+}
+
+/** 点了「停止扫描」：关闭 Channel，Go 那边的 ctx 随之取消，du、find、sips 都会停下 */
+function stopScan(btn: HTMLButtonElement): boolean {
+  const ch = scanChans.get(btn);
+  if (!ch) return false;
+  scanChans.delete(btn);
+  stoppedScans.add(btn);
+  ch.close();
+  return true;
+}
+
+/** 扫描结束（完成、出错或被停止）：恢复按钮，返回它是不是被用户停止的 */
+function endScan(btn: HTMLButtonElement): boolean {
+  scanChans.delete(btn);
+  setBusy(btn, false);
+  return stoppedScans.delete(btn);
+}
+
 function skeletonRows(n: number): string {
   return Array.from({ length: n }, () => `<div class="skeleton card"></div>`).join("");
 }
@@ -511,12 +541,12 @@ async function startFullScan() {
   resetList("fullscan");
   fsRunning = true;
   fsItems = [];
-  setBusy(fsScanBtn, true, t("fs.busy"));
   fsProgress.classList.remove("hidden");
   fsList.innerHTML = "";
   fsCurrent.textContent = t("fs.prep");
   fsCount.textContent = "";
   const ch = new Channel<import("./mygo").FullScanEvent>();
+  setStoppable(fsScanBtn, ch);
   try {
     const done = Cleaner.fullScan(ch);
     for await (const ev of ch) {
@@ -533,13 +563,15 @@ async function startFullScan() {
     }
     await done;
   } catch (e) {
-    fsResult = null;
-    fsList.innerHTML = errorState(t("fs.fail", { msg: msg(e) }), startFullScan);
-    toast(t("fs.fail", { msg: msg(e) }), "err");
+    if (!stoppedScans.has(fsScanBtn)) {
+      fsResult = null;
+      fsList.innerHTML = errorState(t("fs.fail", { msg: msg(e) }), startFullScan);
+      toast(t("fs.fail", { msg: msg(e) }), "err");
+    }
   } finally {
     fsRunning = false;
     fsProgress.classList.add("hidden");
-    setBusy(fsScanBtn, false);
+    if (endScan(fsScanBtn)) renderFsRows(fsItems, false); // 停止时保留已经扫到的
   }
 }
 
@@ -811,12 +843,12 @@ async function startLargeScan() {
   lgResult = null;
   lgRunning = true;
   lgItems = [];
-  setBusy(lgScanBtn, true, t("large.busy"));
   lgProgress.classList.remove("hidden");
   lgList.innerHTML = "";
   lgCurrent.textContent = t("fs.prep");
   lgCount.textContent = "";
   const ch = new Channel<import("./mygo").LargeScanEvent>();
+  setStoppable(lgScanBtn, ch);
   try {
     const done = Cleaner.largeScan(ch);
     for await (const ev of ch) {
@@ -833,13 +865,15 @@ async function startLargeScan() {
     }
     await done;
   } catch (e) {
-    lgItems = [];
-    lgList.innerHTML = errorState(t("large.fail", { msg: msg(e) }), startLargeScan);
-    toast(t("large.fail", { msg: msg(e) }), "err");
+    if (!stoppedScans.has(lgScanBtn)) {
+      lgItems = [];
+      lgList.innerHTML = errorState(t("large.fail", { msg: msg(e) }), startLargeScan);
+      toast(t("large.fail", { msg: msg(e) }), "err");
+    }
   } finally {
     lgRunning = false;
     lgProgress.classList.add("hidden");
-    setBusy(lgScanBtn, false);
+    if (endScan(lgScanBtn)) renderLargeRows(lgItems, false);
   }
 }
 
@@ -883,12 +917,12 @@ async function startOrphanScan() {
   orFoot = null;
   orRunning = true;
   orItems = [];
-  setBusy(orScanBtn, true, t("orphans.busy"));
   orSummary.classList.add("hidden");
   orProgress.classList.remove("hidden");
   orCurrent.textContent = t("orphans.live");
   orList.innerHTML = "";
   const ch = new Channel<OrphanItem>();
+  setStoppable(orScanBtn, ch);
   try {
     const done = Cleaner.scanOrphans(ch);
     for await (const o of ch) {
@@ -910,13 +944,15 @@ async function startOrphanScan() {
     }
     await done;
   } catch (e) {
-    orItems = [];
-    orList.innerHTML = errorState(t("orphans.fail", { msg: msg(e) }), startOrphanScan);
-    toast(t("orphans.fail", { msg: msg(e) }), "err");
+    if (!stoppedScans.has(orScanBtn)) {
+      orItems = [];
+      orList.innerHTML = errorState(t("orphans.fail", { msg: msg(e) }), startOrphanScan);
+      toast(t("orphans.fail", { msg: msg(e) }), "err");
+    }
   } finally {
     orRunning = false;
     orProgress.classList.add("hidden");
-    setBusy(orScanBtn, false);
+    if (endScan(orScanBtn) && orItems.length === 0) orList.innerHTML = emptyState(t("scan.stopped"));
   }
 }
 
@@ -1000,11 +1036,11 @@ async function startPhotoScan() {
   if (phRunning) return;
   resetList("photos");
   phRunning = true;
-  setBusy(phScanBtn, true, t("photos.busy"));
   phProgress.classList.remove("hidden");
   phList.innerHTML = "";
   phCurrent.textContent = t("photos.busy");
   const ch = new Channel<import("./mygo").SimilarPhotoEvent>();
+  setStoppable(phScanBtn, ch);
   try {
     const done = Cleaner.scanSimilarPhotos(ch);
     for await (const ev of ch) {
@@ -1028,13 +1064,15 @@ async function startPhotoScan() {
     }
     await done;
   } catch (e) {
-    phClusters = [];
-    phList.innerHTML = errorState(t("photos.fail", { msg: msg(e) }), startPhotoScan);
-    toast(t("photos.fail", { msg: msg(e) }), "err");
+    if (!stoppedScans.has(phScanBtn)) {
+      phClusters = [];
+      phList.innerHTML = errorState(t("photos.fail", { msg: msg(e) }), startPhotoScan);
+      toast(t("photos.fail", { msg: msg(e) }), "err");
+    }
   } finally {
     phRunning = false;
     phProgress.classList.add("hidden");
-    setBusy(phScanBtn, false);
+    if (endScan(phScanBtn) && phClusters.length === 0) phList.innerHTML = emptyState(t("scan.stopped"));
     phScanBtn.textContent = t("photos.rescan");
   }
 }
@@ -1360,11 +1398,11 @@ function hideModal() {
 
 scanBtn.addEventListener("click", scan);
 cleanAllBtn.addEventListener("click", askCleanAll);
-fsScanBtn.addEventListener("click", startFullScan);
-lgScanBtn.addEventListener("click", startLargeScan);
-orScanBtn.addEventListener("click", startOrphanScan);
+fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
+lgScanBtn.addEventListener("click", () => stopScan(lgScanBtn) || startLargeScan());
+orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
 acScanBtn.addEventListener("click", startAppCacheScan);
-phScanBtn.addEventListener("click", startPhotoScan);
+phScanBtn.addEventListener("click", () => stopScan(phScanBtn) || startPhotoScan());
 appSearch.addEventListener("input", renderApps);
 modalOk.addEventListener("click", async () => {
   const fn = pending;
