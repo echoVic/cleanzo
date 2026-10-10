@@ -129,9 +129,10 @@ type LargeScanResult struct {
 
 // OrphanItem is a leftover directory or file not owned by an installed app.
 type OrphanItem struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
-	Kind string `json:"kind"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Kind      string `json:"kind"`
+	Trashable bool   `json:"trashable"`
 }
 
 // OrphanScanResult aggregates leftover detection results.
@@ -739,6 +740,66 @@ func duSize(path string, timeout time.Duration) (int64, error) {
 	return kb * 1024, nil
 }
 
+// DirItem is a single child entry inside a directory, returned by DirChildren
+// so the frontend can expand a row in place and show what it actually contains.
+type DirItem struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	IsDir     bool   `json:"isDir"`
+	Trashable bool   `json:"trashable"`
+}
+
+// DirChildren lists the direct children of path with sizes: directories are
+// measured with du (8s timeout), files with a quick stat. Unreadable or
+// timed-out entries report Size = -1 so the UI can show them as unknown.
+// The result is sorted by size descending and capped at 60 entries.
+func (Cleaner) DirChildren(path string) ([]DirItem, error) {
+	ents, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	type job struct {
+		name  string
+		full  string
+		isDir bool
+	}
+	jobs := make([]job, 0, len(ents))
+	for _, e := range ents {
+		full := filepath.Join(path, e.Name())
+		jobs = append(jobs, job{e.Name(), full, e.IsDir()})
+	}
+	var mu sync.Mutex
+	items := make([]DirItem, 0, len(jobs))
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		go func(j job) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			size := int64(-1)
+			if j.isDir {
+				if sz, err := duSize(j.full, 8*time.Second); err == nil {
+					size = sz
+				}
+			} else if st, err := os.Stat(j.full); err == nil {
+				size = st.Size()
+			}
+			mu.Lock()
+			items = append(items, DirItem{Name: j.name, Path: j.full, Size: size, IsDir: j.isDir, Trashable: trashable(j.full)})
+			mu.Unlock()
+		}(j)
+	}
+	wg.Wait()
+	sort.Slice(items, func(i, k int) bool { return items[i].Size > items[k].Size })
+	if len(items) > 60 {
+		items = items[:60]
+	}
+	return items, nil
+}
+
 // collectFullScan measures every full-scan target concurrently with du and
 // invokes onItem for each completed target so the frontend can stream the
 // ranking as it is discovered. It returns the sorted top items, the number of
@@ -1005,7 +1066,7 @@ func collectOrphans(onItem func(o OrphanItem)) ([]OrphanItem, int64) {
 			if size < 1<<20 {
 				return // ignore trivial leftovers
 			}
-			it := OrphanItem{Path: c.path, Size: size, Kind: c.kind}
+			it := OrphanItem{Path: c.path, Size: size, Kind: c.kind, Trashable: trashable(c.path)}
 			mu.Lock()
 			items = append(items, it)
 			mu.Unlock()
@@ -1055,6 +1116,33 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 		return TrashResult{}, err
 	}
 	return TrashResult{Moved: 1, Freed: freed}, nil
+}
+
+// RevealInFinder opens path in Finder. Directories open in place; files are
+// revealed (selected) in their parent folder. The call returns an error when
+// the path does not exist.
+func (Cleaner) RevealInFinder(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return fmt.Errorf("路径不存在")
+	}
+	args := []string{}
+	if fi.IsDir() {
+		args = append(args, abs)
+	} else {
+		args = append(args, "-R", abs)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("open failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func main() {

@@ -64,6 +64,18 @@ export interface CleanSummary {
   errors: CleanError[];
 }
 
+/**
+ * DirItem is a single child entry inside a directory, returned by DirChildren
+ * so the frontend can expand a row in place and show what it actually contains.
+ */
+export interface DirItem {
+  name: string;
+  path: string;
+  size: number;
+  isDir: boolean;
+  trashable: boolean;
+}
+
 /** DiskStat is the capacity usage of the boot volume. */
 export interface DiskStat {
   total: number;
@@ -122,6 +134,7 @@ export interface OrphanItem {
   path: string;
   size: number;
   kind: string;
+  trashable: boolean;
 }
 
 /** SystemInfo describes the machine the app runs on. */
@@ -181,6 +194,15 @@ export const Cleaner = {
   clean(names: string[]): Promise<CleanSummary> {
     return call("Cleaner.Clean", names);
   },
+  /**
+   * DirChildren lists the direct children of path with sizes: directories are
+   * measured with du (8s timeout), files with a quick stat. Unreadable or
+   * timed-out entries report Size = -1 so the UI can show them as unknown.
+   * The result is sorted by size descending and capped at 60 entries.
+   */
+  dirChildren(path: string): Promise<DirItem[]> {
+    return call("Cleaner.DirChildren", path);
+  },
   /** FullScan streams per-directory results and the final summary of a full scan. */
   fullScan(ch: Channel<FullScanEvent>): Promise<void> {
     return call("Cleaner.FullScan", ch);
@@ -202,6 +224,14 @@ export const Cleaner = {
   },
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
+  },
+  /**
+   * RevealInFinder opens path in Finder. Directories open in place; files are
+   * revealed (selected) in their parent folder. The call returns an error when
+   * the path does not exist.
+   */
+  revealInFinder(path: string): Promise<void> {
+    return call("Cleaner.RevealInFinder", path);
   },
   /** SaveCategories validates and persists the category configuration. */
   saveCategories(cfg: CategoryConfig[]): Promise<void> {

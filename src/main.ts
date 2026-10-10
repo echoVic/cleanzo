@@ -29,6 +29,7 @@ const fsProgress = $("#fs-progress");
 const fsCurrent = $("#fs-current");
 const fsCount = $("#fs-count");
 const fsList = $("#fs-list");
+const fsToolbar = $("#fs-toolbar");
 const fsUsed = $("#fs-used");
 const fsFree = $("#fs-free");
 const fsTotal = $("#fs-total");
@@ -39,6 +40,7 @@ const lgProgress = $("#lg-progress");
 const lgCurrent = $("#lg-current");
 const lgCount = $("#lg-count");
 const lgList = $("#lg-list");
+const lgToolbar = $("#lg-toolbar");
 const lgThreshold = $("#lg-threshold");
 const orScanBtn = $<HTMLButtonElement>("#or-scan");
 const orSummary = $("#or-summary");
@@ -46,6 +48,7 @@ const orTotal = $("#or-total");
 const orProgress = $("#or-progress");
 const orCurrent = $("#or-current");
 const orList = $("#or-list");
+const orToolbar = $("#or-toolbar");
 
 let categories = [] as Awaited<ReturnType<typeof Cleaner.scan>>;
 let apps: AppInfo[] = [];
@@ -353,35 +356,32 @@ function askCleanAll() {
 function renderFsRows(items: BigItem[], live: boolean, foot = "") {
   if (items.length === 0) {
     fsList.innerHTML = emptyState(live ? t("fs.live") : t("fs.empty")) + foot;
+    fsToolbar.classList.add("hidden");
+    fsToolbar.innerHTML = "";
     return;
   }
   const sorted = [...items].sort((a, b) => b.size - a.size).slice(0, 30);
   const maxSize = sorted[0]?.size || 1;
-  fsList.innerHTML =
-    sorted
-      .map(
-        (it, i) => `
-      <div class="fs-row card">
-        <div class="fs-rank">${i + 1}</div>
-        <div class="fs-main">
-          <div class="fs-path" title="${esc(it.path)}">${esc(displayPath(it.path))}</div>
-          <div class="fs-sub">
-            <div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>
-          </div>
-        </div>
-        <div class="fs-size">${human(it.size)}</div>
-        ${it.trashable ? `<button class="btn small danger fs-trash" data-path="${esc(it.path)}" data-size="${it.size}">${esc(t("fs.trash"))}</button>` : ""}
-      </div>`,
-      )
-      .join("") +
-    (live ? `<div class="fs-foot muted small">${esc(t("fs.live"))}</div>` : "") +
-    foot;
-  fsList.querySelectorAll<HTMLButtonElement>(".fs-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), startFullScan));
-  });
+  const rows = sorted
+    .map(
+      (it, i) =>
+        fsRowHtml({
+          path: it.path,
+          name: esc(displayPath(it.path)),
+          size: it.size,
+          rank: `${i + 1}`,
+          expandable: true,
+          trashable: it.trashable,
+          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
+        }),
+    )
+    .join("");
+  const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("fs.live"))}</div>` : "") + foot;
+  renderFsListInto(fsList, fsToolbar, rows + footHtml, () => renderFsRows(fsItems, false), startFullScan);
 }
 
 async function startFullScan() {
+  checkedPaths.clear();
   if (fsRunning) return;
   fsRunning = true;
   fsItems = [];
@@ -417,6 +417,216 @@ async function startFullScan() {
   }
 }
 
+// ---- 勾选与展开（全盘 / 大文件 / 残留 通用） ----
+
+const checkedPaths = new Set<string>();
+const expandedPaths = new Set<string>();
+const expandedChildren = new Map<string, string>();
+const expandedChildPaths = new Map<string, string[]>();
+
+function checkHtml(path: string, parent?: string): string {
+  const par = parent ? ` data-parent="${esc(parent)}"` : "";
+  return `<label class="fs-check" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}"${par} ${checkedPaths.has(path) ? "checked" : ""}></label>`;
+}
+
+function setParentChecked(path: string, checked: boolean) {
+  if (checked) {
+    checkedPaths.add(path);
+    const kids = expandedChildPaths.get(path);
+    if (kids) kids.forEach((k) => checkedPaths.add(k));
+  } else {
+    checkedPaths.delete(path);
+    const kids = expandedChildPaths.get(path);
+    if (kids) kids.forEach((k) => checkedPaths.delete(k));
+  }
+}
+
+function syncParent(listEl: HTMLElement, parentPath: string) {
+  const kids = expandedChildPaths.get(parentPath);
+  if (!kids || kids.length === 0) return;
+  const n = kids.filter((k) => checkedPaths.has(k)).length;
+  if (n === kids.length) checkedPaths.add(parentPath);
+  else if (n === 0) checkedPaths.delete(parentPath);
+}
+
+function applyIndeterminate(listEl: HTMLElement) {
+  listEl.querySelectorAll<HTMLDivElement>(".fs-row-wrap").forEach((wrap) => {
+    const p = wrap.dataset.path!;
+    const kids = expandedChildPaths.get(p);
+    if (!kids || kids.length === 0) return;
+    const cb = wrap.querySelector<HTMLInputElement>("input[data-check]");
+    if (!cb) return;
+    const n = kids.filter((k) => checkedPaths.has(k)).length;
+    cb.indeterminate = n > 0 && n < kids.length;
+  });
+}
+
+function expandBtnHtml(path: string): string {
+  const open = expandedPaths.has(path);
+  return `<button class="btn small ghost fs-expand" data-expand="${esc(path)}" type="button">${open ? esc(t("fs.collapse")) : esc(t("fs.expand"))} <span class="caret">▸</span></button>`;
+}
+
+function revealBtnHtml(path: string): string {
+  return `<button class="btn small ghost icon fs-reveal" data-reveal="${esc(path)}" type="button" title="${esc(t("fs.reveal"))}" aria-label="${esc(t("fs.reveal"))}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></button>`;
+}
+
+function fsRowHtml(o: {
+  path: string;
+  name: string;
+  size: number;
+  sub?: string;
+  rank?: string;
+  expandable?: boolean;
+  trashable: boolean;
+}): string {
+  const open = expandedPaths.has(o.path);
+  return `
+      <div class="fs-row-wrap" data-path="${esc(o.path)}">
+        <div class="fs-row card ${open ? "open" : ""}">
+          ${checkHtml(o.path)}
+          ${o.rank ? `<div class="fs-rank">${o.rank}</div>` : ""}
+          <div class="fs-main">
+            <div class="fs-path" title="${esc(o.path)}">${o.name}</div>
+            ${o.sub ? `<div class="fs-sub">${o.sub}</div>` : ""}
+          </div>
+          <div class="fs-size">${o.size >= 0 ? human(o.size) : "--"}</div>
+          ${o.expandable ? expandBtnHtml(o.path) : ""}
+          ${revealBtnHtml(o.path)}
+          ${o.trashable ? `<button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
+        </div>
+        ${expandedPaths.has(o.path) ? `<div class="fs-children">${expandedChildren.get(o.path) ?? `<span class="muted small">${esc(t("fs.children"))}</span>`}</div>` : ""}
+      </div>`;
+}
+
+function childRowsHtml(items: { name: string; path: string; size: number; trashable: boolean }[], parentPath: string): string {
+  if (items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
+  return items
+    .map(
+      (c) => `
+      <div class="fs-child">
+        ${checkHtml(c.path, parentPath)}
+        <span class="fs-child-name" title="${esc(c.path)}">${esc(c.name)}${c.trashable ? "" : ` <span class="tag dim">${esc(t("fs.locked"))}</span>`}</span>
+        <span class="fs-child-size">${c.size >= 0 ? human(c.size) : "--"}</span>
+        ${revealBtnHtml(c.path)}
+        ${c.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(c.path)}" data-size="${c.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
+      </div>`,
+    )
+    .join("");
+}
+
+async function toggleExpand(path: string, rerender: () => void) {
+  if (expandedPaths.has(path)) {
+    expandedPaths.delete(path);
+    expandedChildren.delete(path);
+    expandedChildPaths.delete(path);
+    rerender();
+    return;
+  }
+  expandedPaths.add(path);
+  expandedChildren.delete(path);
+  rerender();
+  try {
+    const items = await Cleaner.dirChildren(path);
+    expandedChildPaths.set(path, items.map((i) => i.path));
+    if (checkedPaths.has(path)) items.forEach((i) => checkedPaths.add(i.path));
+    expandedChildren.set(path, childRowsHtml(items, path));
+  } catch (e) {
+    expandedChildren.set(path, `<div class="fs-child err-inline">${esc(t("fs.childrenFail", { msg: msg(e) }))}</div>`);
+  }
+  rerender();
+}
+
+function updateToolbar(toolbar: HTMLElement, listEl: HTMLElement, rerender: () => void, afterTrash: () => Promise<void>) {
+  const visible = Array.from(listEl.querySelectorAll<HTMLInputElement>("input[data-check]")).map((i) => i.dataset.check!);
+  const n = checkedPaths.size;
+  if (n === 0) {
+    toolbar.classList.add("hidden");
+    toolbar.innerHTML = "";
+    return;
+  }
+  const all = visible.length > 0 && visible.every((p) => checkedPaths.has(p));
+  toolbar.classList.remove("hidden");
+  toolbar.innerHTML = `
+    <label class="fs-check"><input type="checkbox" class="fs-checkall" ${all ? "checked" : ""}></label>
+    <span class="fs-toolbar-count">${esc(t("fs.checked", { n }))}</span>
+    <button class="btn danger small fs-toolbar-trash" type="button">${esc(t("fs.trashChecked"))}</button>`;
+  const allBox = toolbar.querySelector<HTMLInputElement>(".fs-checkall");
+  if (allBox) {
+    allBox.addEventListener("change", () => {
+      visible.forEach((p) => (allBox.checked ? checkedPaths.add(p) : checkedPaths.delete(p)));
+      rerender();
+      updateToolbar(toolbar, listEl, rerender, afterTrash);
+    });
+  }
+  toolbar.querySelector<HTMLButtonElement>(".fs-toolbar-trash")?.addEventListener("click", () => trashChecked(afterTrash, rerender));
+}
+
+async function trashChecked(after: () => Promise<void>, rerender: () => void) {
+  const paths = [...checkedPaths].filter((p) => ![...checkedPaths].some((q) => p !== q && p.startsWith(q + "/")));
+  if (paths.length === 0) return;
+  pending = async () => {
+    let ok = 0;
+    let fail = 0;
+    let freed = 0;
+    for (const p of paths) {
+      try {
+        const r = await Cleaner.trashPath(p);
+        ok++;
+        freed += r.freed;
+      } catch {
+        fail++;
+      }
+    }
+    checkedPaths.clear();
+    if (ok > 0) toast(t("fs.trashChecked.ok", { n: ok, size: human(freed) }));
+    if (fail > 0) toast(t("fs.trashChecked.fail", { n: fail }), "err");
+    if (after) await after();
+    rerender();
+  };
+  modalTitle.textContent = t("fs.trashChecked.title");
+  modalBody.textContent = t("fs.trashChecked.body", { n: paths.length });
+  modalOk.textContent = t("fs.trash.confirm");
+  showModal();
+}
+
+function bindFsList(listEl: HTMLElement, rerender: () => void, afterTrash: () => Promise<void>) {
+  listEl.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const p = cb.dataset.check!;
+      const parent = cb.dataset.parent;
+      if (parent) {
+        if (cb.checked) checkedPaths.add(p);
+        else checkedPaths.delete(p);
+        syncParent(listEl, parent);
+      } else if (cb.checked) {
+        setParentChecked(p, true);
+      } else {
+        setParentChecked(p, false);
+      }
+      rerender();
+    });
+  });
+  listEl.querySelectorAll<HTMLButtonElement>(".fs-expand").forEach((b) => {
+    b.addEventListener("click", () => toggleExpand(b.dataset.expand!, rerender));
+  });
+  listEl.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
+    b.addEventListener("click", () => {
+      const path = b.dataset.reveal!;
+      Cleaner.revealInFinder(path).catch((e) => toast(t("fs.revealFail", { msg: msg(e) }), "err"));
+    });
+  });
+  listEl.querySelectorAll<HTMLButtonElement>(".fs-trash").forEach((b) => {
+    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), afterTrash));
+  });
+}
+
+function renderFsListInto(listEl: HTMLElement, toolbar: HTMLElement, html: string, rerender: () => void, afterTrash: () => Promise<void>) {
+  listEl.innerHTML = html;
+  bindFsList(listEl, rerender, afterTrash);
+  applyIndeterminate(listEl);
+  updateToolbar(toolbar, listEl, rerender, afterTrash);
+}
+
 function renderFullScan(r: FullScanResult) {
   const usedPct = r.disk.total ? Math.min(100, Math.round((r.disk.used / r.disk.total) * 100)) : 0;
   fsUsed.textContent = human(r.disk.used);
@@ -424,8 +634,7 @@ function renderFullScan(r: FullScanResult) {
   fsTotal.textContent = human(r.disk.total);
   fsBar.style.width = `${usedPct}%`;
   fsCount.textContent = "";
-  const foot = `<div class="fs-foot muted small">${esc(t("fs.foot", { n: r.scanned.toLocaleString(), t: (r.elapsedMs / 1000).toFixed(1), s: r.skipped.toLocaleString() }))}</div>`;
-  renderFsRows(r.items, false, foot);
+  renderFsRows(r.items, false);
 }
 
 function askTrash(path: string, size: number, after?: () => Promise<void>) {
@@ -447,6 +656,7 @@ function askTrash(path: string, size: number, after?: () => Promise<void>) {
 // ---- 大文件专清 ----
 
 async function startLargeScan() {
+  checkedPaths.clear();
   if (lgRunning) return;
   lgRunning = true;
   lgItems = [];
@@ -484,32 +694,27 @@ async function startLargeScan() {
 function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
   if (items.length === 0) {
     lgList.innerHTML = emptyState(live ? t("large.live") : t("large.empty", { size: human(1 << 30) })) + foot;
+    lgToolbar.classList.add("hidden");
+    lgToolbar.innerHTML = "";
     return;
   }
   const sorted = [...items].sort((a, b) => b.size - a.size).slice(0, 50);
   const maxSize = sorted[0]?.size || 1;
-  lgList.innerHTML =
-    sorted
-      .map(
-        (it, i) => `
-      <div class="fs-row card">
-        <div class="fs-rank">${i + 1}</div>
-        <div class="fs-main">
-          <div class="fs-path" title="${esc(it.path)}">${esc(displayPath(it.path))}</div>
-          <div class="fs-sub">
-            <div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>
-          </div>
-        </div>
-        <div class="fs-size">${human(it.size)}</div>
-        ${it.trashable ? `<button class="btn small danger fs-trash" data-path="${esc(it.path)}" data-size="${it.size}">${esc(t("fs.trash"))}</button>` : ""}
-      </div>`,
-      )
-      .join("") +
-    (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") +
-    foot;
-  lgList.querySelectorAll<HTMLButtonElement>(".fs-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), startLargeScan));
-  });
+  const rows = sorted
+    .map(
+      (it, i) =>
+        fsRowHtml({
+          path: it.path,
+          name: esc(displayPath(it.path)),
+          size: it.size,
+          rank: `${i + 1}`,
+          trashable: it.trashable,
+          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
+        }),
+    )
+    .join("");
+  const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") + foot;
+  renderFsListInto(lgList, lgToolbar, rows + footHtml, () => renderLargeRows(lgItems, false), startLargeScan);
 }
 
 function renderLargeDone(r: LargeScanResult) {
@@ -520,6 +725,7 @@ function renderLargeDone(r: LargeScanResult) {
 // ---- 残留清理 ----
 
 async function startOrphanScan() {
+  checkedPaths.clear();
   if (orRunning) return;
   orRunning = true;
   orItems = [];
@@ -563,25 +769,21 @@ function renderOrphanRows(items: OrphanItem[]) {
   if (items.length === 0) return;
   const sorted = [...items].sort((a, b) => b.size - a.size);
   const maxSize = sorted[0]?.size || 1;
-  orList.innerHTML = sorted
+  const rows = sorted
     .map(
-      (o, i) => `
-      <div class="fs-row card">
-        <div class="fs-rank">${i + 1}</div>
-        <div class="fs-main">
-          <div class="fs-path" title="${esc(o.path)}">${esc(displayPath(o.path))} <span class="tag dim">${esc(kindLabel(o.kind))}</span></div>
-          <div class="fs-sub">
-            <div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((o.size / maxSize) * 100))}%"></div></div>
-          </div>
-        </div>
-        <div class="fs-size">${human(o.size)}</div>
-        <button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}">${esc(t("fs.trash"))}</button>
-      </div>`,
+      (o, i) =>
+        fsRowHtml({
+          path: o.path,
+          name: `${esc(displayPath(o.path))} <span class="tag dim">${esc(kindLabel(o.kind))}</span>`,
+          size: o.size,
+          rank: `${i + 1}`,
+          expandable: true,
+          trashable: o.trashable,
+          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((o.size / maxSize) * 100))}%"></div></div>`,
+        }),
     )
     .join("");
-  orList.querySelectorAll<HTMLButtonElement>(".fs-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), startOrphanScan));
-  });
+  renderFsListInto(orList, orToolbar, rows, () => renderOrphanRows(orItems), startOrphanScan);
 }
 
 // ---- 应用卸载 ----
