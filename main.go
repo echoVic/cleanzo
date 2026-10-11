@@ -2260,6 +2260,9 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 // libraries), which open would launch or mount, are revealed (selected) in
 // their parent folder.
 func revealArgs(path string) ([]string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") { // junk rows show paths this way
+		path = filepath.Join(homeDir(), strings.TrimPrefix(path, "~"))
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err

@@ -1,25 +1,16 @@
+import { initJunk, refreshJunkI18n, markJunkStale, setOpenLeftovers } from "./junk";
+import {
+  $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
+  skeletonRows, setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
+  markRescan, setNavBusy, VIEWS, overlay, modalTitle, modalBody, modalOk, showModal,
+  hideModal, currentModalSeq, setPending, setBeforeModalShow, type View,
+} from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanEvent, CleanResult, CleanSummary, DirItem, DiskStat, FullScanResult, ScanEvent, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
 import { t, categoryName, categoryDescription, isBuiltinCategory, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
-const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
-
-const listEl = $("#list");
-const totalEl = $("#total");
-const totalPrefix = $("#total-prefix");
-const heroSub = $("#hero-sub");
-const heroProgress = $("#hero-progress");
-const heroBar = $("#hero-bar");
-const hero = $(".hero");
-const scanBtn = $<HTMLButtonElement>("#scan");
-const cleanAllBtn = $<HTMLButtonElement>("#clean-all");
-const overlay = $("#overlay");
-const modalTitle = $("#modal-title");
-const modalBody = $("#modal-body");
-const modalOk = $<HTMLButtonElement>("#modal-ok");
-const modalCancel = $<HTMLButtonElement>("#modal-cancel");
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 const appSort = $<HTMLSelectElement>("#app-sort");
 const appSearch = $<HTMLInputElement>("#app-search");
@@ -94,7 +85,6 @@ let lgMinSize = Number(readChoice("cleanzo.largeSize", largeSizes, "1073741824")
 appSort.value = appSortBy;
 lgSize.value = String(lgMinSize);
 
-let categories = [] as Awaited<ReturnType<typeof Cleaner.scan>>;
 let apps: AppInfo[] = [];
 const appBusy = new Set<string>();
 let appsLoading = false;
@@ -103,7 +93,6 @@ let fsResult: FullScanResult | null = null;
 let fsDisk: DiskStat | null = null;
 let fsDiskSeq = 0;
 let fsDiskPending = 0;
-let pending: (() => Promise<void>) | null = null;
 let fsRunning = false;
 let fsItems: BigItem[] = [];
 let lgRunning = false;
@@ -122,73 +111,6 @@ let phClusters: PhotoCluster[] = [];
 let phScanned = 0;
 /** 相似照片扫描是否已经开始过：停掉之后再进这个视图不会自己重新开始 */
 let phTried = false;
-
-// ---- utils ----
-
-const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** 将后端错误码翻成当前语言，普通错误保留原文。 */
-function errText(e: unknown): string {
-  const raw = msg(e);
-  const plain: Record<string, string> = {
-    "in-use": "fs.inUse",
-    blocked: "fs.blocked",
-    gone: "fs.gone",
-    "not-app": "fs.notApp",
-  };
-  if (plain[raw]) return t(plain[raw] as never);
-  try {
-    const parsed = JSON.parse(raw) as { code?: string; args?: unknown[] };
-    if (parsed && typeof parsed.code === "string") {
-      const key: Record<string, string> = {
-        "empty-name": "settings.emptyName",
-        "dup-name": "settings.dupName",
-        "no-paths": "settings.noPaths",
-        "empty-path": "settings.emptyPath",
-        "protected-path": "settings.protectedPath",
-        "dup-path": "settings.dupPath",
-      };
-      const entry = key[parsed.code];
-      if (entry) {
-        const args = parsed.args ?? [];
-        const vars: Record<string, string> = parsed.code === "dup-path"
-          ? { path: String(args[0] ?? ""), owner: String(args[1] ?? ""), name: String(args[2] ?? "") }
-          : { name: String(args[0] ?? ""), path: String(args[0] ?? "") };
-        return t(entry as never, vars);
-      }
-    }
-  } catch {
-    /* 非 JSON 错误按原文显示 */
-  }
-  return raw;
-}
-
-function human(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n;
-  let i = -1;
-  do {
-    v /= 1024;
-    i++;
-  } while (v >= 1024 && i < units.length - 1);
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
-}
-
-const esc = (s: string) =>
-  s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-
-const fmtDate = (sec: number) =>
-  new Date(sec * 1000).toLocaleDateString(currentLang() === "zh" ? "zh-CN" : "en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-
-// ~/xxx for paths under the home directory
-const displayPath = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
 
 // ---- i18n ----
 
@@ -215,7 +137,7 @@ function refreshI18n() {
   applyStaticI18n();
   // 每个已有内容的视图都按新语言重绘，不只是当前这个。垃圾清理页随时可以重绘；
   // 其他扫描中的视图等它结束后自己会重绘
-  render();
+  refreshJunkI18n();
   if (apps.length > 0) renderApps();
   if (catConfig.length > 0) renderCatEditor();
   if (fsDisk) renderDisk(fsDisk);
@@ -243,118 +165,9 @@ langSelect.addEventListener("change", () => {
 
 // ---- 交互态组件 ----
 
-let toastTimer: number | undefined;
-function toast(text: string, kind: "ok" | "err" = "ok") {
-  let el = $<HTMLDivElement>("#toast");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "toast";
-    document.body.appendChild(el);
-  }
-  el.textContent = text;
-  el.className = `toast show ${kind}`;
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => el.classList.remove("show"), 3200);
-}
-
-function setNavBusy(view: View, on: boolean) {
-  navItems.find((b) => b.dataset.view === view)?.classList.toggle("busy", on);
-}
-
-const scanViews: Record<string, View> = {
-  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "or-scan": "orphans",
-  "ac-scan": "appcaches", "ph-scan": "photos",
-};
-
-/** 恢复按钮时仍按当前语言显示「重新扫描」。 */
-function markRescan(btn: HTMLButtonElement) {
-  btn.dataset.i18n = "fs.rescan";
-}
-
-function setBusy(btn: HTMLButtonElement, busy: boolean, label?: string) {
-  const view = scanViews[btn.id];
-  if (view) setNavBusy(view, busy);
-  if (busy) {
-    btn.dataset.orig = btn.textContent ?? "";
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spin"></span>${esc(label ?? t("scan.busy"))}`;
-  } else {
-    btn.disabled = false;
-    // 文案取当前语言：忙碌期间可能切换过语言
-    btn.textContent = btn.dataset.i18n ? t(btn.dataset.i18n as never) : (btn.dataset.orig ?? "");
-  }
-}
-
-/** 正在进行的流式扫描各自的 Channel；扫描期间扫描按钮变成「停止扫描」 */
-const scanChans = new Map<HTMLButtonElement, { close(): void }>();
-const stoppedScans = new Set<HTMLButtonElement>();
-
-/** 扫描开始：按钮保持可点，显示「停止扫描」 */
-function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
-  btn.dataset.orig = btn.textContent ?? "";
-  btn.dataset.started = String(Date.now());
-  btn.disabled = false;
-  btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`;
-  scanChans.set(btn, ch);
-  setNavBusy(scanViews[btn.id]!, true);
-  stoppedScans.delete(btn);
-}
-
-/** 点了「停止扫描」：关闭 Channel，Go 那边的 ctx 随之取消，du、find、sips 都会停下 */
-function stopScan(btn: HTMLButtonElement, immediate = false): boolean {
-  const ch = scanChans.get(btn);
-  if (!ch) return false;
-  // 双击的第二下不算「停止」
-  if (!immediate && Date.now() - Number(btn.dataset.started ?? 0) < 600) return true;
-  scanChans.delete(btn);
-  stoppedScans.add(btn);
-  ch.close();
-  return true;
-}
-
-/** 扫描结束（完成、出错或被停止）：恢复按钮，返回它是不是被用户停止的 */
 const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stopped"))}</div>`;
 
-function endScan(btn: HTMLButtonElement): boolean {
-  scanChans.delete(btn);
-  setBusy(btn, false);
-  return stoppedScans.delete(btn);
-}
-
-function skeletonRows(n: number): string {
-  return Array.from({ length: n }, () => `<div class="skeleton card"></div>`).join("");
-}
-
-function emptyState(text: string): string {
-  return `<div class="empty">${esc(text)}</div>`;
-}
-
-/** 错误态的「重试」按钮：errorState 只产出 HTML，点击由文档级监听找回回调 */
-const retryFns = new Map<string, () => void>();
-let retrySeq = 0;
-document.addEventListener("click", (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>(".retry-btn");
-  const fn = b && retryFns.get(b.dataset.retry ?? "");
-  if (fn) {
-    retryFns.delete(b.dataset.retry!);
-    fn();
-  }
-});
-
-function errorState(text: string, retry?: () => void): string {
-  let btn = "";
-  if (retry) {
-    const id = `r${++retrySeq}`;
-    retryFns.set(id, retry);
-    btn = `<button class="btn ghost retry-btn" data-retry="${id}" type="button">${esc(t("btn.retry"))}</button>`;
-  }
-  return `<div class="empty err"><div class="err-icon">⚠</div><div>${esc(text)}</div>${btn}</div>`;
-}
-
 // ---- 视图切换 ----
-
-const VIEWS = ["clean", "fullscan", "large", "orphans", "appcaches", "photos", "apps", "settings"] as const;
-type View = (typeof VIEWS)[number];
 
 function switchView(v: View) {
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v));
@@ -369,16 +182,6 @@ navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.v
 
 // ---- 垃圾清理 ----
 
-const IDLE_ICON = ` <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-  <circle cx="12" cy="12" r="10.2" stroke="url(#eg-grad)" stroke-width="1.4" stroke-dasharray="3.4 2.8" opacity="0.7"/>
-  <circle cx="12" cy="12" r="6.8" stroke="url(#eg-grad)" stroke-width="1.1" opacity="0.35"/>
-  <path d="M12 2c.9 6 4.4 9.5 10.4 10.4-6 .9-9.5 4.4-10.4 10.4-.9-6-4.4-9.5-10.4-10.4 6-.9 9.5-4.4 10.4-10.4z" fill="url(#eg-grad)"/>
-  <circle cx="17.2" cy="6.6" r="0.9" fill="#fff" opacity="0.85"/>
-  <circle cx="6.6" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
-  <defs><linearGradient id="eg-grad" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
-</svg>`;
-
-/** 未扫描的列表沿用垃圾清理页的引导样式。 */
 function renderIdleScanPages() {
   const guides = [
     { list: fsList, running: fsRunning, key: "fs", start: startFullScan,
@@ -404,446 +207,6 @@ function renderIdleScanPages() {
       </div>`;
     g.list.querySelector("button")?.addEventListener("click", g.start);
   }
-}
-
-/**
- * 垃圾清理页的阶段：idle 尚未扫描；scanning 扫描中（分类逐个出结果）；scanned 可勾选清理；
- * cleaning 清理中（分类逐个推进）；cleaned 清理结束，结果留在页面上，等用户重新扫描。
- */
-type JunkPhase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";
-let phase: JunkPhase = "idle";
-/** 扫描中：还没出结果的分类、最近一次报告的路径 */
-const pendingCats = new Set<string>();
-let scanningPath = "";
-/** 清理中及之后：每个选中分类的进展 */
-type RowState = { state: "waiting" | "cleaning" | "done" | "stopped" | "skipped"; result?: CleanResult };
-const rowStates = new Map<string, RowState>();
-const progress = { total: 0, bytes: 0, name: "", path: "", stopped: false };
-let cleanChan: { close(): void } | null = null;
-
-function initIdleClean() {
-  phase = "idle";
-  renderHero();
-  listEl.classList.remove("grouped");
-  listEl.classList.add("cat-grid", "idle-list");
-  listEl.innerHTML = `
-    <div class="empty-guide">
-      ${IDLE_ICON}
-      <h3>${esc(t("clean.idle.title"))}</h3>
-      <p>${esc(t("clean.idle.desc"))}</p>
-      <button id="idle-scan" class="btn primary big" type="button">${esc(t("clean.idle.cta"))}</button>
-    </div>`;
-  const idleScan = document.getElementById("idle-scan");
-  if (idleScan) idleScan.addEventListener("click", () => scan());
-  scanBtn.textContent = t("scan.start");
-  scanBtn.disabled = false;
-}
-
-/** 扫描中又要求扫描（设置里保存了分类）：这次停下后按新设置重扫 */
-let rescanQueued = false;
-
-/** 扫描：先列出全部分类，每个分类扫完立刻填上结果；扫描按钮在此期间是「停止扫描」 */
-async function scan() {
-  if (phase === "cleaning") return;
-  if (phase === "scanning") {
-    rescanQueued = true;
-    stopScan(scanBtn);
-    return;
-  }
-  phase = "scanning";
-  categories = [];
-  pendingCats.clear();
-  rowStates.clear();
-  scanningPath = "";
-  scannedAt = Date.now();
-  selectedCats.clear();
-  const ch = new Channel<ScanEvent>();
-  setStoppable(scanBtn, ch);
-  listEl.classList.remove("grouped", "idle-list");
-  listEl.classList.add("cat-grid");
-  listEl.innerHTML = skeletonRows(window.innerWidth >= 1600 ? 9 : window.innerWidth >= 1200 ? 8 : 6);
-  renderHero();
-  let failed = false;
-  try {
-    const done = Cleaner.scanStream(ch);
-    for await (const ev of ch) {
-      if (ev.kind === "start") {
-        categories = ev.categories ?? [];
-        categories.forEach((c) => pendingCats.add(c.name));
-        render();
-      } else if (ev.kind === "scanning") {
-        scanningPath = ev.path ?? "";
-        renderHero();
-      } else if (ev.kind === "category" && ev.category) {
-        const c = ev.category;
-        categories = categories.map((x) => (x.name === c.name ? c : x));
-        pendingCats.delete(c.name);
-        // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
-        if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
-        render();
-      }
-    }
-    await done;
-  } catch (e) {
-    if (!stoppedScans.has(scanBtn)) {
-      failed = true;
-      categories = [];
-      totalEl.textContent = t("scan.failed");
-      heroSub.textContent = t("scan.retryHint");
-      cleanAllBtn.disabled = true;
-      listEl.innerHTML = errorState(t("scan.error", { msg: errText(e) }), scan);
-      toast(t("scan.error", { msg: errText(e) }), "err");
-    }
-  } finally {
-    endScan(scanBtn);
-    // 停止时只留下已经扫完的分类
-    categories = categories.filter((c) => !pendingCats.has(c.name));
-    pendingCats.clear();
-    phase = categories.length > 0 ? "scanned" : "idle";
-    if (!failed) render();
-    if (rescanQueued) {
-      rescanQueued = false;
-      void scan();
-    }
-  }
-}
-
-type ScanCat = Awaited<ReturnType<typeof Cleaner.scan>>[number];
-
-const CAT_GROUPS: { key: string; icon: string; color: string; names: string[] }[] = [
-  { key: "group.system", icon: "⚙", color: "#0ea5e9", names: ["caches", "logs", "temp", "trash"] },
-  { key: "group.dev", icon: "⌘", color: "#10b981", names: ["npm", "go", "pip", "homebrew", "xcode"] },
-];
-
-/** 分类所属分组下标；未命中内置分组的自定义分类归入「其他」 */
-function groupIndexOf(name: string): number {
-  const gi = CAT_GROUPS.findIndex((g) => g.names.includes(name));
-  return gi === -1 ? CAT_GROUPS.length : gi;
-}
-
-const selectedCats = new Set<string>();
-/** 这次扫描开始的时间：清空废纸篓时只删那之前就在里面的东西 */
-let scannedAt = 0;
-
-function render() {
-  if (phase === "idle") {
-    initIdleClean();
-    return;
-  }
-  // 扫描刚开始、分类还没列出来：骨架屏留着
-  if (categories.length === 0) {
-    renderHero();
-    return;
-  }
-  listEl.classList.remove("idle-list", "cat-grid");
-  listEl.classList.add("grouped");
-
-  const groups: { key: string; icon: string; color: string; cats: ScanCat[] }[] = [
-    ...CAT_GROUPS.map((g) => ({ ...g, cats: [] as ScanCat[] })),
-    { key: "group.other", icon: "✦", color: "#64748b", names: [], cats: [] as ScanCat[] },
-  ];
-  categories.forEach((c) => groups[c.builtin ? groupIndexOf(c.name) : CAT_GROUPS.length]?.cats.push(c));
-  listEl.innerHTML = groups
-    .filter((g) => g.cats.length > 0)
-    .map((g) => groupHtml(g.key, g.icon, g.color, g.cats))
-    .join("");
-
-  listEl.querySelectorAll<HTMLInputElement>("input[data-cat]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const n = cb.dataset.cat!;
-      if (cb.checked) selectedCats.add(n);
-      else selectedCats.delete(n);
-      updateSelection();
-    });
-  });
-  listEl.querySelectorAll<HTMLButtonElement>(".cat-grant").forEach((b) => {
-    b.addEventListener("click", () => {
-      Cleaner.openFullDiskAccessSettings().catch((e) => toast(t("grant.fail", { msg: errText(e) }), "err"));
-    });
-  });
-  renderHero();
-  updateSelection();
-  if (phase !== "scanning") scanBtn.textContent = t("fs.rescan");
-  scanBtn.disabled = phase === "cleaning";
-}
-
-/** 横幅：按阶段显示已发现的空间、清理进度或清理结果，以及对应的主按钮 */
-function renderHero() {
-  hero.classList.toggle("compact", phase === "idle");
-  heroProgress.classList.toggle("hidden", phase !== "cleaning" && phase !== "cleaned");
-  if (phase !== "cleaning" && phase !== "cleaned") heroBar.style.width = "0";
-  cleanAllBtn.classList.toggle("danger", phase !== "cleaning" && phase !== "cleaned");
-  cleanAllBtn.classList.toggle("ghost", phase === "cleaning");
-  cleanAllBtn.classList.toggle("primary", phase === "cleaned");
-  const pct = progress.total > 0 ? Math.min(100, (progress.bytes / progress.total) * 100) : 100;
-  if (phase === "idle") {
-    totalPrefix.textContent = t("hero.ready");
-    totalEl.textContent = "--";
-    heroSub.textContent = t("clean.idleSub");
-    cleanAllBtn.textContent = t("clean.now");
-    cleanAllBtn.disabled = true;
-  } else if (phase === "scanning") {
-    const found = categories.filter((c) => !pendingCats.has(c.name)).reduce((s, c) => s + c.size, 0);
-    totalPrefix.textContent = t("scan.found");
-    totalEl.textContent = categories.length > pendingCats.size ? human(found) : "--";
-    heroSub.textContent = scanningPath ? t("scan.at", { path: displayPath(scanningPath) }) : t("scan.hero");
-    cleanAllBtn.textContent = t("clean.now");
-    cleanAllBtn.disabled = true;
-  } else if (phase === "scanned") {
-    totalPrefix.textContent = t("clean.foundPrefix");
-    totalEl.textContent = human(categories.reduce((s, c) => s + c.size, 0));
-    cleanAllBtn.textContent = t("clean.now");
-  } else if (phase === "cleaning") {
-    const cur = categories.find((c) => c.name === progress.name);
-    const where = cur ? catTitle(cur) + (progress.path ? ` · ${baseName(progress.path)}` : "") : "";
-    totalPrefix.textContent = t("clean.progress.prefix");
-    totalEl.textContent = human(progress.bytes);
-    heroSub.textContent = where ? t("clean.progress.sub", { total: human(progress.total), where }) : t("clean.progress.preparing", { total: human(progress.total) });
-    heroBar.style.width = `${pct}%`;
-    cleanAllBtn.textContent = t("clean.stop");
-    cleanAllBtn.disabled = progress.stopped;
-  } else {
-    const results = [...rowStates.values()].flatMap((r) => (r.result ? [r.result] : []));
-    const failed = results.filter((r) => r.failed.length > 0).map((r) => {
-      const c = categories.find((x) => x.name === r.name);
-      return c ? catTitle(c) : r.name;
-    });
-    totalPrefix.textContent = progress.stopped ? t("clean.stoppedPrefix") : t("clean.donePrefix");
-    totalEl.textContent = human(progress.bytes);
-    heroSub.textContent = [
-      // 停在半路时，已经做完的分类照常汇总；没有做完的就说明其余没有清理
-      progress.stopped && results.length === 0
-        ? t("clean.stoppedSub")
-        : cleanDoneText({
-            results,
-            totalFreed: results.reduce((s, r) => s + r.freed, 0),
-            totalTrashed: results.reduce((s, r) => s + r.trashed, 0),
-            inUse: results.reduce((s, r) => s + r.inUse, 0),
-            errors: [],
-          }),
-      progress.stopped && results.length > 0 ? t("clean.stoppedSub") : "",
-      failed.length > 0 ? t("clean.all.partial", { names: failed.join(t("list.sep")) }) : "",
-    ]
-      .filter(Boolean)
-      .join(t("phrase.sep"));
-    heroBar.style.width = `${progress.stopped ? pct : 100}%`;
-    cleanAllBtn.textContent = t("fs.rescan");
-    cleanAllBtn.disabled = false;
-  }
-}
-
-/** 勾选变化时联动：横幅「已选择」、各分组小计、立即清理按钮可用态 */
-function updateSelection() {
-  const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
-  const total = sel.reduce((s, c) => s + c.size, 0);
-  if (phase === "scanned") {
-    heroSub.textContent = t("clean.selected", { size: human(total) });
-    cleanAllBtn.disabled = sel.length === 0;
-  }
-  listEl.querySelectorAll<HTMLElement>(".group-sel").forEach((el) => {
-    const names = (el.dataset.names ?? "").split(",").filter(Boolean);
-    el.textContent = groupSummary(categories.filter((c) => names.includes(c.name)));
-  });
-}
-
-/** 分组小计：组里还有分类在扫描时只说「扫描中」 */
-function groupSummary(cats: ScanCat[]): string {
-  if (cats.some((c) => pendingCats.has(c.name))) return t("cat.scanning");
-  const total = cats.reduce((s, c) => s + c.size, 0);
-  const sel = cats.filter((c) => selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
-  return t("group.summary", { total: human(total), sel: human(sel) });
-}
-
-const CAT_ICONS: Record<string, { icon: string; color: string }> = {
-  caches: { icon: "▦", color: "#10b981" },
-  logs: { icon: "≣", color: "#0ea5e9" },
-  temp: { icon: "⏱", color: "#f59e0b" },
-  trash: { icon: "🗑", color: "#64748b" },
-  npm: { icon: "⬢", color: "#8b5cf6" },
-  go: { icon: "🐹", color: "#22c55e" },
-  pip: { icon: "🐍", color: "#eab308" },
-  homebrew: { icon: "🍺", color: "#f97316" },
-  xcode: { icon: "🔨", color: "#3b82f6" },
-};
-const fallbackIcon = { icon: "🧹", color: "#64748b" };
-
-function groupHtml(key: string, icon: string, color: string, cats: ScanCat[]): string {
-  const names = cats.map((c) => c.name).join(",");
-  return `
-    <details class="cat-group" open>
-      <summary>
-        <div class="tile group-tile" style="--c:${color}"><span>${icon}</span></div>
-        <span class="group-name">${esc(t(key as never))}</span>
-        <span class="group-sel" data-names="${esc(names)}">${esc(groupSummary(cats))}</span>
-        <span class="group-caret" aria-hidden="true">▾</span>
-      </summary>
-      <div class="group-rows">${cats.map(rowHtml).join("")}</div>
-    </details>`;
-}
-
-/** 分类标题：未改动的内置分类用本地化名称，其余用用户起的名字 */
-const catTitle = (c: ScanCat) => (c.builtin ? categoryName(c.name) : c.name);
-
-const grantBtn = () => `<button class="btn small ghost cat-grant" type="button">${esc(t("cat.grant"))}</button>`;
-
-/** 分类右侧的状态：没有权限、受保护、未找到、很干净，或大小与清理建议 */
-function catNote(c: ScanCat): string {
-  if (c.size > 0) {
-    return c.risk === "moderate"
-      ? `<span class="cat-note-text caution">${esc(t("cat.sizeCaution", { size: human(c.size) }))}</span>`
-      : `<span class="cat-note-text">${esc(t("cat.sizeSafe", { size: human(c.size) }))}</span>`;
-  }
-  if (c.denied.length > 0) return `<span class="tag warn">${esc(t("cat.denied"))}</span>${grantBtn()}`;
-  if (c.blocked.length > 0) return `<span class="tag dim">${esc(t("cat.blocked"))}</span>`;
-  if (c.missing.length > 0) return `<span class="tag dim">${esc(t("cat.missing"))}</span>`;
-  return `<span class="tag ok">${esc(t("cat.cleanState"))}</span>`;
-}
-
-/** 清理中及之后，一个分类在这次清理里的进展 */
-function cleanStateNote(r: RowState): string {
-  const spin = (text: string) => `<span class="cat-note-text muted"><span class="spin"></span> ${esc(text)}</span>`;
-  if (r.state === "waiting") return `<span class="cat-note-text muted">${esc(t("cat.waiting"))}</span>`;
-  if (r.state === "cleaning") return spin(t("cat.cleaning"));
-  if (r.state === "stopped") return `<span class="tag dim">${esc(t("cat.stopped"))}</span>`;
-  if (r.state === "skipped") return `<span class="tag dim">${esc(t("cat.notCleaned"))}</span>`;
-  const res = r.result!;
-  const parts: string[] = [];
-  if (res.freed > 0) parts.push(t("cat.freed", { size: human(res.freed) }));
-  if (res.trashed > 0) parts.push(t("cat.trashed", { size: human(res.trashed) }));
-  const done = `<span class="cat-note-text ok">✓ ${esc(parts.join(t("phrase.sep")) || t("cat.cleanedNothing"))}</span>`;
-  return res.failed.length > 0 ? `${done}<span class="tag warn">${esc(t("cat.failedN", { n: res.failed.length }))}</span>` : done;
-}
-
-function rowHtml(c: ScanCat): string {
-  const meta = c.builtin && Object.hasOwn(CAT_ICONS, c.name) ? CAT_ICONS[c.name]! : fallbackIcon;
-  const scanning = pendingCats.has(c.name);
-  const cleanState = rowStates.get(c.name);
-  const empty = c.size === 0;
-  const caution = !empty && c.risk === "moderate";
-  const checked = selectedCats.has(c.name);
-  // 只有扫描完、尚未清理时能勾选；清理中及之后，没参与这次清理的分类变淡
-  const locked = phase !== "scanned" || empty;
-  const dim = (phase === "cleaning" || phase === "cleaned") && !cleanState;
-  const note = scanning
-    ? `<span class="cat-note-text muted"><span class="spin"></span> ${esc(t("cat.scanning"))}</span>`
-    : cleanState
-      ? cleanStateNote(cleanState)
-      : catNote(c);
-  const inUse = cleanState?.result ? cleanState.result.inUse : c.inUse;
-  // 明细是扫描时的样子；清理过的分类，那些条目已经删掉或移走了
-  const showTops = !scanning && (!cleanState || cleanState.state === "skipped");
-  const trashTag = c.permanent ? "" : `<span class="tag dim">${esc(t("cat.toTrash"))}</span>`;
-  const subs = [
-    !scanning && inUse > 0 ? esc(t("cat.inUse", { n: inUse })) : "",
-    !scanning && !empty && c.denied.length > 0 ? `${esc(t("cat.deniedPart"))}${grantBtn()}` : "",
-  ]
-    .filter(Boolean)
-    .map((s) => `<div class="cat-sub muted">${s}</div>`)
-    .join("");
-  const tops = (c.top ?? [])
-    .map(
-      (item) =>
-        `<div class="top-item"><span class="top-name">${esc(item.name)}</span><span class="top-path muted">${esc(item.path)}</span><span class="top-size">${human(item.size)}</span></div>`,
-    )
-    .join("");
-  return `
-    <div class="cat-row${empty && !scanning ? " is-empty" : ""}${caution ? " caution" : ""}${dim ? " is-dim" : ""}">
-      <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${locked ? "disabled" : ""} ${checked && !scanning ? "checked" : ""}></label>
-      <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
-      <div class="cat-info">
-        <div class="cat-name">${esc(catTitle(c))}${trashTag}</div>
-        <div class="cat-desc muted">${esc(c.builtin ? categoryDescription(c.name, c.description) : c.description)}</div>
-        ${subs}
-      </div>
-      <div class="cat-note">${note}</div>
-      ${tops && showTops ? `<details class="cat-details"><summary>${esc(t("cat.tops"))}</summary>${tops}</details>` : ""}
-    </div>`;
-}
-
-/**
- * 清理：横幅显示进度，选中的分类依次「等待中 → 清理中 → 结果」；结束后结果留在页面上，
- * 横幅的按钮变成「重新扫描」。清理中按钮是「停止清理」：处理完手头这一项就停。
- */
-async function clean(sel: ScanCat[]) {
-  phase = "cleaning";
-  setNavBusy("clean", true);
-  rowStates.clear();
-  sel.forEach((c) => rowStates.set(c.name, { state: "waiting" }));
-  Object.assign(progress, { total: sel.reduce((s, c) => s + c.size, 0), bytes: 0, name: "", path: "", stopped: false });
-  const ch = new Channel<CleanEvent>();
-  cleanChan = ch;
-  render();
-  try {
-    const done = Cleaner.cleanStream(sel.map((c) => c.name), scannedAt, ch);
-    for await (const ev of ch) {
-      if (ev.kind === "start") {
-        rowStates.set(ev.name, { state: "cleaning" });
-        Object.assign(progress, { name: ev.name, path: "" });
-        render();
-      } else if (ev.kind === "checking" || ev.kind === "removed") {
-        Object.assign(progress, { name: ev.name, path: ev.path ?? "" });
-        if (ev.kind === "removed") progress.bytes = ev.bytes ?? 0;
-        renderHero();
-      } else if (ev.kind === "done" && ev.result) {
-        rowStates.set(ev.name, { state: "done", result: ev.result });
-        progress.bytes = ev.bytes ?? 0;
-        render();
-      }
-    }
-    await done;
-  } catch (e) {
-    if (!progress.stopped) toast(t("clean.fail", { msg: errText(e) }), "err");
-  } finally {
-    cleanChan = null;
-    // 停在半路的分类标「已停止」，还没轮到的标「未清理」；一个都没打断就算清理完成
-    let interrupted = false;
-    rowStates.forEach((r) => {
-      if (r.state === "cleaning") r.state = "stopped";
-      else if (r.state === "waiting") r.state = "skipped";
-      else return;
-      interrupted = true;
-    });
-    progress.stopped = interrupted;
-    phase = "cleaned";
-    setNavBusy("clean", false);
-    render();
-  }
-}
-
-function stopClean() {
-  if (!cleanChan) return;
-  progress.stopped = true;
-  cleanChan.close();
-  renderHero();
-}
-
-/** 清理结果：释放了多少、移到废纸篓多少、跳过了几项 */
-function cleanDoneText(res: CleanSummary): string {
-  const parts: string[] = [];
-  if (res.totalFreed > 0) parts.push(t("clean.done.freed", { size: human(res.totalFreed) }));
-  if (res.totalTrashed > 0) parts.push(t("clean.done.trashed", { size: human(res.totalTrashed) }));
-  if (res.inUse > 0) parts.push(t("clean.done.inUse", { n: res.inUse }));
-  return parts.length > 0 ? parts.join(t("phrase.sep")) : t("clean.nothing");
-}
-
-function askCleanAll() {
-  const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
-  if (sel.length === 0) return;
-  // 内置垃圾直接删除；用户自定义的分类移到废纸篓
-  const sum = (cs: ScanCat[]) => human(cs.reduce((s, c) => s + c.size, 0));
-  const names = (cs: ScanCat[]) => cs.map(catTitle).join(t("list.sep"));
-  const del = sel.filter((c) => c.permanent);
-  const keep = sel.filter((c) => !c.permanent);
-  const lines = [
-    del.length > 0 ? t("clean.body.delete", { size: sum(del), names: names(del) }) : "",
-    keep.length > 0 ? t("clean.body.trash", { size: sum(keep), names: names(keep) }) : "",
-    t("clean.body.inUse"),
-  ].filter(Boolean);
-  pending = () => clean(sel);
-  modalTitle.textContent = t("clean.sel.title");
-  modalBody.innerHTML = lines.map((l) => `<p>${esc(l)}</p>`).join("");
-  modalOk.textContent = t("clean.confirm");
-  showModal();
 }
 
 // ---- 全盘扫描 ----
@@ -1219,7 +582,7 @@ function updateToolbar(ctx: ListCtx) {
 async function trashChecked(ctx: ListCtx) {
   const paths = pickedPaths(ctx.st);
   if (paths.length === 0 || ctx.st.busy) return;
-  pending = async () => {
+  setPending(async () => {
     ctx.st.busy = true;
     ctx.rerender();
     try {
@@ -1236,7 +599,7 @@ async function trashChecked(ctx: ListCtx) {
       ctx.st.busy = false;
       ctx.rerender();
     }
-  };
+  });
   modalTitle.textContent = t("fs.trashChecked.title");
   modalBody.textContent = t("fs.trashChecked.body", { n: paths.length });
   modalOk.textContent = t("fs.trash.confirm");
@@ -1312,7 +675,7 @@ const failText = (e: unknown) => t("fs.actionFail", { msg: errText(e) });
 
 function askTrash(path: string, size: number, ctx: ListCtx) {
   if (ctx.st.busy || isGone(ctx.st, path)) return;
-  pending = async () => {
+  setPending(async () => {
     ctx.st.busy = true;
     ctx.rerender();
     try {
@@ -1325,7 +688,7 @@ function askTrash(path: string, size: number, ctx: ListCtx) {
       ctx.st.busy = false;
       ctx.rerender();
     }
-  };
+  });
   modalTitle.textContent = t("fs.trash.title");
   modalBody.textContent = t("fs.trash.body", { path: displayPath(path), size: human(size) });
   modalOk.textContent = t("fs.trash.confirm");
@@ -1548,8 +911,6 @@ function renderOrphanRows(items: OrphanItem[]) {
 }
 
 // ---- 应用缓存（按应用拆分） ----
-
-const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
 async function startAppCacheScan() {
   if (acRunning) return;
@@ -1933,7 +1294,7 @@ function removePhotos(removed: string[]) {
 function askTrashPhotos() {
   const paths = [...lists.photos.sel].filter((p) => !isGone(lists.photos, p));
   if (paths.length === 0 || lists.photos.busy) return;
-  pending = async () => {
+  setPending(async () => {
     lists.photos.busy = true;
     renderPhotoClusters();
     try {
@@ -1951,7 +1312,7 @@ function askTrashPhotos() {
       lists.photos.busy = false;
       renderPhotoClusters();
     }
-  };
+  });
   modalTitle.textContent = t("photos.clean");
   modalBody.textContent = t("photos.trashBody", { n: paths.length });
   modalOk.textContent = t("fs.trash.confirm");
@@ -2024,10 +1385,10 @@ async function showUninstallDetail(path: string) {
   modalOk.disabled = true;
   modalOk.textContent = t("apps.wait");
   showModal();
-  const seq = modalSeq;
+  const seq = currentModalSeq();
   try {
     const d = await Cleaner.appUninstallDetail(path);
-    if (seq !== modalSeq) return; // 这个框已经关掉或换成了别的
+    if (seq !== currentModalSeq()) return; // 这个框已经关掉或换成了别的
     modalTitle.textContent = t("apps.title", { name: d.app.name });
     const rows = d.items
       .map(
@@ -2040,11 +1401,11 @@ async function showUninstallDetail(path: string) {
     modalBody.innerHTML = `<div class="detail-list">${rows}</div>
       <p class="warn-text">${esc(note)}</p>`;
     if (d.app.running) {
-      pending = null;
+      setPending(null);
       modalOk.textContent = t("btn.close");
       return;
     }
-    pending = async () => {
+    setPending(async () => {
       if (appBusy.has(d.app.path)) return;
       appBusy.add(d.app.path);
       setNavBusy("apps", true);
@@ -2068,15 +1429,15 @@ async function showUninstallDetail(path: string) {
         setNavBusy("apps", appsLoading || appBusy.size > 0);
         renderApps();
       }
-    };
+    });
     modalOk.textContent = t("apps.confirm");
   } catch (e) {
-    if (seq !== modalSeq) return;
+    if (seq !== currentModalSeq()) return;
     modalBody.innerHTML = `<div class="err-inline">${esc(t("apps.analyzeFail", { msg: errText(e) }))}</div>`;
-    pending = null;
+    setPending(null);
     modalOk.textContent = t("btn.close");
   } finally {
-    if (seq === modalSeq) modalOk.disabled = false;
+    if (seq === currentModalSeq()) modalOk.disabled = false;
   }
 }
 
@@ -2151,7 +1512,7 @@ saveCatsBtn.addEventListener("click", async () => {
     await Cleaner.saveCategories(catConfig);
     settingsStatus.textContent = t("settings.saved");
     toast(t("settings.saved"));
-    await scan();
+    markJunkStale();
   } catch (e) {
     settingsStatus.textContent = t("settings.saveFail", { msg: errText(e) });
     settingsStatus.classList.add("err");
@@ -2161,31 +1522,8 @@ saveCatsBtn.addEventListener("click", async () => {
   }
 });
 
-// ---- 弹窗 ----
-
-/** 每次打开或关闭确认框都换一个编号；晚到的异步结果凭它判断这个框是否还是自己的 */
-let modalSeq = 0;
-function showModal() {
-  closePhotoViewer();
-  modalSeq++;
-  overlay.classList.remove("hidden");
-  modalOk.focus();
-}
-function hideModal() {
-  modalSeq++;
-  overlay.classList.add("hidden");
-  modalOk.disabled = false; // 取消一次还在分析的卸载，不能让之后的确认框都点不动
-  pending = null;
-}
-
 // ---- 事件 ----
 
-scanBtn.addEventListener("click", () => stopScan(scanBtn) || scan());
-cleanAllBtn.addEventListener("click", () => {
-  if (phase === "cleaning") stopClean();
-  else if (phase === "cleaned") scan();
-  else askCleanAll();
-});
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
 lgScanBtn.addEventListener("click", () => stopScan(lgScanBtn) || startLargeScan());
 orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
@@ -2198,12 +1536,6 @@ appSort.addEventListener("change", () => {
   if (!appsLoading) renderApps();
 });
 lgSize.addEventListener("change", changeLargeSize);
-modalOk.addEventListener("click", async () => {
-  const fn = pending;
-  hideModal();
-  if (fn) await fn();
-});
-modalCancel.addEventListener("click", hideModal);
 document.addEventListener("keydown", (e) => {
   if (viewerPhoto) {
     if (e.key === "Escape") closePhotoViewer();
@@ -2222,12 +1554,14 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
 });
-overlay.addEventListener("click", (e) => {
-  if (e.target === overlay) hideModal();
-});
 
+setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
-initIdleClean();
+initJunk();
+setOpenLeftovers(() => {
+  switchView("orphans");
+  if (orItems.length === 0 && !orRunning) void startOrphanScan();
+});
 renderIdleScanPages();
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()

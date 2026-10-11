@@ -915,3 +915,14 @@ func TestClaimSet(t *testing.T) {
 		t.Fatal("clone shares state")
 	}
 }
+
+// TestRevealArgsExpandsHome: junk rows show and hand back paths as "~/…".
+func TestRevealArgsExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, "Library", "Caches", "x"))
+	args, err := revealArgs("~/Library/Caches/x")
+	if err != nil || !slices.Equal(args, []string{filepath.Join(home, "Library", "Caches", "x")}) {
+		t.Fatalf("revealArgs(~/…) = %q, %v", args, err)
+	}
+}

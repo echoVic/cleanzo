@@ -8,7 +8,8 @@
     "generate": "mygo generate",
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:web": "bun test tests/"
   },
   "dependencies": {
     "mygo-runtime": "^0.3.6"
