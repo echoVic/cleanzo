@@ -1079,7 +1079,7 @@ async function startLargeScan() {
   const ch = new Channel<import("./mygo").LargeScanEvent>();
   setStoppable(lgScanBtn, ch);
   try {
-    const done = Cleaner.largeScan(ch);
+    const done = Cleaner.largeScan(1 << 30, ch);
     for await (const ev of ch) {
       if (ev.kind === "item" && ev.path) {
         lgCurrent.textContent = t("fs.scanning", { path: displayPath(ev.path) });

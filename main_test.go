@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -2269,5 +2273,290 @@ func TestCleanStreamStops(t *testing.T) {
 	left, _ := os.ReadDir(one)
 	if removed != 1 || len(left) != 2 || !slices.Equal(started, []string{"one"}) || !exists(filepath.Join(two, "z")) {
 		t.Fatalf("removed %d, %d left, started %v", removed, len(left), started)
+	}
+}
+
+// TestCleanPathsReportsRemoved keeps the caller's paths for removed rows.
+func TestCleanPathsReportsRemoved(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	moved := filepath.Join(home, "Library", "Caches", "Moved") + string(os.PathSeparator)
+	mustMkdir(t, moved)
+	writeFile(t, filepath.Join(moved, "data"), 1024)
+	missing := filepath.Join(home, "Library", "Caches", "Missing")
+	blocked := filepath.Join(home, "Library")
+	got := Cleaner{}.CleanPaths([]string{moved, missing, blocked})
+	if !slices.Equal(got.Removed, []string{moved, missing}) {
+		t.Fatalf("Removed = %q, want %q", got.Removed, []string{moved, missing})
+	}
+	if !exists(blocked) {
+		t.Fatal("blocked path was removed")
+	}
+}
+
+// TestPathErrorCodes checks errors the UI translates for trash and reveal.
+func TestPathErrorCodes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	blocked := filepath.Join(home, "Library")
+	mustMkdir(t, blocked)
+	if _, err := (Cleaner{}).TrashPath(blocked); !errors.Is(err, errBlocked) {
+		t.Fatalf("blocked error = %v", err)
+	}
+	missing := filepath.Join(home, "missing.png")
+	if _, err := (Cleaner{}).TrashPath(missing); !errors.Is(err, errGone) {
+		t.Fatalf("missing trash error = %v", err)
+	}
+	if err := (Cleaner{}).RevealInFinder(missing); !errors.Is(err, errGone) {
+		t.Fatalf("missing reveal error = %v", err)
+	}
+}
+
+// TestSaveCategoriesErrorCodes checks validation order and translation arguments.
+func TestSaveCategoriesErrorCodes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "junk")
+	blocked := filepath.Join(home, "Library")
+	tests := []struct {
+		code string
+		args []string
+		cfg  []CategoryConfig
+	}{
+		{"empty-name", nil, []CategoryConfig{{Name: " "}}},
+		{"dup-name", []string{"Junk"}, []CategoryConfig{{Name: "junk", Paths: []string{path}}, {Name: "Junk"}}},
+		{"no-paths", []string{"junk"}, []CategoryConfig{{Name: "junk"}}},
+		{"empty-path", []string{"junk"}, []CategoryConfig{{Name: "junk", Paths: []string{" "}}}},
+		{"protected-path", []string{blocked}, []CategoryConfig{{Name: "junk", Enabled: true, Paths: []string{blocked}}}},
+		{"dup-path", []string{path + "/", "first", "second"}, []CategoryConfig{{Name: "first", Paths: []string{path}}, {Name: "second", Paths: []string{path + "/"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			err := (Cleaner{}).SaveCategories(tt.cfg)
+			var coded codeError
+			if !errors.As(err, &coded) {
+				t.Fatalf("error = %v, want codeError", err)
+			}
+			if coded.Code != tt.code || !slices.Equal(coded.Args, tt.args) {
+				t.Fatalf("error = %+v, want %s %q", coded, tt.code, tt.args)
+			}
+			var decoded codeError
+			if err := json.Unmarshal([]byte(coded.Error()), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Code != tt.code || !slices.Equal(decoded.Args, tt.args) {
+				t.Fatalf("JSON error = %+v", decoded)
+			}
+		})
+	}
+}
+
+// TestUninstallAppNotAppCode rejects paths outside the app directories.
+func TestUninstallAppNotAppCode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := makeApp(t, filepath.Join(home, "Downloads"), "Fake.app", "dev.cleanzo.fake", "Fake")
+	got := Cleaner{}.UninstallApp(path)
+	if !slices.Equal(got.Failed, []string{path + ": not-app"}) {
+		t.Fatalf("Failed = %q", got.Failed)
+	}
+}
+
+// TestDiskReportsCapacity gets disk usage without scanning files.
+func TestDiskReportsCapacity(t *testing.T) {
+	got := Cleaner{}.Disk()
+	if got.Total <= 0 || got.Free <= 0 {
+		t.Fatalf("Disk = %+v, want positive total and free", got)
+	}
+}
+
+// TestOrphanItemsReportDirectories distinguishes expandable folders from files.
+func TestOrphanItemsReportDirectories(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	folder := filepath.Join(home, "Library", "Caches", "ZzxqAbandonedFolder")
+	mustMkdir(t, folder)
+	writeFile(t, filepath.Join(folder, "data"), 2<<20)
+	file := filepath.Join(home, "Library", "Preferences", "ZzxqAbandonedFile.plist")
+	writeFile(t, file, 0)
+	if err := os.Truncate(file, 2<<20); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := collectOrphans(context.Background(), nil)
+	found := map[string]bool{}
+	for _, item := range items {
+		if item.Path == folder || item.Path == file {
+			found[item.Path] = true
+			if item.IsDir != (item.Path == folder) {
+				t.Errorf("item = %+v", item)
+			}
+		}
+	}
+	if !found[folder] || !found[file] {
+		t.Fatalf("missing leftover: %+v", items)
+	}
+}
+
+// TestMarkRunning matches bundle IDs without case and bundle paths exactly.
+func TestMarkRunning(t *testing.T) {
+	apps := []AppInfo{
+		{BundleID: "COM.EXAMPLE.EDITOR", Path: "/Applications/Editor.app"},
+		{BundleID: "dev.other.preview", Path: "/Applications/Preview.app"},
+		{BundleID: "dev.other.idle", Path: "/Applications/Idle.app"},
+	}
+	markRunning(apps, map[string]bool{"com.example.editor": true}, []string{"/Applications/Preview.app"})
+	for i, want := range []bool{true, true, false} {
+		if apps[i].Running != want {
+			t.Errorf("apps[%d].Running = %v, want %v", i, apps[i].Running, want)
+		}
+	}
+	markRunning(apps, nil, nil)
+	for _, app := range apps {
+		if app.Running {
+			t.Errorf("app still marked running: %+v", app)
+		}
+	}
+}
+
+// TestAppNamesByBundleID reads display names once across app directories.
+func TestAppNamesByBundleID(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	makeApp(t, first, "Editor.app", "COM.EXAMPLE.EDITOR", "Editor Display")
+	makeApp(t, second, "Viewer.app", "com.example.viewer", "Viewer Display")
+	makeApp(t, first, "Fallback.app", "com.example.fallback", "")
+	makeApp(t, first, "NoID.app", "", "No ID")
+	mustMkdir(t, filepath.Join(first, "Ignored"))
+	got := appNamesByBundleID([]string{first, second, filepath.Join(first, "missing")})
+	want := map[string]string{"com.example.editor": "Editor Display", "com.example.viewer": "Viewer Display", "com.example.fallback": "Fallback"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("names = %v, want %v", got, want)
+	}
+}
+
+// TestScanAppCachesIncludesAppName matches cache folders to installed bundles.
+func TestScanAppCachesIncludesAppName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	makeApp(t, filepath.Join(home, "Applications"), "Named.app", "dev.zzxq.cachename", "Cache Display")
+	caches := filepath.Join(home, "Library", "Caches")
+	mustMkdir(t, filepath.Join(caches, "DEV.ZZXQ.CACHENAME"))
+	mustMkdir(t, filepath.Join(caches, "ZzxqUnownedCache"))
+	got := Cleaner{}.ScanAppCaches()
+	if len(got) != 2 {
+		t.Fatalf("caches = %+v", got)
+	}
+	for _, item := range got {
+		want := ""
+		if item.Name == "DEV.ZZXQ.CACHENAME" {
+			want = "Cache Display"
+		}
+		if item.App != want {
+			t.Errorf("cache %s app = %q, want %q", item.Name, item.App, want)
+		}
+	}
+}
+
+// TestLargeScanThreshold selects large files and clamps small thresholds.
+func TestLargeScanThreshold(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "Downloads")
+	for name, size := range map[string]int64{"large": 60 << 20, "small": 10 << 20, "exact": 50 << 20} {
+		path := filepath.Join(dir, name)
+		writeFile(t, path, 0)
+		if err := os.Truncate(path, size); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, threshold := range []int64{50 << 20, 1} {
+		t.Run(strconv.FormatInt(threshold, 10), func(t *testing.T) {
+			found := map[string]bool{}
+			got := largeScan(context.Background(), threshold, func(file LargeFile) {
+				if filepath.Dir(file.Path) == dir {
+					found[filepath.Base(file.Path)] = true
+				}
+			})
+			if got.Threshold != 50<<20 {
+				t.Errorf("threshold = %d, want %d", got.Threshold, 50<<20)
+			}
+			if !maps.Equal(found, map[string]bool{"large": true, "exact": true}) {
+				t.Fatalf("files = %v", found)
+			}
+		})
+	}
+}
+
+// TestCollectLargeScanKeepsTwoHundred checks the expanded result cap.
+func TestCollectLargeScanKeepsTwoHundred(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "Downloads")
+	for i := range 201 {
+		path := filepath.Join(dir, fmt.Sprintf("large-%03d", i))
+		writeFile(t, path, 0)
+		if err := os.Truncate(path, (1<<40)+int64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, _, _ := collectLargeScan(context.Background(), 1<<40, nil)
+	if len(items) != 200 {
+		t.Fatalf("file count = %d, want 200", len(items))
+	}
+	for i := 1; i < len(items); i++ {
+		if items[i-1].Size < items[i].Size {
+			t.Fatal("files are not sorted by size")
+		}
+	}
+}
+
+// TestPhotoPreviewResizesToJPEG provides a larger bounded preview of a photo.
+func TestPhotoPreviewResizesToJPEG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "photo.PNG")
+	writeDocPNG(t, path, 2400, 1200, [][4]int{{200, 100, 1800, 900}})
+	url, err := (Cleaner{}).PhotoPreview(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "data:image/jpeg;base64,"
+	if !strings.HasPrefix(url, prefix) {
+		t.Fatalf("preview is not a JPEG data URL")
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(url, prefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() != 1600 || bounds.Dy() != 800 {
+		t.Fatalf("preview bounds = %v, want 1600x800", bounds)
+	}
+}
+
+// TestPhotoPreviewPathErrors refuses outside paths and unsupported entries.
+func TestPhotoPreviewPathErrors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	writeFile(t, outside, 1)
+	unsupported := filepath.Join(home, "file.txt")
+	writeFile(t, unsupported, 1)
+	folder := filepath.Join(home, "folder.png")
+	mustMkdir(t, folder)
+	link := filepath.Join(home, "link.png")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{outside, unsupported, folder, link} {
+		if _, err := (Cleaner{}).PhotoPreview(path); !errors.Is(err, errBlocked) {
+			t.Errorf("PhotoPreview(%q) error = %v, want blocked", path, err)
+		}
+	}
+	if _, err := (Cleaner{}).PhotoPreview(filepath.Join(home, "missing.png")); !errors.Is(err, errGone) {
+		t.Fatalf("missing error = %v, want gone", err)
 	}
 }

@@ -7,6 +7,8 @@ import { call, type Channel } from "mygo-runtime";
 /** AppCacheItem is one application's cache footprint under ~/Library/Caches. */
 export interface AppCacheItem {
   name: string;
+  /** the installed app whose bundle ID names the folder; empty if none */
+  app: string;
   path: string;
   size: number;
   files: number;
@@ -23,6 +25,8 @@ export interface AppInfo {
   size: number;
   /** unix seconds; 0 = never opened */
   lastOpened: number;
+  /** its bundle ID or bundle is running */
+  running: boolean;
 }
 
 /** BigItem is a large directory discovered by the full scan. */
@@ -196,6 +200,7 @@ export interface OrphanItem {
   size: number;
   kind: string;
   trashable: boolean;
+  isDir: boolean;
 }
 
 /** PathsCleanResult reports what CleanPaths moved to the Trash. */
@@ -206,6 +211,8 @@ export interface PathsCleanResult {
   /** paths left alone because they are in use */
   inUse: number;
   failed: string[];
+  /** the given paths no longer there: moved now, or gone before */
+  removed: string[];
 }
 
 /** PhotoCluster groups visually near-identical photos together. */
@@ -350,6 +357,10 @@ export const Cleaner = {
   dirChildren(path: string): Promise<DirListing> {
     return call("Cleaner.DirChildren", path);
   },
+  /** Disk returns the boot volume's capacity without scanning files. */
+  disk(): Promise<DiskStat> {
+    return call("Cleaner.Disk");
+  },
   /**
    * FullScan streams per-directory results and the final summary of a full scan.
    * ctx is canceled when the page goes away, which stops the scan.
@@ -369,9 +380,10 @@ export const Cleaner = {
    * LargeScan streams per-file results and the final summary of a large-file
    * scan across the same targets as the full scan.
    */
-  largeScan(ch: Channel<LargeScanEvent>): Promise<void> {
-    return call("Cleaner.LargeScan", ch);
+  largeScan(minSize: number, ch: Channel<LargeScanEvent>): Promise<void> {
+    return call("Cleaner.LargeScan", minSize, ch);
   },
+  /** ListApps returns installed applications and whether they are running. */
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
   },
@@ -382,6 +394,13 @@ export const Cleaner = {
    */
   openFullDiskAccessSettings(): Promise<void> {
     return call("Cleaner.OpenFullDiskAccessSettings");
+  },
+  /**
+   * PhotoPreview returns a JPEG data URL of a photo in the home folder, at most
+   * 1600 pixels on its longest side, for a closer look than the thumbnails give.
+   */
+  photoPreview(path: string): Promise<string> {
+    return call("Cleaner.PhotoPreview", path);
   },
   /**
    * RevealInFinder shows path in Finder: plain folders open in place; files
