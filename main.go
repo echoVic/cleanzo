@@ -88,6 +88,7 @@ type CleanResult struct {
 	Files   int64    `json:"files"`
 	InUse   int64    `json:"inUse"` // entries left alone because they are in use
 	Failed  []string `json:"failed"`
+	Skipped string   `json:"skipped,omitempty"`
 }
 
 // CleanError reports a category whose clean pass had failures.
@@ -403,7 +404,9 @@ func scanPath(p string) (size, files int64) {
 }
 
 // measure sums the size and count of regular files under p, and finds when
-// anything there last changed (see changedAt).
+// anything there last changed (see changedAt). A file counts what it takes
+// on disk when that is less than its length (sparse or compressed files), so
+// sizes say what removing it frees.
 func measure(p string) (size, files int64, newest time.Time) {
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil {
@@ -417,12 +420,20 @@ func measure(p string) (size, files int64, newest time.Time) {
 			newest = t
 		}
 		if d.Type().IsRegular() {
-			size += info.Size()
+			size += onDisk(info)
 			files++
 		}
 		return nil
 	})
 	return size, files, newest
+}
+
+// onDisk is a file's length, or the space its blocks take when that is less.
+func onDisk(info fs.FileInfo) int64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return min(info.Size(), st.Blocks*512)
+	}
+	return info.Size()
 }
 
 // Inside the home folder, cleaning never reaches these folders themselves
@@ -1178,7 +1189,10 @@ func readBundleInfo(plistPath string) (name, bid, version string) {
 
 // plistStrings returns the string values of the top-level dictionary of an
 // XML property list.
-func plistStrings(data []byte) map[string]string {
+func plistStrings(data []byte) map[string]string { return plistValues(data) }
+
+// plistValues reads strings and dates from the top-level plist dictionary.
+func plistValues(data []byte) map[string]string {
 	m := map[string]string{}
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	depth := 0 // of dict and array elements; the top-level dictionary is 1
@@ -1197,7 +1211,7 @@ func plistStrings(data []byte) map[string]string {
 			case depth != 1:
 			case name == "key":
 				_ = dec.DecodeElement(&key, &t)
-			case name == "string" && key != "":
+			case (name == "string" || name == "date") && key != "":
 				var v string
 				if dec.DecodeElement(&v, &t) == nil {
 					m[key] = v

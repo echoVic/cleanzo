@@ -108,6 +108,7 @@ export interface CleanResult {
   /** entries left alone because they are in use */
   inUse: number;
   failed: string[];
+  skipped?: string;
 }
 
 /** CleanSummary aggregates the results of a clean pass. */
@@ -173,6 +174,49 @@ export interface FullScanResult {
   scanned: number;
   skipped: number;
   elapsedMs: number;
+}
+
+/** JunkCleanEvent reports a streamed junk clean. */
+export interface JunkCleanEvent {
+  kind: string;
+  id: string;
+  path?: string;
+  bytes?: number;
+  result?: CleanResult;
+}
+
+/** JunkItem is one rule, app cache or custom folder on the junk page. */
+export interface JunkItem {
+  id: string;
+  group: string;
+  name: string;
+  size: number;
+  files: number;
+  default: boolean;
+  trash: boolean;
+  running: boolean;
+  inUse: number;
+  denied: boolean;
+  estimate: boolean;
+  paths: string[];
+  top: TopItem[];
+  subs: SubItem[];
+  skipped?: string;
+}
+
+/** JunkScanEvent reports a streamed junk scan. */
+export interface JunkScanEvent {
+  kind: string;
+  items?: JunkItem[];
+  path?: string;
+  item?: JunkItem;
+  summary?: ScanSummary;
+}
+
+/** JunkSelection chooses an item and optionally its sub-items. */
+export interface JunkSelection {
+  id: string;
+  paths?: string[];
 }
 
 /** LargeFile is a single large file discovered by the large-file scan. */
@@ -257,6 +301,16 @@ export interface ScanEvent {
   category?: Category;
 }
 
+/** ScanSummary closes a junk scan. */
+export interface ScanSummary {
+  fullDiskAccess: boolean;
+  containers: number;
+  checked: number;
+  ignored: number;
+  leftovers: number;
+  leftoversSize: number;
+}
+
 /** Settings holds the junk groups, ignored items and custom folders. */
 export interface Settings {
   disabledGroups: string[];
@@ -278,6 +332,15 @@ export interface SimilarPhotosResult {
   clusters: PhotoCluster[];
   scanned: number;
   elapsedMs: number;
+}
+
+/** SubItem is a separately selectable part of an item. */
+export interface SubItem {
+  path: string;
+  name: string;
+  detail: string;
+  size: number;
+  default: boolean;
 }
 
 /** SystemInfo describes the app and the machine it runs on. */
@@ -344,6 +407,10 @@ export const Cleaner = {
    */
   clean(names: string[], scannedAt: number): Promise<CleanSummary> {
     return call("Cleaner.Clean", names, scannedAt);
+  },
+  /** CleanJunk streams progress, refreshing file usage before each selected item. */
+  cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
+    return call("Cleaner.CleanJunk", selections, scannedAt, ch);
   },
   /**
    * CleanPaths moves the given individual paths (e.g. selected photos) to the
@@ -456,6 +523,10 @@ export const Cleaner = {
    */
   scanAppCaches(): Promise<AppCacheItem[]> {
     return call("Cleaner.ScanAppCaches");
+  },
+  /** ScanJunk streams an initial list, measured rows and a final summary. */
+  scanJunk(ch: Channel<JunkScanEvent>): Promise<void> {
+    return call("Cleaner.ScanJunk", ch);
   },
   /** ScanOrphans streams leftover files from apps that are no longer installed. */
   scanOrphans(ch: Channel<OrphanItem>): Promise<void> {
