@@ -38,11 +38,54 @@ var builtinRuleIDs = map[string][]string{
 	"homebrew": {"dev.homebrew"}, "xcode": {"dev.xcode"},
 }
 
-// settingsFile keeps the old categories readable during the v3 transition.
+// settingsFile is the persisted v3 settings model.
 type settingsFile struct {
 	Version int `json:"version"`
 	Settings
-	Categories []CategoryConfig `json:"categories"`
+}
+
+// legacyCategoryConfig holds only the fields needed to migrate v1 and v2.
+type legacyCategoryConfig struct {
+	Name    string   `json:"name"`
+	Paths   []string `json:"paths"`
+	Enabled bool     `json:"enabled"`
+}
+
+// legacyConfigFile is the v2 category wrapper read during migration.
+type legacyConfigFile struct {
+	Version    int                    `json:"version"`
+	Categories []legacyCategoryConfig `json:"categories"`
+}
+
+// legacyCategoryDefaults identifies unedited built-ins without restoring them.
+func legacyCategoryDefaults() []legacyCategoryConfig {
+	h := homeDir()
+	return []legacyCategoryConfig{
+		{Name: "caches", Enabled: true, Paths: []string{filepath.Join(h, "Library/Caches")}},
+		{Name: "logs", Enabled: true, Paths: []string{filepath.Join(h, "Library/Logs")}},
+		{Name: "temp", Enabled: true, Paths: []string{os.TempDir()}},
+		{Name: "trash", Enabled: true, Paths: []string{filepath.Join(h, ".Trash")}},
+		{Name: "npm", Enabled: true, Paths: []string{filepath.Join(h, ".npm/_cacache"), filepath.Join(h, "Library/Caches/pnpm")}},
+		{Name: "go", Enabled: true, Paths: []string{filepath.Join(h, "Library/Caches/go-build")}},
+		{Name: "pip", Enabled: true, Paths: []string{filepath.Join(h, "Library/Caches/pip")}},
+		{Name: "homebrew", Enabled: true, Paths: []string{filepath.Join(h, "Library/Caches/Homebrew")}},
+		{Name: "xcode", Enabled: true, Paths: []string{filepath.Join(h, "Library/Developer/Xcode/DerivedData")}},
+	}
+}
+
+// isBuiltin reports whether a legacy category still has its built-in paths.
+func isBuiltin(c legacyCategoryConfig) bool {
+	for _, d := range legacyCategoryDefaults() {
+		if c.Name == d.Name && samePaths(c.Paths, d.Paths) {
+			return true
+		}
+	}
+	return false
+}
+
+// samePaths compares legacy paths in order, ignoring trailing separators.
+func samePaths(a, b []string) bool {
+	return slices.EqualFunc(a, b, func(x, y string) bool { return filepath.Clean(x) == filepath.Clean(y) })
 }
 
 // loadSettings reads v3 settings or migrates a saved category config.
@@ -55,14 +98,19 @@ func loadSettings() Settings {
 	if json.Unmarshal(data, &f) == nil && f.Version == settingsVersion {
 		return f.Settings
 	}
-	if cfg, ok := savedCategoryConfigs(); ok {
-		return migrateCategories(cfg)
+	var legacy legacyConfigFile
+	if json.Unmarshal(data, &legacy) == nil && legacy.Version == 2 {
+		return migrateCategories(legacy.Categories)
+	}
+	var v1 []legacyCategoryConfig
+	if json.Unmarshal(data, &v1) == nil {
+		return migrateCategories(v1)
 	}
 	return Settings{}
 }
 
 // migrateCategories keeps disabled choices and turns edited paths into folders.
-func migrateCategories(cfg []CategoryConfig) Settings {
+func migrateCategories(cfg []legacyCategoryConfig) Settings {
 	s := Settings{}
 	for _, c := range cfg {
 		if isBuiltin(c) {
@@ -130,21 +178,9 @@ func validateSettings(s Settings) (Settings, error) {
 	return out, nil
 }
 
-// writeSettings saves v3 settings alongside the old categories until their removal.
+// writeSettings saves only v3 settings with one atomic replacement.
 func writeSettings(s Settings) error {
-	cfg, ok := savedCategoryConfigs()
-	if !ok {
-		cfg = defaultCategoryConfigs()
-	}
-	return writeSettingsAndCategories(s, cfg)
-}
-
-// writeSettingsAndCategories saves both live formats with one atomic replacement.
-func writeSettingsAndCategories(s Settings, cfg []CategoryConfig) error {
-	if cfg == nil {
-		cfg = []CategoryConfig{}
-	}
-	data, err := json.MarshalIndent(settingsFile{Version: settingsVersion, Settings: s, Categories: cfg}, "", "  ")
+	data, err := json.MarshalIndent(settingsFile{Version: settingsVersion, Settings: s}, "", "  ")
 	if err != nil {
 		return err
 	}

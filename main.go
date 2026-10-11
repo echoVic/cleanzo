@@ -37,47 +37,11 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// Category describes one kind of junk the app can scan and clean.
-type Category struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Risk        string `json:"risk"` // "safe" or "moderate"
-	Size        int64  `json:"size"`
-	Files       int64  `json:"files"`
-	// Missing lists the paths that do not exist.
-	Missing []string `json:"missing"`
-	// Denied lists the paths macOS does not let the app read, such as the
-	// Trash without Full Disk Access.
-	Denied []string `json:"denied"`
-	// Blocked lists the paths the safety rules keep the app away from.
-	Blocked []string `json:"blocked"`
-	// InUse counts the entries left alone because they are in use.
-	InUse int64 `json:"inUse"`
-	// Permanent reports that cleaning deletes the entries instead of moving
-	// them to the Trash: built-in junk, and anything in the Trash.
-	Permanent bool `json:"permanent"`
-	// Builtin reports a built-in category at its built-in paths, which the
-	// UI describes with its own texts.
-	Builtin bool      `json:"builtin"`
-	Top     []TopItem `json:"top"`
-	paths   []string
-	exclude []string // canonical paths of the categories nested in this one
-}
-
-// TopItem is one of the largest direct children inside a category.
+// TopItem is one of the largest entries inside a junk item.
 type TopItem struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
-}
-
-// CategoryConfig is the persisted, user-editable definition of a category.
-type CategoryConfig struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Risk        string   `json:"risk"`
-	Paths       []string `json:"paths"`
-	Enabled     bool     `json:"enabled"`
 }
 
 // CleanResult reports what a clean pass did.
@@ -89,21 +53,6 @@ type CleanResult struct {
 	InUse   int64    `json:"inUse"` // entries left alone because they are in use
 	Failed  []string `json:"failed"`
 	Skipped string   `json:"skipped,omitempty"`
-}
-
-// CleanError reports a category whose clean pass had failures.
-type CleanError struct {
-	Name  string `json:"name"`
-	Error string `json:"error"`
-}
-
-// CleanSummary aggregates the results of a clean pass.
-type CleanSummary struct {
-	Results      []CleanResult `json:"results"`
-	TotalFreed   int64         `json:"totalFreed"`   // bytes deleted
-	TotalTrashed int64         `json:"totalTrashed"` // bytes moved to the Trash
-	InUse        int64         `json:"inUse"`        // entries left alone because they are in use
-	Errors       []CleanError  `json:"errors"`
 }
 
 // AppInfo describes an installed application.
@@ -192,170 +141,15 @@ type SystemInfo struct {
 // into typed TypeScript functions in src/mygo.ts.
 type Cleaner struct{}
 
+// homeDir returns the current user's home folder.
 func homeDir() string {
 	h, _ := os.UserHomeDir()
 	return h
 }
 
-// configPath returns where the category configuration is persisted.
+// configPath returns where Cleanzo settings are persisted.
 func configPath() string {
 	return filepath.Join(homeDir(), "Library", "Application Support", "Cleanzo", "config.json")
-}
-
-// defaultCategoryConfigs returns the built-in macOS junk categories.
-func defaultCategoryConfigs() []CategoryConfig {
-	h := homeDir()
-	return []CategoryConfig{
-		{Name: "caches", Description: "应用与浏览器缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches")}},
-		{Name: "logs", Description: "系统与应用日志", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Logs")}},
-		{Name: "temp", Description: "7 天未改动的临时文件", Risk: "moderate", Enabled: true, Paths: []string{os.TempDir()}},
-		{Name: "trash", Description: "废纸篓（清空后不可恢复）", Risk: "moderate", Enabled: true, Paths: []string{filepath.Join(h, ".Trash")}},
-		{Name: "npm", Description: "npm / pnpm 下载缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, ".npm", "_cacache"), filepath.Join(h, "Library", "Caches", "pnpm")}},
-		{Name: "go", Description: "Go 构建缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "go-build")}},
-		{Name: "pip", Description: "pip 缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "pip")}},
-		{Name: "homebrew", Description: "Homebrew 下载缓存", Risk: "safe", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Caches", "Homebrew")}},
-		{Name: "xcode", Description: "Xcode 编译缓存（清理后需重新编译）", Risk: "moderate", Enabled: true, Paths: []string{filepath.Join(h, "Library", "Developer", "Xcode", "DerivedData")}},
-	}
-}
-
-// configVersion is the version of config.json. Version 1 was a bare array of
-// categories.
-const configVersion = 2
-
-type configFile struct {
-	Version    int              `json:"version"`
-	Categories []CategoryConfig `json:"categories"`
-}
-
-// saveCategoryConfigs writes the legacy category configuration.
-func saveCategoryConfigs(cfg []CategoryConfig) error {
-	if cfg == nil {
-		cfg = []CategoryConfig{}
-	}
-	if data, err := os.ReadFile(configPath()); err == nil {
-		var f settingsFile
-		if json.Unmarshal(data, &f) == nil && f.Version == settingsVersion {
-			return writeSettingsAndCategories(f.Settings, cfg)
-		}
-	}
-	b, err := json.MarshalIndent(configFile{Version: configVersion, Categories: cfg}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeConfigAtomically(b)
-}
-
-// savedCategoryConfigs returns the saved categories, migrated to the current
-// version; ok is false when nothing usable is saved. A saved empty list is
-// kept: the user removed every category.
-func savedCategoryConfigs() (cfg []CategoryConfig, ok bool) {
-	b, err := os.ReadFile(configPath())
-	if err != nil {
-		return nil, false
-	}
-	var f configFile
-	if json.Unmarshal(b, &f) == nil && f.Version >= configVersion {
-		if f.Version == settingsVersion && f.Categories == nil {
-			return defaultCategoryConfigs(), true
-		}
-		return f.Categories, true
-	}
-	var v1 []CategoryConfig
-	if json.Unmarshal(b, &v1) != nil || len(v1) == 0 {
-		return nil, false
-	}
-	cfg = migrateV1(v1)
-	_ = saveCategoryConfigs(cfg)
-	return cfg, true
-}
-
-// migrateV1 updates the built-in categories that are still as version 1
-// shipped them: the temporary folder and the Trash are no longer picked by
-// default.
-func migrateV1(cfg []CategoryConfig) []CategoryConfig {
-	for i, c := range cfg {
-		for _, d := range defaultCategoryConfigs() {
-			if (d.Name == "temp" || d.Name == "trash") && c.Name == d.Name && samePaths(c.Paths, d.Paths) && c.Risk == "safe" {
-				cfg[i].Risk = d.Risk
-			}
-		}
-	}
-	return cfg
-}
-
-// loadCategories returns the effective categories: the saved config when
-// present, otherwise the defaults (which are then saved on first run).
-func loadCategories() []Category {
-	cfg, ok := savedCategoryConfigs()
-	if !ok {
-		cfg = defaultCategoryConfigs()
-		if _, err := os.Stat(configPath()); errors.Is(err, fs.ErrNotExist) {
-			_ = saveCategoryConfigs(cfg)
-		}
-	}
-	// Disabled categories still own their folders: disabling go keeps
-	// go-build out of cleaning rather than folding it into caches.
-	all := make([]Category, 0, len(cfg))
-	for _, c := range cfg {
-		builtin := isBuiltin(c)
-		all = append(all, Category{Name: c.Name, Description: c.Description, Risk: c.Risk,
-			Permanent: builtin || holdsTrash(c.Paths), Builtin: builtin, paths: c.Paths})
-	}
-	all = excludeNested(all)
-	cats := make([]Category, 0, len(all))
-	for i, c := range all {
-		if cfg[i].Enabled {
-			cats = append(cats, c)
-		}
-	}
-	return cats
-}
-
-// holdsTrash reports whether any of paths is in the Trash, whose contents
-// cleaning deletes for good.
-func holdsTrash(paths []string) bool {
-	trash := canonical(userTrashDir())
-	return slices.ContainsFunc(paths, func(p string) bool { return within(canonical(p), trash) })
-}
-
-// isBuiltin reports whether c is a built-in category at its built-in paths.
-// Their contents regenerate, so cleaning deletes them; whatever a user
-// points a category at goes to the Trash instead.
-func isBuiltin(c CategoryConfig) bool {
-	for _, d := range defaultCategoryConfigs() {
-		if c.Name == d.Name && samePaths(c.Paths, d.Paths) {
-			return true
-		}
-	}
-	return false
-}
-
-// samePaths reports whether a and b list the same folders in order.
-func samePaths(a, b []string) bool {
-	return slices.EqualFunc(a, b, func(x, y string) bool { return filepath.Clean(x) == filepath.Clean(y) })
-}
-
-// excludeNested gives each category the paths of the categories nested in
-// it, such as go-build inside ~/Library/Caches, so every file belongs to one
-// category: it is counted once, and cleaned only with its own.
-func excludeNested(cats []Category) []Category {
-	for i := range cats {
-		cats[i].exclude = nil
-		for j := range cats {
-			if i == j {
-				continue
-			}
-			for _, inner := range cats[j].paths {
-				in := canonical(inner)
-				for _, outer := range cats[i].paths {
-					if out := canonical(outer); in != out && within(in, out) {
-						cats[i].exclude = append(cats[i].exclude, in)
-					}
-				}
-			}
-		}
-	}
-	return cats
 }
 
 // canonical returns p absolute, resolved and lower-cased, the form paths are
@@ -678,204 +472,14 @@ func removalRefused(path string, info fs.FileInfo) bool {
 	return false
 }
 
-// cleanEntry is one item cleaning a category removes.
+// cleanEntry is one entry removed by a junk clean.
 type cleanEntry struct {
 	path        string
 	size, files int64
 }
 
-// categoryPlan is what cleaning a category would do now.
-type categoryPlan struct {
-	entries                  []cleanEntry // largest first
-	inUse                    int64
-	missing, denied, blocked []string
-}
-
-// planCategory lists what cleaning cat would remove: the direct children of
-// its paths, except the folders of nested categories (it descends into
-// their parents instead), entries in use, sockets and other special files,
-// and in the temporary folder, entries touched within tempMinAge. Sizing
-// walks share sem, and measuring, when set, hears of each entry as its walk
-// starts (from several goroutines at once). Once ctx is canceled no more
-// walks start, and the plan holds what was measured.
-func planCategory(ctx context.Context, cat Category, g *usageGuard, sem chan struct{}, measuring func(string)) categoryPlan {
-	var plan categoryPlan
-	type candidate struct {
-		path   string
-		minAge time.Duration
-	}
-	var cands []candidate
-	var collect func(dir string, minAge time.Duration)
-	collect = func(dir string, minAge time.Duration) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			plan.denied = append(plan.denied, dir) // unreadable: privacy protection or an I/O error
-			return
-		}
-		for _, e := range entries {
-			child := filepath.Join(dir, e.Name())
-			key := strings.ToLower(child)
-			switch {
-			case slices.Contains(cat.exclude, key):
-				// another category's folder
-			case slices.ContainsFunc(cat.exclude, func(x string) bool { return within(x, key) }):
-				collect(child, minAge)
-			case e.Type()&(fs.ModeSocket|fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeIrregular) != 0:
-				// live endpoints, not junk
-			case g.inUse(child):
-				plan.inUse++
-			default:
-				if info, err := e.Info(); err == nil && !removalRefused(child, info) {
-					cands = append(cands, candidate{child, minAge})
-				}
-			}
-		}
-	}
-	tmp := canonical(os.TempDir())
-	for _, p := range cat.paths {
-		if !safeToClean(p) {
-			plan.blocked = append(plan.blocked, p)
-			continue
-		}
-		info, err := os.Lstat(p)
-		if err != nil {
-			if errors.Is(err, fs.ErrPermission) {
-				plan.denied = append(plan.denied, p)
-			} else {
-				plan.missing = append(plan.missing, p)
-			}
-			continue
-		}
-		abs, _ := filepath.Abs(p)
-		if !info.IsDir() {
-			// A category on a file cleans that file.
-			cands = append(cands, candidate{resolvePath(abs), 0})
-			continue
-		}
-		var minAge time.Duration
-		if canonical(p) == tmp {
-			minAge = tempMinAge
-		}
-		collect(resolvePath(abs), minAge)
-	}
-
-	measured := make([]cleanEntry, len(cands))
-	newest := make([]time.Time, len(cands))
-	var wg sync.WaitGroup
-	started := 0
-	for i, c := range cands {
-		if ctx.Err() != nil {
-			break
-		}
-		started++
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if measuring != nil {
-				measuring(c.path)
-			}
-			size, files, t := measure(c.path)
-			measured[i], newest[i] = cleanEntry{c.path, size, files}, t
-		}()
-	}
-	wg.Wait()
-	t := now()
-	for i, e := range measured[:started] {
-		if age := cands[i].minAge; age > 0 && t.Sub(newest[i]) < age {
-			continue
-		}
-		plan.entries = append(plan.entries, e)
-	}
-	sort.Slice(plan.entries, func(i, j int) bool { return plan.entries[i].size > plan.entries[j].size })
-	return plan
-}
-
-// scanCategories fills in what cleaning each category would remove now.
-func scanCategories(cats []Category, g *usageGuard) []Category {
-	scanStream(context.Background(), cats, g, nil, nil)
-	return cats
-}
-
-// scanStream fills in what cleaning each category would remove now.
-// Categories are planned concurrently; their walks share one bounded pool.
-// It reports each entry it starts to measure to measuring, and each
-// category once planned to done; both may be nil and are called one at a
-// time. Once ctx is canceled it stops and reports nothing more.
-func scanStream(ctx context.Context, cats []Category, g *usageGuard, measuring func(string), done func(Category)) {
-	var mu sync.Mutex
-	report := func(f func()) {
-		mu.Lock()
-		defer mu.Unlock()
-		if ctx.Err() == nil {
-			f()
-		}
-	}
-	var onMeasure func(string)
-	if measuring != nil {
-		onMeasure = func(p string) { report(func() { measuring(p) }) }
-	}
-	sem := make(chan struct{}, scanConcurrency)
-	var wg sync.WaitGroup
-	for i := range cats {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			plan := planCategory(ctx, cats[i], g, sem, onMeasure)
-			c := &cats[i]
-			c.Size, c.Files, c.Top = 0, 0, nil
-			for _, e := range plan.entries {
-				c.Size += e.size
-				c.Files += e.files
-			}
-			for _, e := range plan.entries[:min(5, len(plan.entries))] {
-				c.Top = append(c.Top, TopItem{Name: filepath.Base(e.path), Path: e.path, Size: e.size})
-			}
-			c.InUse, c.Missing, c.Denied, c.Blocked = plan.inUse, plan.missing, plan.denied, plan.blocked
-			if done != nil {
-				report(func() { done(*c) })
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-// Scan returns every category with what cleaning it would remove now.
-func (Cleaner) Scan() []Category {
-	return scanCategories(loadCategories(), probeUsage())
-}
-
-// ScanEvent is one step of a streamed scan.
-type ScanEvent struct {
-	Kind       string     `json:"kind"`                 // "start" | "scanning" | "category"
-	Categories []Category `json:"categories,omitempty"` // start: the categories, not yet sized
-	Path       string     `json:"path,omitempty"`       // scanning: an entry being measured
-	Category   *Category  `json:"category,omitempty"`   // category: a category, once sized
-}
-
 // progressInterval is how often streams report what they are working on.
 const progressInterval = 100 * time.Millisecond
-
-// ScanStream scans like Scan and streams its progress: the categories first,
-// every so often the entry being measured, and each category as soon as it
-// is sized. ctx is canceled when the page stops the scan or goes away.
-func (Cleaner) ScanStream(ctx context.Context, ch *mygo.Channel[ScanEvent]) error {
-	cats := loadCategories()
-	if err := ch.Send(ScanEvent{Kind: "start", Categories: cats}); err != nil {
-		return err
-	}
-	var last time.Time
-	scanStream(ctx, cats, probeUsage(), func(p string) {
-		if time.Since(last) >= progressInterval {
-			last = time.Now()
-			_ = ch.Send(ScanEvent{Kind: "scanning", Path: p})
-		}
-	}, func(c Category) {
-		_ = ch.Send(ScanEvent{Kind: "category", Category: &c})
-	})
-	return ctx.Err()
-}
 
 // userTrashDir is the macOS Trash directory for the current user.
 func userTrashDir() string {
@@ -886,177 +490,13 @@ func userTrashDir() string {
 // picks the Trash of its volume and a free name there. Tests replace it.
 var trashItem = mygo.Shell.TrashItem
 
-// cleanCategory removes what planCategory lists. Built-in junk and the
-// Trash's own contents are deleted; everything else moves to the Trash, so
-// it stays recoverable. Unless scannedAt is zero, what reached the Trash
-// after the scan the user confirmed stays there.
-func cleanCategory(cat Category, g *usageGuard, scannedAt time.Time) CleanResult {
-	var cleaned int64
-	return cleanCategoryStream(context.Background(), cat, g, scannedAt, cleanHooks{}, &cleaned)
-}
-
 // cleanHooks report a clean pass's progress. Each may be nil; they are
 // called one at a time.
 type cleanHooks struct {
-	started  func(name string)                    // a category starts
+	started  func(name string)                    // an item starts
 	checking func(name, path string)              // an entry is measured before removal
 	removed  func(name, path string, bytes int64) // an entry is gone; bytes: cleaned so far in the pass
-	finished func(res CleanResult)                // a category is done, or stopped
-}
-
-// cleanCategoryStream is cleanCategory reporting through hooks, and adding
-// what it cleans to *cleaned. Once ctx is canceled it finishes the entry at
-// hand and stops.
-func cleanCategoryStream(ctx context.Context, cat Category, g *usageGuard, scannedAt time.Time, hooks cleanHooks, cleaned *int64) CleanResult {
-	res := CleanResult{Name: cat.Name}
-	var checking func(string)
-	if hooks.checking != nil {
-		var mu sync.Mutex
-		checking = func(p string) {
-			mu.Lock()
-			defer mu.Unlock()
-			hooks.checking(cat.Name, p)
-		}
-	}
-	plan := planCategory(ctx, cat, g, make(chan struct{}, scanConcurrency), checking)
-	res.InUse = plan.inUse
-	for _, p := range plan.blocked {
-		res.Failed = append(res.Failed, p+": blocked")
-	}
-	for _, p := range plan.denied {
-		res.Failed = append(res.Failed, p+": "+fs.ErrPermission.Error())
-	}
-	trash := canonical(userTrashDir())
-	for _, e := range plan.entries {
-		if ctx.Err() != nil {
-			break
-		}
-		inTrash := within(strings.ToLower(e.path), trash)
-		if inTrash && !scannedAt.IsZero() {
-			if info, err := os.Lstat(e.path); err != nil || changedAt(info).After(scannedAt) {
-				continue
-			}
-		}
-		permanent := cat.Permanent || inTrash
-		var err error
-		if permanent {
-			err = removeAll(e.path)
-		} else {
-			err = trashItem(e.path)
-		}
-		if err != nil {
-			res.Failed = append(res.Failed, e.path+": "+err.Error())
-			continue
-		}
-		if permanent {
-			res.Freed += e.size
-		} else {
-			res.Trashed += e.size
-		}
-		res.Files += e.files
-		*cleaned += e.size
-		if hooks.removed != nil {
-			hooks.removed(cat.Name, e.path, *cleaned)
-		}
-	}
-	return res
-}
-
-// Clean cleans the named categories (all if names is empty). The Trash is
-// emptied first, so what the other categories move there stays recoverable,
-// and only of what was in it at scannedAt (Unix milliseconds of the scan the
-// user confirmed; 0 for no limit). Each category gets a fresh look at the
-// files in use, as a pass can take a while.
-func (Cleaner) Clean(names []string, scannedAt int64) CleanSummary {
-	return cleanStream(context.Background(), names, scannedAt, cleanHooks{})
-}
-
-// CleanEvent is one step of a streamed clean.
-type CleanEvent struct {
-	Kind   string       `json:"kind"`             // "start" | "checking" | "removed" | "done"
-	Name   string       `json:"name"`             // the category
-	Path   string       `json:"path,omitempty"`   // checking, removed: the entry
-	Bytes  int64        `json:"bytes,omitempty"`  // removed, done: bytes cleaned so far in the pass
-	Result *CleanResult `json:"result,omitempty"` // done: what the category's pass did
-}
-
-// CleanStream cleans like Clean and streams its progress: each category as
-// it starts, every so often the entry being checked or removed with the
-// bytes cleaned so far, and each category's result. Stopping it (ctx is
-// canceled) finishes the entry at hand.
-func (Cleaner) CleanStream(ctx context.Context, names []string, scannedAt int64, ch *mygo.Channel[CleanEvent]) error {
-	var last time.Time
-	var cleaned int64
-	every := func(ev CleanEvent) {
-		if time.Since(last) >= progressInterval {
-			last = time.Now()
-			_ = ch.Send(ev)
-		}
-	}
-	cleanStream(ctx, names, scannedAt, cleanHooks{
-		started:  func(name string) { _ = ch.Send(CleanEvent{Kind: "start", Name: name}) },
-		checking: func(name, path string) { every(CleanEvent{Kind: "checking", Name: name, Path: path}) },
-		removed: func(name, path string, bytes int64) {
-			cleaned = bytes
-			every(CleanEvent{Kind: "removed", Name: name, Path: path, Bytes: bytes})
-		},
-		finished: func(res CleanResult) {
-			_ = ch.Send(CleanEvent{Kind: "done", Name: res.Name, Bytes: cleaned, Result: &res})
-		},
-	})
-	return ctx.Err()
-}
-
-// cleanStream is Clean reporting through hooks. Once ctx is canceled it
-// finishes the entry at hand and starts no further category.
-func cleanStream(ctx context.Context, names []string, scannedAt int64, hooks cleanHooks) CleanSummary {
-	selected := make(map[string]bool, len(names))
-	for _, n := range names {
-		selected[n] = true
-	}
-	var since time.Time
-	if scannedAt > 0 {
-		since = time.UnixMilli(scannedAt)
-	}
-	cats := loadCategories()
-	trash := canonical(userTrashDir())
-	holdsTrash := func(c Category) bool {
-		return slices.ContainsFunc(c.paths, func(p string) bool { return canonical(p) == trash })
-	}
-	slices.SortStableFunc(cats, func(a, b Category) int {
-		switch ta, tb := holdsTrash(a), holdsTrash(b); {
-		case ta && !tb:
-			return -1
-		case tb && !ta:
-			return 1
-		}
-		return 0
-	})
-	summary := CleanSummary{}
-	var cleaned int64
-	for _, cat := range cats {
-		if len(names) > 0 && !selected[cat.Name] {
-			continue
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		if hooks.started != nil {
-			hooks.started(cat.Name)
-		}
-		res := cleanCategoryStream(ctx, cat, probeUsage(), since, hooks, &cleaned)
-		if hooks.finished != nil {
-			hooks.finished(res)
-		}
-		summary.Results = append(summary.Results, res)
-		summary.TotalFreed += res.Freed
-		summary.TotalTrashed += res.Trashed
-		summary.InUse += res.InUse
-		if len(res.Failed) > 0 {
-			summary.Errors = append(summary.Errors, CleanError{Name: cat.Name, Error: strings.Join(res.Failed, "; ")})
-		}
-	}
-	return summary
+	finished func(res CleanResult)                // an item is done, or stopped
 }
 
 // OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
@@ -1072,18 +512,8 @@ func (Cleaner) Info() SystemInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Per-application cache cleanup
+// Individual path cleanup
 // ---------------------------------------------------------------------------
-
-// AppCacheItem is one application's cache footprint under ~/Library/Caches.
-type AppCacheItem struct {
-	Name  string `json:"name"`
-	App   string `json:"app"` // the installed app whose bundle ID names the folder; empty if none
-	Path  string `json:"path"`
-	Size  int64  `json:"size"`
-	Files int64  `json:"files"`
-	InUse bool   `json:"inUse"` // a running app uses it, so it is not cleanable
-}
 
 // PathsCleanResult reports what CleanPaths moved to the Trash.
 type PathsCleanResult struct {
@@ -1095,49 +525,9 @@ type PathsCleanResult struct {
 	Removed []string `json:"removed"` // the given paths no longer there: moved now, or gone before
 }
 
-// ScanAppCaches measures every direct subdirectory of ~/Library/Caches (one
-// row per application) so the frontend can let the user pick apps to clean.
-// Sizing runs concurrently under a bounded semaphore; results are sorted by
-// size descending.
-func (Cleaner) ScanAppCaches() []AppCacheItem {
-	dir := filepath.Join(homeDir(), "Library", "Caches")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	g := probeUsage()
-	names := appNamesByBundleID(appDirs())
-	var (
-		mu    sync.Mutex
-		items []AppCacheItem
-		wg    sync.WaitGroup
-		sem   = make(chan struct{}, scanConcurrency)
-	)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		child := filepath.Join(dir, name)
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			size, files := scanPath(child)
-			mu.Lock()
-			items = append(items, AppCacheItem{Name: name, App: names[strings.ToLower(name)], Path: child, Size: size, Files: files, InUse: g.inUse(resolvePath(child))})
-			mu.Unlock()
-		}()
-	}
-	wg.Wait()
-	sort.Slice(items, func(i, j int) bool { return items[i].Size > items[j].Size })
-	return items
-}
-
 // CleanPaths moves the given individual paths (e.g. selected photos) to the
 // Trash, honoring the safeToClean gate and leaving alone what is in use. It
-// is the fine-grained counterpart to Clean (which works on whole categories).
+// is the fine-grained counterpart to CleanJunk (which works on junk items).
 func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 	g := probeUsage()
 	res := PathsCleanResult{}
@@ -1383,18 +773,6 @@ func (k appKeys) addBundleID(bid string) {
 	}
 }
 
-// appNamesByBundleID maps the lower-cased bundle IDs of the apps in dirs to
-// their display names.
-func appNamesByBundleID(dirs []string) map[string]string {
-	names := map[string]string{}
-	for key, app := range buildAppIndex(dirs).keys {
-		if key == strings.ToLower(app.BundleID) {
-			names[key] = app.Name
-		}
-	}
-	return names
-}
-
 // installedKeys collects the bundle IDs, names and bundle ID words of the
 // installed apps, and of the running ones, wherever they live (a running app
 // may be on a disk image or in Downloads).
@@ -1631,14 +1009,6 @@ func (Cleaner) UninstallApp(path string) UninstallResult {
 	return res
 }
 
-// GetCategories returns the current (persisted or default) category config.
-func (Cleaner) GetCategories() []CategoryConfig {
-	if saved, ok := savedCategoryConfigs(); ok {
-		return saved
-	}
-	return defaultCategoryConfigs()
-}
-
 // codeError is an error the UI translates: its text is the JSON object
 // {"code": ..., "args": [...]}.
 type codeError struct {
@@ -1650,38 +1020,6 @@ type codeError struct {
 func (e codeError) Error() string {
 	data, _ := json.Marshal(e)
 	return string(data)
-}
-
-// SaveCategories validates and persists the category configuration.
-func (Cleaner) SaveCategories(cfg []CategoryConfig) error {
-	names := map[string]bool{}
-	owners := map[string]string{} // canonical folder -> category
-	for _, c := range cfg {
-		if strings.TrimSpace(c.Name) == "" {
-			return codeError{Code: "empty-name"}
-		}
-		name := strings.ToLower(strings.TrimSpace(c.Name))
-		if names[name] {
-			return codeError{Code: "dup-name", Args: []string{c.Name}}
-		}
-		names[name] = true
-		if len(c.Paths) == 0 {
-			return codeError{Code: "no-paths", Args: []string{c.Name}}
-		}
-		for _, p := range c.Paths {
-			if strings.TrimSpace(p) == "" {
-				return codeError{Code: "empty-path", Args: []string{c.Name}}
-			}
-			if c.Enabled && !safeToClean(p) {
-				return codeError{Code: "protected-path", Args: []string{p}}
-			}
-			if owner, ok := owners[canonical(p)]; ok {
-				return codeError{Code: "dup-path", Args: []string{p, owner, c.Name}}
-			}
-			owners[canonical(p)] = c.Name
-		}
-	}
-	return saveCategoryConfigs(cfg)
 }
 
 // ---------------------------------------------------------------------------

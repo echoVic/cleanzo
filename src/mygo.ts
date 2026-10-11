@@ -4,18 +4,6 @@ import { call, type Channel } from "mygo-runtime";
 
 // ---- Types ----
 
-/** AppCacheItem is one application's cache footprint under ~/Library/Caches. */
-export interface AppCacheItem {
-  name: string;
-  /** the installed app whose bundle ID names the folder; empty if none */
-  app: string;
-  path: string;
-  size: number;
-  files: number;
-  /** a running app uses it, so it is not cleanable */
-  inUse: boolean;
-}
-
 /** AppInfo describes an installed application. */
 export interface AppInfo {
   name: string;
@@ -36,67 +24,6 @@ export interface BigItem {
   trashable: boolean;
 }
 
-/** Category describes one kind of junk the app can scan and clean. */
-export interface Category {
-  name: string;
-  description: string;
-  /** "safe" or "moderate" */
-  risk: string;
-  size: number;
-  files: number;
-  /** Missing lists the paths that do not exist. */
-  missing: string[];
-  /**
-   * Denied lists the paths macOS does not let the app read, such as the
-   * Trash without Full Disk Access.
-   */
-  denied: string[];
-  /** Blocked lists the paths the safety rules keep the app away from. */
-  blocked: string[];
-  /** InUse counts the entries left alone because they are in use. */
-  inUse: number;
-  /**
-   * Permanent reports that cleaning deletes the entries instead of moving
-   * them to the Trash: built-in junk, and anything in the Trash.
-   */
-  permanent: boolean;
-  /**
-   * Builtin reports a built-in category at its built-in paths, which the
-   * UI describes with its own texts.
-   */
-  builtin: boolean;
-  top: TopItem[];
-}
-
-/** CategoryConfig is the persisted, user-editable definition of a category. */
-export interface CategoryConfig {
-  name: string;
-  description: string;
-  risk: string;
-  paths: string[];
-  enabled: boolean;
-}
-
-/** CleanError reports a category whose clean pass had failures. */
-export interface CleanError {
-  name: string;
-  error: string;
-}
-
-/** CleanEvent is one step of a streamed clean. */
-export interface CleanEvent {
-  /** "start" | "checking" | "removed" | "done" */
-  kind: string;
-  /** the category */
-  name: string;
-  /** checking, removed: the entry */
-  path?: string;
-  /** removed, done: bytes cleaned so far in the pass */
-  bytes?: number;
-  /** done: what the category's pass did */
-  result?: CleanResult;
-}
-
 /** CleanResult reports what a clean pass did. */
 export interface CleanResult {
   name: string;
@@ -109,18 +36,6 @@ export interface CleanResult {
   inUse: number;
   failed: string[];
   skipped?: string;
-}
-
-/** CleanSummary aggregates the results of a clean pass. */
-export interface CleanSummary {
-  results: CleanResult[];
-  /** bytes deleted */
-  totalFreed: number;
-  /** bytes moved to the Trash */
-  totalTrashed: number;
-  /** entries left alone because they are in use */
-  inUse: number;
-  errors: CleanError[];
 }
 
 /** CustomFolder is a user-selected folder whose contents go to the Trash. */
@@ -289,18 +204,6 @@ export interface PhotoItem {
   keep: boolean;
 }
 
-/** ScanEvent is one step of a streamed scan. */
-export interface ScanEvent {
-  /** "start" | "scanning" | "category" */
-  kind: string;
-  /** start: the categories, not yet sized */
-  categories?: Category[];
-  /** scanning: an entry being measured */
-  path?: string;
-  /** category: a category, once sized */
-  category?: Category;
-}
-
 /** ScanSummary closes a junk scan. */
 export interface ScanSummary {
   fullDiskAccess: boolean;
@@ -352,7 +255,7 @@ export interface SystemInfo {
   goVersion: string;
 }
 
-/** TopItem is one of the largest direct children inside a category. */
+/** TopItem is one of the largest entries inside a junk item. */
 export interface TopItem {
   name: string;
   path: string;
@@ -398,16 +301,6 @@ export const Cleaner = {
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
-  /**
-   * Clean cleans the named categories (all if names is empty). The Trash is
-   * emptied first, so what the other categories move there stays recoverable,
-   * and only of what was in it at scannedAt (Unix milliseconds of the scan the
-   * user confirmed; 0 for no limit). Each category gets a fresh look at the
-   * files in use, as a pass can take a while.
-   */
-  clean(names: string[], scannedAt: number): Promise<CleanSummary> {
-    return call("Cleaner.Clean", names, scannedAt);
-  },
   /** CleanJunk streams progress, refreshing file usage before each selected item. */
   cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
     return call("Cleaner.CleanJunk", selections, scannedAt, ch);
@@ -415,19 +308,10 @@ export const Cleaner = {
   /**
    * CleanPaths moves the given individual paths (e.g. selected photos) to the
    * Trash, honoring the safeToClean gate and leaving alone what is in use. It
-   * is the fine-grained counterpart to Clean (which works on whole categories).
+   * is the fine-grained counterpart to CleanJunk (which works on junk items).
    */
   cleanPaths(paths: string[]): Promise<PathsCleanResult> {
     return call("Cleaner.CleanPaths", paths);
-  },
-  /**
-   * CleanStream cleans like Clean and streams its progress: each category as
-   * it starts, every so often the entry being checked or removed with the
-   * bytes cleaned so far, and each category's result. Stopping it (ctx is
-   * canceled) finishes the entry at hand.
-   */
-  cleanStream(names: string[], scannedAt: number, ch: Channel<CleanEvent>): Promise<void> {
-    return call("Cleaner.CleanStream", names, scannedAt, ch);
   },
   /**
    * DirChildren lists the direct children of path with sizes: directories are
@@ -452,10 +336,6 @@ export const Cleaner = {
    */
   fullScan(ch: Channel<FullScanEvent>): Promise<void> {
     return call("Cleaner.FullScan", ch);
-  },
-  /** GetCategories returns the current (persisted or default) category config. */
-  getCategories(): Promise<CategoryConfig[]> {
-    return call("Cleaner.GetCategories");
   },
   /** GetSettings returns the saved settings, migrating old categories when needed. */
   getSettings(): Promise<Settings> {
@@ -503,26 +383,9 @@ export const Cleaner = {
   revealInFinder(path: string): Promise<void> {
     return call("Cleaner.RevealInFinder", path);
   },
-  /** SaveCategories validates and persists the category configuration. */
-  saveCategories(cfg: CategoryConfig[]): Promise<void> {
-    return call("Cleaner.SaveCategories", cfg);
-  },
   /** SaveSettings validates and persists the settings. */
   saveSettings(s: Settings): Promise<void> {
     return call("Cleaner.SaveSettings", s);
-  },
-  /** Scan returns every category with what cleaning it would remove now. */
-  scan(): Promise<Category[]> {
-    return call("Cleaner.Scan");
-  },
-  /**
-   * ScanAppCaches measures every direct subdirectory of ~/Library/Caches (one
-   * row per application) so the frontend can let the user pick apps to clean.
-   * Sizing runs concurrently under a bounded semaphore; results are sorted by
-   * size descending.
-   */
-  scanAppCaches(): Promise<AppCacheItem[]> {
-    return call("Cleaner.ScanAppCaches");
   },
   /** ScanJunk streams an initial list, measured rows and a final summary. */
   scanJunk(ch: Channel<JunkScanEvent>): Promise<void> {
@@ -539,14 +402,6 @@ export const Cleaner = {
    */
   scanSimilarPhotos(ch: Channel<SimilarPhotoEvent>): Promise<void> {
     return call("Cleaner.ScanSimilarPhotos", ch);
-  },
-  /**
-   * ScanStream scans like Scan and streams its progress: the categories first,
-   * every so often the entry being measured, and each category as soon as it
-   * is sized. ctx is canceled when the page stops the scan or goes away.
-   */
-  scanStream(ch: Channel<ScanEvent>): Promise<void> {
-    return call("Cleaner.ScanStream", ch);
   },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {

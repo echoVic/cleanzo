@@ -15,8 +15,8 @@ import (
 func TestSettingsMigrateFromCategories(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	builtins := defaultCategoryConfigs()
-	var cfg []CategoryConfig
+	builtins := legacyCategoryDefaults()
+	var cfg []legacyCategoryConfig
 	for _, c := range builtins {
 		switch c.Name {
 		case "trash", "npm", "caches":
@@ -26,7 +26,7 @@ func TestSettingsMigrateFromCategories(t *testing.T) {
 		}
 		cfg = append(cfg, c)
 	}
-	cfg = append(cfg, CategoryConfig{Name: "旧安装包", Paths: []string{filepath.Join(home, "Downloads", "installers"), filepath.Join(home, "old")}, Enabled: true})
+	cfg = append(cfg, legacyCategoryConfig{Name: "旧安装包", Paths: []string{filepath.Join(home, "Downloads", "installers"), filepath.Join(home, "old")}, Enabled: true})
 	s := migrateCategories(cfg)
 	if !slices.Contains(s.Ignored, "sys.trash") || !slices.Contains(s.Ignored, "dev.npm") || !slices.Contains(s.Ignored, "dev.npx") {
 		t.Fatalf("disabled built-ins should become ignored rules, got %v", s.Ignored)
@@ -145,7 +145,7 @@ func TestSettingsLoadVersions(t *testing.T) {
 // TestSettingsMigrateDisabledRules keeps every disabled built-in choice.
 func TestSettingsMigrateDisabledRules(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg := defaultCategoryConfigs()
+	cfg := legacyCategoryDefaults()
 	for i := range cfg {
 		cfg[i].Enabled = false
 	}
@@ -154,7 +154,7 @@ func TestSettingsMigrateDisabledRules(t *testing.T) {
 	if !slices.Equal(s.Ignored, want) || !slices.Equal(s.DisabledGroups, []string{"apps"}) || len(s.Custom) != 0 {
 		t.Fatalf("disabled built-ins = %+v", s)
 	}
-	cfg = []CategoryConfig{{Name: "logs", Paths: []string{" ", "~/elsewhere"}, Enabled: false}}
+	cfg = []legacyCategoryConfig{{Name: "logs", Paths: []string{" ", "~/elsewhere"}, Enabled: false}}
 	if got := migrateCategories(cfg); !slices.Equal(got.Custom, []CustomFolder{{Name: "logs", Path: "~/elsewhere", Enabled: false}}) {
 		t.Fatalf("edited disabled category = %+v", got)
 	}
@@ -226,76 +226,12 @@ func TestSettingsSavePreservesConfig(t *testing.T) {
 	}
 }
 
-// TestSettingsLegacyCategoriesCoexist keeps both settings and the active old UI config.
-func TestSettingsLegacyCategoriesCoexist(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg := defaultCategoryConfigs()
-	cfg[0].Enabled = false
-	if err := saveCategoryConfigs(cfg); err != nil {
-		t.Fatal(err)
-	}
-	settings := Settings{DisabledGroups: []string{"browsers"}, Ignored: []string{"dev.gradle"}, Custom: []CustomFolder{{Name: "old", Path: filepath.Join(home, "old"), Enabled: true}}}
-	if err := (Cleaner{}).SaveSettings(settings); err != nil {
-		t.Fatal(err)
-	}
-	if got := (Cleaner{}).GetCategories(); !reflect.DeepEqual(got, cfg) {
-		t.Fatalf("v3 save changed the legacy categories: got %+v, want %+v", got, cfg)
-	}
-	cfg[1].Enabled = false
-	if err := (Cleaner{}).SaveCategories(cfg); err != nil {
-		t.Fatal(err)
-	}
-	got := (Cleaner{}).GetSettings()
-	if !reflect.DeepEqual(got, settings) {
-		t.Fatalf("legacy save lost v3 settings: got %+v, want %+v", got, settings)
-	}
-	data, err := os.ReadFile(configPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"version": 3`) {
-		t.Fatalf("legacy save downgraded config: %s", data)
-	}
-	if got := (Cleaner{}).GetCategories(); !reflect.DeepEqual(got, cfg) {
-		t.Fatalf("legacy save lost its own changes: got %+v, want %+v", got, cfg)
-	}
-}
-
-// TestSettingsLegacyCategoriesStartWithDefaults keeps the existing UI on fresh v3 installs.
-func TestSettingsLegacyCategoriesStartWithDefaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := (Cleaner{}).SaveSettings(Settings{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := (Cleaner{}).GetCategories(); len(got) != len(defaultCategoryConfigs()) {
-		t.Fatalf("fresh v3 install has %d legacy categories", len(got))
-	}
-}
-
-// TestSettingsLegacyEmptyCategories preserves an explicitly empty legacy list.
-func TestSettingsLegacyEmptyCategories(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := saveCategoryConfigs(nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := (Cleaner{}).SaveSettings(Settings{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := (Cleaner{}).GetCategories(); len(got) != 0 {
-		t.Fatalf("empty legacy list restored defaults: %+v", got)
-	}
-}
-
-// TestSettingsLegacyPlainV3 uses defaults when no legacy list is saved in v3.
-func TestSettingsLegacyPlainV3(t *testing.T) {
+// TestSettingsPlainV3 reads settings without a legacy categories field.
+func TestSettingsPlainV3(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	mustMkdir(t, filepath.Dir(configPath()))
 	if err := os.WriteFile(configPath(), []byte(`{"version":3,"ignored":["dev.npm"]}`), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	if got := (Cleaner{}).GetCategories(); !reflect.DeepEqual(got, defaultCategoryConfigs()) {
-		t.Fatalf("plain v3 lost default categories: %+v", got)
 	}
 	if got := (Cleaner{}).GetSettings(); !slices.Equal(got.Ignored, []string{"dev.npm"}) {
 		t.Fatalf("plain v3 settings = %+v", got)

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,9 +26,73 @@ import (
 	"time"
 )
 
-func TestScanPathAndClean(t *testing.T) {
+// TestCleanerDropsLegacyJunkMethods keeps the bound API on the rule engine.
+func TestCleanerDropsLegacyJunkMethods(t *testing.T) {
+	service := reflect.TypeOf(Cleaner{})
+	for _, name := range []string{"Scan", "Clean", "ScanStream", "CleanStream", "ScanAppCaches", "GetCategories", "SaveCategories"} {
+		if _, ok := service.MethodByName(name); ok {
+			t.Errorf("legacy method %s is still bound", name)
+		}
+	}
+}
+
+// TestSettingsSaveDropsLegacyCategories writes only the v3 settings model.
+func TestSettingsSaveDropsLegacyCategories(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Dir(configPath()))
+	old := strconv.Quote(filepath.Join(home, "old"))
+	for _, data := range []string{
+		"", `[{"name":"old","paths":[` + old + `],"enabled":false}]`,
+		`{"version":2,"categories":[{"name":"old","paths":[` + old + `],"enabled":false}]}`,
+		`{"version":3,"ignored":["dev.npm"],"categories":[{"name":"old","paths":[` + old + `],"enabled":false}]}`,
+	} {
+		if err := os.WriteFile(configPath(), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		settings := (Cleaner{}).GetSettings()
+		if err := (Cleaner{}).SaveSettings(settings); err != nil {
+			t.Fatal(err)
+		}
+		saved, err := os.ReadFile(configPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(saved, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["categories"]; ok {
+			t.Errorf("v3 save kept the old categories: %s", saved)
+		}
+		if string(fields["version"]) != "3" || !reflect.DeepEqual((Cleaner{}).GetSettings(), settings) {
+			t.Fatalf("v3 settings did not round trip: %s", saved)
+		}
+	}
+}
+
+// TestSettingsMigrationDoesNotRewriteConfig waits until saving to write v3.
+func TestSettingsMigrationDoesNotRewriteConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Dir(configPath()))
+	data := `[{"name":"logs","risk":"safe","paths":[` + strconv.Quote(filepath.Join(home, "Library/Logs")) + `],"enabled":false}]`
+	if err := os.WriteFile(configPath(), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := (Cleaner{}).GetSettings(); !slices.Equal(got.Ignored, []string{"sys.logs"}) {
+		t.Fatalf("legacy choice was not migrated: %+v", got)
+	}
+	saved, err := os.ReadFile(configPath())
+	if err != nil || string(saved) != data {
+		t.Fatalf("reading legacy settings rewrote them: %s, %v", saved, err)
+	}
+}
+
+// TestScanPathAndClean measures and trashes custom contents, keeping their root.
+func TestScanPathAndClean(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	junk := filepath.Join(home, "junk")
 	if err := os.MkdirAll(filepath.Join(junk, "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -39,14 +104,15 @@ func TestScanPathAndClean(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat := Category{Name: "test", paths: []string{junk}}
+	env.settings.Custom = []CustomFolder{{Name: "test", Path: junk, Enabled: true}}
+	sel := []JunkSelection{{ID: "custom:" + junk}}
 
 	size, files := scanPath(junk)
 	if size != 3072 || files != 2 {
 		t.Fatalf("scanPath got size=%d files=%d, want 3072/2", size, files)
 	}
 
-	res := cleanCategory(cat, &usageGuard{}, time.Time{})
+	res := cleanJunk(context.Background(), env, sel, time.Time{}, cleanHooks{})[0]
 	if res.Trashed != 3072 || res.Freed != 0 || res.Files != 2 {
 		t.Fatalf("clean got trashed=%d freed=%d files=%d, want 3072/0/2", res.Trashed, res.Freed, res.Files)
 	}
@@ -73,26 +139,23 @@ func TestScanPathAndClean(t *testing.T) {
 		t.Fatalf("sub/b.bin should be in trash: %v", err)
 	}
 
-	res2 := cleanCategory(cat, &usageGuard{}, time.Time{})
+	res2 := cleanJunk(context.Background(), env, sel, time.Time{}, cleanHooks{})[0]
 	if res2.Trashed != 0 || res2.Files != 0 {
 		t.Fatalf("second clean should move nothing, got trashed=%d files=%d", res2.Trashed, res2.Files)
 	}
 }
 
-// TestCleanCategoryEmptiesTrash verifies the built-in "trash" category is
-// emptied permanently (its contents are already in the Trash), while other
-// categories move recoverable copies in.
-func TestCleanCategoryEmptiesTrash(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestCleanJunkEmptiesTrash permanently removes existing Trash contents.
+func TestCleanJunkEmptiesTrash(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	trash := filepath.Join(home, ".Trash")
 	mustMkdir(t, trash)
 	// something already sitting in the trash
 	if err := os.WriteFile(filepath.Join(trash, "old.bin"), make([]byte, 1500), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cat := Category{Name: "trash", paths: []string{trash}}
-	res := cleanCategory(cat, &usageGuard{}, time.Time{})
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.Time{}, cleanHooks{})[0]
 	if res.Freed != 1500 {
 		t.Fatalf("freed = %d, want 1500", res.Freed)
 	}
@@ -131,16 +194,12 @@ func TestSafeToClean(t *testing.T) {
 	}
 }
 
-func TestScanCategoriesMissing(t *testing.T) {
-	dir := t.TempDir()
-	missing := filepath.Join(dir, "nope")
-	cat := Category{Name: "x", paths: []string{missing}}
-	got := scanCategories([]Category{cat}, &usageGuard{})
-	if len(got[0].Missing) != 1 || got[0].Missing[0] != missing {
-		t.Fatalf("expected missing path recorded, got %v", got[0].Missing)
-	}
-	if got[0].Size != 0 || got[0].Files != 0 {
-		t.Fatalf("missing path should contribute 0 size/files")
+// TestScanJunkMissingFolder hides absent custom folders without counting them.
+func TestScanJunkMissingFolder(t *testing.T) {
+	env := testEnv(t)
+	env.settings.Custom = []CustomFolder{{Name: "x", Path: filepath.Join(env.home, "nope"), Enabled: true}}
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 0 {
+		t.Fatalf("missing folder should contribute no items: %+v", got)
 	}
 }
 
@@ -282,50 +341,48 @@ func TestUninstallApp(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Category config persistence
+// Settings persistence
 // ---------------------------------------------------------------------------
 
+// TestConfigRoundtrip preserves custom settings and their effective targets.
 func TestConfigRoundtrip(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 
-	got := Cleaner{}.GetCategories()
-	if len(got) != 9 {
-		t.Fatalf("want 9 default categories, got %d", len(got))
-	}
-	custom := got[:2]
-	custom[0].Name = "custom"
-	custom[0].Description = "自定义分类"
-	custom[0].Paths = []string{filepath.Join(home, "mydir")}
-	if err := (Cleaner{}).SaveCategories(custom); err != nil {
+	path := filepath.Join(home, "mydir")
+	writeFile(t, filepath.Join(path, "old"), 100)
+	settings := Settings{Custom: []CustomFolder{{Name: "custom", Path: path, Enabled: true}}}
+	if err := (Cleaner{}).SaveSettings(settings); err != nil {
 		t.Fatal(err)
 	}
 
-	re := Cleaner{}.GetCategories()
-	if len(re) != 2 || re[0].Name != "custom" || re[0].Paths[0] != filepath.Join(home, "mydir") {
+	re := Cleaner{}.GetSettings()
+	if !reflect.DeepEqual(re, settings) {
 		t.Fatalf("unexpected reload: %+v", re)
 	}
-	loaded := loadCategories()
-	if len(loaded) != 2 || loaded[0].paths[0] != filepath.Join(home, "mydir") {
-		t.Fatalf("unexpected effective categories: %+v", loaded)
+	env.settings = re
+	loaded, _ := expandItems(&env)
+	if len(loaded) != 1 || loaded[0].item.ID != "custom:"+path || loaded[0].cands[0].path != resolvePath(filepath.Join(path, "old")) {
+		t.Fatalf("unexpected effective settings: %v", itemIDs(loaded))
 	}
 }
 
-func TestSaveCategoriesRejectsBlocked(t *testing.T) {
+// TestSaveSettingsRejectsBlocked rejects enabled folders outside the safety gate.
+func TestSaveSettingsRejectsBlocked(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	err := Cleaner{}.SaveCategories([]CategoryConfig{{Name: "x", Enabled: true, Paths: []string{"/"}}})
+	err := Cleaner{}.SaveSettings(Settings{Custom: []CustomFolder{{Name: "x", Enabled: true, Path: "/"}}})
 	if err == nil {
 		t.Fatal("expected protected path to be rejected")
 	}
 }
 
-func TestConfigDefaultPersisted(t *testing.T) {
+// TestSettingsDefaultsNeedNoConfig leaves a fresh install unchanged until saving.
+func TestSettingsDefaultsNeedNoConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	_ = loadCategories() // first run persists defaults
-	if _, err := os.Stat(configPath()); err != nil {
-		t.Fatalf("config.json should be written on first load: %v", err)
+	if got := loadSettings(); !reflect.DeepEqual(got, Settings{}) || exists(configPath()) {
+		t.Fatalf("default settings should not write config: %+v", got)
 	}
 }
 
@@ -588,9 +645,10 @@ func TestCollectOrphans(t *testing.T) {
 // Per-application cache cleanup
 // ---------------------------------------------------------------------------
 
-func TestScanAppCaches(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestScanJunkAppCaches reports each app's cache size and source path.
+func TestScanJunkAppCaches(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	caches := filepath.Join(home, "Library", "Caches")
 	for _, name := range []string{"AppA", "AppB"} {
 		d := filepath.Join(caches, name)
@@ -599,19 +657,19 @@ func TestScanAppCaches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	items := Cleaner{}.ScanAppCaches()
+	items, _ := scanJunk(context.Background(), env, nil, nil)
 	if len(items) != 2 {
 		t.Fatalf("want 2 app cache rows, got %+v", items)
 	}
 	// sorted by size descending (equal sizes, order not asserted beyond presence)
-	byName := map[string]AppCacheItem{}
+	byName := map[string]JunkItem{}
 	for _, it := range items {
 		byName[it.Name] = it
 	}
 	if byName["AppA"].Size < 2048 || byName["AppB"].Size < 2048 {
 		t.Fatalf("unexpected sizes: %+v", byName)
 	}
-	if byName["AppA"].Path != filepath.Join(caches, "AppA") {
+	if !slices.Equal(byName["AppA"].Paths, []string{"~/Library/Caches/AppA"}) {
 		t.Fatalf("bad path: %+v", byName["AppA"])
 	}
 }
@@ -1100,31 +1158,31 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// TestNestedCategoriesCountOnce: a category inside another one owns its
-// folder, so its files are counted once and cleaned only with it.
-func TestNestedCategoriesCountOnce(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestNestedJunkItemsCountOnce keeps nested targets out of other items' cleans.
+func TestNestedJunkItemsCountOnce(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	caches := filepath.Join(home, "Library", "Caches")
 	writeFile(t, filepath.Join(caches, "com.app", "blob"), 2000)
 	writeFile(t, filepath.Join(caches, "go-build", "ab", "obj"), 1000)
 	writeFile(t, filepath.Join(caches, "foo", "x"), 300)
 	writeFile(t, filepath.Join(caches, "foo", "bar", "y"), 400)
-	cats := excludeNested([]Category{
-		{Name: "caches", paths: []string{caches}},
-		{Name: "go", paths: []string{filepath.Join(caches, "go-build")}},
-		{Name: "bar", paths: []string{filepath.Join(caches, "foo", "bar")}},
-	})
-	got := scanCategories(cats, &usageGuard{})
-	if got[0].Size != 2300 || got[1].Size != 1000 || got[2].Size != 400 {
-		t.Fatalf("sizes = %d, %d, %d; want 2300, 1000, 400", got[0].Size, got[1].Size, got[2].Size)
+	bar := filepath.Join(caches, "foo", "bar")
+	env.settings.Custom = []CustomFolder{{Name: "bar", Path: bar, Enabled: true}}
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	got := map[string]JunkItem{}
+	for _, item := range items {
+		got[item.ID] = item
 	}
-	if len(got[0].Top) == 0 || got[0].Top[0].Name != "com.app" {
-		t.Fatalf("top of caches = %+v", got[0].Top)
+	if len(got) != 4 || got["app:dir:com.app"].Size != 2000 || got["app:dir:foo"].Size != 300 || got["dev.go-build"].Size != 1000 || got["custom:"+bar].Size != 400 {
+		t.Fatalf("items counted nested targets twice: %+v", got)
 	}
-	res := cleanCategory(cats[0], &usageGuard{}, time.Time{})
-	if len(res.Failed) != 0 {
-		t.Fatalf("failed: %v", res.Failed)
+	if top := got["app:dir:com.app"].Top; len(top) != 1 || top[0].Name != "com.app" || top[0].Size != 2000 {
+		t.Fatalf("top of app cache = %+v", top)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "app:dir:com.app"}, {ID: "app:dir:foo"}}, time.Time{}, cleanHooks{})
+	if len(res) != 2 || len(res[0].Failed)+len(res[1].Failed) != 0 || res[0].Freed+res[1].Freed != 2300 {
+		t.Fatalf("results: %+v", res)
 	}
 	if exists(filepath.Join(caches, "com.app")) || exists(filepath.Join(caches, "foo", "x")) {
 		t.Fatal("caches' own entries should be cleaned")
@@ -1137,11 +1195,8 @@ func TestNestedCategoriesCountOnce(t *testing.T) {
 // TestTempCleansOnlyStaleEntries: the temporary folder only loses entries
 // nothing has touched for a week, and never sockets or pipes.
 func TestTempCleansOnlyStaleEntries(t *testing.T) {
-	base := t.TempDir()
-	home, tmp := filepath.Join(base, "home"), filepath.Join(base, "tmp")
-	mustMkdir(t, home)
-	mustMkdir(t, tmp)
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	tmp := env.tmp
 	t.Setenv("TMPDIR", tmp)
 	// Files made now cannot get an old status change time, so the clock moves
 	// ten days ahead instead; fresh entries are touched at that "now".
@@ -1165,12 +1220,11 @@ func TestTempCleansOnlyStaleEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat := Category{Name: "temp", paths: []string{tmp}}
-	got := scanCategories([]Category{cat}, &usageGuard{})
-	if got[0].Size != 1000 || got[0].Files != 1 {
-		t.Fatalf("scan = %d bytes, %d files; want 1000, 1", got[0].Size, got[0].Files)
+	got, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(got) != 1 || got[0].Size != 1000 || got[0].Files != 1 {
+		t.Fatalf("scan = %+v; want 1000 bytes, 1 file", got)
 	}
-	cleanCategory(cat, &usageGuard{}, time.Time{})
+	cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.temp"}}, time.Time{}, cleanHooks{})
 	if exists(filepath.Join(tmp, "stale")) {
 		t.Fatal("stale entry should be cleaned")
 	}
@@ -1184,8 +1238,8 @@ func TestTempCleansOnlyStaleEntries(t *testing.T) {
 // TestCleanSkipsOpenFiles: a folder holding a file a process has open is
 // in use, so cleaning leaves it and counts it.
 func TestCleanSkipsOpenFiles(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	dir := filepath.Join(home, "junk")
 	writeFile(t, filepath.Join(dir, "busy", "db.sqlite"), 800)
 	writeFile(t, filepath.Join(dir, "idle", "x"), 300)
@@ -1194,12 +1248,12 @@ func TestCleanSkipsOpenFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	cat := Category{Name: "junk", paths: []string{dir}}
-	g := probeUsage()
-	if got := scanCategories([]Category{cat}, g); got[0].Size != 300 || got[0].InUse != 1 {
-		t.Fatalf("scan = %d bytes, %d in use; want 300, 1", got[0].Size, got[0].InUse)
+	env.settings.Custom = []CustomFolder{{Name: "junk", Path: dir, Enabled: true}}
+	env.guard = probeUsage()
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 1 || got[0].Size != 300 || got[0].InUse != 1 {
+		t.Fatalf("scan = %+v; want 300 bytes, 1 in use", got)
 	}
-	res := cleanCategory(cat, g, time.Time{})
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "custom:" + dir}}, time.Time{}, cleanHooks{})[0]
 	if res.InUse != 1 || !exists(filepath.Join(dir, "busy", "db.sqlite")) || exists(filepath.Join(dir, "idle")) {
 		t.Fatalf("res = %+v; busy must stay, idle must go", res)
 	}
@@ -1208,29 +1262,29 @@ func TestCleanSkipsOpenFiles(t *testing.T) {
 // TestScanReportsUnreadableFolder: a folder macOS will not let the app read
 // is reported as denied, not as empty.
 func TestScanReportsUnreadableFolder(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	locked := filepath.Join(home, "locked")
 	writeFile(t, filepath.Join(locked, "a"), 100)
 	if err := os.Chmod(locked, 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(locked, 0o755) })
-	got := scanCategories([]Category{{Name: "x", paths: []string{locked}}}, &usageGuard{})
-	if len(got[0].Denied) != 1 || got[0].Size != 0 || len(got[0].Missing) != 0 {
-		t.Fatalf("got denied=%v missing=%v size=%d", got[0].Denied, got[0].Missing, got[0].Size)
+	env.settings.Custom = []CustomFolder{{Name: "x", Path: locked, Enabled: true}}
+	got, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(got) != 1 || !got[0].Denied || got[0].Size != 0 {
+		t.Fatalf("unreadable folder not reported as denied: %+v", got)
 	}
 }
 
-// TestBuiltinJunkIsDeleted: built-in categories at their built-in paths
-// hold regenerable junk, which is deleted rather than moved to the Trash.
+// TestBuiltinJunkIsDeleted permanently removes regenerable app caches.
 func TestBuiltinJunkIsDeleted(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	writeFile(t, filepath.Join(home, "Library", "Caches", "com.example.app", "blob"), 4096)
-	sum := Cleaner{}.Clean([]string{"caches"}, 0)
-	if sum.TotalFreed != 4096 || sum.TotalTrashed != 0 || len(sum.Errors) != 0 {
-		t.Fatalf("summary = %+v", sum)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "app:dir:com.example.app"}}, time.Time{}, cleanHooks{})[0]
+	if res.Freed != 4096 || res.Trashed != 0 || len(res.Failed) != 0 {
+		t.Fatalf("result = %+v", res)
 	}
 	if exists(filepath.Join(home, "Library", "Caches", "com.example.app")) {
 		t.Fatal("cache should be deleted")
@@ -1243,29 +1297,23 @@ func TestBuiltinJunkIsDeleted(t *testing.T) {
 // TestCleanEmptiesTrashFirst: emptying the Trash in the same pass happens
 // first, so what the pass moves to the Trash stays recoverable.
 func TestCleanEmptiesTrashFirst(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	trash := filepath.Join(home, ".Trash")
 	writeFile(t, filepath.Join(trash, "old.bin"), 1500)
 	mine := filepath.Join(home, "mydir")
 	writeFile(t, filepath.Join(mine, "a.bin"), 700)
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
-		{Name: "mine", Risk: "safe", Enabled: true, Paths: []string{mine}},
-		{Name: "trash", Risk: "moderate", Enabled: true, Paths: []string{trash}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sum := Cleaner{}.Clean(nil, 0)
+	env.settings.Custom = []CustomFolder{{Name: "mine", Path: mine, Enabled: true}}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "custom:" + mine}, {ID: "sys.trash"}}, time.Time{}, cleanHooks{})
 	if !exists(filepath.Join(trash, "a.bin")) || exists(filepath.Join(trash, "old.bin")) {
 		t.Fatal("a.bin should be in the Trash, old.bin gone")
 	}
-	if sum.TotalFreed != 1500 || sum.TotalTrashed != 700 {
-		t.Fatalf("summary = %+v", sum)
+	if len(res) != 2 || res[0].Name != "sys.trash" || res[0].Freed != 1500 || res[1].Trashed != 700 {
+		t.Fatalf("results = %+v", res)
 	}
 }
 
-// TestConfigMigratesV1Defaults: version 1 files keep the user's edits, while
-// built-ins still at their old defaults adopt the new ones.
+// TestConfigMigratesV1Defaults hands built-ins to rules and keeps edited paths.
 func TestConfigMigratesV1Defaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1278,35 +1326,26 @@ func TestConfigMigratesV1Defaults(t *testing.T) {
 	if err := os.WriteFile(configPath(), []byte(v1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := Cleaner{}.GetCategories()
-	risks := map[string]string{}
-	for _, c := range got {
-		risks[c.Name] = c.Risk
-	}
-	if risks["temp"] != "moderate" || risks["trash"] != "moderate" || risks["logs"] != "safe" {
-		t.Fatalf("risks = %v", risks)
+	got := Cleaner{}.GetSettings()
+	if len(got.DisabledGroups)+len(got.Ignored) != 0 || !slices.Equal(got.Custom, []CustomFolder{{Name: "logs", Path: "/elsewhere/logs", Enabled: true}}) {
+		t.Fatalf("migrated settings = %+v", got)
 	}
 	b, _ := os.ReadFile(configPath())
-	if !strings.HasPrefix(strings.TrimSpace(string(b)), "{") || !strings.Contains(string(b), `"version": 2`) {
-		t.Fatalf("config should be rewritten as version 2:\n%s", b)
+	if string(b) != v1 {
+		t.Fatalf("config should not be rewritten until saving:\n%s", b)
 	}
 }
 
-func TestSaveCategoriesRejectsDuplicates(t *testing.T) {
+// TestSaveSettingsRejectsDuplicates rejects two names for the same folder.
+func TestSaveSettingsRejectsDuplicates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	a, b := filepath.Join(home, "a"), filepath.Join(home, "b")
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
-		{Name: "dup", Enabled: true, Paths: []string{a}},
-		{Name: "Dup", Enabled: true, Paths: []string{b}},
-	}); err == nil {
-		t.Error("two categories with one name should be rejected")
-	}
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
-		{Name: "a", Enabled: true, Paths: []string{a}},
-		{Name: "b", Enabled: true, Paths: []string{a + "/"}},
-	}); err == nil {
-		t.Error("two categories with one folder should be rejected")
+	a := filepath.Join(home, "a")
+	if err := (Cleaner{}).SaveSettings(Settings{Custom: []CustomFolder{
+		{Name: "a", Enabled: true, Path: a},
+		{Name: "b", Enabled: true, Path: a + "/"},
+	}}); err == nil {
+		t.Error("two custom folders with one path should be rejected")
 	}
 }
 
@@ -1331,9 +1370,10 @@ func TestTrashPathRefusesFolderInUse(t *testing.T) {
 	}
 }
 
-func TestScanAppCachesFlagsInUse(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestScanJunkAppCachesFlagsInUse reports caches holding real open files.
+func TestScanJunkAppCachesFlagsInUse(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	caches := filepath.Join(home, "Library", "Caches")
 	writeFile(t, filepath.Join(caches, "busy", "db"), 100)
 	writeFile(t, filepath.Join(caches, "idle", "x"), 100)
@@ -1343,8 +1383,10 @@ func TestScanAppCachesFlagsInUse(t *testing.T) {
 	}
 	defer f.Close()
 	inUse := map[string]bool{}
-	for _, it := range (Cleaner{}).ScanAppCaches() {
-		inUse[it.Name] = it.InUse
+	env.guard = probeUsage()
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	for _, it := range items {
+		inUse[it.Name] = it.InUse > 0
 	}
 	if !inUse["busy"] || inUse["idle"] {
 		t.Fatalf("inUse = %v", inUse)
@@ -1861,50 +1903,40 @@ func TestTrashPathHonorsSafetyGate(t *testing.T) {
 	}
 }
 
-// TestCategoryFlagsFollowWhatCleaningDoes: a category on the Trash deletes
-// for good whatever it is called, and only untouched built-ins are built-in.
-func TestCategoryFlagsFollowWhatCleaningDoes(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestJunkFlagsFollowWhatCleaningDoes marks only user folders as recoverable.
+func TestJunkFlagsFollowWhatCleaningDoes(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	trash, mine, logs := filepath.Join(home, ".Trash"), filepath.Join(home, "mine"), filepath.Join(home, "Library", "Logs")
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
-		{Name: "废纸篓", Enabled: true, Paths: []string{trash}},
-		{Name: "mine", Enabled: true, Paths: []string{mine}},
-		{Name: "logs", Enabled: true, Paths: []string{logs}},
-	}); err != nil {
-		t.Fatal(err)
+	for _, dir := range []string{trash, mine, logs} {
+		writeFile(t, filepath.Join(dir, "x"), 10)
 	}
-	type flags struct{ permanent, builtin bool }
-	got := map[string]flags{}
-	for _, c := range loadCategories() {
-		got[c.Name] = flags{c.Permanent, c.Builtin}
+	env.settings.Custom = []CustomFolder{{Name: "mine", Path: mine, Enabled: true}}
+	got := map[string]bool{}
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	for _, item := range items {
+		got[item.ID] = item.Trash
 	}
-	want := map[string]flags{"废纸篓": {true, false}, "mine": {false, false}, "logs": {true, true}}
+	want := map[string]bool{"sys.trash": false, "custom:" + mine: true, "sys.logs": false}
 	if !maps.Equal(got, want) {
 		t.Fatalf("flags = %+v, want %+v", got, want)
 	}
 }
 
-// TestDisabledCategoryKeepsItsFolder: disabling a nested category keeps its
-// folder out of cleaning, instead of folding it into the outer one.
-func TestDisabledCategoryKeepsItsFolder(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestIgnoredRuleKeepsItsFolder keeps ignored developer caches out of app rows.
+func TestIgnoredRuleKeepsItsFolder(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	caches := filepath.Join(home, "Library", "Caches")
 	writeFile(t, filepath.Join(caches, "go-build", "x"), 1000)
 	writeFile(t, filepath.Join(caches, "com.app", "y"), 500)
-	cfg := defaultCategoryConfigs()
-	for i := range cfg {
-		if cfg[i].Name == "go" {
-			cfg[i].Enabled = false
-		}
-	}
-	if err := (Cleaner{}).SaveCategories(cfg); err != nil {
-		t.Fatal(err)
-	}
-	Cleaner{}.Clean([]string{"caches"}, 0)
+	env.settings.Ignored = []string{"dev.go-build"}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "app:dir:com.app"}, {ID: "dev.go-build"}}, time.Time{}, cleanHooks{})
 	if !exists(filepath.Join(caches, "go-build", "x")) || exists(filepath.Join(caches, "com.app")) {
-		t.Fatal("caches must clean com.app and leave the disabled go category's folder")
+		t.Fatal("app caches must clean com.app and leave the ignored rule's folder")
+	}
+	if len(res) != 2 || res[0].Freed != 500 || res[1].Freed != 0 {
+		t.Fatalf("results = %+v", res)
 	}
 }
 
@@ -1937,49 +1969,49 @@ func TestUninstallRefusesAppInUse(t *testing.T) {
 	}
 }
 
-// TestSaveCategoriesIgnoresDisabledLegacyPaths: a disabled category from an
-// older version, whose folder is now protected, does not block saving.
-func TestSaveCategoriesIgnoresDisabledLegacyPaths(t *testing.T) {
+// TestSaveSettingsIgnoresDisabledLegacyPaths keeps disabled protected folders.
+func TestSaveSettingsIgnoresDisabledLegacyPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	old := CategoryConfig{Name: "old", Enabled: false, Paths: []string{filepath.Join(home, "Downloads")}}
-	ok := CategoryConfig{Name: "ok", Enabled: true, Paths: []string{filepath.Join(home, "x")}}
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{old, ok}); err != nil {
-		t.Fatalf("disabled legacy category blocked saving: %v", err)
+	old := CustomFolder{Name: "old", Enabled: false, Path: filepath.Join(home, "Downloads")}
+	ok := CustomFolder{Name: "ok", Enabled: true, Path: filepath.Join(home, "x")}
+	if err := (Cleaner{}).SaveSettings(Settings{Custom: []CustomFolder{old, ok}}); err != nil {
+		t.Fatalf("disabled legacy folder blocked saving: %v", err)
 	}
 	old.Enabled = true
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{old, ok}); err == nil {
-		t.Fatal("an enabled category on a protected folder must be rejected")
+	if err := (Cleaner{}).SaveSettings(Settings{Custom: []CustomFolder{old, ok}}); err == nil {
+		t.Fatal("an enabled custom folder on a protected path must be rejected")
 	}
 }
 
-// TestEmptyCategoryListIsKept: removing every category means none, not the
-// defaults, which delete for good.
-func TestEmptyCategoryListIsKept(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{}); err != nil {
+// TestDisabledJunkGroupsStayDisabled does not restore rules on save or reload.
+func TestDisabledJunkGroupsStayDisabled(t *testing.T) {
+	env := testEnv(t)
+	settings := Settings{DisabledGroups: slices.Clone(junkGroupNames)}
+	if err := (Cleaner{}).SaveSettings(settings); err != nil {
 		t.Fatal(err)
 	}
-	if got := (Cleaner{}).GetCategories(); len(got) != 0 {
-		t.Fatalf("GetCategories = %d categories", len(got))
+	if got := (Cleaner{}).GetSettings(); !reflect.DeepEqual(got, settings) {
+		t.Fatalf("GetSettings = %+v", got)
 	}
-	if got := loadCategories(); len(got) != 0 {
-		t.Fatalf("loadCategories = %d categories", len(got))
+	writeFile(t, filepath.Join(env.home, "Library/Caches/App/x"), 100)
+	writeFile(t, filepath.Join(env.home, ".npm/_npx/x"), 100)
+	env.settings = loadSettings()
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 0 {
+		t.Fatalf("disabled groups produced items: %+v", got)
 	}
 }
 
-// TestCategoryPathCanBeAFile: a category on a file cleans that file.
-func TestCategoryPathCanBeAFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestJunkTargetCanBeAFile measures and deletes a rule's direct file target.
+func TestJunkTargetCanBeAFile(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	log := filepath.Join(home, "Library", "Logs", "huge.log")
 	writeFile(t, log, 5000)
-	cat := Category{Name: "log", paths: []string{log}}
-	if got := scanCategories([]Category{cat}, &usageGuard{}); got[0].Size != 5000 {
-		t.Fatalf("size = %d, want 5000", got[0].Size)
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 1 || got[0].Size != 5000 {
+		t.Fatalf("scan = %+v, want 5000 bytes", got)
 	}
-	if res := cleanCategory(cat, &usageGuard{}, time.Time{}); res.Trashed != 5000 || exists(log) {
+	if res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.logs"}}, time.Time{}, cleanHooks{})[0]; res.Freed != 5000 || exists(log) {
 		t.Fatalf("res = %+v", res)
 	}
 }
@@ -1987,8 +2019,8 @@ func TestCategoryPathCanBeAFile(t *testing.T) {
 // TestPlanSkipsProtectedEntries: entries macOS will not let the app remove,
 // such as immutable ones, are left out instead of failing every clean.
 func TestPlanSkipsProtectedEntries(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	dir := filepath.Join(home, "junk")
 	writeFile(t, filepath.Join(dir, "locked", "x"), 10)
 	writeFile(t, filepath.Join(dir, "plain", "y"), 20)
@@ -1997,11 +2029,11 @@ func TestPlanSkipsProtectedEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { syscall.Chflags(locked, 0) })
-	cat := Category{Name: "junk", paths: []string{dir}}
-	if got := scanCategories([]Category{cat}, &usageGuard{}); got[0].Size != 20 {
-		t.Fatalf("size = %d, want 20", got[0].Size)
+	env.settings.Custom = []CustomFolder{{Name: "junk", Path: dir, Enabled: true}}
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 1 || got[0].Size != 20 {
+		t.Fatalf("scan = %+v, want 20 bytes", got)
 	}
-	if res := cleanCategory(cat, &usageGuard{}, time.Time{}); len(res.Failed) != 0 || exists(filepath.Join(dir, "plain")) || !exists(locked) {
+	if res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "custom:" + dir}}, time.Time{}, cleanHooks{})[0]; len(res.Failed) != 0 || exists(filepath.Join(dir, "plain")) || !exists(locked) {
 		t.Fatalf("res = %+v", res)
 	}
 }
@@ -2009,8 +2041,8 @@ func TestPlanSkipsProtectedEntries(t *testing.T) {
 // TestCleanRemovesReadOnlyTrees: junk with read-only folders inside, as Go's
 // module cache leaves, is still deleted.
 func TestCleanRemovesReadOnlyTrees(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	mod := filepath.Join(home, "Library", "Caches", "gomod")
 	writeFile(t, filepath.Join(mod, "pkg", "a.go"), 100)
 	for _, d := range []string{filepath.Join(mod, "pkg"), mod} {
@@ -2019,18 +2051,16 @@ func TestCleanRemovesReadOnlyTrees(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { os.Chmod(mod, 0o755); os.Chmod(filepath.Join(mod, "pkg"), 0o755) })
-	if sum := (Cleaner{}).Clean([]string{"caches"}, 0); len(sum.Errors) != 0 || exists(mod) {
-		t.Fatalf("summary = %+v", sum)
+	if res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "app:dir:gomod"}}, time.Time{}, cleanHooks{})[0]; len(res.Failed) != 0 || exists(mod) {
+		t.Fatalf("result = %+v", res)
 	}
 }
 
 // TestTempAgeCountsMoves: a file moved or extracted into the temporary folder
 // keeps its old modification time, yet it arrived just now.
 func TestTempAgeCountsMoves(t *testing.T) {
-	base := t.TempDir()
-	home, tmp := filepath.Join(base, "home"), filepath.Join(base, "tmp")
-	mustMkdir(t, home)
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	tmp := env.tmp
 	t.Setenv("TMPDIR", tmp)
 	old := time.Now().Add(-30 * 24 * time.Hour)
 	p := filepath.Join(tmp, "extracted", "a.bin")
@@ -2040,25 +2070,29 @@ func TestTempAgeCountsMoves(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := scanCategories([]Category{{Name: "temp", paths: []string{tmp}}}, &usageGuard{}); got[0].Size != 0 {
-		t.Fatalf("a just-extracted file was planned: %d bytes", got[0].Size)
+	if got, _ := scanJunk(context.Background(), env, nil, nil); len(got) != 1 || got[0].Size != 0 {
+		t.Fatalf("a just-extracted file was planned: %+v", got)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.temp"}}, time.Time{}, cleanHooks{})[0]
+	if res.Freed != 0 || !exists(p) {
+		t.Fatalf("a just-extracted file was cleaned: %+v", res)
 	}
 }
 
 // TestCleanKeepsWhatReachedTheTrashAfterTheScan: emptying the Trash deletes
 // what the scan showed; what arrives later stays recoverable.
 func TestCleanKeepsWhatReachedTheTrashAfterTheScan(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	home := env.home
 	trash := filepath.Join(home, ".Trash")
 	writeFile(t, filepath.Join(trash, "old.bin"), 1500)
 	time.Sleep(20 * time.Millisecond)
 	scannedAt := time.Now()
 	time.Sleep(20 * time.Millisecond)
 	writeFile(t, filepath.Join(trash, "new.bin"), 700)
-	sum := Cleaner{}.Clean([]string{"trash"}, scannedAt.UnixMilli())
-	if exists(filepath.Join(trash, "old.bin")) || !exists(filepath.Join(trash, "new.bin")) || sum.TotalFreed != 1500 {
-		t.Fatalf("summary = %+v", sum)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.UnixMilli(scannedAt.UnixMilli()), cleanHooks{})[0]
+	if exists(filepath.Join(trash, "old.bin")) || !exists(filepath.Join(trash, "new.bin")) || res.Freed != 1500 {
+		t.Fatalf("result = %+v", res)
 	}
 }
 
@@ -2183,20 +2217,19 @@ func TestAppsSharingABundleID(t *testing.T) {
 // Streamed scan and clean
 // ---------------------------------------------------------------------------
 
-// TestScanStreamReportsEachCategory: a streamed scan reports every category
-// once, as planned, and the entries it measures along the way.
-func TestScanStreamReportsEachCategory(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestScanJunkReportsEachItem reports each item once and every measured entry.
+func TestScanJunkReportsEachItem(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	a, b := filepath.Join(home, "a"), filepath.Join(home, "b")
 	writeFile(t, filepath.Join(a, "x", "1"), 100)
 	writeFile(t, filepath.Join(b, "y", "2"), 200)
-	cats := []Category{{Name: "a", paths: []string{a}}, {Name: "b", paths: []string{b}}}
+	env.settings.Custom = []CustomFolder{{Name: "a", Path: a, Enabled: true}, {Name: "b", Path: b, Enabled: true}}
 	var measured []string
 	sizes := map[string]int64{}
-	scanStream(context.Background(), cats, &usageGuard{},
+	scanJunk(context.Background(), env,
 		func(p string) { measured = append(measured, filepath.Base(p)) },
-		func(c Category) { sizes[c.Name] += c.Size + 1000 }) // +1000 counts the reports
+		func(item JunkItem) { sizes[item.Name] += item.Size + 1000 }) // +1000 counts the reports
 	if !maps.Equal(sizes, map[string]int64{"a": 1100, "b": 1200}) {
 		t.Errorf("reported %v", sizes)
 	}
@@ -2206,72 +2239,64 @@ func TestScanStreamReportsEachCategory(t *testing.T) {
 	}
 }
 
-// TestScanStreamStopsWhenCanceled: a stopped scan reports nothing more.
-func TestScanStreamStopsWhenCanceled(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestScanJunkStopsWhenCanceled reports nothing after cancellation.
+func TestScanJunkStopsWhenCanceled(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	writeFile(t, filepath.Join(home, "a", "x", "1"), 100)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	reported := 0
-	scanStream(ctx, []Category{{Name: "a", paths: []string{filepath.Join(home, "a")}}}, &usageGuard{},
-		func(string) { reported++ }, func(Category) { reported++ })
+	env.settings.Custom = []CustomFolder{{Name: "a", Path: filepath.Join(home, "a"), Enabled: true}}
+	scanJunk(ctx, env, func(string) { reported++ }, func(JunkItem) { reported++ })
 	if reported != 0 {
 		t.Errorf("a stopped scan reported %d times", reported)
 	}
 }
 
-// TestCleanStreamReportsProgress: a streamed clean announces each category,
-// reports every entry it removes with the bytes cleaned so far in the pass,
-// and finishes each category with its result.
-func TestCleanStreamReportsProgress(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestCleanJunkReportsProgress reports starts, cumulative bytes and final results.
+func TestCleanJunkReportsProgress(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	mine := filepath.Join(home, "mine")
 	writeFile(t, filepath.Join(mine, "a"), 100)
 	writeFile(t, filepath.Join(mine, "b"), 200)
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{{Name: "mine", Enabled: true, Paths: []string{mine}}}); err != nil {
-		t.Fatal(err)
-	}
+	env.settings.Custom = []CustomFolder{{Name: "mine", Path: mine, Enabled: true}}
 	var events []string
-	sum := cleanStream(context.Background(), []string{"mine"}, 0, cleanHooks{
+	id := "custom:" + mine
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: id}}, time.Time{}, cleanHooks{
 		started: func(name string) { events = append(events, "start "+name) },
 		removed: func(name, path string, bytes int64) {
 			events = append(events, fmt.Sprintf("removed %s/%s %d", name, filepath.Base(path), bytes))
 		},
 		finished: func(r CleanResult) { events = append(events, fmt.Sprintf("done %s %d", r.Name, r.Trashed)) },
 	})
-	want := []string{"start mine", "removed mine/b 200", "removed mine/a 300", "done mine 300"}
-	if !slices.Equal(events, want) || sum.TotalTrashed != 300 {
-		t.Fatalf("events = %q, summary = %+v", events, sum)
+	want := []string{"start " + id, "removed " + id + "/b 200", "removed " + id + "/a 300", "done " + id + " 300"}
+	if !slices.Equal(events, want) || len(res) != 1 || res[0].Trashed != 300 {
+		t.Fatalf("events = %q, results = %+v", events, res)
 	}
 }
 
-// TestCleanStreamStops: stopping a clean finishes the entry at hand, leaves
-// the rest, and starts no further category.
-func TestCleanStreamStops(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestCleanJunkStops leaves remaining entries and starts no further item.
+func TestCleanJunkStops(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	one, two := filepath.Join(home, "one"), filepath.Join(home, "two")
 	for _, n := range []string{"a", "b", "c"} {
 		writeFile(t, filepath.Join(one, n), 10)
 	}
 	writeFile(t, filepath.Join(two, "z"), 10)
-	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
-		{Name: "one", Enabled: true, Paths: []string{one}},
-		{Name: "two", Enabled: true, Paths: []string{two}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	env.settings.Custom = []CustomFolder{{Name: "one", Path: one, Enabled: true}, {Name: "two", Path: two, Enabled: true}}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var started []string
 	removed := 0
-	cleanStream(ctx, nil, 0, cleanHooks{
+	cleanJunk(ctx, env, []JunkSelection{{ID: "custom:" + one}, {ID: "custom:" + two}}, time.Time{}, cleanHooks{
 		started: func(name string) { started = append(started, name) },
 		removed: func(string, string, int64) { removed++; cancel() },
 	})
 	left, _ := os.ReadDir(one)
-	if removed != 1 || len(left) != 2 || !slices.Equal(started, []string{"one"}) || !exists(filepath.Join(two, "z")) {
+	if removed != 1 || len(left) != 2 || !slices.Equal(started, []string{"custom:" + one}) || !exists(filepath.Join(two, "z")) {
 		t.Fatalf("removed %d, %d left, started %v", removed, len(left), started)
 	}
 }
@@ -2312,8 +2337,8 @@ func TestPathErrorCodes(t *testing.T) {
 	}
 }
 
-// TestSaveCategoriesErrorCodes checks validation order and translation arguments.
-func TestSaveCategoriesErrorCodes(t *testing.T) {
+// TestSaveSettingsErrorCodes checks translated validation codes and arguments.
+func TestSaveSettingsErrorCodes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, "junk")
@@ -2321,18 +2346,16 @@ func TestSaveCategoriesErrorCodes(t *testing.T) {
 	tests := []struct {
 		code string
 		args []string
-		cfg  []CategoryConfig
+		cfg  Settings
 	}{
-		{"empty-name", nil, []CategoryConfig{{Name: " "}}},
-		{"dup-name", []string{"Junk"}, []CategoryConfig{{Name: "junk", Paths: []string{path}}, {Name: "Junk"}}},
-		{"no-paths", []string{"junk"}, []CategoryConfig{{Name: "junk"}}},
-		{"empty-path", []string{"junk"}, []CategoryConfig{{Name: "junk", Paths: []string{" "}}}},
-		{"protected-path", []string{blocked}, []CategoryConfig{{Name: "junk", Enabled: true, Paths: []string{blocked}}}},
-		{"dup-path", []string{path + "/", "first", "second"}, []CategoryConfig{{Name: "first", Paths: []string{path}}, {Name: "second", Paths: []string{path + "/"}}}},
+		{"group-unknown", []string{"unknown"}, Settings{DisabledGroups: []string{"unknown"}}},
+		{"folder-empty", nil, Settings{Custom: []CustomFolder{{Name: "junk", Path: " "}}}},
+		{"folder-protected", []string{blocked}, Settings{Custom: []CustomFolder{{Name: "junk", Enabled: true, Path: blocked}}}},
+		{"folder-dup", []string{path}, Settings{Custom: []CustomFolder{{Name: "first", Path: path}, {Name: "second", Path: path + "/"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
-			err := (Cleaner{}).SaveCategories(tt.cfg)
+			err := (Cleaner{}).SaveSettings(tt.cfg)
 			var coded codeError
 			if !errors.As(err, &coded) {
 				t.Fatalf("error = %v, want codeError", err)
@@ -2418,41 +2441,45 @@ func TestMarkRunning(t *testing.T) {
 	}
 }
 
-// TestAppNamesByBundleID reads display names once across app directories.
-func TestAppNamesByBundleID(t *testing.T) {
+// TestAppIndexBundleNames reads display names and fallbacks across app directories.
+func TestAppIndexBundleNames(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	makeApp(t, first, "Editor.app", "COM.EXAMPLE.EDITOR", "Editor Display")
 	makeApp(t, second, "Viewer.app", "com.example.viewer", "Viewer Display")
 	makeApp(t, first, "Fallback.app", "com.example.fallback", "")
 	makeApp(t, first, "NoID.app", "", "No ID")
 	mustMkdir(t, filepath.Join(first, "Ignored"))
-	got := appNamesByBundleID([]string{first, second, filepath.Join(first, "missing")})
+	index := buildAppIndex([]string{first, second, filepath.Join(first, "missing")})
 	want := map[string]string{"com.example.editor": "Editor Display", "com.example.viewer": "Viewer Display", "com.example.fallback": "Fallback"}
-	if !maps.Equal(got, want) {
-		t.Fatalf("names = %v, want %v", got, want)
+	for id, name := range want {
+		if got, ok := index.lookup(id); !ok || got.Name != name {
+			t.Errorf("lookup(%q) = %+v, %v; want %s", id, got, ok, name)
+		}
+	}
+	if _, ok := index.lookup("No ID"); ok {
+		t.Fatal("app with no bundle ID entered the index")
 	}
 }
 
-// TestScanAppCachesIncludesAppName matches cache folders to installed bundles.
-func TestScanAppCachesIncludesAppName(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+// TestScanJunkAppCachesIncludesAppName names owned caches and keeps folder fallbacks.
+func TestScanJunkAppCachesIncludesAppName(t *testing.T) {
+	env := testEnv(t)
+	home := env.home
 	makeApp(t, filepath.Join(home, "Applications"), "Named.app", "dev.zzxq.cachename", "Cache Display")
 	caches := filepath.Join(home, "Library", "Caches")
-	mustMkdir(t, filepath.Join(caches, "DEV.ZZXQ.CACHENAME"))
-	mustMkdir(t, filepath.Join(caches, "ZzxqUnownedCache"))
-	got := Cleaner{}.ScanAppCaches()
+	writeFile(t, filepath.Join(caches, "DEV.ZZXQ.CACHENAME", "x"), 100)
+	writeFile(t, filepath.Join(caches, "ZzxqUnownedCache", "y"), 200)
+	env.apps = buildAppIndex([]string{filepath.Join(home, "Applications")})
+	got, _ := scanJunk(context.Background(), env, nil, nil)
 	if len(got) != 2 {
 		t.Fatalf("caches = %+v", got)
 	}
+	names := map[string]string{}
 	for _, item := range got {
-		want := ""
-		if item.Name == "DEV.ZZXQ.CACHENAME" {
-			want = "Cache Display"
-		}
-		if item.App != want {
-			t.Errorf("cache %s app = %q, want %q", item.Name, item.App, want)
-		}
+		names[item.ID] = item.Name
+	}
+	if !maps.Equal(names, map[string]string{"app:dev.zzxq.cachename": "Cache Display", "app:dir:zzxqunownedcache": "ZzxqUnownedCache"}) {
+		t.Fatalf("app names = %v", names)
 	}
 }
 
