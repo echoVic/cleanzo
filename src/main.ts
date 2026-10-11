@@ -21,6 +21,7 @@ const modalBody = $("#modal-body");
 const modalOk = $<HTMLButtonElement>("#modal-ok");
 const modalCancel = $<HTMLButtonElement>("#modal-cancel");
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
+const appSort = $<HTMLSelectElement>("#app-sort");
 const appSearch = $<HTMLInputElement>("#app-search");
 const appListEl = $("#app-list");
 const editorEl = $("#cat-editor");
@@ -44,7 +45,7 @@ const lgCurrent = $("#lg-current");
 const lgCount = $("#lg-count");
 const lgList = $("#lg-list");
 const lgToolbar = $("#lg-toolbar");
-const lgThreshold = $("#lg-threshold");
+const lgSize = $<HTMLSelectElement>("#lg-size");
 const orScanBtn = $<HTMLButtonElement>("#or-scan");
 const orSummary = $("#or-summary");
 const orTotal = $("#or-total");
@@ -63,6 +64,35 @@ const phCurrent = $("#ph-current");
 const phBar = $("#ph-bar");
 const phList = $("#ph-list");
 const phToolbar = $("#ph-toolbar");
+const photoViewer = $("#photo-viewer");
+const pvName = $("#pv-name");
+const pvMeta = $("#pv-meta");
+const pvKeep = $("#pv-keep");
+const pvImage = $<HTMLImageElement>("#pv-image");
+const pvLoading = $("#pv-loading");
+const pvError = $("#pv-error");
+const pvCheck = $<HTMLInputElement>("#pv-check");
+const pvClose = $<HTMLButtonElement>("#pv-close");
+const pvPrev = $<HTMLButtonElement>("#pv-prev");
+const pvNext = $<HTMLButtonElement>("#pv-next");
+
+/** 小偏好：存储不可用时仍可操作。 */
+function readChoice<T extends string>(key: string, choices: readonly T[], fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    if (choices.includes(value as T)) return value as T;
+  } catch { /* 忽略 */ }
+  return fallback;
+}
+function saveChoice(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* 忽略 */ }
+}
+const appSorts = ["name", "size", "opened"] as const;
+let appSortBy = readChoice("cleanzo.appSort", appSorts, "name");
+const largeSizes = ["104857600", "524288000", "1073741824", "5368709120"] as const;
+let lgMinSize = Number(readChoice("cleanzo.largeSize", largeSizes, "1073741824"));
+appSort.value = appSortBy;
+lgSize.value = String(lgMinSize);
 
 let categories = [] as Awaited<ReturnType<typeof Cleaner.scan>>;
 let apps: AppInfo[] = [];
@@ -79,6 +109,9 @@ let fsItems: BigItem[] = [];
 let lgRunning = false;
 let lgItems: LargeFile[] = [];
 let lgResult: LargeScanResult | null = null;
+let lgScannedThreshold: number | null = null;
+let lgRestartQueued = false;
+let lgStopped = false;
 let orRunning = false;
 let orItems: OrphanItem[] = [];
 let orFoot: { n: string; size: string; t: string } | null = null;
@@ -167,6 +200,11 @@ function applyStaticI18n() {
   document.querySelectorAll<HTMLElement>("[data-i18n-ph]").forEach((el) => {
     el.setAttribute("placeholder", t(el.dataset.i18nPh as never));
   });
+  document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
+    const text = t(el.dataset.i18nTitle as never);
+    el.title = text;
+    el.setAttribute("aria-label", text);
+  });
   // 正在扫描的按钮是「停止扫描」，不是它的静态文案
   scanChans.forEach((_, btn) => (btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`));
   langSelect.value = getPref();
@@ -183,11 +221,7 @@ function refreshI18n() {
   if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   renderIdleScanPages();
-  lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
-  if (!lgRunning) {
-    if (lgResult) renderLargeDone(lgResult);
-    else if (lgItems.length > 0) renderLargeRows(lgItems, false);
-  }
+  if (lgResult || lgItems.length > 0) renderLargeCurrent();
   if (!orRunning && orItems.length > 0) {
     if (orFoot) orTotal.textContent = t("orphans.foot", orFoot);
     renderOrphanRows(orItems);
@@ -198,6 +232,7 @@ function refreshI18n() {
   if (phClusters.length > 0 && !phRunning) {
     renderPhotoClusters();
   }
+  syncPhotoViewer();
 }
 
 langSelect.addEventListener("change", () => {
@@ -266,11 +301,11 @@ function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
 }
 
 /** 点了「停止扫描」：关闭 Channel，Go 那边的 ctx 随之取消，du、find、sips 都会停下 */
-function stopScan(btn: HTMLButtonElement): boolean {
+function stopScan(btn: HTMLButtonElement, immediate = false): boolean {
   const ch = scanChans.get(btn);
   if (!ch) return false;
   // 双击的第二下不算「停止」
-  if (Date.now() - Number(btn.dataset.started ?? 0) < 600) return true;
+  if (!immediate && Date.now() - Number(btn.dataset.started ?? 0) < 600) return true;
   scanChans.delete(btn);
   stoppedScans.add(btn);
   ch.close();
@@ -364,7 +399,7 @@ function renderIdleScanPages() {
           <defs><linearGradient id="${grad}" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
         </svg>
         <h3>${esc(t(`${g.key}.idle.title`))}</h3>
-        <p>${esc(t(`${g.key}.idle.desc`))}</p>
+        <p>${esc(t(`${g.key}.idle.desc`, { size: human(lgMinSize) }))}</p>
         <button class="btn primary big" type="button">${esc(t(`${g.key}.idle.cta`))}</button>
       </div>`;
     g.list.querySelector("button")?.addEventListener("click", g.start);
@@ -1303,6 +1338,8 @@ async function startLargeScan() {
   if (lgRunning) return;
   resetList("large");
   lgResult = null;
+  lgScannedThreshold = lgMinSize;
+  lgStopped = false;
   lgRunning = true;
   lgItems = [];
   lgProgress.classList.remove("hidden");
@@ -1312,16 +1349,17 @@ async function startLargeScan() {
   const ch = new Channel<import("./mygo").LargeScanEvent>();
   setStoppable(lgScanBtn, ch);
   try {
-    const done = Cleaner.largeScan(1 << 30, ch);
+    const done = Cleaner.largeScan(lgScannedThreshold, ch);
     for await (const ev of ch) {
+      if (lgRestartQueued) continue; // 停下后重扫，旧结果不再显示
       if (ev.kind === "item" && ev.path) {
         lgCurrent.textContent = t("fs.scanning", { path: displayPath(ev.path) });
         lgItems.push({ path: ev.path, size: ev.size ?? 0, trashable: ev.trashable ?? false });
-        lgCount.textContent = t("large.count", { n: lgItems.length.toLocaleString() });
         renderLargeRows(lgItems, true);
       } else if (ev.kind === "done" && ev.result) {
         lgItems = ev.result.items;
         lgResult = ev.result;
+        lgScannedThreshold = ev.result.threshold;
         renderLargeDone(ev.result);
       }
     }
@@ -1337,17 +1375,48 @@ async function startLargeScan() {
     lgRunning = false;
     lgProgress.classList.add("hidden");
     if (stoppedScans.has(lgScanBtn) && lgItems.length > 0) markRescan(lgScanBtn);
-    if (endScan(lgScanBtn)) {
-      if (lgItems.length > 0) renderLargeRows(lgItems, false, stoppedFoot());
+    lgStopped = endScan(lgScanBtn);
+    if (lgStopped) {
+      if (lgItems.length > 0) renderLargeCurrent();
       else lgList.innerHTML = emptyState(t("scan.stopped"));
+    }
+    if (lgRestartQueued) {
+      lgRestartQueued = false;
+      void startLargeScan();
     }
   }
 }
 
+/** 提高下限复用结果；降低下限等旧扫描退出后再扫。 */
+function changeLargeSize() {
+  lgMinSize = Number(lgSize.value);
+  saveChoice("cleanzo.largeSize", lgSize.value);
+  if (lgRestartQueued) {
+    if (lgResult || lgItems.length > 0) renderLargeCurrent();
+    return;
+  }
+  if (lgScannedThreshold !== null && lgMinSize >= lgScannedThreshold && (lgResult || lgItems.length > 0)) {
+    renderLargeCurrent();
+  } else if (lgRunning) {
+    lgRestartQueued = true;
+    stopScan(lgScanBtn, true);
+  } else {
+    void startLargeScan();
+  }
+}
+
+function renderLargeCurrent() {
+  if (lgResult) renderLargeDone(lgResult);
+  else renderLargeRows(lgItems, lgRunning, lgStopped ? stoppedFoot() : "");
+}
+
 function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
-  items = items.filter((it) => !isGone(lists.large, it.path));
+  items = items.filter((it) => it.size >= lgMinSize && !isGone(lists.large, it.path));
+  const visible = new Set(items.map((it) => it.path));
+  for (const path of lists.large.sel) if (!visible.has(path)) lists.large.sel.delete(path);
+  lgCount.textContent = t("large.count", { n: items.length.toLocaleString() });
   if (items.length === 0) {
-    lgList.innerHTML = emptyState(live ? t("large.live") : t("large.empty", { size: human(1 << 30) })) + foot;
+    lgList.innerHTML = emptyState(live ? t("large.live") : t("large.empty", { size: human(lgMinSize) })) + foot;
     lgToolbar.classList.add("hidden");
     lgToolbar.innerHTML = "";
     return;
@@ -1369,12 +1438,11 @@ function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
     )
     .join("");
   const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") + foot;
-  const rerender = () => (lgResult ? renderLargeDone(lgResult) : renderLargeRows(lgItems, false));
   renderFsListInto({
     st: lists.large,
     list: lgList,
     toolbar: lgToolbar,
-    rerender,
+    rerender: renderLargeCurrent,
     removeRows: (removed) => {
       updateRowsAfterRemoved(lgItems, removed, lists.large);
       if (lgResult) lgResult.items = lgItems;
@@ -1521,7 +1589,7 @@ function renderAppCacheRows() {
       (it, i) =>
         fsRowHtml(lists.appcaches, {
           path: it.path,
-          name: esc(it.name),
+          name: esc(it.app || it.name),
           size: it.size,
           rank: `${i + 1}`,
           trashable: !it.inUse,
@@ -1542,8 +1610,123 @@ function renderAppCacheRows() {
 
 // ---- 相似照片 ----
 
+let viewerPhoto: { cluster: number; path: string } | null = null;
+let viewerOpener: HTMLElement | null = null;
+let viewerSeq = 0;
+let viewerError: unknown = null;
+const photoPreviews = new Map<string, string>();
+const photoPreviewLoads = new Map<string, Promise<string>>();
+
+function viewerItems() {
+  return phClusters.find((cl) => cl.id === viewerPhoto?.cluster)?.items.filter((it) => !isGone(lists.photos, it.path)) ?? [];
+}
+
+/** 查看器与网格共用勾选；重绘不改变当前预览。 */
+function syncPhotoViewer() {
+  if (!viewerPhoto) return;
+  const items = viewerItems();
+  const index = items.findIndex((it) => it.path === viewerPhoto!.path);
+  const it = items[index];
+  if (!it) { closePhotoViewer(); return; }
+  pvName.textContent = baseName(it.path);
+  pvName.title = it.path;
+  pvImage.alt = baseName(it.path);
+  pvMeta.textContent = t("photos.detail", { w: it.width, h: it.height, size: human(it.size) });
+  pvKeep.classList.toggle("hidden", !it.keep);
+  pvCheck.checked = lists.photos.sel.has(it.path);
+  pvCheck.disabled = lists.photos.busy;
+  pvPrev.disabled = index === 0;
+  pvNext.disabled = index === items.length - 1;
+  if (viewerError !== null) pvError.textContent = errText(viewerError);
+}
+
+async function showPhotoViewer(path: string) {
+  const cluster = phClusters.find((cl) => cl.items.some((it) => it.path === path));
+  const it = cluster?.items.find((it) => it.path === path);
+  if (!cluster || !it || isGone(lists.photos, path)) return;
+  const opening = viewerPhoto === null;
+  if (opening) viewerOpener = document.activeElement as HTMLElement | null;
+  viewerPhoto = { cluster: cluster.id, path };
+  const seq = ++viewerSeq;
+  viewerError = null;
+  const cached = photoPreviews.get(path);
+  pvImage.src = cached ?? it.thumb;
+  pvImage.classList.remove("hidden");
+  pvLoading.classList.toggle("hidden", !!cached);
+  pvError.classList.add("hidden");
+  photoViewer.classList.remove("hidden");
+  $(".app").inert = true;
+  syncPhotoViewer();
+  if (opening) pvClose.focus();
+  if (cached) return;
+  try {
+    let load = photoPreviewLoads.get(path);
+    if (!load) {
+      const request = Cleaner.photoPreview(path).then((data) => {
+        // 重扫已清空缓存时，旧请求不能把它填回来
+        if (photoPreviewLoads.get(path) === request) photoPreviews.set(path, data);
+        return data;
+      }).finally(() => {
+        if (photoPreviewLoads.get(path) === request) photoPreviewLoads.delete(path);
+      });
+      photoPreviewLoads.set(path, request);
+      load = request;
+    }
+    const data = await load;
+    if (seq !== viewerSeq) return;
+    pvImage.src = data;
+  } catch (e) {
+    if (seq !== viewerSeq) return;
+    viewerError = e;
+    pvImage.classList.add("hidden");
+    pvError.textContent = errText(e);
+    pvError.classList.remove("hidden");
+  } finally {
+    if (seq === viewerSeq) pvLoading.classList.add("hidden");
+  }
+}
+
+function movePhotoViewer(step: number) {
+  if (!viewerPhoto) return;
+  const items = viewerItems();
+  const index = items.findIndex((it) => it.path === viewerPhoto!.path);
+  const next = items[index + step];
+  if (next) void showPhotoViewer(next.path);
+}
+
+function closePhotoViewer() {
+  if (!viewerPhoto) return;
+  const path = viewerPhoto.path;
+  viewerPhoto = null;
+  viewerSeq++;
+  viewerError = null;
+  photoViewer.classList.add("hidden");
+  $(".app").inert = false;
+  pvImage.removeAttribute("src");
+  const target = viewerOpener?.isConnected ? viewerOpener : phList.querySelector<HTMLElement>(`[data-preview="${CSS.escape(path)}"]`);
+  (target ?? phScanBtn).focus();
+  viewerOpener = null;
+}
+
+pvClose.addEventListener("click", closePhotoViewer);
+pvPrev.addEventListener("click", () => movePhotoViewer(-1));
+pvNext.addEventListener("click", () => movePhotoViewer(1));
+pvCheck.addEventListener("change", () => {
+  if (!viewerPhoto || pvCheck.disabled) return;
+  const path = viewerPhoto.path;
+  if (pvCheck.checked) lists.photos.sel.add(path);
+  else lists.photos.sel.delete(path);
+  renderPhotoClusters();
+});
+photoViewer.addEventListener("click", (e) => {
+  if (e.target === photoViewer) closePhotoViewer();
+});
+
 async function startPhotoScan() {
   if (phRunning) return;
+  closePhotoViewer();
+  photoPreviews.clear();
+  photoPreviewLoads.clear();
   resetList("photos");
   phClusters = [];
   phTried = true;
@@ -1596,6 +1779,7 @@ async function startPhotoScan() {
 
 function renderPhotoClusters() {
   phClusters = phClusters.filter((cl) => cl.items.filter((it) => !isGone(lists.photos, it.path)).length >= 2);
+  syncPhotoViewer();
   if (phClusters.length === 0) {
     phToolbar.classList.add("hidden");
     phToolbar.innerHTML = "";
@@ -1626,7 +1810,10 @@ function renderPhotoClusters() {
             <div class="photo-name">${esc(baseName(it.path))}</div>
             <div class="photo-sub muted small">${esc(t("photos.sizeDim", { w: it.width, h: it.height }))} · ${human(it.size)}</div>
           </figcaption>
-          ${revealBtnHtml(it.path)}
+          <div class="photo-actions">
+            <button class="btn small ghost icon ph-preview" data-preview="${esc(it.path)}" type="button" title="${esc(t("photos.viewLarger"))}" aria-label="${esc(t("photos.viewLarger"))}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6M7 10h6M10 7v6"/></svg></button>
+            ${revealBtnHtml(it.path)}
+          </div>
         </figure>`;
         })
         .join("");
@@ -1648,6 +1835,9 @@ function renderPhotoClusters() {
 }
 
 function bindPhotoList() {
+  phList.querySelectorAll<HTMLButtonElement>(".ph-preview").forEach((b) => {
+    b.addEventListener("click", () => void showPhotoViewer(b.dataset.preview!));
+  });
   phList.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
     cb.addEventListener("change", () => {
       if (cb.disabled) return;
@@ -1792,7 +1982,12 @@ function renderApps() {
   const q = appSearch.value.trim().toLowerCase();
   const list = apps.filter(
     (a) => !q || a.name.toLowerCase().includes(q) || a.path.toLowerCase().includes(q),
-  );
+  ).sort((a, b) => {
+    const byName = () => a.name.localeCompare(b.name, currentLang() === "zh" ? "zh-CN" : "en");
+    if (appSortBy === "size") return b.size - a.size || byName();
+    if (appSortBy === "opened") return b.lastOpened - a.lastOpened || byName();
+    return byName();
+  });
   if (apps.length === 0) {
     appListEl.innerHTML = emptyState(t("apps.empty"));
     return;
@@ -1807,7 +2002,7 @@ function renderApps() {
       <div class="app-row card">
         <div class="app-icon">${esc(a.name.charAt(0).toUpperCase())}</div>
         <div class="app-main">
-          <div class="app-name">${esc(a.name)}${a.version ? ` <span class="ver muted">${esc(a.version)}</span>` : ""}</div>
+          <div class="app-name">${esc(a.name)}${a.running ? ` <span class="tag ok">${esc(t("apps.running"))}</span>` : ""}${a.version ? ` <span class="ver muted">${esc(a.version)}</span>` : ""}</div>
           <div class="app-path muted">${esc(a.path)}</div>
         </div>
         <div class="app-meta">
@@ -1840,8 +2035,15 @@ async function showUninstallDetail(path: string) {
           `<div class="detail-item"><span class="kind">${esc(kindLabel(it.kind))}</span><span class="path">${esc(it.path)}</span><span class="size">${human(it.size)}</span></div>`,
       )
       .join("");
+    // 正在运行的应用卸不了：照样列出文件，但不问「确定卸载吗」，只请用户先退出
+    const note = d.app.running ? t("apps.inUse", { name: d.app.name }) : t("apps.body", { n: d.items.length, size: human(d.totalSize) });
     modalBody.innerHTML = `<div class="detail-list">${rows}</div>
-      <p class="warn-text">${esc(t("apps.body", { n: d.items.length, size: human(d.totalSize) }))}</p>`;
+      <p class="warn-text">${esc(note)}</p>`;
+    if (d.app.running) {
+      pending = null;
+      modalOk.textContent = t("btn.close");
+      return;
+    }
     pending = async () => {
       if (appBusy.has(d.app.path)) return;
       appBusy.add(d.app.path);
@@ -1964,6 +2166,7 @@ saveCatsBtn.addEventListener("click", async () => {
 /** 每次打开或关闭确认框都换一个编号；晚到的异步结果凭它判断这个框是否还是自己的 */
 let modalSeq = 0;
 function showModal() {
+  closePhotoViewer();
   modalSeq++;
   overlay.classList.remove("hidden");
   modalOk.focus();
@@ -1989,6 +2192,12 @@ orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan
 acScanBtn.addEventListener("click", startAppCacheScan);
 phScanBtn.addEventListener("click", () => stopScan(phScanBtn) || startPhotoScan());
 appSearch.addEventListener("input", renderApps);
+appSort.addEventListener("change", () => {
+  appSortBy = appSort.value as typeof appSortBy;
+  saveChoice("cleanzo.appSort", appSortBy);
+  if (!appsLoading) renderApps();
+});
+lgSize.addEventListener("change", changeLargeSize);
 modalOk.addEventListener("click", async () => {
   const fn = pending;
   hideModal();
@@ -1996,6 +2205,21 @@ modalOk.addEventListener("click", async () => {
 });
 modalCancel.addEventListener("click", hideModal);
 document.addEventListener("keydown", (e) => {
+  if (viewerPhoto) {
+    if (e.key === "Escape") closePhotoViewer();
+    else if (e.key === "ArrowLeft") movePhotoViewer(-1);
+    else if (e.key === "ArrowRight") movePhotoViewer(1);
+    else if (e.key === "Tab") {
+      const controls = Array.from(photoViewer.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      return;
+    } else return;
+    e.preventDefault();
+    return;
+  }
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
 });
 overlay.addEventListener("click", (e) => {
@@ -2003,7 +2227,6 @@ overlay.addEventListener("click", (e) => {
 });
 
 applyStaticI18n();
-lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
 initIdleClean();
 renderIdleScanPages();
 // 版本号以应用自己为准，不写死在页面里
