@@ -44,23 +44,13 @@ bun run build
 #   build/darwin-arm64/Cleanzo 0.1.3.dmg
 ```
 
-版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.3」），同时挂着几个版本也分得清。
-
-### 签名与公证
-
-`bun run build` 用 Developer ID 签名 .app 和 dmg（hardened runtime + 时间戳），把 dmg 提交苹果公证，再把公证票据装订到 dmg 和 .app 上，配置在 `mygo.config.ts` 的 `macos` 字段。构建机需要：
-
-- 钥匙串里有 `Developer ID Application: Zijie Hu (8LH7PFQJ89)` 的证书和私钥（`security find-identity -v -p codesigning` 能列出来）
-- notarytool 凭据 profile `notary`（`xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id 8LH7PFQJ89`，需要 App 专用密码）
-
-公证通常要几分钟。没有证书的机器构建未签名版本：`bun run build -- -sign=- -skip-notarize`。
-
-检查产物：
+`bun run build` 会用 `mygo.config.ts` 里配置的 Developer ID 证书签名，并提交苹果公证，只有存着这张证书的机器能完成（发版步骤见 [docs/RELEASING.md](docs/RELEASING.md)）。没有证书时，构建一个 ad hoc 签名、不公证的版本，只适合在自己的 Mac 上用：
 
 ```sh
-spctl -a -vvv -t exec build/darwin-arm64/Cleanzo.app   # source=Notarized Developer ID
-xcrun stapler validate "build/darwin-arm64/Cleanzo 0.1.3.dmg"
+bun run build -- -sign=- -skip-notarize
 ```
+
+版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.3」），同时挂着几个版本也分得清。
 
 ## 测试
 
