@@ -2174,3 +2174,100 @@ func TestAppsSharingABundleID(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Streamed scan and clean
+// ---------------------------------------------------------------------------
+
+// TestScanStreamReportsEachCategory: a streamed scan reports every category
+// once, as planned, and the entries it measures along the way.
+func TestScanStreamReportsEachCategory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	a, b := filepath.Join(home, "a"), filepath.Join(home, "b")
+	writeFile(t, filepath.Join(a, "x", "1"), 100)
+	writeFile(t, filepath.Join(b, "y", "2"), 200)
+	cats := []Category{{Name: "a", paths: []string{a}}, {Name: "b", paths: []string{b}}}
+	var measured []string
+	sizes := map[string]int64{}
+	scanStream(context.Background(), cats, &usageGuard{},
+		func(p string) { measured = append(measured, filepath.Base(p)) },
+		func(c Category) { sizes[c.Name] += c.Size + 1000 }) // +1000 counts the reports
+	if !maps.Equal(sizes, map[string]int64{"a": 1100, "b": 1200}) {
+		t.Errorf("reported %v", sizes)
+	}
+	slices.Sort(measured)
+	if !slices.Equal(measured, []string{"x", "y"}) {
+		t.Errorf("measured %v", measured)
+	}
+}
+
+// TestScanStreamStopsWhenCanceled: a stopped scan reports nothing more.
+func TestScanStreamStopsWhenCanceled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeFile(t, filepath.Join(home, "a", "x", "1"), 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reported := 0
+	scanStream(ctx, []Category{{Name: "a", paths: []string{filepath.Join(home, "a")}}}, &usageGuard{},
+		func(string) { reported++ }, func(Category) { reported++ })
+	if reported != 0 {
+		t.Errorf("a stopped scan reported %d times", reported)
+	}
+}
+
+// TestCleanStreamReportsProgress: a streamed clean announces each category,
+// reports every entry it removes with the bytes cleaned so far in the pass,
+// and finishes each category with its result.
+func TestCleanStreamReportsProgress(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mine := filepath.Join(home, "mine")
+	writeFile(t, filepath.Join(mine, "a"), 100)
+	writeFile(t, filepath.Join(mine, "b"), 200)
+	if err := (Cleaner{}).SaveCategories([]CategoryConfig{{Name: "mine", Enabled: true, Paths: []string{mine}}}); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	sum := cleanStream(context.Background(), []string{"mine"}, 0, cleanHooks{
+		started: func(name string) { events = append(events, "start "+name) },
+		removed: func(name, path string, bytes int64) {
+			events = append(events, fmt.Sprintf("removed %s/%s %d", name, filepath.Base(path), bytes))
+		},
+		finished: func(r CleanResult) { events = append(events, fmt.Sprintf("done %s %d", r.Name, r.Trashed)) },
+	})
+	want := []string{"start mine", "removed mine/b 200", "removed mine/a 300", "done mine 300"}
+	if !slices.Equal(events, want) || sum.TotalTrashed != 300 {
+		t.Fatalf("events = %q, summary = %+v", events, sum)
+	}
+}
+
+// TestCleanStreamStops: stopping a clean finishes the entry at hand, leaves
+// the rest, and starts no further category.
+func TestCleanStreamStops(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	one, two := filepath.Join(home, "one"), filepath.Join(home, "two")
+	for _, n := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(one, n), 10)
+	}
+	writeFile(t, filepath.Join(two, "z"), 10)
+	if err := (Cleaner{}).SaveCategories([]CategoryConfig{
+		{Name: "one", Enabled: true, Paths: []string{one}},
+		{Name: "two", Enabled: true, Paths: []string{two}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var started []string
+	removed := 0
+	cleanStream(ctx, nil, 0, cleanHooks{
+		started: func(name string) { started = append(started, name) },
+		removed: func(string, string, int64) { removed++; cancel() },
+	})
+	left, _ := os.ReadDir(one)
+	if removed != 1 || len(left) != 2 || !slices.Equal(started, []string{"one"}) || !exists(filepath.Join(two, "z")) {
+		t.Fatalf("removed %d, %d left, started %v", removed, len(left), started)
+	}
+}

@@ -216,7 +216,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   justify-content: center;
   gap: 6px;
   white-space: nowrap;
-  transition: background 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease, opacity 0.13s ease, border-color 0.13s ease;
+  transition: background 0.13s ease, color 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease, opacity 0.13s ease, border-color 0.13s ease;
 }
 .btn:hover:not(:disabled) { background: var(--hover); }
 .btn:active:not(:disabled) { transform: scale(0.97); }
@@ -284,7 +284,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
   color: var(--accent-strong);
 }
-.hero-sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.hero-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-progress {
+  margin-top: 10px;
+  height: 6px;
+  width: min(420px, 100%);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+.hero-bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
 .banner-actions { position: relative; z-index: 1; flex-shrink: 0; }
 .hero-spark {
   position: absolute;
@@ -487,6 +509,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .cat-note .caution { color: var(--warn); font-weight: 640; }
 .cat-note-text { font-variant-numeric: tabular-nums; }
+.cat-note-text.muted { color: var(--muted); font-weight: 520; }
+.cat-note-text.ok { color: var(--accent-strong); }
+.cat-note .spin { width: 10px; height: 10px; vertical-align: -1px; }
+.cat-note .tag + .tag, .cat-note .cat-note-text + .tag { margin-left: 6px; }
+.cat-row.is-dim { opacity: 0.45; }
 .cat-note .cat-grant { margin-left: 8px; }
 
 .tag {

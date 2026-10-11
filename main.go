@@ -177,8 +177,9 @@ type OrphanScanResult struct {
 	ElapsedMs int64        `json:"elapsedMs"`
 }
 
-// SystemInfo describes the machine the app runs on.
+// SystemInfo describes the app and the machine it runs on.
 type SystemInfo struct {
+	Version   string `json:"version"` // the app's, from mygo.config.ts; empty under go test
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
 	GoVersion string `json:"goVersion"`
@@ -669,8 +670,10 @@ type categoryPlan struct {
 // its paths, except the folders of nested categories (it descends into
 // their parents instead), entries in use, sockets and other special files,
 // and in the temporary folder, entries touched within tempMinAge. Sizing
-// walks share sem.
-func planCategory(cat Category, g *usageGuard, sem chan struct{}) categoryPlan {
+// walks share sem, and measuring, when set, hears of each entry as its walk
+// starts (from several goroutines at once). Once ctx is canceled no more
+// walks start, and the plan holds what was measured.
+func planCategory(ctx context.Context, cat Category, g *usageGuard, sem chan struct{}, measuring func(string)) categoryPlan {
 	var plan categoryPlan
 	type candidate struct {
 		path   string
@@ -734,19 +737,27 @@ func planCategory(cat Category, g *usageGuard, sem chan struct{}) categoryPlan {
 	measured := make([]cleanEntry, len(cands))
 	newest := make([]time.Time, len(cands))
 	var wg sync.WaitGroup
+	started := 0
 	for i, c := range cands {
+		if ctx.Err() != nil {
+			break
+		}
+		started++
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if measuring != nil {
+				measuring(c.path)
+			}
 			size, files, t := measure(c.path)
 			measured[i], newest[i] = cleanEntry{c.path, size, files}, t
 		}()
 	}
 	wg.Wait()
 	t := now()
-	for i, e := range measured {
+	for i, e := range measured[:started] {
 		if age := cands[i].minAge; age > 0 && t.Sub(newest[i]) < age {
 			continue
 		}
@@ -757,15 +768,36 @@ func planCategory(cat Category, g *usageGuard, sem chan struct{}) categoryPlan {
 }
 
 // scanCategories fills in what cleaning each category would remove now.
-// Categories are planned concurrently; their walks share one bounded pool.
 func scanCategories(cats []Category, g *usageGuard) []Category {
+	scanStream(context.Background(), cats, g, nil, nil)
+	return cats
+}
+
+// scanStream fills in what cleaning each category would remove now.
+// Categories are planned concurrently; their walks share one bounded pool.
+// It reports each entry it starts to measure to measuring, and each
+// category once planned to done; both may be nil and are called one at a
+// time. Once ctx is canceled it stops and reports nothing more.
+func scanStream(ctx context.Context, cats []Category, g *usageGuard, measuring func(string), done func(Category)) {
+	var mu sync.Mutex
+	report := func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		if ctx.Err() == nil {
+			f()
+		}
+	}
+	var onMeasure func(string)
+	if measuring != nil {
+		onMeasure = func(p string) { report(func() { measuring(p) }) }
+	}
 	sem := make(chan struct{}, scanConcurrency)
 	var wg sync.WaitGroup
 	for i := range cats {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			plan := planCategory(cats[i], g, sem)
+			plan := planCategory(ctx, cats[i], g, sem, onMeasure)
 			c := &cats[i]
 			c.Size, c.Files, c.Top = 0, 0, nil
 			for _, e := range plan.entries {
@@ -776,15 +808,48 @@ func scanCategories(cats []Category, g *usageGuard) []Category {
 				c.Top = append(c.Top, TopItem{Name: filepath.Base(e.path), Path: e.path, Size: e.size})
 			}
 			c.InUse, c.Missing, c.Denied, c.Blocked = plan.inUse, plan.missing, plan.denied, plan.blocked
+			if done != nil {
+				report(func() { done(*c) })
+			}
 		}()
 	}
 	wg.Wait()
-	return cats
 }
 
 // Scan returns every category with what cleaning it would remove now.
 func (Cleaner) Scan() []Category {
 	return scanCategories(loadCategories(), probeUsage())
+}
+
+// ScanEvent is one step of a streamed scan.
+type ScanEvent struct {
+	Kind       string     `json:"kind"`                 // "start" | "scanning" | "category"
+	Categories []Category `json:"categories,omitempty"` // start: the categories, not yet sized
+	Path       string     `json:"path,omitempty"`       // scanning: an entry being measured
+	Category   *Category  `json:"category,omitempty"`   // category: a category, once sized
+}
+
+// progressInterval is how often streams report what they are working on.
+const progressInterval = 100 * time.Millisecond
+
+// ScanStream scans like Scan and streams its progress: the categories first,
+// every so often the entry being measured, and each category as soon as it
+// is sized. ctx is canceled when the page stops the scan or goes away.
+func (Cleaner) ScanStream(ctx context.Context, ch *mygo.Channel[ScanEvent]) error {
+	cats := loadCategories()
+	if err := ch.Send(ScanEvent{Kind: "start", Categories: cats}); err != nil {
+		return err
+	}
+	var last time.Time
+	scanStream(ctx, cats, probeUsage(), func(p string) {
+		if time.Since(last) >= progressInterval {
+			last = time.Now()
+			_ = ch.Send(ScanEvent{Kind: "scanning", Path: p})
+		}
+	}, func(c Category) {
+		_ = ch.Send(ScanEvent{Kind: "category", Category: &c})
+	})
+	return ctx.Err()
 }
 
 // userTrashDir is the macOS Trash directory for the current user.
@@ -801,8 +866,34 @@ var trashItem = mygo.Shell.TrashItem
 // it stays recoverable. Unless scannedAt is zero, what reached the Trash
 // after the scan the user confirmed stays there.
 func cleanCategory(cat Category, g *usageGuard, scannedAt time.Time) CleanResult {
+	var cleaned int64
+	return cleanCategoryStream(context.Background(), cat, g, scannedAt, cleanHooks{}, &cleaned)
+}
+
+// cleanHooks report a clean pass's progress. Each may be nil; they are
+// called one at a time.
+type cleanHooks struct {
+	started  func(name string)                    // a category starts
+	checking func(name, path string)              // an entry is measured before removal
+	removed  func(name, path string, bytes int64) // an entry is gone; bytes: cleaned so far in the pass
+	finished func(res CleanResult)                // a category is done, or stopped
+}
+
+// cleanCategoryStream is cleanCategory reporting through hooks, and adding
+// what it cleans to *cleaned. Once ctx is canceled it finishes the entry at
+// hand and stops.
+func cleanCategoryStream(ctx context.Context, cat Category, g *usageGuard, scannedAt time.Time, hooks cleanHooks, cleaned *int64) CleanResult {
 	res := CleanResult{Name: cat.Name}
-	plan := planCategory(cat, g, make(chan struct{}, scanConcurrency))
+	var checking func(string)
+	if hooks.checking != nil {
+		var mu sync.Mutex
+		checking = func(p string) {
+			mu.Lock()
+			defer mu.Unlock()
+			hooks.checking(cat.Name, p)
+		}
+	}
+	plan := planCategory(ctx, cat, g, make(chan struct{}, scanConcurrency), checking)
 	res.InUse = plan.inUse
 	for _, p := range plan.blocked {
 		res.Failed = append(res.Failed, p+": blocked")
@@ -812,6 +903,9 @@ func cleanCategory(cat Category, g *usageGuard, scannedAt time.Time) CleanResult
 	}
 	trash := canonical(userTrashDir())
 	for _, e := range plan.entries {
+		if ctx.Err() != nil {
+			break
+		}
 		inTrash := within(strings.ToLower(e.path), trash)
 		if inTrash && !scannedAt.IsZero() {
 			if info, err := os.Lstat(e.path); err != nil || changedAt(info).After(scannedAt) {
@@ -835,6 +929,10 @@ func cleanCategory(cat Category, g *usageGuard, scannedAt time.Time) CleanResult
 			res.Trashed += e.size
 		}
 		res.Files += e.files
+		*cleaned += e.size
+		if hooks.removed != nil {
+			hooks.removed(cat.Name, e.path, *cleaned)
+		}
 	}
 	return res
 }
@@ -845,6 +943,48 @@ func cleanCategory(cat Category, g *usageGuard, scannedAt time.Time) CleanResult
 // user confirmed; 0 for no limit). Each category gets a fresh look at the
 // files in use, as a pass can take a while.
 func (Cleaner) Clean(names []string, scannedAt int64) CleanSummary {
+	return cleanStream(context.Background(), names, scannedAt, cleanHooks{})
+}
+
+// CleanEvent is one step of a streamed clean.
+type CleanEvent struct {
+	Kind   string       `json:"kind"`             // "start" | "checking" | "removed" | "done"
+	Name   string       `json:"name"`             // the category
+	Path   string       `json:"path,omitempty"`   // checking, removed: the entry
+	Bytes  int64        `json:"bytes,omitempty"`  // removed, done: bytes cleaned so far in the pass
+	Result *CleanResult `json:"result,omitempty"` // done: what the category's pass did
+}
+
+// CleanStream cleans like Clean and streams its progress: each category as
+// it starts, every so often the entry being checked or removed with the
+// bytes cleaned so far, and each category's result. Stopping it (ctx is
+// canceled) finishes the entry at hand.
+func (Cleaner) CleanStream(ctx context.Context, names []string, scannedAt int64, ch *mygo.Channel[CleanEvent]) error {
+	var last time.Time
+	var cleaned int64
+	every := func(ev CleanEvent) {
+		if time.Since(last) >= progressInterval {
+			last = time.Now()
+			_ = ch.Send(ev)
+		}
+	}
+	cleanStream(ctx, names, scannedAt, cleanHooks{
+		started:  func(name string) { _ = ch.Send(CleanEvent{Kind: "start", Name: name}) },
+		checking: func(name, path string) { every(CleanEvent{Kind: "checking", Name: name, Path: path}) },
+		removed: func(name, path string, bytes int64) {
+			cleaned = bytes
+			every(CleanEvent{Kind: "removed", Name: name, Path: path, Bytes: bytes})
+		},
+		finished: func(res CleanResult) {
+			_ = ch.Send(CleanEvent{Kind: "done", Name: res.Name, Bytes: cleaned, Result: &res})
+		},
+	})
+	return ctx.Err()
+}
+
+// cleanStream is Clean reporting through hooks. Once ctx is canceled it
+// finishes the entry at hand and starts no further category.
+func cleanStream(ctx context.Context, names []string, scannedAt int64, hooks cleanHooks) CleanSummary {
 	selected := make(map[string]bool, len(names))
 	for _, n := range names {
 		selected[n] = true
@@ -868,11 +1008,21 @@ func (Cleaner) Clean(names []string, scannedAt int64) CleanSummary {
 		return 0
 	})
 	summary := CleanSummary{}
+	var cleaned int64
 	for _, cat := range cats {
 		if len(names) > 0 && !selected[cat.Name] {
 			continue
 		}
-		res := cleanCategory(cat, probeUsage(), since)
+		if ctx.Err() != nil {
+			break
+		}
+		if hooks.started != nil {
+			hooks.started(cat.Name)
+		}
+		res := cleanCategoryStream(ctx, cat, probeUsage(), since, hooks, &cleaned)
+		if hooks.finished != nil {
+			hooks.finished(res)
+		}
 		summary.Results = append(summary.Results, res)
 		summary.TotalFreed += res.Freed
 		summary.TotalTrashed += res.Trashed
@@ -893,7 +1043,7 @@ func (Cleaner) OpenFullDiskAccessSettings() error {
 
 // Info returns basic system information.
 func (Cleaner) Info() SystemInfo {
-	return SystemInfo{OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version()}
+	return SystemInfo{Version: mygo.App.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version()}
 }
 
 // ---------------------------------------------------------------------------

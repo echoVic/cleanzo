@@ -79,6 +79,20 @@ export interface CleanError {
   error: string;
 }
 
+/** CleanEvent is one step of a streamed clean. */
+export interface CleanEvent {
+  /** "start" | "checking" | "removed" | "done" */
+  kind: string;
+  /** the category */
+  name: string;
+  /** checking, removed: the entry */
+  path?: string;
+  /** removed, done: bytes cleaned so far in the pass */
+  bytes?: number;
+  /** done: what the category's pass did */
+  result?: CleanResult;
+}
+
 /** CleanResult reports what a clean pass did. */
 export interface CleanResult {
   name: string;
@@ -217,6 +231,18 @@ export interface PhotoItem {
   keep: boolean;
 }
 
+/** ScanEvent is one step of a streamed scan. */
+export interface ScanEvent {
+  /** "start" | "scanning" | "category" */
+  kind: string;
+  /** start: the categories, not yet sized */
+  categories?: Category[];
+  /** scanning: an entry being measured */
+  path?: string;
+  /** category: a category, once sized */
+  category?: Category;
+}
+
 /** SimilarPhotoEvent streams scan progress and the final result. */
 export interface SimilarPhotoEvent {
   /** "progress" | "done" */
@@ -233,8 +259,10 @@ export interface SimilarPhotosResult {
   elapsedMs: number;
 }
 
-/** SystemInfo describes the machine the app runs on. */
+/** SystemInfo describes the app and the machine it runs on. */
 export interface SystemInfo {
+  /** the app's, from mygo.config.ts; empty under go test */
+  version: string;
   os: string;
   arch: string;
   goVersion: string;
@@ -303,6 +331,15 @@ export const Cleaner = {
    */
   cleanPaths(paths: string[]): Promise<PathsCleanResult> {
     return call("Cleaner.CleanPaths", paths);
+  },
+  /**
+   * CleanStream cleans like Clean and streams its progress: each category as
+   * it starts, every so often the entry being checked or removed with the
+   * bytes cleaned so far, and each category's result. Stopping it (ctx is
+   * canceled) finishes the entry at hand.
+   */
+  cleanStream(names: string[], scannedAt: number, ch: Channel<CleanEvent>): Promise<void> {
+    return call("Cleaner.CleanStream", names, scannedAt, ch);
   },
   /**
    * DirChildren lists the direct children of path with sizes: directories are
@@ -382,6 +419,14 @@ export const Cleaner = {
    */
   scanSimilarPhotos(ch: Channel<SimilarPhotoEvent>): Promise<void> {
     return call("Cleaner.ScanSimilarPhotos", ch);
+  },
+  /**
+   * ScanStream scans like Scan and streams its progress: the categories first,
+   * every so often the entry being measured, and each category as soon as it
+   * is sized. ctx is canceled when the page stops the scan or goes away.
+   */
+  scanStream(ch: Channel<ScanEvent>): Promise<void> {
+    return call("Cleaner.ScanStream", ch);
   },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {

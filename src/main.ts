@@ -1,7 +1,7 @@
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanSummary, DirItem, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanEvent, CleanResult, CleanSummary, DirItem, FullScanResult, ScanEvent, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
 import { t, categoryName, categoryDescription, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -10,6 +10,8 @@ const listEl = $("#list");
 const totalEl = $("#total");
 const totalPrefix = $("#total-prefix");
 const heroSub = $("#hero-sub");
+const heroProgress = $("#hero-progress");
+const heroBar = $("#hero-bar");
 const hero = $(".hero");
 const scanBtn = $<HTMLButtonElement>("#scan");
 const cleanAllBtn = $<HTMLButtonElement>("#clean-all");
@@ -131,11 +133,9 @@ function applyStaticI18n() {
 /** Re-render the current view so all dynamic text follows the new language. */
 function refreshI18n() {
   applyStaticI18n();
-  // 每个已有内容的视图都按新语言重绘，不只是当前这个；扫描中的视图等它结束后自己会重绘
-  if (!scanBtn.disabled) {
-    if (categories.length > 0) render();
-    else initIdleClean();
-  }
+  // 每个已有内容的视图都按新语言重绘，不只是当前这个。垃圾清理页随时可以重绘；
+  // 其他扫描中的视图等它结束后自己会重绘
+  render();
   if (apps.length > 0) renderApps();
   if (catConfig.length > 0) renderCatEditor();
   if (fsResult && !fsRunning) renderFullScan(fsResult);
@@ -283,11 +283,24 @@ const IDLE_ICON = ` <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hi
   <defs><linearGradient id="eg-grad" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
 </svg>`;
 
+/**
+ * 垃圾清理页的阶段：idle 尚未扫描；scanning 扫描中（分类逐个出结果）；scanned 可勾选清理；
+ * cleaning 清理中（分类逐个推进）；cleaned 清理结束，结果留在页面上，等用户重新扫描。
+ */
+type JunkPhase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";
+let phase: JunkPhase = "idle";
+/** 扫描中：还没出结果的分类、最近一次报告的路径 */
+const pendingCats = new Set<string>();
+let scanningPath = "";
+/** 清理中及之后：每个选中分类的进展 */
+type RowState = { state: "waiting" | "cleaning" | "done" | "stopped" | "skipped"; result?: CleanResult };
+const rowStates = new Map<string, RowState>();
+const progress = { total: 0, bytes: 0, name: "", path: "", stopped: false };
+let cleanChan: { close(): void } | null = null;
+
 function initIdleClean() {
-  totalPrefix.textContent = t("hero.ready");
-  totalEl.textContent = "--";
-  heroSub.textContent = t("clean.idleSub");
-  hero.classList.add("compact");
+  phase = "idle";
+  renderHero();
   listEl.classList.remove("grouped");
   listEl.classList.add("cat-grid", "idle-list");
   listEl.innerHTML = `
@@ -299,38 +312,76 @@ function initIdleClean() {
     </div>`;
   const idleScan = document.getElementById("idle-scan");
   if (idleScan) idleScan.addEventListener("click", () => scan());
-  cleanAllBtn.disabled = true;
   scanBtn.textContent = t("scan.start");
   scanBtn.disabled = false;
 }
 
+/** 扫描中又要求扫描（设置里保存了分类）：这次停下后按新设置重扫 */
+let rescanQueued = false;
+
+/** 扫描：先列出全部分类，每个分类扫完立刻填上结果；扫描按钮在此期间是「停止扫描」 */
 async function scan() {
-  setBusy(scanBtn, true);
-  cleanAllBtn.disabled = true;
-  totalPrefix.textContent = t("hero.ready");
-  totalEl.textContent = "--";
-  heroSub.textContent = t("scan.hero");
+  if (phase === "cleaning") return;
+  if (phase === "scanning") {
+    rescanQueued = true;
+    stopScan(scanBtn);
+    return;
+  }
+  phase = "scanning";
+  categories = [];
+  pendingCats.clear();
+  rowStates.clear();
+  scanningPath = "";
+  scannedAt = Date.now();
+  selectedCats.clear();
+  const ch = new Channel<ScanEvent>();
+  setStoppable(scanBtn, ch);
   listEl.classList.remove("grouped", "idle-list");
   listEl.classList.add("cat-grid");
   listEl.innerHTML = skeletonRows(window.innerWidth >= 1600 ? 9 : window.innerWidth >= 1200 ? 8 : 6);
+  renderHero();
+  let failed = false;
   try {
-    scannedAt = Date.now();
-    categories = await Cleaner.scan();
-    // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
-    selectedCats.clear();
-    categories.forEach((c) => {
-      if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
-    });
-    render();
+    const done = Cleaner.scanStream(ch);
+    for await (const ev of ch) {
+      if (ev.kind === "start") {
+        categories = ev.categories ?? [];
+        categories.forEach((c) => pendingCats.add(c.name));
+        render();
+      } else if (ev.kind === "scanning") {
+        scanningPath = ev.path ?? "";
+        renderHero();
+      } else if (ev.kind === "category" && ev.category) {
+        const c = ev.category;
+        categories = categories.map((x) => (x.name === c.name ? c : x));
+        pendingCats.delete(c.name);
+        // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
+        if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
+        render();
+      }
+    }
+    await done;
   } catch (e) {
-    totalEl.textContent = t("scan.failed");
-    heroSub.textContent = t("scan.retryHint");
-    cleanAllBtn.disabled = true;
-    listEl.innerHTML = errorState(t("scan.error", { msg: msg(e) }), scan);
-    toast(t("scan.error", { msg: msg(e) }), "err");
+    if (!stoppedScans.has(scanBtn)) {
+      failed = true;
+      categories = [];
+      totalEl.textContent = t("scan.failed");
+      heroSub.textContent = t("scan.retryHint");
+      cleanAllBtn.disabled = true;
+      listEl.innerHTML = errorState(t("scan.error", { msg: msg(e) }), scan);
+      toast(t("scan.error", { msg: msg(e) }), "err");
+    }
   } finally {
-    setBusy(scanBtn, false);
-    scanBtn.textContent = categories.length > 0 ? t("fs.rescan") : t("scan.start");
+    endScan(scanBtn);
+    // 停止时只留下已经扫完的分类
+    categories = categories.filter((c) => !pendingCats.has(c.name));
+    pendingCats.clear();
+    phase = categories.length > 0 ? "scanned" : "idle";
+    if (!failed) render();
+    if (rescanQueued) {
+      rescanQueued = false;
+      void scan();
+    }
   }
 }
 
@@ -352,16 +403,17 @@ const selectedCats = new Set<string>();
 let scannedAt = 0;
 
 function render() {
-  if (categories.length === 0) {
+  if (phase === "idle") {
     initIdleClean();
     return;
   }
-  hero.classList.remove("compact");
+  // 扫描刚开始、分类还没列出来：骨架屏留着
+  if (categories.length === 0) {
+    renderHero();
+    return;
+  }
   listEl.classList.remove("idle-list", "cat-grid");
   listEl.classList.add("grouped");
-  const total = categories.reduce((s, c) => s + c.size, 0);
-  totalPrefix.textContent = t("clean.foundPrefix");
-  totalEl.textContent = human(total);
 
   const groups: { key: string; icon: string; color: string; cats: ScanCat[] }[] = [
     ...CAT_GROUPS.map((g) => ({ ...g, cats: [] as ScanCat[] })),
@@ -386,23 +438,97 @@ function render() {
       Cleaner.openFullDiskAccessSettings().catch((e) => toast(t("grant.fail", { msg: msg(e) }), "err"));
     });
   });
+  renderHero();
   updateSelection();
-  scanBtn.textContent = t("fs.rescan");
+  if (phase !== "scanning") scanBtn.textContent = t("fs.rescan");
+  scanBtn.disabled = phase === "cleaning";
+}
+
+/** 横幅：按阶段显示已发现的空间、清理进度或清理结果，以及对应的主按钮 */
+function renderHero() {
+  hero.classList.toggle("compact", phase === "idle");
+  heroProgress.classList.toggle("hidden", phase !== "cleaning" && phase !== "cleaned");
+  if (phase !== "cleaning" && phase !== "cleaned") heroBar.style.width = "0";
+  cleanAllBtn.classList.toggle("danger", phase !== "cleaning" && phase !== "cleaned");
+  cleanAllBtn.classList.toggle("ghost", phase === "cleaning");
+  cleanAllBtn.classList.toggle("primary", phase === "cleaned");
+  const pct = progress.total > 0 ? Math.min(100, (progress.bytes / progress.total) * 100) : 100;
+  if (phase === "idle") {
+    totalPrefix.textContent = t("hero.ready");
+    totalEl.textContent = "--";
+    heroSub.textContent = t("clean.idleSub");
+    cleanAllBtn.textContent = t("clean.now");
+    cleanAllBtn.disabled = true;
+  } else if (phase === "scanning") {
+    const found = categories.filter((c) => !pendingCats.has(c.name)).reduce((s, c) => s + c.size, 0);
+    totalPrefix.textContent = t("scan.found");
+    totalEl.textContent = categories.length > pendingCats.size ? human(found) : "--";
+    heroSub.textContent = scanningPath ? t("scan.at", { path: displayPath(scanningPath) }) : t("scan.hero");
+    cleanAllBtn.textContent = t("clean.now");
+    cleanAllBtn.disabled = true;
+  } else if (phase === "scanned") {
+    totalPrefix.textContent = t("clean.foundPrefix");
+    totalEl.textContent = human(categories.reduce((s, c) => s + c.size, 0));
+    cleanAllBtn.textContent = t("clean.now");
+  } else if (phase === "cleaning") {
+    const cur = categories.find((c) => c.name === progress.name);
+    const where = cur ? catTitle(cur) + (progress.path ? ` · ${baseName(progress.path)}` : "") : "";
+    totalPrefix.textContent = t("clean.progress.prefix");
+    totalEl.textContent = human(progress.bytes);
+    heroSub.textContent = where ? t("clean.progress.sub", { total: human(progress.total), where }) : t("clean.progress.preparing", { total: human(progress.total) });
+    heroBar.style.width = `${pct}%`;
+    cleanAllBtn.textContent = t("clean.stop");
+    cleanAllBtn.disabled = progress.stopped;
+  } else {
+    const results = [...rowStates.values()].flatMap((r) => (r.result ? [r.result] : []));
+    const failed = results.filter((r) => r.failed.length > 0).map((r) => {
+      const c = categories.find((x) => x.name === r.name);
+      return c ? catTitle(c) : r.name;
+    });
+    totalPrefix.textContent = progress.stopped ? t("clean.stoppedPrefix") : t("clean.donePrefix");
+    totalEl.textContent = human(progress.bytes);
+    heroSub.textContent = [
+      // 停在半路时，已经做完的分类照常汇总；没有做完的就说明其余没有清理
+      progress.stopped && results.length === 0
+        ? t("clean.stoppedSub")
+        : cleanDoneText({
+            results,
+            totalFreed: results.reduce((s, r) => s + r.freed, 0),
+            totalTrashed: results.reduce((s, r) => s + r.trashed, 0),
+            inUse: results.reduce((s, r) => s + r.inUse, 0),
+            errors: [],
+          }),
+      progress.stopped && results.length > 0 ? t("clean.stoppedSub") : "",
+      failed.length > 0 ? t("clean.all.partial", { names: failed.join(t("list.sep")) }) : "",
+    ]
+      .filter(Boolean)
+      .join(t("phrase.sep"));
+    heroBar.style.width = `${progress.stopped ? pct : 100}%`;
+    cleanAllBtn.textContent = t("fs.rescan");
+    cleanAllBtn.disabled = false;
+  }
 }
 
 /** 勾选变化时联动：横幅「已选择」、各分组小计、立即清理按钮可用态 */
 function updateSelection() {
   const sel = categories.filter((c) => selectedCats.has(c.name) && c.size > 0);
   const total = sel.reduce((s, c) => s + c.size, 0);
-  heroSub.textContent = t("clean.selected", { size: human(total) });
-  cleanAllBtn.disabled = sel.length === 0;
+  if (phase === "scanned") {
+    heroSub.textContent = t("clean.selected", { size: human(total) });
+    cleanAllBtn.disabled = sel.length === 0;
+  }
   listEl.querySelectorAll<HTMLElement>(".group-sel").forEach((el) => {
     const names = (el.dataset.names ?? "").split(",").filter(Boolean);
-    const inGroup = (c: ScanCat) => names.includes(c.name);
-    const gtotal = categories.filter(inGroup).reduce((s, c) => s + c.size, 0);
-    const gsel = categories.filter((c) => inGroup(c) && selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
-    el.textContent = t("group.summary", { total: human(gtotal), sel: human(gsel) });
+    el.textContent = groupSummary(categories.filter((c) => names.includes(c.name)));
   });
+}
+
+/** 分组小计：组里还有分类在扫描时只说「扫描中」 */
+function groupSummary(cats: ScanCat[]): string {
+  if (cats.some((c) => pendingCats.has(c.name))) return t("cat.scanning");
+  const total = cats.reduce((s, c) => s + c.size, 0);
+  const sel = cats.filter((c) => selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
+  return t("group.summary", { total: human(total), sel: human(sel) });
 }
 
 const CAT_ICONS: Record<string, { icon: string; color: string }> = {
@@ -419,15 +545,13 @@ const CAT_ICONS: Record<string, { icon: string; color: string }> = {
 const fallbackIcon = { icon: "🧹", color: "#64748b" };
 
 function groupHtml(key: string, icon: string, color: string, cats: ScanCat[]): string {
-  const total = cats.reduce((s, c) => s + c.size, 0);
-  const sel = cats.filter((c) => selectedCats.has(c.name)).reduce((s, c) => s + c.size, 0);
   const names = cats.map((c) => c.name).join(",");
   return `
     <details class="cat-group" open>
       <summary>
         <div class="tile group-tile" style="--c:${color}"><span>${icon}</span></div>
         <span class="group-name">${esc(t(key as never))}</span>
-        <span class="group-sel" data-names="${esc(names)}">${esc(t("group.summary", { total: human(total), sel: human(sel) }))}</span>
+        <span class="group-sel" data-names="${esc(names)}">${esc(groupSummary(cats))}</span>
         <span class="group-caret" aria-hidden="true">▾</span>
       </summary>
       <div class="group-rows">${cats.map(rowHtml).join("")}</div>
@@ -452,15 +576,43 @@ function catNote(c: ScanCat): string {
   return `<span class="tag ok">${esc(t("cat.cleanState"))}</span>`;
 }
 
+/** 清理中及之后，一个分类在这次清理里的进展 */
+function cleanStateNote(r: RowState): string {
+  const spin = (text: string) => `<span class="cat-note-text muted"><span class="spin"></span> ${esc(text)}</span>`;
+  if (r.state === "waiting") return `<span class="cat-note-text muted">${esc(t("cat.waiting"))}</span>`;
+  if (r.state === "cleaning") return spin(t("cat.cleaning"));
+  if (r.state === "stopped") return `<span class="tag dim">${esc(t("cat.stopped"))}</span>`;
+  if (r.state === "skipped") return `<span class="tag dim">${esc(t("cat.notCleaned"))}</span>`;
+  const res = r.result!;
+  const parts: string[] = [];
+  if (res.freed > 0) parts.push(t("cat.freed", { size: human(res.freed) }));
+  if (res.trashed > 0) parts.push(t("cat.trashed", { size: human(res.trashed) }));
+  const done = `<span class="cat-note-text ok">✓ ${esc(parts.join(t("phrase.sep")) || t("cat.cleanedNothing"))}</span>`;
+  return res.failed.length > 0 ? `${done}<span class="tag warn">${esc(t("cat.failedN", { n: res.failed.length }))}</span>` : done;
+}
+
 function rowHtml(c: ScanCat): string {
   const meta = c.builtin && Object.hasOwn(CAT_ICONS, c.name) ? CAT_ICONS[c.name]! : fallbackIcon;
+  const scanning = pendingCats.has(c.name);
+  const cleanState = rowStates.get(c.name);
   const empty = c.size === 0;
   const caution = !empty && c.risk === "moderate";
   const checked = selectedCats.has(c.name);
+  // 只有扫描完、尚未清理时能勾选；清理中及之后，没参与这次清理的分类变淡
+  const locked = phase !== "scanned" || empty;
+  const dim = (phase === "cleaning" || phase === "cleaned") && !cleanState;
+  const note = scanning
+    ? `<span class="cat-note-text muted"><span class="spin"></span> ${esc(t("cat.scanning"))}</span>`
+    : cleanState
+      ? cleanStateNote(cleanState)
+      : catNote(c);
+  const inUse = cleanState?.result ? cleanState.result.inUse : c.inUse;
+  // 明细是扫描时的样子；清理过的分类，那些条目已经删掉或移走了
+  const showTops = !scanning && (!cleanState || cleanState.state === "skipped");
   const trashTag = c.permanent ? "" : `<span class="tag dim">${esc(t("cat.toTrash"))}</span>`;
   const subs = [
-    c.inUse > 0 ? esc(t("cat.inUse", { n: c.inUse })) : "",
-    !empty && c.denied.length > 0 ? `${esc(t("cat.deniedPart"))}${grantBtn()}` : "",
+    !scanning && inUse > 0 ? esc(t("cat.inUse", { n: inUse })) : "",
+    !scanning && !empty && c.denied.length > 0 ? `${esc(t("cat.deniedPart"))}${grantBtn()}` : "",
   ]
     .filter(Boolean)
     .map((s) => `<div class="cat-sub muted">${s}</div>`)
@@ -472,17 +624,72 @@ function rowHtml(c: ScanCat): string {
     )
     .join("");
   return `
-    <div class="cat-row${empty ? " is-empty" : ""}${caution ? " caution" : ""}">
-      <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${empty ? "disabled" : ""} ${checked ? "checked" : ""}></label>
+    <div class="cat-row${empty && !scanning ? " is-empty" : ""}${caution ? " caution" : ""}${dim ? " is-dim" : ""}">
+      <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${locked ? "disabled" : ""} ${checked && !scanning ? "checked" : ""}></label>
       <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
       <div class="cat-info">
         <div class="cat-name">${esc(catTitle(c))}${trashTag}</div>
         <div class="cat-desc muted">${esc(c.builtin ? categoryDescription(c.name, c.description) : c.description)}</div>
         ${subs}
       </div>
-      <div class="cat-note">${catNote(c)}</div>
-      ${tops ? `<details class="cat-details"><summary>${esc(t("cat.tops"))}</summary>${tops}</details>` : ""}
+      <div class="cat-note">${note}</div>
+      ${tops && showTops ? `<details class="cat-details"><summary>${esc(t("cat.tops"))}</summary>${tops}</details>` : ""}
     </div>`;
+}
+
+/**
+ * 清理：横幅显示进度，选中的分类依次「等待中 → 清理中 → 结果」；结束后结果留在页面上，
+ * 横幅的按钮变成「重新扫描」。清理中按钮是「停止清理」：处理完手头这一项就停。
+ */
+async function clean(sel: ScanCat[]) {
+  phase = "cleaning";
+  rowStates.clear();
+  sel.forEach((c) => rowStates.set(c.name, { state: "waiting" }));
+  Object.assign(progress, { total: sel.reduce((s, c) => s + c.size, 0), bytes: 0, name: "", path: "", stopped: false });
+  const ch = new Channel<CleanEvent>();
+  cleanChan = ch;
+  render();
+  try {
+    const done = Cleaner.cleanStream(sel.map((c) => c.name), scannedAt, ch);
+    for await (const ev of ch) {
+      if (ev.kind === "start") {
+        rowStates.set(ev.name, { state: "cleaning" });
+        Object.assign(progress, { name: ev.name, path: "" });
+        render();
+      } else if (ev.kind === "checking" || ev.kind === "removed") {
+        Object.assign(progress, { name: ev.name, path: ev.path ?? "" });
+        if (ev.kind === "removed") progress.bytes = ev.bytes ?? 0;
+        renderHero();
+      } else if (ev.kind === "done" && ev.result) {
+        rowStates.set(ev.name, { state: "done", result: ev.result });
+        progress.bytes = ev.bytes ?? 0;
+        render();
+      }
+    }
+    await done;
+  } catch (e) {
+    if (!progress.stopped) toast(t("clean.fail", { msg: msg(e) }), "err");
+  } finally {
+    cleanChan = null;
+    // 停在半路的分类标「已停止」，还没轮到的标「未清理」；一个都没打断就算清理完成
+    let interrupted = false;
+    rowStates.forEach((r) => {
+      if (r.state === "cleaning") r.state = "stopped";
+      else if (r.state === "waiting") r.state = "skipped";
+      else return;
+      interrupted = true;
+    });
+    progress.stopped = interrupted;
+    phase = "cleaned";
+    render();
+  }
+}
+
+function stopClean() {
+  if (!cleanChan) return;
+  progress.stopped = true;
+  cleanChan.close();
+  renderHero();
 }
 
 /** 清理结果：释放了多少、移到废纸篓多少、跳过了几项 */
@@ -507,24 +714,7 @@ function askCleanAll() {
     keep.length > 0 ? t("clean.body.trash", { size: sum(keep), names: names(keep) }) : "",
     t("clean.body.inUse"),
   ].filter(Boolean);
-  pending = async () => {
-    cleanAllBtn.disabled = true;
-    try {
-      const res = await Cleaner.clean(sel.map((c) => c.name), scannedAt);
-      if (res.errors.length > 0) {
-        const failed = res.errors.map((e) => {
-          const c = categories.find((x) => x.name === e.name);
-          return c ? catTitle(c) : e.name;
-        });
-        toast(`${cleanDoneText(res)}${t("phrase.sep")}${t("clean.all.partial", { names: failed.join(t("list.sep")) })}`, "err");
-      } else {
-        toast(cleanDoneText(res));
-      }
-    } catch (e) {
-      toast(t("clean.fail", { msg: msg(e) }), "err");
-    }
-    await scan();
-  };
+  pending = () => clean(sel);
   modalTitle.textContent = t("clean.sel.title");
   modalBody.innerHTML = lines.map((l) => `<p>${esc(l)}</p>`).join("");
   modalOk.textContent = t("clean.confirm");
@@ -1444,8 +1634,12 @@ function hideModal() {
 
 // ---- 事件 ----
 
-scanBtn.addEventListener("click", scan);
-cleanAllBtn.addEventListener("click", askCleanAll);
+scanBtn.addEventListener("click", () => stopScan(scanBtn) || scan());
+cleanAllBtn.addEventListener("click", () => {
+  if (phase === "cleaning") stopClean();
+  else if (phase === "cleaned") scan();
+  else askCleanAll();
+});
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
 lgScanBtn.addEventListener("click", () => stopScan(lgScanBtn) || startLargeScan());
 orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
@@ -1465,3 +1659,9 @@ overlay.addEventListener("click", (e) => {
 applyStaticI18n();
 lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
 initIdleClean();
+// 版本号以应用自己为准，不写死在页面里
+Cleaner.info()
+  .then((i) => {
+    if (i.version) $("#app-version").textContent = `Cleanzo v${i.version}`;
+  })
+  .catch(() => {});

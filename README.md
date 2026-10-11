@@ -6,8 +6,8 @@
 ## 功能
 
 - 9 个清理分类：应用缓存 / 日志 / 临时文件 / 废纸篓 / npm·pnpm / Go 构建缓存 / pip / Homebrew / Xcode DerivedData；嵌套在一起的分类（如 `~/Library/Caches` 里的 go-build）各算各的，不会重复计算
-- 扫描显示每个分类的占用大小与文件数
-- 单分类清理或一键清理全部（删除前二次确认弹窗）
+- 扫描显示每个分类的占用大小与文件数；分类扫完一个出一个，可随时停止
+- 单分类清理或一键清理全部（删除前二次确认弹窗）；清理时显示进度和每个分类的结果，可随时停止（处理完手头这一项就停）
 - 每个分类展示占用最多的目录明细，清理前清楚知道删了什么
 - 全盘扫描：扫描整个磁盘，按占用排行展示大目录，可一键移入废纸篓（流式进度，du 并发加速，可随时停止）
 - 中英文界面：设置页可切换「跟随系统 / 中文 / English」
@@ -33,6 +33,8 @@ bun run build
 #   build/darwin-arm64/Cleanzo.app
 #   build/darwin-arm64/Cleanzo 0.1.2.dmg
 ```
+
+版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.2」），同时挂着几个版本也分得清。
 
 ### 签名与公证
 
@@ -68,7 +70,7 @@ go vet ./...
 
 ## 技术要点
 
-- Go 侧 `Cleaner` 服务绑定暴露给前端，自动生成类型化 TS 客户端（src/mygo.ts），前端调用 `Cleaner.scan()` / `Cleaner.clean()`
+- Go 侧 `Cleaner` 服务绑定暴露给前端，自动生成类型化 TS 客户端（src/mygo.ts），前端调用 `Cleaner.scanStream()` / `Cleaner.cleanStream()`，经 Channel 边做边报进度
 - 清理策略：只删除分类目录的**内容**，保留目录本身
 - 分类表集中在 `buildCategories()`，加新分类只需加一行
 
