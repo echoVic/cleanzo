@@ -1,6 +1,7 @@
 {
   "name": "cleanzo",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "mygo dev",
