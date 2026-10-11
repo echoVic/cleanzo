@@ -1,8 +1,8 @@
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanEvent, CleanResult, CleanSummary, DirItem, FullScanResult, ScanEvent, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
-import { t, categoryName, categoryDescription, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
+import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, CleanEvent, CleanResult, CleanSummary, DirItem, DiskStat, FullScanResult, ScanEvent, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import { t, categoryName, categoryDescription, isBuiltinCategory, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
 
@@ -60,14 +60,19 @@ const acToolbar = $("#ac-toolbar");
 const phScanBtn = $<HTMLButtonElement>("#ph-scan");
 const phProgress = $("#ph-progress");
 const phCurrent = $("#ph-current");
+const phBar = $("#ph-bar");
 const phList = $("#ph-list");
 const phToolbar = $("#ph-toolbar");
 
 let categories = [] as Awaited<ReturnType<typeof Cleaner.scan>>;
 let apps: AppInfo[] = [];
 const appBusy = new Set<string>();
+let appsLoading = false;
 let catConfig: CategoryConfig[] = [];
 let fsResult: FullScanResult | null = null;
+let fsDisk: DiskStat | null = null;
+let fsDiskSeq = 0;
+let fsDiskPending = 0;
 let pending: (() => Promise<void>) | null = null;
 let fsRunning = false;
 let fsItems: BigItem[] = [];
@@ -175,7 +180,9 @@ function refreshI18n() {
   render();
   if (apps.length > 0) renderApps();
   if (catConfig.length > 0) renderCatEditor();
+  if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
+  renderIdleScanPages();
   lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
   if (!lgRunning) {
     if (lgResult) renderLargeDone(lgResult);
@@ -187,18 +194,16 @@ function refreshI18n() {
   }
   if (acItems.length > 0 && !acRunning) {
     renderAppCacheRows();
-    acScanBtn.textContent = t("appcaches.rescan");
   }
   if (phClusters.length > 0 && !phRunning) {
     renderPhotoClusters();
-    phScanBtn.textContent = t("photos.rescan");
   }
 }
 
 langSelect.addEventListener("change", () => {
   setPref(langSelect.value as LangPref);
   refreshI18n();
-  toast(t("settings.saved"));
+  toast(t("settings.languageChanged"));
 });
 
 // ---- 交互态组件 ----
@@ -217,7 +222,23 @@ function toast(text: string, kind: "ok" | "err" = "ok") {
   toastTimer = window.setTimeout(() => el.classList.remove("show"), 3200);
 }
 
+function setNavBusy(view: View, on: boolean) {
+  navItems.find((b) => b.dataset.view === view)?.classList.toggle("busy", on);
+}
+
+const scanViews: Record<string, View> = {
+  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "or-scan": "orphans",
+  "ac-scan": "appcaches", "ph-scan": "photos",
+};
+
+/** 恢复按钮时仍按当前语言显示「重新扫描」。 */
+function markRescan(btn: HTMLButtonElement) {
+  btn.dataset.i18n = "fs.rescan";
+}
+
 function setBusy(btn: HTMLButtonElement, busy: boolean, label?: string) {
+  const view = scanViews[btn.id];
+  if (view) setNavBusy(view, busy);
   if (busy) {
     btn.dataset.orig = btn.textContent ?? "";
     btn.disabled = true;
@@ -240,6 +261,7 @@ function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
   btn.disabled = false;
   btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`;
   scanChans.set(btn, ch);
+  setNavBusy(scanViews[btn.id]!, true);
   stoppedScans.delete(btn);
 }
 
@@ -302,7 +324,8 @@ type View = (typeof VIEWS)[number];
 function switchView(v: View) {
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
-  if (v === "apps" && apps.length === 0) loadApps();
+  if (v === "apps" && apps.length === 0 && !appsLoading) loadApps();
+  if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings" && catConfig.length === 0) loadCatConfig();
   if (v === "appcaches" && acItems.length === 0 && !acRunning) startAppCacheScan();
   if (v === "photos" && !phTried) startPhotoScan();
@@ -319,6 +342,34 @@ const IDLE_ICON = ` <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hi
   <circle cx="6.6" cy="17.4" r="0.7" fill="#fff" opacity="0.6"/>
   <defs><linearGradient id="eg-grad" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
 </svg>`;
+
+/** 未扫描的列表沿用垃圾清理页的引导样式。 */
+function renderIdleScanPages() {
+  const guides = [
+    { list: fsList, running: fsRunning, key: "fs", start: startFullScan,
+      path: '<circle cx="12" cy="12" r="6.8" opacity="0.25"/><path d="M12 5.2v6.8h6.8"/><path d="M12 12l-4.8 4.8"/>' },
+    { list: lgList, running: lgRunning, key: "large", start: startLargeScan,
+      path: '<path d="M7 4.8h6.5l4 4v10.4H7z"/><path d="M13.5 4.8v4h4M10 12.5h4.5M10 15.5h4.5"/>' },
+    { list: orList, running: orRunning, key: "orphans", start: startOrphanScan,
+      path: '<path d="M4.8 9V7h5l2 2h7.4v9H4.8z"/><path d="M9.5 13.5h5" stroke-dasharray="1 2"/>' },
+  ] as const;
+  for (const g of guides) {
+    if (g.running || (g.list.childElementCount > 0 && !g.list.querySelector(".empty-guide"))) continue;
+    const grad = `eg-${g.key}-grad`;
+    g.list.innerHTML = `
+      <div class="empty-guide">
+        <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10.2" stroke="url(#${grad})" stroke-width="1.4" stroke-dasharray="3.4 2.8" opacity="0.7"/>
+          <g stroke="url(#${grad})" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${g.path}</g>
+          <defs><linearGradient id="${grad}" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
+        </svg>
+        <h3>${esc(t(`${g.key}.idle.title`))}</h3>
+        <p>${esc(t(`${g.key}.idle.desc`))}</p>
+        <button class="btn primary big" type="button">${esc(t(`${g.key}.idle.cta`))}</button>
+      </div>`;
+    g.list.querySelector("button")?.addEventListener("click", g.start);
+  }
+}
 
 /**
  * 垃圾清理页的阶段：idle 尚未扫描；scanning 扫描中（分类逐个出结果）；scanned 可勾选清理；
@@ -680,6 +731,7 @@ function rowHtml(c: ScanCat): string {
  */
 async function clean(sel: ScanCat[]) {
   phase = "cleaning";
+  setNavBusy("clean", true);
   rowStates.clear();
   sel.forEach((c) => rowStates.set(c.name, { state: "waiting" }));
   Object.assign(progress, { total: sel.reduce((s, c) => s + c.size, 0), bytes: 0, name: "", path: "", stopped: false });
@@ -718,6 +770,7 @@ async function clean(sel: ScanCat[]) {
     });
     progress.stopped = interrupted;
     phase = "cleaned";
+    setNavBusy("clean", false);
     render();
   }
 }
@@ -820,12 +873,14 @@ async function startFullScan() {
         fsCount.textContent = t("fs.count", { n: fsItems.length.toLocaleString() });
         renderFsRows(fsItems, true);
       } else if (ev.kind === "done" && ev.result) {
+        fsDiskSeq++; // 不让先前的磁盘读取覆盖扫描结果
         fsResult = ev.result;
         fsItems = ev.result.items;
         renderFullScan(ev.result);
       }
     }
     await done;
+    if (!stoppedScans.has(fsScanBtn) || fsItems.length > 0) markRescan(fsScanBtn);
   } catch (e) {
     if (!stoppedScans.has(fsScanBtn)) {
       fsResult = null;
@@ -835,6 +890,7 @@ async function startFullScan() {
   } finally {
     fsRunning = false;
     fsProgress.classList.add("hidden");
+    if (stoppedScans.has(fsScanBtn) && fsItems.length > 0) markRescan(fsScanBtn);
     if (endScan(fsScanBtn)) {
       // 停止时保留已经扫到的，并说明是停止了，而不是没找到
       if (fsItems.length > 0) renderFsRows(fsItems, false, stoppedFoot());
@@ -1060,6 +1116,7 @@ function applyRemoved(ctx: ListCtx, removed: string[]) {
   ctx.removeRows(removed);
   subtractRemovedFromState(ctx.st, removed);
   ctx.rerender();
+  if (ctx.st === lists.fullscan) void refreshDisk();
 }
 
 async function toggleExpand(ctx: ListCtx, path: string) {
@@ -1184,12 +1241,33 @@ function renderFsListInto(ctx: ListCtx, html: string) {
   updateToolbar(ctx);
 }
 
-function renderFullScan(r: FullScanResult) {
-  const usedPct = r.disk.total ? Math.min(100, Math.round((r.disk.used / r.disk.total) * 100)) : 0;
-  fsUsed.textContent = human(r.disk.used);
-  fsFree.textContent = human(r.disk.free);
-  fsTotal.textContent = human(r.disk.total);
+/** 磁盘卡不依赖目录扫描。 */
+function renderDisk(disk: DiskStat) {
+  fsDisk = disk;
+  const usedPct = disk.total ? Math.min(100, Math.round((disk.used / disk.total) * 100)) : 0;
+  fsUsed.textContent = human(disk.used);
+  fsFree.textContent = human(disk.free);
+  fsTotal.textContent = human(disk.total);
   fsBar.style.width = `${usedPct}%`;
+}
+
+async function refreshDisk() {
+  const seq = ++fsDiskSeq;
+  fsDiskPending++;
+  try {
+    const disk = await Cleaner.disk();
+    if (seq !== fsDiskSeq) return;
+    if (fsResult) fsResult.disk = disk;
+    renderDisk(disk);
+  } catch {
+    // 读取失败时保留上次容量。
+  } finally {
+    fsDiskPending--;
+  }
+}
+
+function renderFullScan(r: FullScanResult) {
+  renderDisk(r.disk);
   fsCount.textContent = "";
   renderFsRows(r.items, false);
 }
@@ -1248,6 +1326,7 @@ async function startLargeScan() {
       }
     }
     await done;
+    if (!stoppedScans.has(lgScanBtn) || lgItems.length > 0) markRescan(lgScanBtn);
   } catch (e) {
     if (!stoppedScans.has(lgScanBtn)) {
       lgItems = [];
@@ -1257,6 +1336,7 @@ async function startLargeScan() {
   } finally {
     lgRunning = false;
     lgProgress.classList.add("hidden");
+    if (stoppedScans.has(lgScanBtn) && lgItems.length > 0) markRescan(lgScanBtn);
     if (endScan(lgScanBtn)) {
       if (lgItems.length > 0) renderLargeRows(lgItems, false, stoppedFoot());
       else lgList.innerHTML = emptyState(t("scan.stopped"));
@@ -1342,6 +1422,7 @@ async function startOrphanScan() {
       renderOrphanRows(orItems);
     }
     await done;
+    if (!stoppedScans.has(orScanBtn) || orItems.length > 0) markRescan(orScanBtn);
   } catch (e) {
     if (!stoppedScans.has(orScanBtn)) {
       orItems = [];
@@ -1351,6 +1432,7 @@ async function startOrphanScan() {
   } finally {
     orRunning = false;
     orProgress.classList.add("hidden");
+    if (stoppedScans.has(orScanBtn) && orItems.length > 0) markRescan(orScanBtn);
     if (endScan(orScanBtn) && orItems.length === 0) orList.innerHTML = emptyState(t("scan.stopped"));
   }
 }
@@ -1411,6 +1493,7 @@ async function startAppCacheScan() {
   acCurrent.textContent = t("appcaches.busy");
   try {
     acItems = await Cleaner.scanAppCaches();
+    markRescan(acScanBtn);
     renderAppCacheRows();
   } catch (e) {
     acItems = [];
@@ -1420,7 +1503,6 @@ async function startAppCacheScan() {
     acRunning = false;
     acProgress.classList.add("hidden");
     setBusy(acScanBtn, false);
-    acScanBtn.textContent = t("appcaches.rescan");
   }
 }
 
@@ -1469,12 +1551,16 @@ async function startPhotoScan() {
   phProgress.classList.remove("hidden");
   phList.innerHTML = "";
   phCurrent.textContent = t("photos.busy");
+  phBar.style.width = "0%";
   const ch = new Channel<import("./mygo").SimilarPhotoEvent>();
   setStoppable(phScanBtn, ch);
   try {
     const done = Cleaner.scanSimilarPhotos(ch);
     for await (const ev of ch) {
       if (ev.kind === "progress") {
+        const total = ev.total ?? 0;
+        const pct = total > 0 ? Math.max(0, Math.min(100, ((ev.processed ?? 0) / total) * 100)) : 0;
+        phBar.style.width = `${pct}%`;
         phCurrent.textContent = t("photos.progress", {
           n: (ev.processed ?? 0).toLocaleString(),
           total: (ev.total ?? 0).toLocaleString(),
@@ -1493,6 +1579,7 @@ async function startPhotoScan() {
       }
     }
     await done;
+    if (!stoppedScans.has(phScanBtn) || phClusters.length > 0) markRescan(phScanBtn);
   } catch (e) {
     if (!stoppedScans.has(phScanBtn)) {
       phClusters = [];
@@ -1502,8 +1589,8 @@ async function startPhotoScan() {
   } finally {
     phRunning = false;
     phProgress.classList.add("hidden");
+    if (stoppedScans.has(phScanBtn) && phClusters.length > 0) markRescan(phScanBtn);
     if (endScan(phScanBtn) && phClusters.length === 0) phList.innerHTML = emptyState(t("scan.stopped"));
-    phScanBtn.textContent = t("photos.rescan");
   }
 }
 
@@ -1684,6 +1771,9 @@ function askTrashPhotos() {
 // ---- 应用卸载 ----
 
 async function loadApps() {
+  if (appsLoading) return;
+  appsLoading = true;
+  setNavBusy("apps", true);
   appListEl.innerHTML = skeletonRows(8);
   try {
     apps = await Cleaner.listApps();
@@ -1692,6 +1782,9 @@ async function loadApps() {
     apps = [];
     appListEl.innerHTML = errorState(t("apps.loadFail", { msg: errText(e) }), loadApps);
     toast(t("apps.loadFail", { msg: errText(e) }), "err");
+  } finally {
+    appsLoading = false;
+    setNavBusy("apps", appBusy.size > 0);
   }
 }
 
@@ -1752,6 +1845,7 @@ async function showUninstallDetail(path: string) {
     pending = async () => {
       if (appBusy.has(d.app.path)) return;
       appBusy.add(d.app.path);
+      setNavBusy("apps", true);
       renderApps();
       try {
         const res = await Cleaner.uninstallApp(d.app.path);
@@ -1769,6 +1863,7 @@ async function showUninstallDetail(path: string) {
         toast(t("apps.fail", { msg: errText(e) }), "err");
       } finally {
         appBusy.delete(d.app.path);
+        setNavBusy("apps", appsLoading || appBusy.size > 0);
         renderApps();
       }
     };
@@ -1802,8 +1897,11 @@ function renderCatEditor() {
       (c, i) => `
       <div class="cat-edit card">
         <div class="edit-grid">
+          ${isBuiltinCategory(c.name) ? `
+          <div class="cat-edit-name">${esc(categoryName(c.name))} <span class="tag dim">${esc(t("settings.builtin"))}</span></div>
+          <div class="cat-edit-desc muted">${esc(categoryDescription(c.name, c.description))}</div>` : `
           <input data-i="${i}" data-f="name" value="${esc(c.name)}" placeholder="${esc(t("settings.name"))}" />
-          <input data-i="${i}" data-f="description" value="${esc(c.description)}" placeholder="${esc(t("settings.desc"))}" />
+          <input data-i="${i}" data-f="description" value="${esc(c.description)}" placeholder="${esc(t("settings.desc"))}" />`}
         </div>
         <textarea data-i="${i}" data-f="paths" rows="2" placeholder="${esc(t("settings.paths"))}">${esc(c.paths.join("\n"))}</textarea>
         <div class="edit-actions">
@@ -1897,6 +1995,9 @@ modalOk.addEventListener("click", async () => {
   if (fn) await fn();
 });
 modalCancel.addEventListener("click", hideModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
+});
 overlay.addEventListener("click", (e) => {
   if (e.target === overlay) hideModal();
 });
@@ -1904,6 +2005,7 @@ overlay.addEventListener("click", (e) => {
 applyStaticI18n();
 lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
 initIdleClean();
+renderIdleScanPages();
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

@@ -152,6 +152,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: background 0.13s ease, color 0.13s ease;
 }
 .nav-item svg { flex-shrink: 0; }
+.nav-item.busy::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
 .nav-item:hover { background: var(--hover); color: var(--fg); }
 .nav-item.active {
   background: var(--accent-soft);
@@ -604,6 +615,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .fs-progress.hidden { display: none; }
 .fs-progress-text { min-width: 0; flex: 1; }
+#ph-progress .hero-progress { width: 100%; }
 #fs-current {
   font-size: 13px;
   font-weight: 550;
@@ -874,6 +886,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cat-editor { display: flex; flex-direction: column; gap: 10px; }
 .cat-edit { padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; border-radius: 12px; }
 .edit-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 9px; }
+.cat-edit-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; }
+.cat-edit-desc { align-self: center; font-size: 12.5px; line-height: 1.5; }
 .cat-edit input, .cat-edit textarea {
   font-size: 12.5px;
   padding: 8px 11px;

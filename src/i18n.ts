@@ -109,6 +109,9 @@ const dict = {
     "btn.retry": "重试",
     "btn.close": "知道了",
     // full scan
+    "fs.idle.title": "看看空间都去哪了",
+    "fs.idle.desc": "逐个统计主目录、资源库和系统目录的大小，按占用从大到小排好，通常需要一两分钟。",
+    "fs.idle.cta": "开始全盘扫描",
     "fs.sub": "扫描整个磁盘，找出最占空间的位置",
     "fs.used": "已用",
     "fs.free": "可用",
@@ -161,6 +164,8 @@ const dict = {
     "kind.logs": "日志",
     "kind.support": "应用支持",
     // settings
+    "settings.languageChanged": "界面语言已切换",
+    "settings.builtin": "内置",
     "settings.sub": "管理清理分类与扫描目录，可自由增删改",
     "settings.readFail": "读取配置失败：{msg}",
     "settings.name": "名称",
@@ -170,7 +175,7 @@ const dict = {
     "settings.remove": "删除",
     "settings.add": "添加分类",
     "settings.save": "保存设置",
-    "settings.saved": "已保存，分类将在下次扫描时生效",
+    "settings.saved": "已保存，垃圾清理会按新设置重新扫描",
     "settings.saveFail": "保存失败：{msg}",
     "settings.emptyName": "分类名称不能为空",
     "settings.dupName": "分类名称重复：{name}",
@@ -183,6 +188,9 @@ const dict = {
     "settings.langZh": "中文",
     "settings.langEn": "English",
     // large files
+    "large.idle.title": "找出占地方的大文件",
+    "large.idle.desc": "在主目录和常用位置里找出超过所选大小的单个文件，按大小排好。",
+    "large.idle.cta": "开始扫描",
     "large.sub": "找出占用最大的单个文件，快速清理磁盘",
     "large.scanBtn": "扫描大文件",
     "large.threshold": "只显示大于 {size} 的文件",
@@ -192,6 +200,9 @@ const dict = {
     "large.live": "实时排行，扫描完成后排序",
     "large.fail": "扫描失败：{msg}",
     // leftovers
+    "orphans.idle.title": "找出卸载后留下的残留",
+    "orphans.idle.desc": "检查资源库里不属于任何已安装应用的文件夹和文件，移到废纸篓前可以先查看。",
+    "orphans.idle.cta": "开始扫描",
     "orphans.sub": "找出已卸载应用留下的残留文件",
     "orphans.scanBtn": "扫描残留",
     "orphans.count": "已发现 {n} 项残留",
@@ -203,7 +214,6 @@ const dict = {
     // app caches (per-app breakdown)
     "appcaches.sub": "按应用拆分缓存，可单独勾选要清理的应用",
     "appcaches.scanBtn": "扫描应用缓存",
-    "appcaches.rescan": "重新扫描",
     "appcaches.busy": "扫描中…",
     "appcaches.empty": "没有发现应用缓存",
     "appcaches.count": "{n} 个应用",
@@ -212,7 +222,6 @@ const dict = {
     // similar photos
     "photos.sub": "找出近乎重复、相似截图与连拍的照片簇",
     "photos.scanBtn": "扫描相似照片",
-    "photos.rescan": "重新扫描",
     "photos.busy": "扫描中…",
     "photos.progress": "正在处理 {n} / {total} 张",
     "photos.empty": "没有发现相似照片",
@@ -357,6 +366,9 @@ const dict = {
     "btn.ok": "OK",
     "btn.retry": "Retry",
     "btn.close": "Got it",
+    "fs.idle.title": "See where your space went",
+    "fs.idle.desc": "Measures your home folder, Library and system folders and ranks them by size. Usually takes a minute or two.",
+    "fs.idle.cta": "Start full scan",
     "fs.sub": "Scan the whole disk and find what takes up the most space",
     "fs.used": "Used",
     "fs.free": "Free",
@@ -406,6 +418,8 @@ const dict = {
     "kind.launchAgent": "Launch agent",
     "kind.logs": "Logs",
     "kind.support": "App support",
+    "settings.languageChanged": "Language changed",
+    "settings.builtin": "Built-in",
     "settings.sub": "Manage cleaning categories and scan directories",
     "settings.readFail": "Failed to read config: {msg}",
     "settings.name": "Name",
@@ -415,7 +429,7 @@ const dict = {
     "settings.remove": "Remove",
     "settings.add": "Add Category",
     "settings.save": "Save Settings",
-    "settings.saved": "Saved. Categories take effect on next scan.",
+    "settings.saved": "Saved. Junk cleaning rescans with the new settings.",
     "settings.saveFail": "Save failed: {msg}",
     "settings.emptyName": "Category name cannot be empty",
     "settings.dupName": "Duplicate category name: {name}",
@@ -427,6 +441,9 @@ const dict = {
     "settings.langSystem": "System",
     "settings.langZh": "中文",
     "settings.langEn": "English",
+    "large.idle.title": "Find the files that take the most space",
+    "large.idle.desc": "Looks through your home folder and common places for single files above the size you pick, largest first.",
+    "large.idle.cta": "Start scan",
     "large.sub": "Find the largest single files and free disk space fast",
     "large.scanBtn": "Scan Large Files",
     "large.threshold": "Only files larger than {size}",
@@ -435,6 +452,9 @@ const dict = {
     "large.empty": "No files larger than {size}",
     "large.live": "Live ranking while scanning",
     "large.fail": "Scan failed: {msg}",
+    "orphans.idle.title": "Find what uninstalled apps left behind",
+    "orphans.idle.desc": "Checks your Library for folders and files that belong to no installed app; you can look before moving them to the Trash.",
+    "orphans.idle.cta": "Start scan",
     "orphans.sub": "Find leftover files from apps that are no longer installed",
     "orphans.scanBtn": "Scan Leftovers",
     "orphans.count": "{n} leftovers found",
@@ -446,7 +466,6 @@ const dict = {
     // app caches (per-app breakdown)
     "appcaches.sub": "Break caches down by app, pick which ones to clean",
     "appcaches.scanBtn": "Scan App Caches",
-    "appcaches.rescan": "Rescan",
     "appcaches.busy": "Scanning…",
     "appcaches.empty": "No app caches found",
     "appcaches.count": "{n} apps",
@@ -455,7 +474,6 @@ const dict = {
     // similar photos
     "photos.sub": "Find near-duplicates, similar screenshots and burst shots",
     "photos.scanBtn": "Scan Similar Photos",
-    "photos.rescan": "Rescan",
     "photos.busy": "Scanning…",
     "photos.progress": "Processing {n} / {total}",
     "photos.empty": "No similar photos found",
@@ -544,6 +562,11 @@ export function t(key: keyof (typeof dict)["zh"] & keyof (typeof dict)["en"], va
     }
   }
   return s;
+}
+
+/** 是否有内置名称翻译。 */
+export function isBuiltinCategory(name: string): boolean {
+  return Object.hasOwn(dict.zh, `name.${name}`);
 }
 
 /** categoryName maps a built-in category name to its localized title. */
