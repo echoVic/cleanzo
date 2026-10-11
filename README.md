@@ -31,7 +31,7 @@ bun run dev      # 开发模式，带热更新
 bun run build
 # 产物：
 #   build/darwin-arm64/Cleanzo.app
-#   build/darwin-arm64/Cleanzo 0.1.1.dmg
+#   build/darwin-arm64/Cleanzo 0.1.2.dmg
 ```
 
 ### 签名与公证
@@ -47,7 +47,7 @@ bun run build
 
 ```sh
 spctl -a -vvv -t exec build/darwin-arm64/Cleanzo.app   # source=Notarized Developer ID
-xcrun stapler validate "build/darwin-arm64/Cleanzo 0.1.1.dmg"
+xcrun stapler validate "build/darwin-arm64/Cleanzo 0.1.2.dmg"
 ```
 
 ## 测试
