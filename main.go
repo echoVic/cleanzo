@@ -460,7 +460,11 @@ func safeToClean(p string) bool {
 	if err != nil {
 		return false
 	}
-	path := strings.ToLower(resolvePath(abs))
+	return safeResolved(strings.ToLower(resolvePath(abs)))
+}
+
+// safeResolved is safeToClean for a path already resolved and lower-cased.
+func safeResolved(path string) bool {
 	home := strings.ToLower(resolvePath(homeDir()))
 	if within(path, home) {
 		rel := strings.TrimPrefix(path, home)
@@ -495,6 +499,14 @@ func within(path, dir string) bool {
 // absolute path, and appends the rest.
 func resolvePath(p string) string {
 	p = filepath.Clean(p)
+	if r, ok := memoResolved(p); ok {
+		return r
+	}
+	return resolveUncached(p)
+}
+
+// resolveUncached is resolvePath without the expansion memo.
+func resolveUncached(p string) string {
 	rest := ""
 	for {
 		if r, err := filepath.EvalSymlinks(p); err == nil {
@@ -2107,9 +2119,13 @@ var appleDataNames = map[string]bool{
 // entries that do not correspond to an installed app. Orphan directories are
 // measured concurrently with du (60s each); plain files use stat. Each
 // completed measurement is streamed through onItem, one call at a time. It
-// stops when ctx is canceled.
-func collectOrphans(ctx context.Context, onItem func(o OrphanItem)) ([]OrphanItem, int64) {
+// stops when ctx is canceled. With no roots specified, it checks libraryRoots.
+func collectOrphans(ctx context.Context, onItem func(o OrphanItem), roots ...string) ([]OrphanItem, int64) {
+	if len(roots) == 0 {
+		roots = libraryRoots
+	}
 	h := homeDir()
+	traversal := junkEnv{home: h, tmp: filepath.Clean(os.TempDir()), fda: true}
 	keys := installedKeys()
 	g := probeUsage()
 	type candidate struct {
@@ -2118,13 +2134,19 @@ func collectOrphans(ctx context.Context, onItem func(o OrphanItem)) ([]OrphanIte
 		isDir bool
 	}
 	var cands []candidate
-	for _, root := range libraryRoots {
+	for _, root := range roots {
 		dir := filepath.Join(h, "Library", root)
+		if traversal.traversalBlocked(dir) {
+			continue
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
+			if !e.Type().IsRegular() && !e.IsDir() {
+				continue // never resolve links into another app's data
+			}
 			name := e.Name()
 			base := name
 			if root == "Preferences" || root == "LaunchAgents" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func TestExpandShowsOnlyWhatExists(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, ".npm/_npx/abc/pkg.tgz"), 1000)
 	writeFile(t, filepath.Join(env.home, ".cache/uv/wheels/x.whl"), 1000)
-	specs, sum := expandItems(env)
+	specs, sum := expandItems(&env)
 	got := itemIDs(specs)
 	if !slices.Equal(got, []string{"dev.npx", "dev.uv"}) {
 		t.Fatalf("items = %v", got)
@@ -56,7 +57,7 @@ func TestClaimsKeepRuleFoldersOutOfAppItems(t *testing.T) {
 	writeFile(t, filepath.Join(caches, "go-build/ab/cd"), 1000)
 	env.settings.Ignored = []string{"browser.chrome"} // ignored, still claims
 	env.settings.DisabledGroups = []string{"updates"} // off, still claims
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		for _, c := range s.cands {
 			if strings.Contains(c.path, "Google/Chrome") || strings.Contains(c.path, "ShipIt") {
@@ -81,7 +82,7 @@ func TestAppItemsMergeSourcesByOwner(t *testing.T) {
 	writeFile(t, filepath.Join(env.home, "Library/Application Support/Trae CN/Cache/b"), 100)
 	writeFile(t, filepath.Join(env.home, "Library/Application Support/Trae CN/Service Worker/c"), 100) // not a cache folder
 	writeFile(t, filepath.Join(env.home, "Library/Containers/com.spotify.client/Data/Library/Caches/d"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	var trae, spotify *itemSpec
 	for i := range specs {
 		switch specs[i].item.ID {
@@ -109,7 +110,7 @@ func TestNoFullDiskAccessStaysOutOfContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(data, 0o755) })
-	specs, sum := expandItems(env)
+	specs, sum := expandItems(&env)
 	if sum.Containers != 1 || sum.FullDiskAccess {
 		t.Fatalf("summary = %+v", sum)
 	}
@@ -128,7 +129,7 @@ func TestProtectedAndCustom(t *testing.T) {
 	writeFile(t, filepath.Join(env.home, ".cache/huggingface/hub/model.bin"), 100)
 	writeFile(t, filepath.Join(env.home, "stuff/old.bin"), 100)
 	env.settings.Custom = []CustomFolder{{Name: "stuff", Path: filepath.Join(env.home, "stuff"), Enabled: true}}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		for _, c := range s.cands {
 			if strings.Contains(c.path, "Spotlight") || strings.Contains(c.path, "huggingface") {
@@ -147,7 +148,7 @@ func TestFilteredRulesKeepDisjointDownloadTargets(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, "Downloads/old.dmg"), 100)
 	writeFile(t, filepath.Join(env.home, "Downloads/incomplete.part"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	ids := itemIDs(specs)
 	if !slices.Contains(ids, "review.installers") || !slices.Contains(ids, "review.partial-downloads") {
 		t.Fatalf("items = %v", ids)
@@ -160,7 +161,7 @@ func TestCustomCannotEncloseProtectedCaches(t *testing.T) {
 	writeFile(t, filepath.Join(env.home, ".cache/huggingface/hub/model.bin"), 100)
 	writeFile(t, filepath.Join(env.home, ".cache/unused/blob"), 100)
 	env.settings.Custom = []CustomFolder{{Path: filepath.Join(env.home, ".cache"), Enabled: true}}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		for _, c := range s.cands {
 			if within(canonical(filepath.Join(env.home, ".cache/huggingface")), canonical(c.path)) {
@@ -236,7 +237,7 @@ func TestPlanItemMeasuresAndSkips(t *testing.T) {
 	open := filepath.Join(env.home, ".npm/_npx/c")
 	writeFile(t, filepath.Join(open, "z"), 500)
 	env.guard.open = []string{strings.ToLower(resolvePath(filepath.Join(open, "z")))}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	p := planItem(context.Background(), specs[0], env, make(chan struct{}, 4), nil)
 	if p.item.Size != 4000 || p.item.InUse != 1 || len(p.entries) != 2 || p.entries[0].size != 3000 {
 		t.Fatalf("plan = %+v", p)
@@ -251,7 +252,7 @@ func TestPlanItemRunningOwnerTakesNothing(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, "Library/Caches/Google/Chrome/Default/Cache/d"), 100)
 	env.guard.running = map[string]bool{"com.google.chrome": true}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	p := planItem(context.Background(), specs[0], env, make(chan struct{}, 4), nil)
 	if !p.item.Running || len(p.entries) != 0 {
 		t.Fatalf("a running browser keeps its cache: %+v", p)
@@ -271,7 +272,7 @@ func TestTempFolderWithTrailingSlash(t *testing.T) {
 	saved := now
 	now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
 	defer func() { now = saved }()
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		if s.item.ID == "sys.temp" {
 			p := planItem(context.Background(), s, env, make(chan struct{}, 4), nil)
@@ -290,7 +291,7 @@ func TestHomebrewKeepsItsIndex(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, "Library/Caches/Homebrew/downloads/x.tar.gz"), 100)
 	writeFile(t, filepath.Join(env.home, "Library/Caches/Homebrew/api/formula.jws.json"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		for _, c := range s.cands {
 			if strings.Contains(c.path, "Homebrew/api") {
@@ -311,7 +312,7 @@ func TestDeviceSupportKeepsNewestPerPlatform(t *testing.T) {
 		writeFile(t, filepath.Join(ios, v, "Symbols/x"), 100)
 	}
 	writeFile(t, filepath.Join(env.home, "Library/Developer/Xcode/watchOS DeviceSupport/10.4 (21T216)/Symbols/x"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	var p itemPlan
 	for _, s := range specs {
 		if s.item.ID == "review.device-support" {
@@ -345,7 +346,7 @@ func TestInstallersNeedThirtyDays(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(env.home, "Downloads/New.dmg"), now(), now()); err != nil {
 		t.Fatal(err)
 	}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, s := range specs {
 		if s.item.ID == "review.installers" {
 			p := planItem(context.Background(), s, env, make(chan struct{}, 4), nil)
@@ -372,7 +373,7 @@ func TestPlanItemReadsBackupAndArchiveMetadata(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "Info.plist"), []byte(data), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			specs, _ := expandItems(env)
+			specs, _ := expandItems(&env)
 			for _, spec := range specs {
 				if spec.item.ID == tc.id {
 					p := planItem(context.Background(), spec, env, make(chan struct{}, 4), nil)
@@ -450,7 +451,7 @@ func TestNoFullDiskAccessBlocksCustomContainers(t *testing.T) {
 	writeFile(t, filepath.Join(data, "Library/Caches/x"), 100)
 	env.fda = false
 	env.settings.Custom = []CustomFolder{{Name: "custom", Path: data, Enabled: true}}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, spec := range specs {
 		for _, c := range spec.cands {
 			if strings.Contains(c.path, "/Containers/") {
@@ -505,7 +506,7 @@ func TestNoFullDiskAccessBlocksContainerAliases(t *testing.T) {
 	if err := os.Symlink(filepath.Join(data, "Library/Caches"), filepath.Join(caches, "Alias")); err != nil {
 		t.Fatal(err)
 	}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, spec := range specs {
 		for _, c := range spec.cands {
 			if strings.Contains(c.path, "/Containers/") {
@@ -519,7 +520,7 @@ func TestNoFullDiskAccessBlocksContainerAliases(t *testing.T) {
 func TestProtectedFinderVariants(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, "Library/Caches/com.apple.finder.helper/x"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	if len(specs) != 0 {
 		t.Fatalf("protected Finder cache emitted: %v", itemIDs(specs))
 	}
@@ -534,7 +535,7 @@ func TestRuleCannotFollowCacheIntoDocuments(t *testing.T) {
 	if err := os.Symlink(docs, filepath.Join(env.home, ".npm/_npx")); err != nil {
 		t.Fatal(err)
 	}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, spec := range specs {
 		if spec.item.ID == "dev.npx" && len(spec.cands) > 0 {
 			t.Fatalf("rule enters Documents: %+v", spec)
@@ -570,7 +571,7 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 			saved := now
 			now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
 			defer func() { now = saved }()
-			specs, _ := expandItems(env)
+			specs, _ := expandItems(&env)
 			for _, spec := range specs {
 				if spec.item.ID == rule.ID {
 					plan := planItem(context.Background(), spec, env, make(chan struct{}, 4), nil)
@@ -619,7 +620,7 @@ func TestExpansionDoesNotStatThroughContainerAliases(t *testing.T) {
 		}
 		return os.Lstat(path)
 	}
-	expandItems(env)
+	expandItems(&env)
 }
 
 // TestTemporaryCandidatesAlwaysNeedSevenDays checks custom targets cannot bypass temporary age.
@@ -628,7 +629,7 @@ func TestTemporaryCandidatesAlwaysNeedSevenDays(t *testing.T) {
 	root := filepath.Join(env.tmp, "custom")
 	writeFile(t, filepath.Join(root, "new.bin"), 100)
 	env.settings.Custom = []CustomFolder{{Path: root, Enabled: true}}
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	for _, spec := range specs {
 		p := planItem(context.Background(), spec, env, make(chan struct{}, 4), nil)
 		if p.item.Size != 0 {
@@ -642,7 +643,7 @@ func TestPlanItemFailsClosed(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, ".npm/_npx/a/x"), 100)
 	env.guard.failed = true
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	p := planItem(context.Background(), specs[0], env, make(chan struct{}, 4), nil)
 	if p.item.Size != 0 || p.item.InUse != 1 || len(p.entries) != 0 {
 		t.Fatalf("failed guard removes entries: %+v", p)
@@ -653,7 +654,7 @@ func TestPlanItemFailsClosed(t *testing.T) {
 func TestPlanItemCanceledPoolStartsNoWalks(t *testing.T) {
 	env := testEnv(t)
 	writeFile(t, filepath.Join(env.home, ".npm/_npx/a/x"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	sem := make(chan struct{}, 1)
@@ -670,7 +671,7 @@ func TestPlanItemRejectsAnAncestorChangedToContainerAlias(t *testing.T) {
 	env.fda = false
 	root := filepath.Join(env.home, ".npm/_npx")
 	writeFile(t, filepath.Join(root, "entry/x"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	data := filepath.Join(env.home, "Library/Containers/com.vendor.app/Data")
 	writeFile(t, filepath.Join(data, "entry/x"), 100)
 	if err := os.Rename(root, root+"-old"); err != nil {
@@ -712,7 +713,7 @@ func TestExplicitSelectionChecksCandidatePrefixes(t *testing.T) {
 	root := filepath.Join(env.home, ".npm/_npx")
 	writeFile(t, filepath.Join(root, "a/x"), 100)
 	writeFile(t, filepath.Join(root, "b/y"), 100)
-	specs, _ := expandItems(env)
+	specs, _ := expandItems(&env)
 	data := filepath.Join(env.home, "Library/Containers/com.vendor.app/Data")
 	writeFile(t, filepath.Join(data, "x"), 100)
 	if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "a-old")); err != nil {
@@ -759,5 +760,158 @@ func TestMeasureCountsSpaceOnDisk(t *testing.T) {
 	size, files := scanPath(dir)
 	if files != 2 || size < 4096 || size > 1<<20 {
 		t.Fatalf("size = %d, files = %d; want the 4 KB actually stored", size, files)
+	}
+}
+
+// TestScanJunkSummaryCountsLeftovers checks the review summary and its group switch.
+func TestScanJunkSummaryCountsLeftovers(t *testing.T) {
+	env := testEnv(t)
+	writeFile(t, filepath.Join(env.home, "Library/Application Support/ZzxqAbandoned/data"), 2<<20)
+	_, sum := scanJunk(context.Background(), env, nil, nil)
+	if sum.Leftovers != 1 || sum.LeftoversSize < 1<<20 {
+		t.Fatalf("leftover summary = %+v", sum)
+	}
+	env.settings.DisabledGroups = []string{"review"}
+	_, sum = scanJunk(context.Background(), env, nil, nil)
+	if sum.Leftovers != 0 || sum.LeftoversSize != 0 {
+		t.Fatalf("disabled review summary = %+v", sum)
+	}
+}
+
+// TestScanJunkSummaryWithoutFDAExcludesContainers keeps unprotected leftovers visible.
+func TestScanJunkSummaryWithoutFDAExcludesContainers(t *testing.T) {
+	env := testEnv(t)
+	env.fda = false
+	writeFile(t, filepath.Join(env.home, "Library/Application Support/ZzxqAbandoned/data"), 2<<20)
+	writeFile(t, filepath.Join(env.home, "Library/Containers/com.zzxq.abandoned/Data/data"), 4<<20)
+	_, sum := scanJunk(context.Background(), env, nil, nil)
+	if sum.Leftovers != 1 || sum.LeftoversSize < 1<<20 || sum.LeftoversSize >= 4<<20 {
+		t.Fatalf("must count support leftovers without reading containers: %+v", sum)
+	}
+}
+
+// TestScanJunkSummaryStopsWithContext checks cancellation and suppressed callbacks.
+func TestScanJunkSummaryStopsWithContext(t *testing.T) {
+	env := testEnv(t)
+	writeFile(t, filepath.Join(env.home, "Library/Application Support/ZzxqAbandoned/data"), 2<<20)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, sum := scanJunk(ctx, env, nil, func(JunkItem) { t.Error("callback after cancellation") })
+	if sum.Leftovers != 0 || sum.LeftoversSize != 0 {
+		t.Fatalf("cancelled summary = %+v", sum)
+	}
+}
+
+// TestScanJunkSummaryWithoutFDASkipsLinks rejects aliases into another app's data.
+func TestScanJunkSummaryWithoutFDASkipsLinks(t *testing.T) {
+	for _, kind := range []string{"entry", "root"} {
+		t.Run(kind, func(t *testing.T) {
+			env := testEnv(t)
+			env.fda = false
+			container := filepath.Join(env.home, "Library/Containers/com.zzxq.abandoned/Data")
+			file := filepath.Join(container, "ZzxqAbandoned/data")
+			writeFile(t, file, 2<<20)
+			link, target := filepath.Join(env.home, "Library/Preferences/ZzxqAbandoned.plist"), file
+			if kind == "root" {
+				link, target = filepath.Join(env.home, "Library/Application Support"), container
+			}
+			mustMkdir(t, filepath.Dir(link))
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			_, sum := scanJunk(context.Background(), env, nil, nil)
+			if sum.Leftovers != 0 || sum.LeftoversSize != 0 {
+				t.Fatalf("container alias was read: %+v", sum)
+			}
+		})
+	}
+}
+
+// TestExpansionMemoResolvesLikeResolvePath: while an expansion runs, paths
+// resolve through a memo; it must give the same answers as plain
+// resolution, through linked folders and for paths that do not exist.
+func TestExpansionMemoResolvesLikeResolvePath(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	writeFile(t, filepath.Join(real, "sub", "f"), 10)
+	if err := os.Symlink(real, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		filepath.Join(dir, "link", "sub", "f"),
+		filepath.Join(dir, "link", "sub", "missing", "x"),
+		filepath.Join(dir, "real", "sub"),
+		filepath.Join(dir, "dangling", "y"),
+		filepath.Join(dir, "absent", "z"),
+	}
+	var want []string
+	for _, p := range paths {
+		want = append(want, resolvePath(p))
+	}
+	stop := startExpandMemo()
+	var got []string
+	for range 2 { // the second round answers from the memo
+		got = got[:0]
+		for _, p := range paths {
+			got = append(got, resolvePath(p))
+		}
+	}
+	stop()
+	if !slices.Equal(got, want) {
+		t.Fatalf("memo resolved %v, want %v", got, want)
+	}
+	if expandMemoActive() {
+		t.Fatal("the memo must switch off when the expansion ends")
+	}
+}
+
+// TestExpansionScalesWithManyEntries: a real $TMPDIR held 52,000 entries,
+// and checking each against every earlier claim one by one took 12 s before
+// the first screen. Checks must not grow with the number of claims.
+func TestExpansionScalesWithManyEntries(t *testing.T) {
+	if raceDetector {
+		t.Skip("timing means nothing under the race detector")
+	}
+	env := testEnv(t)
+	for i := range 3000 { // earlier claims: a big bun cache
+		mustMkdir(t, filepath.Join(env.home, ".bun/install/cache", fmt.Sprintf("pkg%05d", i)))
+	}
+	for i := range 20000 {
+		mustMkdir(t, filepath.Join(env.tmp, fmt.Sprintf("t%05d", i)))
+	}
+	start := time.Now()
+	specs, _ := expandItems(&env)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("expansion took %s", took)
+	}
+	var temp int
+	for _, s := range specs {
+		if s.item.ID == "sys.temp" {
+			temp = len(s.cands)
+		}
+	}
+	if temp != 20000 {
+		t.Fatalf("temp candidates = %d", temp)
+	}
+}
+
+// TestClaimSet: a path is claimed by itself or an ancestor, and a folder
+// with a claim somewhere below it is told apart from a claimed one.
+func TestClaimSet(t *testing.T) {
+	var c claimSet
+	c.claimKey("/u/a/b")
+	if !c.claimedKey("/u/a/b") || !c.claimedKey("/u/a/b/c") || c.claimedKey("/u/a") || c.claimedKey("/u/a/bb") {
+		t.Fatal("claimedKey is off")
+	}
+	if !c.insideKey("/u/a") || !c.insideKey("/u") || c.insideKey("/u/a/b") || c.insideKey("/u/x") {
+		t.Fatal("insideKey is off")
+	}
+	d := c.clone()
+	d.claimKey("/u/x")
+	if c.claimedKey("/u/x") || !d.claimedKey("/u/x") {
+		t.Fatal("clone shares state")
 	}
 }

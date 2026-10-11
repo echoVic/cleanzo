@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,19 +59,21 @@ type ScanSummary struct {
 
 // junkEnv holds the machine state used by a junk pass.
 type junkEnv struct {
-	home, tmp    string
-	apps         *appIndex
-	guard        *usageGuard
-	fda          bool
-	settings     Settings
-	findTool     func(string) string
-	refreshGuard func() *usageGuard
-	lstat        func(string) (fs.FileInfo, error)
+	home, tmp     string
+	ctx           context.Context
+	apps          *appIndex
+	guard         *usageGuard
+	fda           bool
+	settings      Settings
+	findTool      func(string) string
+	refreshGuard  func() *usageGuard
+	commandClaims map[string]claimSet
+	lstat         func(string) (fs.FileInfo, error)
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
 func currentJunkEnv() junkEnv {
-	return junkEnv{home: homeDir(), tmp: filepath.Clean(os.TempDir()), apps: buildAppIndex(appDirs()), guard: probeUsage(), fda: fullDiskAccess(), settings: loadSettings(), findTool: func(string) string { return "" }}
+	return junkEnv{home: homeDir(), tmp: filepath.Clean(os.TempDir()), apps: buildAppIndex(appDirs()), guard: probeUsage(), fda: fullDiskAccess(), settings: loadSettings(), findTool: findTool}
 }
 
 // junkCand is an entry to measure with its minimum age.
@@ -88,27 +91,69 @@ type itemSpec struct {
 	owners []string
 }
 
-// claimSet prevents overlapping rules from removing the same path.
-type claimSet []string
+// claimSet holds the paths items have taken, in comparison form, so that
+// overlapping rules never remove the same path. Lookups walk a path's
+// ancestors instead of every claim: a scan meets tens of thousands of
+// entries and claims.
+type claimSet struct {
+	roots map[string]bool // claimed paths
+	below map[string]bool // folders with a claimed path somewhere inside
+}
 
 // claimed reports whether a path is already owned by another item.
-func (c claimSet) claimed(p string) bool {
-	key := canonical(p)
-	return slices.ContainsFunc(c, func(root string) bool { return within(key, root) })
-}
+func (c claimSet) claimed(p string) bool { return c.claimedKey(canonical(p)) }
 
 // inside reports whether a path contains another item's target.
-func (c claimSet) inside(p string) bool {
-	key := canonical(p)
-	return slices.ContainsFunc(c, func(root string) bool { return root != key && within(root, key) })
+func (c claimSet) inside(p string) bool { return c.insideKey(canonical(p)) }
+
+// overlaps reports a target that contains or is inside an earlier claim.
+func (c claimSet) overlaps(roots []string) bool {
+	return slices.ContainsFunc(roots, func(root string) bool { return c.claimed(root) || c.inside(root) })
 }
 
+// claimedKey is claimed for a path already in comparison form.
+func (c claimSet) claimedKey(key string) bool {
+	for p := key; ; p = filepath.Dir(p) {
+		if c.roots[p] {
+			return true
+		}
+		if parent := filepath.Dir(p); parent == p {
+			return false
+		}
+	}
+}
+
+// insideKey is inside for a path already in comparison form.
+func (c claimSet) insideKey(key string) bool { return c.below[key] }
+
 // claim records a path in comparison form.
-func (c *claimSet) claim(p string) { *c = append(*c, canonical(p)) }
+func (c *claimSet) claim(p string) { c.claimKey(canonical(p)) }
+
+// claimKey records a path already in comparison form.
+func (c *claimSet) claimKey(key string) {
+	if c.roots == nil {
+		c.roots, c.below = map[string]bool{}, map[string]bool{}
+	}
+	c.roots[key] = true
+	for p := filepath.Dir(key); !c.below[p]; p = filepath.Dir(p) {
+		c.below[p] = true
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+}
+
+// clone copies the set, for a snapshot that later claims do not change.
+func (c claimSet) clone() claimSet {
+	return claimSet{roots: maps.Clone(c.roots), below: maps.Clone(c.below)}
+}
 
 // protected reports hard protected paths and their descendants.
-func (env junkEnv) protected(p string) bool {
-	for path := canonical(p); within(path, canonical(env.home)); path = filepath.Dir(path) {
+func (env junkEnv) protected(p string) bool { return env.protectedKey(canonical(p)) }
+
+// protectedKey is protected for a path already in comparison form.
+func (env junkEnv) protectedKey(key string) bool {
+	for path := key; within(path, canonical(env.home)); path = filepath.Dir(path) {
 		for _, pattern := range protectedPatterns {
 			if hit, _ := filepath.Match(strings.ToLower(filepath.Join(resolvePath(env.home), pattern)), path); hit {
 				return true
@@ -228,10 +273,27 @@ func (env junkEnv) collectDir(dir string, names []string, age time.Duration, cla
 		spec.item.Denied = spec.item.Denied || errors.Is(err, fs.ErrPermission)
 		return
 	}
+	// Entries are judged from the listing: the folder was checked above, so an
+	// entry that is not a link resolves to the folder's resolved path plus its
+	// name. Temporary folders hold tens of thousands of entries, and a system
+	// call or two per entry made the first screen wait for seconds.
+	parent := resolvePath(dir)
 	for _, e := range entries {
-		if nameMatches(e.Name(), names) {
-			env.collect(filepath.Join(dir, e.Name()), age, claims, spec)
+		if !nameMatches(e.Name(), names) || e.Type()&(fs.ModeSymlink|fs.ModeSocket|fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeIrregular) != 0 {
+			continue
 		}
+		resolved := filepath.Join(parent, e.Name())
+		key := strings.ToLower(resolved)
+		if env.protectedKey(key) || claims.claimedKey(key) || !safeResolved(key) {
+			continue
+		}
+		if claims.insideKey(key) {
+			if e.IsDir() {
+				env.collectDir(filepath.Join(dir, e.Name()), nil, age, claims, spec)
+			}
+			continue
+		}
+		spec.cands = append(spec.cands, junkCand{path: resolved, minAge: age})
 	}
 }
 
@@ -241,7 +303,11 @@ func (env junkEnv) running(owners []string) bool {
 }
 
 // expandItems resolves the catalog, customs and per-app sources in claim order.
-func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
+func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
+	defer startExpandMemo()()
+	if env.commandClaims == nil {
+		env.commandClaims = map[string]claimSet{}
+	}
 	sum := ScanSummary{FullDiskAccess: env.fda}
 	var specs []itemSpec
 	var claims claimSet
@@ -253,7 +319,7 @@ func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
 		}
 	}
 	emit := func(spec itemSpec) {
-		if len(spec.cands) == 0 && !spec.item.Denied {
+		if len(spec.cands) == 0 && !spec.item.Denied && !(spec.rule != nil && spec.rule.Command != nil && spec.item.Size == -1) {
 			return
 		}
 		if slices.Contains(env.settings.Ignored, spec.item.ID) {
@@ -266,10 +332,15 @@ func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
 	}
 	for i := range junkRules {
 		r := &junkRules[i]
-		if r.Command != nil {
-			continue
+		if env.toolContext().Err() != nil {
+			break
 		}
 		sum.Checked++
+		if r.Command != nil {
+			env.commandClaims[r.ID] = claims.clone()
+			emit(expandCommand(*env, r))
+			continue
+		}
 		spec := itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group), Size: -1, Default: r.Default, Trash: r.Trash, Running: env.running(r.Owners)}}
 		if !env.fda && slices.Contains([]string{"sys.trash", "review.ios-backups", "review.mail-downloads"}, r.ID) {
 			spec.item.Denied = true
@@ -282,7 +353,7 @@ func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
 				if claims.claimed(root) {
 					continue
 				}
-				spec.addRoot(env, root)
+				spec.addRoot(*env, root)
 				if target.Mode == matched {
 					env.collect(root, r.MinAge, claims, &spec)
 				} else {
@@ -312,7 +383,7 @@ func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
 			continue
 		}
 		spec := itemSpec{item: JunkItem{ID: "custom:" + folder.Path, Group: string(groupCustom), Name: folder.Name, Size: -1, Default: true, Trash: true}}
-		spec.addRoot(env, folder.Path)
+		spec.addRoot(*env, folder.Path)
 		env.collectDir(folder.Path, nil, 0, claims, &spec)
 		claims.claim(folder.Path)
 		emit(spec)
@@ -351,14 +422,14 @@ func expandItems(env junkEnv) ([]itemSpec, ScanSummary) {
 		if len(spec.cands) == 0 && !spec.item.Denied {
 			return
 		}
-		spec.addRoot(env, root)
+		spec.addRoot(*env, root)
 		for _, c := range spec.cands {
 			claims.claim(c.path)
 		}
 		if prev := apps[id]; prev != nil {
 			prev.cands = append(prev.cands, spec.cands...)
 			prev.item.Denied = prev.item.Denied || spec.item.Denied
-			prev.addRoot(env, root)
+			prev.addRoot(*env, root)
 		} else {
 			apps[id] = &spec
 			appOrder = append(appOrder, id)
@@ -401,12 +472,43 @@ type itemPlan struct {
 // planItem measures candidates using the shared pool and existing removal guards.
 func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}, measuring func(string)) itemPlan {
 	plan := itemPlan{item: spec.item}
+	if spec.rule != nil && spec.rule.Command != nil {
+		plan.item.Size = 0
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return plan
+		}
+		defer func() { <-sem }()
+		if ctx.Err() != nil {
+			return plan
+		}
+		env.ctx = ctx
+		tool := env.findTool(spec.rule.Command.Tool)
+		if tool == "" {
+			return plan
+		}
+		if measuring != nil {
+			measuring(tool)
+		}
+		size, upper, roots, err := estimateCommand(env, spec.rule.Command, tool)
+		if err != nil || ctx.Err() != nil || env.commandClaims[spec.rule.ID].overlaps(roots) {
+			return plan
+		}
+		plan.item.Size, plan.item.Estimate = size, upper
+		for _, root := range roots {
+			spec.addRoot(env, root)
+		}
+		plan.item.Paths = spec.item.Paths
+		return plan
+	}
 	plan.item.Size, plan.item.Files, plan.item.Top, plan.item.Subs = 0, 0, nil, nil
 	// A running owner's item is measured only to show what quitting it would
 	// free; it gets no entries, so nothing of it is removed.
 	running := spec.item.Running
 	measured := make([]cleanEntry, len(spec.cands))
 	newest := make([]time.Time, len(spec.cands))
+	parentOK := map[string]bool{}
 	var wg sync.WaitGroup
 	started := make([]bool, len(spec.cands))
 candidates:
@@ -414,12 +516,26 @@ candidates:
 		if ctx.Err() != nil {
 			break
 		}
-		if env.traversalBlocked(c.path) || !running && env.guard.inUse(c.path) {
+		// A folder swapped for a link since expansion (say into another app's
+		// container) must not be read through: check each parent folder once,
+		// and the entry itself below. cleanItem checks every entry again in
+		// full before it removes anything.
+		parent := filepath.Dir(c.path)
+		ok, seen := parentOK[parent]
+		if !seen {
+			ok = !env.traversalBlocked(parent)
+			parentOK[parent] = ok
+		}
+		if !ok || !running && env.guard.inUse(c.path) {
 			plan.item.InUse++
 			continue
 		}
 		info, err := os.Lstat(c.path)
-		if err != nil || !safeToClean(c.path) || env.protected(c.path) || removalRefused(c.path, info) {
+		if err != nil || info.Mode()&fs.ModeSymlink != 0 || removalRefused(c.path, info) {
+			continue
+		}
+		// An entry changed within the minimum age is too new whatever is inside.
+		if c.minAge > 0 && now().Sub(changedAt(info)) < c.minAge {
 			continue
 		}
 		select {
@@ -579,8 +695,31 @@ type JunkSelection struct {
 
 // scanJunk expands and measures items with serialized callbacks.
 func scanJunk(ctx context.Context, env junkEnv, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
-	specs, summary := expandItems(env)
-	return measureItems(ctx, specs, env, measuring, sized), summary
+	env.ctx = ctx
+	specs, summary := expandItems(&env)
+	return measureJunk(ctx, specs, env, summary, measuring, sized)
+}
+
+// measureJunk collects leftovers alongside item measurements for the final summary.
+func measureJunk(ctx context.Context, specs []itemSpec, env junkEnv, summary ScanSummary, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
+	var wg sync.WaitGroup
+	if ctx.Err() == nil && !slices.Contains(env.settings.DisabledGroups, string(groupReview)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			roots := slices.Clone(libraryRoots)
+			if !env.fda {
+				roots = slices.DeleteFunc(roots, func(root string) bool { return root == "Containers" })
+			}
+			items, total := collectOrphans(ctx, nil, roots...)
+			if ctx.Err() == nil {
+				summary.Leftovers, summary.LeftoversSize = len(items), total
+			}
+		}()
+	}
+	items := measureItems(ctx, specs, env, measuring, sized)
+	wg.Wait()
+	return items, summary
 }
 
 // measureItems measures expanded items once, sharing one bounded pool.
@@ -619,7 +758,8 @@ func measureItems(ctx context.Context, specs []itemSpec, env junkEnv, measuring 
 
 // cleanJunk cleans selections in order, taking a fresh look before each item.
 func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, scannedAt time.Time, hooks cleanHooks) []CleanResult {
-	specs, _ := expandItems(env)
+	env.ctx = ctx
+	specs, _ := expandItems(&env)
 	byID := make(map[string]itemSpec, len(specs))
 	for _, s := range specs {
 		byID[s.item.ID] = s
@@ -655,15 +795,32 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 			env.guard = env.refreshGuard()
 		}
 		spec, ok := byID[sel.ID]
+		// A selected command still needs a result if its tool or estimate vanished.
+		if !ok {
+			for i := range junkRules {
+				rule := &junkRules[i]
+				if rule.ID == sel.ID && rule.Command != nil && !slices.Contains(env.settings.Ignored, rule.ID) && !slices.Contains(env.settings.DisabledGroups, string(rule.Group)) {
+					spec = itemSpec{rule: rule, item: JunkItem{ID: rule.ID}}
+					ok = true
+					break
+				}
+			}
+		}
 		res := CleanResult{Name: sel.ID}
 		if ok {
 			owners := spec.owners
 			if spec.rule != nil {
-				owners = spec.rule.Owners
+				owners = commandOwners(spec.rule)
 			}
 			spec.item.Running = env.running(owners)
 			if spec.item.Running {
 				res.Skipped = "running"
+			} else if spec.rule != nil && spec.rule.Command != nil {
+				if len(sel.Paths) > 0 {
+					res.Skipped, res.Failed = "failed", []string{"blocked"}
+				} else {
+					res = cleanTool(ctx, spec.rule, env, hooks, &cleaned)
+				}
 			} else {
 				res = cleanItem(ctx, spec, env, sel.Paths, scannedAt, hooks, &cleaned)
 			}
@@ -782,7 +939,8 @@ func (env junkEnv) removable(path string, trash bool) bool {
 // ScanJunk streams an initial list, measured rows and a final summary.
 func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) error {
 	env := currentJunkEnv()
-	specs, summary := expandItems(env)
+	env.ctx = ctx
+	specs, summary := expandItems(&env)
 	initial := make([]JunkItem, len(specs))
 	for i := range specs {
 		initial[i] = specs[i].item
@@ -792,7 +950,7 @@ func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) er
 		return err
 	}
 	var last time.Time
-	measureItems(ctx, specs, env, func(path string) {
+	_, summary = measureJunk(ctx, specs, env, summary, func(path string) {
 		if time.Since(last) >= progressInterval {
 			last = time.Now()
 			_ = ch.Send(JunkScanEvent{Kind: "scanning", Path: path})
@@ -887,7 +1045,100 @@ func (env junkEnv) stat(path string) (fs.FileInfo, error) {
 	if env.lstat != nil {
 		return env.lstat(path)
 	}
-	return os.Lstat(path)
+	return memoLstat(path)
+}
+
+// expandMemo, while an expansion runs, remembers what paths resolve to and
+// what lstat said about them: a scan meets thousands of entries, and
+// resolving each from the root costs one lstat per path component, several
+// times over (about 15 s on a real Mac). The memo is on only during
+// expansion; what cleaning removes is checked again without it.
+var expandMemo struct {
+	sync.Mutex
+	users    int
+	resolved map[string]string
+	lstat    map[string]lstatResult
+}
+
+// lstatResult is one remembered lstat.
+type lstatResult struct {
+	info fs.FileInfo
+	err  error
+}
+
+// startExpandMemo turns the memo on until the returned function is called.
+func startExpandMemo() (stop func()) {
+	expandMemo.Lock()
+	if expandMemo.users == 0 {
+		expandMemo.resolved, expandMemo.lstat = map[string]string{}, map[string]lstatResult{}
+	}
+	expandMemo.users++
+	expandMemo.Unlock()
+	return func() {
+		expandMemo.Lock()
+		if expandMemo.users--; expandMemo.users == 0 {
+			expandMemo.resolved, expandMemo.lstat = nil, nil
+		}
+		expandMemo.Unlock()
+	}
+}
+
+// expandMemoActive reports whether an expansion's memo is on.
+func expandMemoActive() bool {
+	expandMemo.Lock()
+	defer expandMemo.Unlock()
+	return expandMemo.users > 0
+}
+
+// memoLstat is os.Lstat, remembered while the memo is on.
+func memoLstat(path string) (fs.FileInfo, error) {
+	expandMemo.Lock()
+	on := expandMemo.users > 0
+	if on {
+		if r, ok := expandMemo.lstat[path]; ok {
+			expandMemo.Unlock()
+			return r.info, r.err
+		}
+	}
+	expandMemo.Unlock()
+	info, err := os.Lstat(path)
+	if on {
+		expandMemo.Lock()
+		if expandMemo.lstat != nil {
+			expandMemo.lstat[path] = lstatResult{info, err}
+		}
+		expandMemo.Unlock()
+	}
+	return info, err
+}
+
+// memoResolved answers resolvePath from the memo, building a path's answer
+// from its parent's: a component that is not a link resolves to itself.
+func memoResolved(p string) (string, bool) {
+	expandMemo.Lock()
+	if expandMemo.users == 0 {
+		expandMemo.Unlock()
+		return "", false
+	}
+	r, ok := expandMemo.resolved[p]
+	expandMemo.Unlock()
+	if ok {
+		return r, true
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		r = resolveUncached(p)
+	} else if info, err := memoLstat(p); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		r = resolveUncached(p) // a link: resolve it in full
+	} else {
+		r = filepath.Join(resolvePath(parent), filepath.Base(p))
+	}
+	expandMemo.Lock()
+	if expandMemo.resolved != nil {
+		expandMemo.resolved[p] = r
+	}
+	expandMemo.Unlock()
+	return r, true
 }
 
 // readDir lists only targets whose prefixes permit traversal.
