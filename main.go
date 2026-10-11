@@ -226,25 +226,22 @@ type configFile struct {
 	Categories []CategoryConfig `json:"categories"`
 }
 
+// saveCategoryConfigs writes the legacy category configuration.
 func saveCategoryConfigs(cfg []CategoryConfig) error {
-	dir := filepath.Dir(configPath())
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	if cfg == nil {
 		cfg = []CategoryConfig{}
+	}
+	if data, err := os.ReadFile(configPath()); err == nil {
+		var f settingsFile
+		if json.Unmarshal(data, &f) == nil && f.Version == settingsVersion {
+			return writeSettingsAndCategories(f.Settings, cfg)
+		}
 	}
 	b, err := json.MarshalIndent(configFile{Version: configVersion, Categories: cfg}, "", "  ")
 	if err != nil {
 		return err
 	}
-	// Write a copy and rename it into place, so a crash cannot leave a
-	// truncated config that would read as "no config".
-	tmp := configPath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, configPath())
+	return writeConfigAtomically(b)
 }
 
 // savedCategoryConfigs returns the saved categories, migrated to the current
@@ -257,6 +254,9 @@ func savedCategoryConfigs() (cfg []CategoryConfig, ok bool) {
 	}
 	var f configFile
 	if json.Unmarshal(b, &f) == nil && f.Version >= configVersion {
+		if f.Version == settingsVersion && f.Categories == nil {
+			return defaultCategoryConfigs(), true
+		}
 		return f.Categories, true
 	}
 	var v1 []CategoryConfig
@@ -1360,37 +1360,12 @@ func (k appKeys) addBundleID(bid string) {
 // appNamesByBundleID maps the lower-cased bundle IDs of the apps in dirs to
 // their display names.
 func appNamesByBundleID(dirs []string) map[string]string {
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, 16)
-	)
 	names := map[string]string{}
-	for _, dir := range dirs {
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			if !e.IsDir() || !strings.HasSuffix(e.Name(), ".app") {
-				continue
-			}
-			wg.Add(1)
-			sem <- struct{}{}
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				name, bid, _ := readBundleInfo(filepath.Join(dir, e.Name(), "Contents", "Info.plist"))
-				if bid == "" {
-					return
-				}
-				if name == "" {
-					name = strings.TrimSuffix(e.Name(), ".app")
-				}
-				mu.Lock()
-				names[strings.ToLower(bid)] = name
-				mu.Unlock()
-			}()
+	for key, app := range buildAppIndex(dirs).keys {
+		if key == strings.ToLower(app.BundleID) {
+			names[key] = app.Name
 		}
 	}
-	wg.Wait()
 	return names
 }
 

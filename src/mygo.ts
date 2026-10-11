@@ -122,6 +122,13 @@ export interface CleanSummary {
   errors: CleanError[];
 }
 
+/** CustomFolder is a user-selected folder whose contents go to the Trash. */
+export interface CustomFolder {
+  name: string;
+  path: string;
+  enabled: boolean;
+}
+
 /**
  * DirItem is a single child entry inside a directory, returned by DirChildren
  * so the frontend can expand a row in place and show what it actually contains.
@@ -250,6 +257,13 @@ export interface ScanEvent {
   category?: Category;
 }
 
+/** Settings holds the junk groups, ignored items and custom folders. */
+export interface Settings {
+  disabledGroups: string[];
+  ignored: string[];
+  custom: CustomFolder[];
+}
+
 /** SimilarPhotoEvent streams scan progress and the final result. */
 export interface SimilarPhotoEvent {
   /** "progress" | "done" */
@@ -361,6 +375,10 @@ export const Cleaner = {
   disk(): Promise<DiskStat> {
     return call("Cleaner.Disk");
   },
+  /** FullDiskAccess reports whether macOS allows reading protected folders. */
+  fullDiskAccess(): Promise<boolean> {
+    return call("Cleaner.FullDiskAccess");
+  },
   /**
    * FullScan streams per-directory results and the final summary of a full scan.
    * ctx is canceled when the page goes away, which stops the scan.
@@ -371,6 +389,10 @@ export const Cleaner = {
   /** GetCategories returns the current (persisted or default) category config. */
   getCategories(): Promise<CategoryConfig[]> {
     return call("Cleaner.GetCategories");
+  },
+  /** GetSettings returns the saved settings, migrating old categories when needed. */
+  getSettings(): Promise<Settings> {
+    return call("Cleaner.GetSettings");
   },
   /** Info returns basic system information. */
   info(): Promise<SystemInfo> {
@@ -402,6 +424,10 @@ export const Cleaner = {
   photoPreview(path: string): Promise<string> {
     return call("Cleaner.PhotoPreview", path);
   },
+  /** PickFolder opens a folder panel on the calling window, returning empty on cancel. */
+  pickFolder(): Promise<string> {
+    return call("Cleaner.PickFolder");
+  },
   /**
    * RevealInFinder shows path in Finder: plain folders open in place; files
    * and packages, which opening would launch or mount, are selected in their
@@ -413,6 +439,10 @@ export const Cleaner = {
   /** SaveCategories validates and persists the category configuration. */
   saveCategories(cfg: CategoryConfig[]): Promise<void> {
     return call("Cleaner.SaveCategories", cfg);
+  },
+  /** SaveSettings validates and persists the settings. */
+  saveSettings(s: Settings): Promise<void> {
+    return call("Cleaner.SaveSettings", s);
   },
   /** Scan returns every category with what cleaning it would remove now. */
   scan(): Promise<Category[]> {
