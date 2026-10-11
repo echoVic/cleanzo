@@ -1,4 +1,5 @@
-import { initJunk, refreshJunkI18n, markJunkStale, setOpenLeftovers } from "./junk";
+import { showSettings, refreshSettingsI18n } from "./settings";
+import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
 import {
   $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
   skeletonRows, setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
@@ -8,17 +9,13 @@ import {
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, AppCacheItem, BigItem, CategoryConfig, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
-import { t, categoryName, categoryDescription, isBuiltinCategory, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
+import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import { t, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 const appSort = $<HTMLSelectElement>("#app-sort");
 const appSearch = $<HTMLInputElement>("#app-search");
 const appListEl = $("#app-list");
-const editorEl = $("#cat-editor");
-const addCatBtn = $<HTMLButtonElement>("#add-cat");
-const saveCatsBtn = $<HTMLButtonElement>("#save-cats");
-const settingsStatus = $("#settings-status");
 const fsScanBtn = $<HTMLButtonElement>("#fs-scan");
 const fsProgress = $("#fs-progress");
 const fsCurrent = $("#fs-current");
@@ -44,11 +41,6 @@ const orProgress = $("#or-progress");
 const orCurrent = $("#or-current");
 const orList = $("#or-list");
 const orToolbar = $("#or-toolbar");
-const acScanBtn = $<HTMLButtonElement>("#ac-scan");
-const acProgress = $("#ac-progress");
-const acCurrent = $("#ac-current");
-const acList = $("#ac-list");
-const acToolbar = $("#ac-toolbar");
 const phScanBtn = $<HTMLButtonElement>("#ph-scan");
 const phProgress = $("#ph-progress");
 const phCurrent = $("#ph-current");
@@ -88,7 +80,6 @@ lgSize.value = String(lgMinSize);
 let apps: AppInfo[] = [];
 const appBusy = new Set<string>();
 let appsLoading = false;
-let catConfig: CategoryConfig[] = [];
 let fsResult: FullScanResult | null = null;
 let fsDisk: DiskStat | null = null;
 let fsDiskSeq = 0;
@@ -102,10 +93,11 @@ let lgScannedThreshold: number | null = null;
 let lgRestartQueued = false;
 let lgStopped = false;
 let orRunning = false;
+let orTried = false;
+let appsTab: "installed" | "leftovers" = "installed";
+const appsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".apps-tab"));
 let orItems: OrphanItem[] = [];
 let orFoot: { n: string; size: string; t: string } | null = null;
-let acRunning = false;
-let acItems: AppCacheItem[] = [];
 let phRunning = false;
 let phClusters: PhotoCluster[] = [];
 let phScanned = 0;
@@ -139,7 +131,7 @@ function refreshI18n() {
   // 其他扫描中的视图等它结束后自己会重绘
   refreshJunkI18n();
   if (apps.length > 0) renderApps();
-  if (catConfig.length > 0) renderCatEditor();
+  refreshSettingsI18n();
   if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   renderIdleScanPages();
@@ -148,9 +140,7 @@ function refreshI18n() {
     if (orFoot) orTotal.textContent = t("orphans.foot", orFoot);
     renderOrphanRows(orItems);
   }
-  if (acItems.length > 0 && !acRunning) {
-    renderAppCacheRows();
-  }
+  renderAppsTabs();
   if (phClusters.length > 0 && !phRunning) {
     renderPhotoClusters();
   }
@@ -172,10 +162,9 @@ const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stoppe
 function switchView(v: View) {
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
-  if (v === "apps" && apps.length === 0 && !appsLoading) loadApps();
+  if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
-  if (v === "settings" && catConfig.length === 0) loadCatConfig();
-  if (v === "appcaches" && acItems.length === 0 && !acRunning) startAppCacheScan();
+  if (v === "settings") showSettings();
   if (v === "photos" && !phTried) startPhotoScan();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View)));
@@ -297,7 +286,7 @@ async function startFullScan() {
   }
 }
 
-// ---- 勾选与展开（全盘扫描 / 大文件 / 残留 / 应用缓存 / 相似照片） ----
+// ---- 勾选与展开（全盘扫描 / 大文件 / 残留 / 相似照片） ----
 
 /** 展开后的子项：存数据而不是 HTML，每次重绘都按当前勾选状态生成 */
 type ChildList = { items: DirItem[]; total: number } | { error: string };
@@ -312,11 +301,11 @@ interface ListState {
 }
 
 const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
-const lists = { fullscan: newList(), large: newList(), orphans: newList(), appcaches: newList(), photos: newList() };
+const lists = { fullscan: newList(), large: newList(), orphans: newList(), photos: newList() };
 /** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
 function resetList(v: keyof typeof lists) {
   lists[v] = newList();
-  const toolbar = { fullscan: fsToolbar, large: lgToolbar, orphans: orToolbar, appcaches: acToolbar, photos: phToolbar }[v];
+  const toolbar = { fullscan: fsToolbar, large: lgToolbar, orphans: orToolbar, photos: phToolbar }[v];
   toolbar.classList.add("hidden");
   toolbar.innerHTML = "";
 }
@@ -826,7 +815,9 @@ async function startOrphanScan() {
   resetList("orphans");
   orFoot = null;
   orRunning = true;
+  orTried = true;
   orItems = [];
+  renderAppsTabs();
   orSummary.classList.add("hidden");
   orProgress.classList.remove("hidden");
   orCurrent.textContent = t("orphans.live");
@@ -849,6 +840,7 @@ async function startOrphanScan() {
         continue;
       }
       orItems.push(o);
+      renderAppsTabs();
       orCurrent.textContent = t("orphans.count", { n: orItems.length.toLocaleString() });
       renderOrphanRows(orItems);
     }
@@ -865,6 +857,8 @@ async function startOrphanScan() {
     orProgress.classList.add("hidden");
     if (stoppedScans.has(orScanBtn) && orItems.length > 0) markRescan(orScanBtn);
     if (endScan(orScanBtn) && orItems.length === 0) orList.innerHTML = emptyState(t("scan.stopped"));
+    renderAppsTabs();
+    syncAppsBusy();
   }
 }
 
@@ -900,6 +894,7 @@ function renderOrphanRows(items: OrphanItem[]) {
     rerender: () => renderOrphanRows(orItems),
     removeRows: (removed) => {
       updateRowsAfterRemoved(orItems, removed, lists.orphans);
+      renderAppsTabs();
       if (orFoot) {
         orFoot.n = orItems.length.toLocaleString();
         orFoot.size = human(orItems.reduce((sum, it) => sum + (it.size >= 0 ? it.size : 0), 0));
@@ -908,65 +903,6 @@ function renderOrphanRows(items: OrphanItem[]) {
     },
     sizeOf: (path) => orItems.find((it) => it.path === path)?.size ?? childSize(lists.orphans, path),
   }, rows);
-}
-
-// ---- 应用缓存（按应用拆分） ----
-
-async function startAppCacheScan() {
-  if (acRunning) return;
-  resetList("appcaches");
-  acRunning = true;
-  setBusy(acScanBtn, true, t("appcaches.busy"));
-  acProgress.classList.remove("hidden");
-  acList.innerHTML = "";
-  acCurrent.textContent = t("appcaches.busy");
-  try {
-    acItems = await Cleaner.scanAppCaches();
-    markRescan(acScanBtn);
-    renderAppCacheRows();
-  } catch (e) {
-    acItems = [];
-    acList.innerHTML = errorState(t("fs.fail", { msg: errText(e) }), startAppCacheScan);
-    toast(t("fs.fail", { msg: errText(e) }), "err");
-  } finally {
-    acRunning = false;
-    acProgress.classList.add("hidden");
-    setBusy(acScanBtn, false);
-  }
-}
-
-function renderAppCacheRows() {
-  acItems = acItems.filter((it) => !isGone(lists.appcaches, it.path));
-  if (acItems.length === 0) {
-    acToolbar.classList.add("hidden");
-    acToolbar.innerHTML = "";
-    acList.innerHTML = emptyState(t("appcaches.empty"));
-    return;
-  }
-  const sorted = [...acItems].sort((a, b) => b.size - a.size);
-  const max = sorted[0]?.size || 1;
-  const rows = sorted
-    .map(
-      (it, i) =>
-        fsRowHtml(lists.appcaches, {
-          path: it.path,
-          name: esc(it.app || it.name),
-          size: it.size,
-          rank: `${i + 1}`,
-          trashable: !it.inUse,
-          sub: `<div class="fs-sub muted small">${it.inUse ? `<span class="tag dim">${esc(t("appcaches.inUse"))}</span> ` : ""}${esc(displayPath(it.path))}</div>`,
-        }),
-    )
-    .join("");
-  const foot = `<div class="fs-foot muted small">${esc(t("appcaches.count", { n: acItems.length }))}</div>`;
-  renderFsListInto({
-    st: lists.appcaches,
-    list: acList,
-    toolbar: acToolbar,
-    rerender: renderAppCacheRows,
-    removeRows: (removed) => updateRowsAfterRemoved(acItems, removed, lists.appcaches),
-    sizeOf: (path) => acItems.find((it) => it.path === path)?.size ?? childSize(lists.appcaches, path),
-  }, rows + foot);
 }
 
 // ---- 相似照片 ----
@@ -1321,10 +1257,45 @@ function askTrashPhotos() {
 
 // ---- 应用卸载 ----
 
+/** 应用与残留的后台任务共用导航提示。 */
+function syncAppsBusy() {
+  setNavBusy("apps", appsLoading || appBusy.size > 0 || orRunning);
+}
+
+function renderAppsTabs() {
+  appsTabs.forEach((b) => {
+    const active = b.dataset.tab === appsTab;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", String(active));
+    b.tabIndex = active ? 0 : -1;
+  });
+  $("#apps-tab-leftovers").textContent = t("apps.tab.leftoversCount", { n: orItems.length });
+}
+
+function selectAppsTab(tab: typeof appsTab) {
+  appsTab = tab;
+  $("#apps-installed").classList.toggle("hidden", tab !== "installed");
+  $("#apps-leftovers").classList.toggle("hidden", tab !== "leftovers");
+  renderAppsTabs();
+  if (tab === "installed" && apps.length === 0 && !appsLoading) void loadApps();
+  if (tab === "leftovers" && !orTried) void startOrphanScan();
+}
+
+appsTabs.forEach((b, i) => {
+  b.addEventListener("click", () => selectAppsTab(b.dataset.tab as typeof appsTab));
+  b.addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next = e.key === "Home" ? 0 : e.key === "End" ? appsTabs.length - 1 : (i + 1) % appsTabs.length;
+    appsTabs[next]?.click();
+    appsTabs[next]?.focus();
+  });
+});
+
 async function loadApps() {
   if (appsLoading) return;
   appsLoading = true;
-  setNavBusy("apps", true);
+  syncAppsBusy();
   appListEl.innerHTML = skeletonRows(8);
   try {
     apps = await Cleaner.listApps();
@@ -1335,7 +1306,7 @@ async function loadApps() {
     toast(t("apps.loadFail", { msg: errText(e) }), "err");
   } finally {
     appsLoading = false;
-    setNavBusy("apps", appBusy.size > 0);
+    syncAppsBusy();
   }
 }
 
@@ -1408,7 +1379,7 @@ async function showUninstallDetail(path: string) {
     setPending(async () => {
       if (appBusy.has(d.app.path)) return;
       appBusy.add(d.app.path);
-      setNavBusy("apps", true);
+      syncAppsBusy();
       renderApps();
       try {
         const res = await Cleaner.uninstallApp(d.app.path);
@@ -1426,7 +1397,7 @@ async function showUninstallDetail(path: string) {
         toast(t("apps.fail", { msg: errText(e) }), "err");
       } finally {
         appBusy.delete(d.app.path);
-        setNavBusy("apps", appsLoading || appBusy.size > 0);
+        syncAppsBusy();
         renderApps();
       }
     });
@@ -1441,93 +1412,11 @@ async function showUninstallDetail(path: string) {
   }
 }
 
-// ---- 设置 ----
-
-async function loadCatConfig() {
-  try {
-    catConfig = await Cleaner.getCategories();
-  } catch (e) {
-    settingsStatus.textContent = t("settings.readFail", { msg: errText(e) });
-    settingsStatus.classList.add("err");
-    return;
-  }
-  renderCatEditor();
-}
-
-function renderCatEditor() {
-  editorEl.innerHTML = catConfig
-    .map(
-      (c, i) => `
-      <div class="cat-edit card">
-        <div class="edit-grid">
-          ${isBuiltinCategory(c.name) ? `
-          <div class="cat-edit-name">${esc(categoryName(c.name))} <span class="tag dim">${esc(t("settings.builtin"))}</span></div>
-          <div class="cat-edit-desc muted">${esc(categoryDescription(c.name, c.description))}</div>` : `
-          <input data-i="${i}" data-f="name" value="${esc(c.name)}" placeholder="${esc(t("settings.name"))}" />
-          <input data-i="${i}" data-f="description" value="${esc(c.description)}" placeholder="${esc(t("settings.desc"))}" />`}
-        </div>
-        <textarea data-i="${i}" data-f="paths" rows="2" placeholder="${esc(t("settings.paths"))}">${esc(c.paths.join("\n"))}</textarea>
-        <div class="edit-actions">
-          <label class="check"><input type="checkbox" data-i="${i}" data-f="enabled" ${c.enabled ? "checked" : ""} /> ${esc(t("settings.enabled"))}</label>
-          <button class="btn ghost small remove-cat" data-i="${i}" type="button">${esc(t("settings.remove"))}</button>
-        </div>
-      </div>`,
-    )
-    .join("");
-
-  editorEl
-    .querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[data-f], textarea[data-f]")
-    .forEach((el) => {
-      el.addEventListener(
-        el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input",
-        () => {
-          const cfg = catConfig[Number(el.dataset.i)];
-          if (!cfg) return;
-          const f = el.dataset.f!;
-          if (f === "enabled") cfg.enabled = (el as HTMLInputElement).checked;
-          else if (f === "paths") cfg.paths = el.value.split("\n");
-          else if (f === "name") cfg.name = el.value;
-          else cfg.description = el.value;
-        },
-      );
-    });
-  editorEl.querySelectorAll<HTMLButtonElement>(".remove-cat").forEach((b) => {
-    b.addEventListener("click", () => {
-      catConfig.splice(Number(b.dataset.i), 1);
-      renderCatEditor();
-    });
-  });
-}
-
-addCatBtn.addEventListener("click", () => {
-  catConfig.push({ name: "", description: "", risk: "safe", paths: [""], enabled: true });
-  renderCatEditor();
-});
-
-saveCatsBtn.addEventListener("click", async () => {
-  setBusy(saveCatsBtn, true);
-  settingsStatus.textContent = "";
-  settingsStatus.classList.remove("err");
-  try {
-    await Cleaner.saveCategories(catConfig);
-    settingsStatus.textContent = t("settings.saved");
-    toast(t("settings.saved"));
-    markJunkStale();
-  } catch (e) {
-    settingsStatus.textContent = t("settings.saveFail", { msg: errText(e) });
-    settingsStatus.classList.add("err");
-    toast(t("settings.saveFail", { msg: errText(e) }), "err");
-  } finally {
-    setBusy(saveCatsBtn, false);
-  }
-});
-
 // ---- 事件 ----
 
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
 lgScanBtn.addEventListener("click", () => stopScan(lgScanBtn) || startLargeScan());
 orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
-acScanBtn.addEventListener("click", startAppCacheScan);
 phScanBtn.addEventListener("click", () => stopScan(phScanBtn) || startPhotoScan());
 appSearch.addEventListener("input", renderApps);
 appSort.addEventListener("change", () => {
@@ -1559,10 +1448,11 @@ setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
 initJunk();
 setOpenLeftovers(() => {
-  switchView("orphans");
-  if (orItems.length === 0 && !orRunning) void startOrphanScan();
+  appsTab = "leftovers";
+  switchView("apps");
 });
 renderIdleScanPages();
+renderAppsTabs();
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

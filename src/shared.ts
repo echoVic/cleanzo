@@ -35,6 +35,7 @@ function errText(e: unknown): string {
         "folder-empty": "settings.folderEmpty",
         "folder-protected": "settings.folderProtected",
         "folder-dup": "settings.folderDup",
+        "folder-missing": "settings.folderMissing",
         "group-unknown": "settings.groupUnknown",
       };
       const entry = key[parsed.code];
@@ -98,8 +99,7 @@ function setNavBusy(view: View, on: boolean) {
 }
 
 const scanViews: Record<string, View> = {
-  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "or-scan": "orphans",
-  "ac-scan": "appcaches", "ph-scan": "photos",
+  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "or-scan": "apps", "ph-scan": "photos",
 };
 
 /** 恢复按钮时仍按当前语言显示「重新扫描」。 */
@@ -185,7 +185,7 @@ function errorState(text: string, retry?: () => void): string {
   return `<div class="empty err"><div class="err-icon">⚠</div><div>${esc(text)}</div>${btn}</div>`;
 }
 
-const VIEWS = ["clean", "fullscan", "large", "orphans", "appcaches", "photos", "apps", "settings"] as const;
+const VIEWS = ["clean", "fullscan", "large", "photos", "apps", "settings"] as const;
 type View = (typeof VIEWS)[number];
 
 const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
