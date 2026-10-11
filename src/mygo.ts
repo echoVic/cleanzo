@@ -53,9 +53,14 @@ export interface Category {
   inUse: number;
   /**
    * Permanent reports that cleaning deletes the entries instead of moving
-   * them to the Trash.
+   * them to the Trash: built-in junk, and anything in the Trash.
    */
   permanent: boolean;
+  /**
+   * Builtin reports a built-in category at its built-in paths, which the
+   * UI describes with its own texts.
+   */
+  builtin: boolean;
   top: TopItem[];
 }
 
@@ -283,10 +288,13 @@ export const Cleaner = {
   },
   /**
    * Clean cleans the named categories (all if names is empty). The Trash is
-   * emptied first, so what the other categories move there stays recoverable.
+   * emptied first, so what the other categories move there stays recoverable,
+   * and only of what was in it at scannedAt (Unix milliseconds of the scan the
+   * user confirmed; 0 for no limit). Each category gets a fresh look at the
+   * files in use, as a pass can take a while.
    */
-  clean(names: string[]): Promise<CleanSummary> {
-    return call("Cleaner.Clean", names);
+  clean(names: string[], scannedAt: number): Promise<CleanSummary> {
+    return call("Cleaner.Clean", names, scannedAt);
   },
   /**
    * CleanPaths moves the given individual paths (e.g. selected photos) to the
@@ -339,8 +347,9 @@ export const Cleaner = {
     return call("Cleaner.OpenFullDiskAccessSettings");
   },
   /**
-   * RevealInFinder shows path in Finder (see revealArgs). The call returns an
-   * error when the path does not exist.
+   * RevealInFinder shows path in Finder: plain folders open in place; files
+   * and packages, which opening would launch or mount, are selected in their
+   * parent folder. The call returns an error when the path does not exist.
    */
   revealInFinder(path: string): Promise<void> {
     return call("Cleaner.RevealInFinder", path);

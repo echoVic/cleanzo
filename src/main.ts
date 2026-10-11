@@ -79,6 +79,8 @@ let acItems: AppCacheItem[] = [];
 let phRunning = false;
 let phClusters: PhotoCluster[] = [];
 let phScanned = 0;
+/** 相似照片扫描是否已经开始过：停掉之后再进这个视图不会自己重新开始 */
+let phTried = false;
 
 // ---- utils ----
 
@@ -121,6 +123,8 @@ function applyStaticI18n() {
   document.querySelectorAll<HTMLElement>("[data-i18n-ph]").forEach((el) => {
     el.setAttribute("placeholder", t(el.dataset.i18nPh as never));
   });
+  // 正在扫描的按钮是「停止扫描」，不是它的静态文案
+  scanChans.forEach((_, btn) => (btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`));
   langSelect.value = getPref();
 }
 
@@ -128,15 +132,20 @@ function applyStaticI18n() {
 function refreshI18n() {
   applyStaticI18n();
   // 每个已有内容的视图都按新语言重绘，不只是当前这个；扫描中的视图等它结束后自己会重绘
-  if (categories.length > 0) render();
-  else if (!scanBtn.disabled) initIdleClean();
+  if (!scanBtn.disabled) {
+    if (categories.length > 0) render();
+    else initIdleClean();
+  }
   if (apps.length > 0) renderApps();
   if (catConfig.length > 0) renderCatEditor();
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   lgThreshold.textContent = t("large.threshold", { size: human(1 << 30) });
-  if (lgResult && !lgRunning) renderLargeDone(lgResult);
-  if (orFoot && !orRunning) {
-    orTotal.textContent = t("orphans.foot", orFoot);
+  if (!lgRunning) {
+    if (lgResult) renderLargeDone(lgResult);
+    else if (lgItems.length > 0) renderLargeRows(lgItems, false);
+  }
+  if (!orRunning && orItems.length > 0) {
+    if (orFoot) orTotal.textContent = t("orphans.foot", orFoot);
     renderOrphanRows(orItems);
   }
   if (acItems.length > 0 && !acRunning) {
@@ -190,6 +199,7 @@ const stoppedScans = new Set<HTMLButtonElement>();
 /** 扫描开始：按钮保持可点，显示「停止扫描」 */
 function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
   btn.dataset.orig = btn.textContent ?? "";
+  btn.dataset.started = String(Date.now());
   btn.disabled = false;
   btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`;
   scanChans.set(btn, ch);
@@ -200,6 +210,8 @@ function setStoppable(btn: HTMLButtonElement, ch: { close(): void }) {
 function stopScan(btn: HTMLButtonElement): boolean {
   const ch = scanChans.get(btn);
   if (!ch) return false;
+  // 双击的第二下不算「停止」
+  if (Date.now() - Number(btn.dataset.started ?? 0) < 600) return true;
   scanChans.delete(btn);
   stoppedScans.add(btn);
   ch.close();
@@ -207,6 +219,8 @@ function stopScan(btn: HTMLButtonElement): boolean {
 }
 
 /** 扫描结束（完成、出错或被停止）：恢复按钮，返回它是不是被用户停止的 */
+const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stopped"))}</div>`;
+
 function endScan(btn: HTMLButtonElement): boolean {
   scanChans.delete(btn);
   setBusy(btn, false);
@@ -254,7 +268,7 @@ function switchView(v: View) {
   if (v === "apps" && apps.length === 0) loadApps();
   if (v === "settings" && catConfig.length === 0) loadCatConfig();
   if (v === "appcaches" && acItems.length === 0 && !acRunning) startAppCacheScan();
-  if (v === "photos" && phClusters.length === 0 && !phRunning) startPhotoScan();
+  if (v === "photos" && !phTried) startPhotoScan();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View)));
 
@@ -300,7 +314,13 @@ async function scan() {
   listEl.classList.add("cat-grid");
   listEl.innerHTML = skeletonRows(window.innerWidth >= 1600 ? 9 : window.innerWidth >= 1200 ? 8 : 6);
   try {
+    scannedAt = Date.now();
     categories = await Cleaner.scan();
+    // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
+    selectedCats.clear();
+    categories.forEach((c) => {
+      if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
+    });
     render();
   } catch (e) {
     totalEl.textContent = t("scan.failed");
@@ -328,6 +348,8 @@ function groupIndexOf(name: string): number {
 }
 
 const selectedCats = new Set<string>();
+/** 这次扫描开始的时间：清空废纸篓时只删那之前就在里面的东西 */
+let scannedAt = 0;
 
 function render() {
   if (categories.length === 0) {
@@ -341,17 +363,11 @@ function render() {
   totalPrefix.textContent = t("clean.foundPrefix");
   totalEl.textContent = human(total);
 
-  // 默认勾选「建议清理」类；「谨慎清理」类（moderate）默认不勾，由用户手动确认
-  selectedCats.clear();
-  categories.forEach((c) => {
-    if (c.size > 0 && c.risk !== "moderate") selectedCats.add(c.name);
-  });
-
   const groups: { key: string; icon: string; color: string; cats: ScanCat[] }[] = [
     ...CAT_GROUPS.map((g) => ({ ...g, cats: [] as ScanCat[] })),
     { key: "group.other", icon: "✦", color: "#64748b", names: [], cats: [] as ScanCat[] },
   ];
-  categories.forEach((c) => groups[groupIndexOf(c.name)]?.cats.push(c));
+  categories.forEach((c) => groups[c.builtin ? groupIndexOf(c.name) : CAT_GROUPS.length]?.cats.push(c));
   listEl.innerHTML = groups
     .filter((g) => g.cats.length > 0)
     .map((g) => groupHtml(g.key, g.icon, g.color, g.cats))
@@ -418,6 +434,9 @@ function groupHtml(key: string, icon: string, color: string, cats: ScanCat[]): s
     </details>`;
 }
 
+/** 分类标题：未改动的内置分类用本地化名称，其余用用户起的名字 */
+const catTitle = (c: ScanCat) => (c.builtin ? categoryName(c.name) : c.name);
+
 const grantBtn = () => `<button class="btn small ghost cat-grant" type="button">${esc(t("cat.grant"))}</button>`;
 
 /** 分类右侧的状态：没有权限、受保护、未找到、很干净，或大小与清理建议 */
@@ -434,7 +453,7 @@ function catNote(c: ScanCat): string {
 }
 
 function rowHtml(c: ScanCat): string {
-  const meta = CAT_ICONS[c.name] ?? fallbackIcon;
+  const meta = c.builtin && Object.hasOwn(CAT_ICONS, c.name) ? CAT_ICONS[c.name]! : fallbackIcon;
   const empty = c.size === 0;
   const caution = !empty && c.risk === "moderate";
   const checked = selectedCats.has(c.name);
@@ -457,8 +476,8 @@ function rowHtml(c: ScanCat): string {
       <label class="cat-check"><input type="checkbox" data-cat="${esc(c.name)}" ${empty ? "disabled" : ""} ${checked ? "checked" : ""}></label>
       <div class="tile" style="--c:${meta.color}"><span>${meta.icon}</span></div>
       <div class="cat-info">
-        <div class="cat-name">${esc(categoryName(c.name))}${trashTag}</div>
-        <div class="cat-desc muted">${esc(categoryDescription(c.name, c.description))}</div>
+        <div class="cat-name">${esc(catTitle(c))}${trashTag}</div>
+        <div class="cat-desc muted">${esc(c.builtin ? categoryDescription(c.name, c.description) : c.description)}</div>
         ${subs}
       </div>
       <div class="cat-note">${catNote(c)}</div>
@@ -480,7 +499,7 @@ function askCleanAll() {
   if (sel.length === 0) return;
   // 内置垃圾直接删除；用户自定义的分类移到废纸篓
   const sum = (cs: ScanCat[]) => human(cs.reduce((s, c) => s + c.size, 0));
-  const names = (cs: ScanCat[]) => cs.map((c) => categoryName(c.name)).join(t("list.sep"));
+  const names = (cs: ScanCat[]) => cs.map(catTitle).join(t("list.sep"));
   const del = sel.filter((c) => c.permanent);
   const keep = sel.filter((c) => !c.permanent);
   const lines = [
@@ -489,10 +508,15 @@ function askCleanAll() {
     t("clean.body.inUse"),
   ].filter(Boolean);
   pending = async () => {
+    cleanAllBtn.disabled = true;
     try {
-      const res = await Cleaner.clean(sel.map((c) => c.name));
+      const res = await Cleaner.clean(sel.map((c) => c.name), scannedAt);
       if (res.errors.length > 0) {
-        toast(t("clean.all.partial", { names: res.errors.map((e) => categoryName(e.name)).join(t("list.sep")) }), "err");
+        const failed = res.errors.map((e) => {
+          const c = categories.find((x) => x.name === e.name);
+          return c ? catTitle(c) : e.name;
+        });
+        toast(`${cleanDoneText(res)}${t("phrase.sep")}${t("clean.all.partial", { names: failed.join(t("list.sep")) })}`, "err");
       } else {
         toast(cleanDoneText(res));
       }
@@ -539,6 +563,7 @@ function renderFsRows(items: BigItem[], live: boolean, foot = "") {
 async function startFullScan() {
   if (fsRunning) return;
   resetList("fullscan");
+  fsResult = null;
   fsRunning = true;
   fsItems = [];
   fsProgress.classList.remove("hidden");
@@ -571,7 +596,11 @@ async function startFullScan() {
   } finally {
     fsRunning = false;
     fsProgress.classList.add("hidden");
-    if (endScan(fsScanBtn)) renderFsRows(fsItems, false); // 停止时保留已经扫到的
+    if (endScan(fsScanBtn)) {
+      // 停止时保留已经扫到的，并说明是停止了，而不是没找到
+      if (fsItems.length > 0) renderFsRows(fsItems, false, stoppedFoot());
+      else fsList.innerHTML = emptyState(t("scan.stopped"));
+    }
   }
 }
 
@@ -589,7 +618,13 @@ interface ListState {
 
 const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map() });
 const lists = { fullscan: newList(), large: newList(), orphans: newList(), appcaches: newList(), photos: newList() };
-const resetList = (v: keyof typeof lists) => (lists[v] = newList());
+/** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
+function resetList(v: keyof typeof lists) {
+  lists[v] = newList();
+  const toolbar = { fullscan: fsToolbar, large: lgToolbar, orphans: orToolbar, appcaches: acToolbar, photos: phToolbar }[v];
+  toolbar.classList.add("hidden");
+  toolbar.innerHTML = "";
+}
 
 /** 一个列表视图的上下文：状态、容器、重绘，以及移到废纸篓之后的刷新 */
 interface ListCtx {
@@ -613,10 +648,11 @@ function loadedKids(st: ListState, path: string): string[] {
 
 /** 勾选一整行：文件夹连同已加载的子项一起勾上或取消 */
 function toggleRow(st: ListState, path: string, on: boolean) {
-  for (const p of [path, ...loadedKids(st, path)]) {
-    if (on) st.sel.add(p);
-    else st.sel.delete(p);
+  if (on) {
+    for (const p of [path, ...loadedKids(st, path)]) st.sel.add(p);
+    return;
   }
+  for (const p of [...st.sel]) if (p === path || p.startsWith(path + "/")) st.sel.delete(p);
 }
 
 /**
@@ -636,8 +672,10 @@ function toggleChild(st: ListState, parent: string, child: string, on: boolean) 
 
 /** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项 */
 function pickedPaths(st: ListState): string[] {
-  const all = [...st.sel];
-  return all.filter((p) => !all.some((q) => q !== p && p.startsWith(q + "/")));
+  return [...st.sel].filter((p) => {
+    for (let i = p.lastIndexOf("/"); i > 0; i = p.lastIndexOf("/", i - 1)) if (st.sel.has(p.slice(0, i))) return false;
+    return true;
+  });
 }
 
 function applyIndeterminate(ctx: ListCtx) {
@@ -753,21 +791,17 @@ async function trashChecked(ctx: ListCtx) {
   const paths = pickedPaths(ctx.st);
   if (paths.length === 0) return;
   pending = async () => {
-    let ok = 0;
-    let fail = 0;
-    let freed = 0;
-    for (const p of paths) {
-      try {
-        const r = await Cleaner.trashPath(p);
-        ok++;
-        freed += r.freed;
-      } catch {
-        fail++;
-      }
+    try {
+      const r = await Cleaner.cleanPaths(paths);
+      const parts: string[] = [];
+      if (r.moved > 0) parts.push(t("fs.trashChecked.ok", { n: r.moved, size: human(r.freed) }));
+      if (r.inUse > 0) parts.push(t("fs.trashChecked.inUse", { n: r.inUse }));
+      if (r.failed.length > 0) parts.push(t("fs.trashChecked.fail", { n: r.failed.length }));
+      toast(parts.join(t("phrase.sep")) || t("fs.trashChecked.none"), r.moved > 0 && r.failed.length === 0 ? "ok" : "err");
+    } catch (e) {
+      toast(t("fs.actionFail", { msg: msg(e) }), "err");
     }
     ctx.st.sel.clear();
-    if (ok > 0) toast(t("fs.trashChecked.ok", { n: ok, size: human(freed) }));
-    if (fail > 0) toast(t("fs.trashChecked.fail", { n: fail }), "err");
     await ctx.afterTrash();
     ctx.rerender();
   };
@@ -798,7 +832,7 @@ function bindFsList(ctx: ListCtx) {
     });
   });
   list.querySelectorAll<HTMLButtonElement>(".fs-trash, .fs-child-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), ctx.afterTrash));
+    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), ctx));
   });
 }
 
@@ -819,14 +853,19 @@ function renderFullScan(r: FullScanResult) {
   renderFsRows(r.items, false);
 }
 
-function askTrash(path: string, size: number, after?: () => Promise<void>) {
+/** Go 端的「正在使用」错误是固定的 "in-use"，界面按当前语言显示 */
+const failText = (e: unknown) => (msg(e) === "in-use" ? t("fs.inUse") : t("fs.actionFail", { msg: msg(e) }));
+
+function askTrash(path: string, size: number, ctx: ListCtx) {
   pending = async () => {
     try {
       const res = await Cleaner.trashPath(path);
+      toggleRow(ctx.st, path, false);
       toast(t("fs.trash.ok", { path: displayPath(path), size: human(res.freed) }));
-      if (after) await after();
+      await ctx.afterTrash();
+      ctx.rerender();
     } catch (e) {
-      toast(t("fs.actionFail", { msg: msg(e) }), "err");
+      toast(failText(e), "err");
     }
   };
   modalTitle.textContent = t("fs.trash.title");
@@ -873,7 +912,10 @@ async function startLargeScan() {
   } finally {
     lgRunning = false;
     lgProgress.classList.add("hidden");
-    if (endScan(lgScanBtn)) renderLargeRows(lgItems, false);
+    if (endScan(lgScanBtn)) {
+      if (lgItems.length > 0) renderLargeRows(lgItems, false, stoppedFoot());
+      else lgList.innerHTML = emptyState(t("scan.stopped"));
+    }
   }
 }
 
@@ -1035,6 +1077,8 @@ function renderAppCacheRows() {
 async function startPhotoScan() {
   if (phRunning) return;
   resetList("photos");
+  phClusters = [];
+  phTried = true;
   phRunning = true;
   phProgress.classList.remove("hidden");
   phList.innerHTML = "";
@@ -1157,8 +1201,9 @@ function bindPhotoList() {
   });
 }
 
+/** 全选只选可以移走的：每组推荐保留的那份不在其中 */
 function visiblePhotoPaths(): string[] {
-  return phClusters.flatMap((c) => c.items.map((i) => i.path));
+  return phClusters.flatMap((c) => c.items.filter((i) => !i.keep).map((i) => i.path));
 }
 
 function updatePhotoToolbar() {
@@ -1195,7 +1240,7 @@ function askTrashPhotos() {
         const parts: string[] = [];
         if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
         if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
-        toast(parts.join(t("phrase.sep")), r.moved === 0 ? "err" : "ok");
+        toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved === 0 && r.inUse > 0 ? "err" : "ok");
       }
     } catch (e) {
       toast(t("fs.actionFail", { msg: msg(e) }), "err");
@@ -1280,7 +1325,9 @@ async function showUninstallDetail(path: string) {
     pending = async () => {
       try {
         const res = await Cleaner.uninstallApp(d.app.path);
-        if (res.failed.length > 0) {
+        if (res.moved === 0 && res.failed.some((f) => f.endsWith(": in-use"))) {
+          toast(t("apps.inUse", { name: d.app.name }), "err");
+        } else if (res.failed.length > 0) {
           toast(t("apps.partial", { name: d.app.name, n: res.failed.length }), "err");
         } else {
           toast(t("apps.ok", { name: d.app.name, size: human(res.freed) }));
@@ -1391,6 +1438,7 @@ function showModal() {
 function hideModal() {
   modalSeq++;
   overlay.classList.add("hidden");
+  modalOk.disabled = false; // 取消一次还在分析的卸载，不能让之后的确认框都点不动
   pending = null;
 }
 
