@@ -1125,7 +1125,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .photo-cell.keep { outline: 2px solid #10b981; }
 .photo-thumb-wrap { position: relative; aspect-ratio: 1 / 1; background: #0b0f17; }
-.photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
 .photo-thumb-wrap .fs-check {
   position: absolute;
   top: 6px;

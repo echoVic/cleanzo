@@ -65,6 +65,7 @@ const phToolbar = $("#ph-toolbar");
 
 let categories = [] as Awaited<ReturnType<typeof Cleaner.scan>>;
 let apps: AppInfo[] = [];
+const appBusy = new Set<string>();
 let catConfig: CategoryConfig[] = [];
 let fsResult: FullScanResult | null = null;
 let pending: (() => Promise<void>) | null = null;
@@ -87,6 +88,42 @@ let phTried = false;
 // ---- utils ----
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** 将后端错误码翻成当前语言，普通错误保留原文。 */
+function errText(e: unknown): string {
+  const raw = msg(e);
+  const plain: Record<string, string> = {
+    "in-use": "fs.inUse",
+    blocked: "fs.blocked",
+    gone: "fs.gone",
+    "not-app": "fs.notApp",
+  };
+  if (plain[raw]) return t(plain[raw] as never);
+  try {
+    const parsed = JSON.parse(raw) as { code?: string; args?: unknown[] };
+    if (parsed && typeof parsed.code === "string") {
+      const key: Record<string, string> = {
+        "empty-name": "settings.emptyName",
+        "dup-name": "settings.dupName",
+        "no-paths": "settings.noPaths",
+        "empty-path": "settings.emptyPath",
+        "protected-path": "settings.protectedPath",
+        "dup-path": "settings.dupPath",
+      };
+      const entry = key[parsed.code];
+      if (entry) {
+        const args = parsed.args ?? [];
+        const vars: Record<string, string> = parsed.code === "dup-path"
+          ? { path: String(args[0] ?? ""), owner: String(args[1] ?? ""), name: String(args[2] ?? "") }
+          : { name: String(args[0] ?? ""), path: String(args[0] ?? "") };
+        return t(entry as never, vars);
+      }
+    }
+  } catch {
+    /* 非 JSON 错误按原文显示 */
+  }
+  return raw;
+}
 
 function human(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -368,8 +405,8 @@ async function scan() {
       totalEl.textContent = t("scan.failed");
       heroSub.textContent = t("scan.retryHint");
       cleanAllBtn.disabled = true;
-      listEl.innerHTML = errorState(t("scan.error", { msg: msg(e) }), scan);
-      toast(t("scan.error", { msg: msg(e) }), "err");
+      listEl.innerHTML = errorState(t("scan.error", { msg: errText(e) }), scan);
+      toast(t("scan.error", { msg: errText(e) }), "err");
     }
   } finally {
     endScan(scanBtn);
@@ -435,7 +472,7 @@ function render() {
   });
   listEl.querySelectorAll<HTMLButtonElement>(".cat-grant").forEach((b) => {
     b.addEventListener("click", () => {
-      Cleaner.openFullDiskAccessSettings().catch((e) => toast(t("grant.fail", { msg: msg(e) }), "err"));
+      Cleaner.openFullDiskAccessSettings().catch((e) => toast(t("grant.fail", { msg: errText(e) }), "err"));
     });
   });
   renderHero();
@@ -668,7 +705,7 @@ async function clean(sel: ScanCat[]) {
     }
     await done;
   } catch (e) {
-    if (!progress.stopped) toast(t("clean.fail", { msg: msg(e) }), "err");
+    if (!progress.stopped) toast(t("clean.fail", { msg: errText(e) }), "err");
   } finally {
     cleanChan = null;
     // 停在半路的分类标「已停止」，还没轮到的标「未清理」；一个都没打断就算清理完成
@@ -724,6 +761,7 @@ function askCleanAll() {
 // ---- 全盘扫描 ----
 
 function renderFsRows(items: BigItem[], live: boolean, foot = "") {
+  items = items.filter((it) => !isGone(lists.fullscan, it.path));
   if (items.length === 0) {
     fsList.innerHTML = emptyState(live ? t("fs.live") : t("fs.empty")) + foot;
     fsToolbar.classList.add("hidden");
@@ -742,12 +780,23 @@ function renderFsRows(items: BigItem[], live: boolean, foot = "") {
           rank: `${i + 1}`,
           expandable: true,
           trashable: it.trashable,
+          locked: !it.trashable,
           sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
         }),
     )
     .join("");
   const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("fs.live"))}</div>` : "") + foot;
-  renderFsListInto({ st: lists.fullscan, list: fsList, toolbar: fsToolbar, rerender: () => renderFsRows(fsItems, false), afterTrash: startFullScan }, rows + footHtml);
+  renderFsListInto({
+    st: lists.fullscan,
+    list: fsList,
+    toolbar: fsToolbar,
+    rerender: () => renderFsRows(fsItems, false),
+    removeRows: (removed) => {
+      updateRowsAfterRemoved(fsItems, removed, lists.fullscan);
+      if (fsResult) fsResult.items = fsItems;
+    },
+    sizeOf: (path) => fsItems.find((it) => it.path === path)?.size ?? childSize(lists.fullscan, path),
+  }, rows + footHtml);
 }
 
 async function startFullScan() {
@@ -780,8 +829,8 @@ async function startFullScan() {
   } catch (e) {
     if (!stoppedScans.has(fsScanBtn)) {
       fsResult = null;
-      fsList.innerHTML = errorState(t("fs.fail", { msg: msg(e) }), startFullScan);
-      toast(t("fs.fail", { msg: msg(e) }), "err");
+      fsList.innerHTML = errorState(t("fs.fail", { msg: errText(e) }), startFullScan);
+      toast(t("fs.fail", { msg: errText(e) }), "err");
     }
   } finally {
     fsRunning = false;
@@ -804,9 +853,11 @@ interface ListState {
   sel: Set<string>;
   expanded: Set<string>;
   children: Map<string, ChildList>;
+  gone: Set<string>;
+  busy: boolean;
 }
 
-const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map() });
+const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
 const lists = { fullscan: newList(), large: newList(), orphans: newList(), appcaches: newList(), photos: newList() };
 /** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
 function resetList(v: keyof typeof lists) {
@@ -816,40 +867,54 @@ function resetList(v: keyof typeof lists) {
   toolbar.innerHTML = "";
 }
 
-/** 一个列表视图的上下文：状态、容器、重绘，以及移到废纸篓之后的刷新 */
+/** 一个列表视图的上下文：状态、容器和重绘 */
 interface ListCtx {
   st: ListState;
   list: HTMLElement;
   toolbar: HTMLElement;
   rerender: () => void;
-  afterTrash: () => Promise<void>;
+  removeRows: (removed: string[]) => void;
+  sizeOf: (path: string) => number | undefined;
 }
 
-function checkHtml(st: ListState, path: string, parent?: string): string {
+function under(path: string, ancestor: string): boolean {
+  return path === ancestor || path.startsWith(ancestor + "/");
+}
+
+function effectiveRemoved(paths: string[]): string[] {
+  return [...new Set(paths)].filter((p, _, all) => !all.some((other) => other !== p && under(p, other)));
+}
+
+function isGone(st: ListState, path: string): boolean {
+  for (const gone of st.gone) if (under(path, gone)) return true;
+  return false;
+}
+
+function checkHtml(st: ListState, path: string, parent?: string, size = -1, disabled = false): string {
   const par = parent ? ` data-parent="${esc(parent)}"` : "";
-  return `<label class="fs-check" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}"${par} ${st.sel.has(path) ? "checked" : ""}></label>`;
+  return `<label class="fs-check${disabled ? " disabled" : ""}" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}" data-size="${size}"${par} ${st.sel.has(path) ? "checked" : ""}${disabled || st.busy ? " disabled" : ""}></label>`;
 }
 
 /** 展开的文件夹里已经加载出来的子项 */
 function loadedKids(st: ListState, path: string): string[] {
   const c = st.children.get(path);
-  return c && "items" in c ? c.items.map((i) => i.path) : [];
+  return c && "items" in c ? c.items.filter((i) => !isGone(st, i.path)).map((i) => i.path) : [];
 }
 
 /** 勾选一整行：文件夹连同已加载的子项一起勾上或取消 */
 function toggleRow(st: ListState, path: string, on: boolean) {
+  if (isGone(st, path)) return;
   if (on) {
-    for (const p of [path, ...loadedKids(st, path)]) st.sel.add(p);
+    st.sel.add(path);
+    for (const p of loadedKids(st, path)) st.sel.add(p);
     return;
   }
-  for (const p of [...st.sel]) if (p === path || p.startsWith(path + "/")) st.sel.delete(p);
+  for (const p of [...st.sel]) if (under(p, path)) st.sel.delete(p);
 }
 
-/**
- * 勾选文件夹里的一项。取消其中一项时，文件夹不再整个移走，改为勾选其余已加载
- * 的子项；子项全部勾上也不会变回整个文件夹，因为可能还有没显示出来的子项。
- */
+/** 勾选文件夹里的一项。取消其中一项时，文件夹不再整个移走，改为勾选其余已加载子项 */
 function toggleChild(st: ListState, parent: string, child: string, on: boolean) {
+  if (isGone(st, child)) return;
   if (on) {
     st.sel.add(child);
     return;
@@ -862,24 +927,21 @@ function toggleChild(st: ListState, parent: string, child: string, on: boolean) 
 
 /** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项 */
 function pickedPaths(st: ListState): string[] {
-  return [...st.sel].filter((p) => {
-    for (let i = p.lastIndexOf("/"); i > 0; i = p.lastIndexOf("/", i - 1)) if (st.sel.has(p.slice(0, i))) return false;
-    return true;
-  });
+  return [...st.sel].filter((p) => !isGone(st, p) && ![...st.sel].some((q) => q !== p && under(p, q)));
 }
 
 function applyIndeterminate(ctx: ListCtx) {
   ctx.list.querySelectorAll<HTMLDivElement>(".fs-row-wrap").forEach((wrap) => {
     const p = wrap.dataset.path!;
     const cb = wrap.querySelector<HTMLInputElement>("input[data-check]");
-    if (!cb || ctx.st.sel.has(p)) return;
+    if (!cb || cb.disabled || ctx.st.sel.has(p)) return;
     cb.indeterminate = loadedKids(ctx.st, p).some((k) => ctx.st.sel.has(k));
   });
 }
 
 function expandBtnHtml(st: ListState, path: string): string {
   const open = st.expanded.has(path);
-  return `<button class="btn small ghost fs-expand" data-expand="${esc(path)}" type="button">${open ? esc(t("fs.collapse")) : esc(t("fs.expand"))} <span class="caret">▸</span></button>`;
+  return `<button class="btn small ghost fs-expand" data-expand="${esc(path)}" type="button"${st.busy ? " disabled" : ""}>${open ? esc(t("fs.collapse")) : esc(t("fs.expand"))} <span class="caret">▸</span></button>`;
 }
 
 function revealBtnHtml(path: string): string {
@@ -894,21 +956,27 @@ function fsRowHtml(st: ListState, o: {
   rank?: string;
   expandable?: boolean;
   trashable: boolean;
+  locked?: boolean;
 }): string {
+  if (isGone(st, o.path)) return "";
   const open = st.expanded.has(o.path);
+  const name = !o.trashable && o.locked ? `${o.name} <span class="tag dim">${esc(t("fs.locked"))}</span>` : o.name;
+  const trash = o.trashable
+    ? `<button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}" type="button"${st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trash"))}</button>`
+    : "";
   return `
       <div class="fs-row-wrap" data-path="${esc(o.path)}">
         <div class="fs-row card ${open ? "open" : ""}">
-          ${checkHtml(st, o.path)}
+          ${checkHtml(st, o.path, undefined, o.size, !o.trashable)}
           ${o.rank ? `<div class="fs-rank">${o.rank}</div>` : ""}
           <div class="fs-main">
-            <div class="fs-path" title="${esc(o.path)}">${o.name}</div>
+            <div class="fs-path" title="${esc(o.path)}">${name}</div>
             ${o.sub ? `<div class="fs-sub">${o.sub}</div>` : ""}
           </div>
           <div class="fs-size">${o.size >= 0 ? human(o.size) : "--"}</div>
           ${o.expandable ? expandBtnHtml(st, o.path) : ""}
           ${revealBtnHtml(o.path)}
-          ${o.trashable ? `<button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
+          ${trash}
         </div>
         ${open ? `<div class="fs-children">${childrenHtml(st, o.path)}</div>` : ""}
       </div>`;
@@ -918,25 +986,85 @@ function childrenHtml(st: ListState, parent: string): string {
   const c = st.children.get(parent);
   if (!c) return `<span class="muted small">${esc(t("fs.children"))}</span>`;
   if ("error" in c) return `<div class="fs-child err-inline">${esc(t("fs.childrenFail", { msg: c.error }))}</div>`;
-  if (c.items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
-  const rows = c.items
+  const items = c.items.filter((it) => !isGone(st, it.path));
+  if (items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
+  const rows = items
     .map(
       (it) => `
       <div class="fs-child">
-        ${checkHtml(st, it.path, parent)}
+        ${checkHtml(st, it.path, parent, it.size, !it.trashable)}
         <span class="fs-child-name" title="${esc(it.path)}">${esc(it.name)}${it.trashable ? "" : ` <span class="tag dim">${esc(t("fs.locked"))}</span>`}</span>
         <span class="fs-child-size">${it.size >= 0 ? human(it.size) : "--"}</span>
         ${revealBtnHtml(it.path)}
-        ${it.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(it.path)}" data-size="${it.size}" type="button">${esc(t("fs.trash"))}</button>` : ""}
+        ${it.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(it.path)}" data-size="${it.size}" type="button"${st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trash"))}</button>` : ""}
       </div>`,
     )
     .join("");
-  const more = c.total > c.items.length ? `<div class="fs-child muted small">${esc(t("fs.childrenMore", { n: c.items.length, total: c.total }))}</div>` : "";
+  const more = c.total > items.length ? `<div class="fs-child muted small">${esc(t("fs.childrenMore", { n: items.length, total: c.total }))}</div>` : "";
   return rows + more;
+}
+
+function subtractRemovedFromState(st: ListState, removed: string[]) {
+  const roots = effectiveRemoved(removed);
+  const known = new Map<string, number>();
+  for (const c of st.children.values()) {
+    if (!("items" in c)) continue;
+    for (const it of c.items) if (it.size >= 0) known.set(it.path, it.size);
+  }
+  for (const path of roots) st.gone.add(path);
+  for (const p of [...st.sel]) if (isGone(st, p)) st.sel.delete(p);
+  for (const p of [...st.expanded]) if (isGone(st, p)) st.expanded.delete(p);
+  for (const p of [...st.children.keys()]) if (isGone(st, p)) st.children.delete(p);
+  for (const [parent, c] of st.children) {
+    if (!("items" in c)) continue;
+    const kept = c.items.filter((it) => !roots.some((r) => under(it.path, r)));
+    c.total = Math.max(kept.length, c.total - (c.items.length - kept.length));
+    for (const it of kept) {
+      if (it.size < 0) continue;
+      const delta = roots
+        .filter((r) => r !== it.path && under(r, it.path))
+        .reduce((sum, r) => sum + (known.get(r) ?? 0), 0);
+      if (delta > 0) it.size = Math.max(0, it.size - delta);
+    }
+    c.items = kept;
+    st.children.set(parent, c);
+  }
+}
+
+function updateRowsAfterRemoved<T extends { path: string; size: number }>(items: T[], removed: string[], st: ListState): void {
+  const roots = effectiveRemoved(removed);
+  const known = new Map<string, number>();
+  for (const it of items) if (it.size >= 0) known.set(it.path, it.size);
+  for (const c of st.children.values()) {
+    if (!("items" in c)) continue;
+    for (const it of c.items) if (it.size >= 0) known.set(it.path, it.size);
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (roots.some((r) => under(it.path, r))) {
+      items.splice(i, 1);
+      continue;
+    }
+    if (it.size >= 0) {
+      const delta = roots
+        .filter((r) => r !== it.path && under(r, it.path))
+        .reduce((sum, r) => sum + (known.get(r) ?? 0), 0);
+      if (delta > 0) it.size = Math.max(0, it.size - delta);
+    }
+  }
+}
+
+function applyRemoved(ctx: ListCtx, removed: string[]) {
+  if (removed.length === 0) return;
+  // 先改各行的数据：它要从还没删掉的子项列表里查出移走的子项有多大
+  ctx.removeRows(removed);
+  subtractRemovedFromState(ctx.st, removed);
+  ctx.rerender();
 }
 
 async function toggleExpand(ctx: ListCtx, path: string) {
   const { st } = ctx;
+  if (st.busy || isGone(st, path)) return;
   if (st.expanded.delete(path)) {
     st.children.delete(path);
     ctx.rerender();
@@ -946,30 +1074,49 @@ async function toggleExpand(ctx: ListCtx, path: string) {
   ctx.rerender();
   try {
     const r = await Cleaner.dirChildren(path);
-    st.children.set(path, { items: r.items, total: r.total });
-    if (st.sel.has(path)) toggleRow(st, path, true);
+    if (!isGone(st, path)) {
+      st.children.set(path, { items: r.items, total: r.total });
+      if (st.sel.has(path)) toggleRow(st, path, true);
+    }
   } catch (e) {
-    st.children.set(path, { error: msg(e) });
+    if (!isGone(st, path)) st.children.set(path, { error: errText(e) });
   }
   if (st.expanded.has(path)) ctx.rerender();
 }
 
+function childSize(st: ListState, path: string): number | undefined {
+  for (const c of st.children.values()) {
+    if (!("items" in c)) continue;
+    const it = c.items.find((item) => item.path === path);
+    if (it) return it.size;
+  }
+  return undefined;
+}
+
 function updateToolbar(ctx: ListCtx) {
   const { st, toolbar } = ctx;
-  const rows = Array.from(ctx.list.querySelectorAll<HTMLInputElement>("input[data-check]:not([data-parent])")).map((i) => i.dataset.check!);
-  const n = pickedPaths(st).length;
-  if (n === 0) {
+  const allInputs = Array.from(ctx.list.querySelectorAll<HTMLInputElement>("input[data-check]:not([data-parent])"));
+  const rows = allInputs.filter((i) => !i.disabled).map((i) => i.dataset.check!);
+  const hasRows = ctx.list.querySelectorAll(".fs-row-wrap").length > 0;
+  const picked = pickedPaths(st);
+  const size = picked.reduce((sum, p) => {
+    const n = ctx.sizeOf(p);
+    return sum + (n !== undefined && n >= 0 ? n : 0);
+  }, 0);
+  if (!hasRows) {
     toolbar.classList.add("hidden");
     toolbar.innerHTML = "";
     return;
   }
+  const some = rows.some((p) => st.sel.has(p));
   const all = rows.length > 0 && rows.every((p) => st.sel.has(p));
   toolbar.classList.remove("hidden");
   toolbar.innerHTML = `
-    <label class="fs-check"><input type="checkbox" class="fs-checkall" ${all ? "checked" : ""}></label>
-    <span class="fs-toolbar-count">${esc(t("fs.checked", { n }))}</span>
-    <button class="btn danger small fs-toolbar-trash" type="button">${esc(t("fs.trashChecked"))}</button>`;
+    <label class="fs-check"><input type="checkbox" class="fs-checkall" ${all ? "checked" : ""}${rows.length === 0 || st.busy ? " disabled" : ""}></label>
+    <span class="fs-toolbar-count">${esc(picked.length > 0 ? t("fs.checkedSize", { n: picked.length, size: human(size) }) : t("fs.nothing"))}</span>
+    <button class="btn danger small fs-toolbar-trash" type="button"${picked.length === 0 || st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trashChecked"))}</button>`;
   const allBox = toolbar.querySelector<HTMLInputElement>(".fs-checkall");
+  if (allBox) allBox.indeterminate = !all && some;
   allBox?.addEventListener("change", () => {
     rows.forEach((p) => toggleRow(st, p, allBox.checked));
     ctx.rerender();
@@ -979,8 +1126,10 @@ function updateToolbar(ctx: ListCtx) {
 
 async function trashChecked(ctx: ListCtx) {
   const paths = pickedPaths(ctx.st);
-  if (paths.length === 0) return;
+  if (paths.length === 0 || ctx.st.busy) return;
   pending = async () => {
+    ctx.st.busy = true;
+    ctx.rerender();
     try {
       const r = await Cleaner.cleanPaths(paths);
       const parts: string[] = [];
@@ -988,12 +1137,13 @@ async function trashChecked(ctx: ListCtx) {
       if (r.inUse > 0) parts.push(t("fs.trashChecked.inUse", { n: r.inUse }));
       if (r.failed.length > 0) parts.push(t("fs.trashChecked.fail", { n: r.failed.length }));
       toast(parts.join(t("phrase.sep")) || t("fs.trashChecked.none"), r.moved > 0 && r.failed.length === 0 ? "ok" : "err");
+      applyRemoved(ctx, r.removed);
     } catch (e) {
-      toast(t("fs.actionFail", { msg: msg(e) }), "err");
+      toast(t("fs.actionFail", { msg: errText(e) }), "err");
+    } finally {
+      ctx.st.busy = false;
+      ctx.rerender();
     }
-    ctx.st.sel.clear();
-    await ctx.afterTrash();
-    ctx.rerender();
   };
   modalTitle.textContent = t("fs.trashChecked.title");
   modalBody.textContent = t("fs.trashChecked.body", { n: paths.length });
@@ -1005,6 +1155,7 @@ function bindFsList(ctx: ListCtx) {
   const { st, list } = ctx;
   list.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
     cb.addEventListener("change", () => {
+      if (cb.disabled) return;
       const p = cb.dataset.check!;
       const parent = cb.dataset.parent;
       if (parent) toggleChild(st, parent, p, cb.checked);
@@ -1018,7 +1169,7 @@ function bindFsList(ctx: ListCtx) {
   list.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
     b.addEventListener("click", () => {
       const path = b.dataset.reveal!;
-      Cleaner.revealInFinder(path).catch((e) => toast(t("fs.revealFail", { msg: msg(e) }), "err"));
+      Cleaner.revealInFinder(path).catch((e) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
     });
   });
   list.querySelectorAll<HTMLButtonElement>(".fs-trash, .fs-child-trash").forEach((b) => {
@@ -1043,19 +1194,23 @@ function renderFullScan(r: FullScanResult) {
   renderFsRows(r.items, false);
 }
 
-/** Go 端的「正在使用」错误是固定的 "in-use"，界面按当前语言显示 */
-const failText = (e: unknown) => (msg(e) === "in-use" ? t("fs.inUse") : t("fs.actionFail", { msg: msg(e) }));
+/** 将一次性移动错误翻成当前语言。 */
+const failText = (e: unknown) => t("fs.actionFail", { msg: errText(e) });
 
 function askTrash(path: string, size: number, ctx: ListCtx) {
+  if (ctx.st.busy || isGone(ctx.st, path)) return;
   pending = async () => {
+    ctx.st.busy = true;
+    ctx.rerender();
     try {
       const res = await Cleaner.trashPath(path);
-      toggleRow(ctx.st, path, false);
       toast(t("fs.trash.ok", { path: displayPath(path), size: human(res.freed) }));
-      await ctx.afterTrash();
-      ctx.rerender();
+      applyRemoved(ctx, [path]);
     } catch (e) {
       toast(failText(e), "err");
+    } finally {
+      ctx.st.busy = false;
+      ctx.rerender();
     }
   };
   modalTitle.textContent = t("fs.trash.title");
@@ -1096,8 +1251,8 @@ async function startLargeScan() {
   } catch (e) {
     if (!stoppedScans.has(lgScanBtn)) {
       lgItems = [];
-      lgList.innerHTML = errorState(t("large.fail", { msg: msg(e) }), startLargeScan);
-      toast(t("large.fail", { msg: msg(e) }), "err");
+      lgList.innerHTML = errorState(t("large.fail", { msg: errText(e) }), startLargeScan);
+      toast(t("large.fail", { msg: errText(e) }), "err");
     }
   } finally {
     lgRunning = false;
@@ -1110,6 +1265,7 @@ async function startLargeScan() {
 }
 
 function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
+  items = items.filter((it) => !isGone(lists.large, it.path));
   if (items.length === 0) {
     lgList.innerHTML = emptyState(live ? t("large.live") : t("large.empty", { size: human(1 << 30) })) + foot;
     lgToolbar.classList.add("hidden");
@@ -1127,13 +1283,24 @@ function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
           size: it.size,
           rank: `${i + 1}`,
           trashable: it.trashable,
+          locked: !it.trashable,
           sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
         }),
     )
     .join("");
   const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") + foot;
   const rerender = () => (lgResult ? renderLargeDone(lgResult) : renderLargeRows(lgItems, false));
-  renderFsListInto({ st: lists.large, list: lgList, toolbar: lgToolbar, rerender, afterTrash: startLargeScan }, rows + footHtml);
+  renderFsListInto({
+    st: lists.large,
+    list: lgList,
+    toolbar: lgToolbar,
+    rerender,
+    removeRows: (removed) => {
+      updateRowsAfterRemoved(lgItems, removed, lists.large);
+      if (lgResult) lgResult.items = lgItems;
+    },
+    sizeOf: (path) => lgItems.find((it) => it.path === path)?.size ?? childSize(lists.large, path),
+  }, rows + footHtml);
 }
 
 function renderLargeDone(r: LargeScanResult) {
@@ -1178,8 +1345,8 @@ async function startOrphanScan() {
   } catch (e) {
     if (!stoppedScans.has(orScanBtn)) {
       orItems = [];
-      orList.innerHTML = errorState(t("orphans.fail", { msg: msg(e) }), startOrphanScan);
-      toast(t("orphans.fail", { msg: msg(e) }), "err");
+      orList.innerHTML = errorState(t("orphans.fail", { msg: errText(e) }), startOrphanScan);
+      toast(t("orphans.fail", { msg: errText(e) }), "err");
     }
   } finally {
     orRunning = false;
@@ -1189,7 +1356,13 @@ async function startOrphanScan() {
 }
 
 function renderOrphanRows(items: OrphanItem[]) {
-  if (items.length === 0) return;
+  items = items.filter((o) => !isGone(lists.orphans, o.path));
+  if (items.length === 0) {
+    orList.innerHTML = emptyState(t("orphans.empty"));
+    orToolbar.classList.add("hidden");
+    orToolbar.innerHTML = "";
+    return;
+  }
   const sorted = [...items].sort((a, b) => b.size - a.size);
   const maxSize = sorted[0]?.size || 1;
   const rows = sorted
@@ -1200,13 +1373,28 @@ function renderOrphanRows(items: OrphanItem[]) {
           name: `${esc(displayPath(o.path))} <span class="tag dim">${esc(kindLabel(o.kind))}</span>`,
           size: o.size,
           rank: `${i + 1}`,
-          expandable: true,
+          expandable: o.isDir,
           trashable: o.trashable,
+          locked: !o.trashable,
           sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((o.size / maxSize) * 100))}%"></div></div>`,
         }),
     )
     .join("");
-  renderFsListInto({ st: lists.orphans, list: orList, toolbar: orToolbar, rerender: () => renderOrphanRows(orItems), afterTrash: startOrphanScan }, rows);
+  renderFsListInto({
+    st: lists.orphans,
+    list: orList,
+    toolbar: orToolbar,
+    rerender: () => renderOrphanRows(orItems),
+    removeRows: (removed) => {
+      updateRowsAfterRemoved(orItems, removed, lists.orphans);
+      if (orFoot) {
+        orFoot.n = orItems.length.toLocaleString();
+        orFoot.size = human(orItems.reduce((sum, it) => sum + (it.size >= 0 ? it.size : 0), 0));
+        orTotal.textContent = t("orphans.foot", orFoot);
+      }
+    },
+    sizeOf: (path) => orItems.find((it) => it.path === path)?.size ?? childSize(lists.orphans, path),
+  }, rows);
 }
 
 // ---- 应用缓存（按应用拆分） ----
@@ -1226,8 +1414,8 @@ async function startAppCacheScan() {
     renderAppCacheRows();
   } catch (e) {
     acItems = [];
-    acList.innerHTML = errorState(t("fs.fail", { msg: msg(e) }), startAppCacheScan);
-    toast(t("fs.fail", { msg: msg(e) }), "err");
+    acList.innerHTML = errorState(t("fs.fail", { msg: errText(e) }), startAppCacheScan);
+    toast(t("fs.fail", { msg: errText(e) }), "err");
   } finally {
     acRunning = false;
     acProgress.classList.add("hidden");
@@ -1237,6 +1425,7 @@ async function startAppCacheScan() {
 }
 
 function renderAppCacheRows() {
+  acItems = acItems.filter((it) => !isGone(lists.appcaches, it.path));
   if (acItems.length === 0) {
     acToolbar.classList.add("hidden");
     acToolbar.innerHTML = "";
@@ -1259,7 +1448,14 @@ function renderAppCacheRows() {
     )
     .join("");
   const foot = `<div class="fs-foot muted small">${esc(t("appcaches.count", { n: acItems.length }))}</div>`;
-  renderFsListInto({ st: lists.appcaches, list: acList, toolbar: acToolbar, rerender: renderAppCacheRows, afterTrash: startAppCacheScan }, rows + foot);
+  renderFsListInto({
+    st: lists.appcaches,
+    list: acList,
+    toolbar: acToolbar,
+    rerender: renderAppCacheRows,
+    removeRows: (removed) => updateRowsAfterRemoved(acItems, removed, lists.appcaches),
+    sizeOf: (path) => acItems.find((it) => it.path === path)?.size ?? childSize(lists.appcaches, path),
+  }, rows + foot);
 }
 
 // ---- 相似照片 ----
@@ -1300,8 +1496,8 @@ async function startPhotoScan() {
   } catch (e) {
     if (!stoppedScans.has(phScanBtn)) {
       phClusters = [];
-      phList.innerHTML = errorState(t("photos.fail", { msg: msg(e) }), startPhotoScan);
-      toast(t("photos.fail", { msg: msg(e) }), "err");
+      phList.innerHTML = errorState(t("photos.fail", { msg: errText(e) }), startPhotoScan);
+      toast(t("photos.fail", { msg: errText(e) }), "err");
     }
   } finally {
     phRunning = false;
@@ -1312,6 +1508,7 @@ async function startPhotoScan() {
 }
 
 function renderPhotoClusters() {
+  phClusters = phClusters.filter((cl) => cl.items.filter((it) => !isGone(lists.photos, it.path)).length >= 2);
   if (phClusters.length === 0) {
     phToolbar.classList.add("hidden");
     phToolbar.innerHTML = "";
@@ -1320,11 +1517,12 @@ function renderPhotoClusters() {
   }
   const cards = phClusters
     .map((cl) => {
+      const items = cl.items.filter((it) => !isGone(lists.photos, it.path));
       const badge =
         cl.kind === "exact"
           ? `<span class="photo-badge exact">${esc(t("photos.kindExact"))}</span>`
           : `<span class="photo-badge similar">${esc(t("photos.kindSimilar"))}</span>`;
-      const cells = cl.items
+      const cells = items
         .map((it) => {
           const keepCls = it.keep ? " keep" : "";
           const keepTag = it.keep
@@ -1333,9 +1531,9 @@ function renderPhotoClusters() {
           return `
         <figure class="photo-cell${keepCls}">
           <div class="photo-thumb-wrap">
-            ${checkHtml(lists.photos, it.path)}
+            ${checkHtml(lists.photos, it.path, undefined, it.size)}
             ${keepTag}
-            <img class="photo-thumb" src="${it.thumb}" alt="" loading="lazy">
+            <img class="photo-thumb" data-photo="${esc(it.path)}" src="${it.thumb}" alt="" loading="lazy">
           </div>
           <figcaption class="photo-meta" title="${esc(it.path)}">
             <div class="photo-name">${esc(baseName(it.path))}</div>
@@ -1349,8 +1547,8 @@ function renderPhotoClusters() {
       <div class="photo-cluster card" data-cluster="${cl.id}">
         <div class="photo-cluster-head">
           <span class="photo-cluster-title">${esc(t("photos.cluster", { id: cl.id }))} ${badge}</span>
-          <span class="photo-cluster-meta muted">${esc(t("photos.photoCount", { n: cl.items.length }))} · ${esc(t("photos.waste", { size: human(cl.waste) }))}</span>
-          <button class="btn small ghost ph-keep-only" type="button" data-cluster="${cl.id}">${esc(t("photos.keepOnly"))}</button>
+          <span class="photo-cluster-meta muted">${esc(t("photos.photoCount", { n: items.length }))} · ${esc(t("photos.waste", { size: human(cl.waste) }))}</span>
+          <button class="btn small ghost ph-keep-only" type="button" data-cluster="${cl.id}"${lists.photos.busy ? " disabled" : ""}>${esc(t("photos.keepOnly"))}</button>
         </div>
         <div class="photo-grid">${cells}</div>
       </div>`;
@@ -1365,21 +1563,33 @@ function renderPhotoClusters() {
 function bindPhotoList() {
   phList.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
     cb.addEventListener("change", () => {
+      if (cb.disabled) return;
       const p = cb.dataset.check!;
       if (cb.checked) lists.photos.sel.add(p);
       else lists.photos.sel.delete(p);
       renderPhotoClusters();
     });
   });
+  phList.querySelectorAll<HTMLImageElement>("img[data-photo]").forEach((img) => {
+    img.addEventListener("click", () => {
+      const p = img.dataset.photo!;
+      const cb = phList.querySelector<HTMLInputElement>(`input[data-check="${CSS.escape(p)}"]`);
+      if (!cb || cb.disabled) return;
+      if (cb.checked) lists.photos.sel.delete(p);
+      else lists.photos.sel.add(p);
+      renderPhotoClusters();
+    });
+  });
   phList.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
     b.addEventListener("click", () => {
       Cleaner.revealInFinder(b.dataset.reveal!).catch((e) =>
-        toast(t("fs.revealFail", { msg: msg(e) }), "err"),
+        toast(t("fs.revealFail", { msg: errText(e) }), "err"),
       );
     });
   });
   phList.querySelectorAll<HTMLButtonElement>(".ph-keep-only").forEach((b) => {
     b.addEventListener("click", () => {
+      if (lists.photos.busy) return;
       const cl = phClusters.find((c) => String(c.id) === b.dataset.cluster);
       if (!cl) return;
       for (const it of cl.items) {
@@ -1393,50 +1603,77 @@ function bindPhotoList() {
 
 /** 全选只选可以移走的：每组推荐保留的那份不在其中 */
 function visiblePhotoPaths(): string[] {
-  return phClusters.flatMap((c) => c.items.filter((i) => !i.keep).map((i) => i.path));
+  return phClusters.flatMap((c) => c.items.filter((i) => !i.keep && !isGone(lists.photos, i.path)).map((i) => i.path));
 }
 
 function updatePhotoToolbar() {
   const visible = visiblePhotoPaths();
   const sel = lists.photos.sel;
+  for (const p of [...sel]) if (isGone(lists.photos, p)) sel.delete(p);
   const n = sel.size;
-  if (n === 0) {
+  const size = phClusters
+    .flatMap((c) => c.items)
+    .filter((it) => sel.has(it.path) && it.size >= 0)
+    .reduce((sum, it) => sum + it.size, 0);
+  if (visible.length === 0) {
     phToolbar.classList.add("hidden");
     phToolbar.innerHTML = "";
     return;
   }
-  const all = visible.length > 0 && visible.every((p) => sel.has(p));
+  const all = visible.every((p) => sel.has(p));
+  const some = visible.some((p) => sel.has(p));
   phToolbar.classList.remove("hidden");
   phToolbar.innerHTML = `
-    <label class="fs-check"><input type="checkbox" class="ph-checkall" ${all ? "checked" : ""}></label>
-    <span class="fs-toolbar-count">${esc(t("photos.checked", { n }))}</span>
-    <button class="btn danger small ph-trash" type="button">${esc(t("photos.clean"))}</button>`;
-  phToolbar.querySelector<HTMLInputElement>(".ph-checkall")?.addEventListener("change", (e) => {
-    const on = (e.target as HTMLInputElement).checked;
-    visible.forEach((p) => (on ? sel.add(p) : sel.delete(p)));
+    <label class="fs-check"><input type="checkbox" class="ph-checkall" ${all ? "checked" : ""}${lists.photos.busy ? " disabled" : ""}></label>
+    <span class="fs-toolbar-count">${esc(n > 0 ? t("photos.checkedSize", { n, size: human(size) }) : t("photos.nothing"))}</span>
+    <button class="btn danger small ph-trash" type="button"${n === 0 || lists.photos.busy ? " disabled" : ""}>${lists.photos.busy ? `<span class="spin"></span>${esc(t("photos.moving"))}` : esc(t("photos.clean"))}</button>`;
+  const allBox = phToolbar.querySelector<HTMLInputElement>(".ph-checkall");
+  if (allBox) allBox.indeterminate = !all && some;
+  allBox?.addEventListener("change", () => {
+    if (allBox.disabled) return;
+    visible.forEach((p) => (allBox.checked ? sel.add(p) : sel.delete(p)));
     renderPhotoClusters();
   });
   phToolbar.querySelector<HTMLButtonElement>(".ph-trash")?.addEventListener("click", askTrashPhotos);
 }
 
+function removePhotos(removed: string[]) {
+  const roots = effectiveRemoved(removed);
+  for (const path of roots) lists.photos.gone.add(path);
+  for (const p of [...lists.photos.sel]) if (isGone(lists.photos, p)) lists.photos.sel.delete(p);
+  phClusters = phClusters.flatMap((cl) => {
+    const items = cl.items.filter((it) => !roots.some((r) => under(it.path, r)));
+    if (items.length < 2) return [];
+    const keep = items.find((it) => it.keep) ?? items.reduce((best, it) => (it.size > best.size ? it : best), items[0]!);
+    for (const it of items) it.keep = it.path === keep.path;
+    cl.items = items;
+    cl.totalSize = items.reduce((sum, it) => sum + (it.size >= 0 ? it.size : 0), 0);
+    cl.waste = Math.max(0, cl.totalSize - (keep.size >= 0 ? keep.size : 0));
+    return [cl];
+  });
+}
+
 function askTrashPhotos() {
-  const paths = [...lists.photos.sel];
-  if (paths.length === 0) return;
+  const paths = [...lists.photos.sel].filter((p) => !isGone(lists.photos, p));
+  if (paths.length === 0 || lists.photos.busy) return;
   pending = async () => {
+    lists.photos.busy = true;
+    renderPhotoClusters();
     try {
       const r = await Cleaner.cleanPaths(paths);
-      if (r.failed.length > 0) toast(t("photos.trashFail", { n: r.failed.length }), "err");
-      else {
-        const parts: string[] = [];
-        if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
-        if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
-        toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved === 0 && r.inUse > 0 ? "err" : "ok");
-      }
+      const parts: string[] = [];
+      if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
+      if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
+      if (r.failed.length > 0) parts.push(t("photos.trashFail", { n: r.failed.length }));
+      toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved > 0 ? "ok" : "err");
+      removePhotos(r.removed);
+      renderPhotoClusters();
     } catch (e) {
-      toast(t("fs.actionFail", { msg: msg(e) }), "err");
+      toast(t("fs.actionFail", { msg: errText(e) }), "err");
+    } finally {
+      lists.photos.busy = false;
+      renderPhotoClusters();
     }
-    lists.photos.sel.clear();
-    await startPhotoScan();
   };
   modalTitle.textContent = t("photos.clean");
   modalBody.textContent = t("photos.trashBody", { n: paths.length });
@@ -1453,8 +1690,8 @@ async function loadApps() {
     renderApps();
   } catch (e) {
     apps = [];
-    appListEl.innerHTML = errorState(t("apps.loadFail", { msg: msg(e) }), loadApps);
-    toast(t("apps.loadFail", { msg: msg(e) }), "err");
+    appListEl.innerHTML = errorState(t("apps.loadFail", { msg: errText(e) }), loadApps);
+    toast(t("apps.loadFail", { msg: errText(e) }), "err");
   }
 }
 
@@ -1484,7 +1721,7 @@ function renderApps() {
           <div class="app-size">${human(a.size)}</div>
           <div class="app-used muted small">${a.lastOpened ? fmtDate(a.lastOpened) : esc(t("apps.never"))}</div>
         </div>
-        <button class="btn small uninstall-detail" data-path="${esc(a.path)}">${esc(t("apps.detail"))}</button>
+        <button class="btn small uninstall-detail" data-path="${esc(a.path)}"${appBusy.has(a.path) ? " disabled" : ""}>${appBusy.has(a.path) ? `<span class="spin"></span>${esc(t("apps.moving"))}` : esc(t("apps.detail"))}</button>
       </div>`,
     )
     .join("");
@@ -1513,8 +1750,12 @@ async function showUninstallDetail(path: string) {
     modalBody.innerHTML = `<div class="detail-list">${rows}</div>
       <p class="warn-text">${esc(t("apps.body", { n: d.items.length, size: human(d.totalSize) }))}</p>`;
     pending = async () => {
+      if (appBusy.has(d.app.path)) return;
+      appBusy.add(d.app.path);
+      renderApps();
       try {
         const res = await Cleaner.uninstallApp(d.app.path);
+        const bundleFailed = res.failed.some((f) => f === res.path || f.startsWith(`${res.path}:`));
         if (res.moved === 0 && res.failed.some((f) => f.endsWith(": in-use"))) {
           toast(t("apps.inUse", { name: d.app.name }), "err");
         } else if (res.failed.length > 0) {
@@ -1522,15 +1763,19 @@ async function showUninstallDetail(path: string) {
         } else {
           toast(t("apps.ok", { name: d.app.name, size: human(res.freed) }));
         }
-        await loadApps();
+        if (!bundleFailed) apps = apps.filter((a) => a.path !== res.path);
+        renderApps();
       } catch (e) {
-        toast(t("apps.fail", { msg: msg(e) }), "err");
+        toast(t("apps.fail", { msg: errText(e) }), "err");
+      } finally {
+        appBusy.delete(d.app.path);
+        renderApps();
       }
     };
     modalOk.textContent = t("apps.confirm");
   } catch (e) {
     if (seq !== modalSeq) return;
-    modalBody.innerHTML = `<div class="err-inline">${esc(t("apps.analyzeFail", { msg: msg(e) }))}</div>`;
+    modalBody.innerHTML = `<div class="err-inline">${esc(t("apps.analyzeFail", { msg: errText(e) }))}</div>`;
     pending = null;
     modalOk.textContent = t("btn.close");
   } finally {
@@ -1544,7 +1789,7 @@ async function loadCatConfig() {
   try {
     catConfig = await Cleaner.getCategories();
   } catch (e) {
-    settingsStatus.textContent = t("settings.readFail", { msg: msg(e) });
+    settingsStatus.textContent = t("settings.readFail", { msg: errText(e) });
     settingsStatus.classList.add("err");
     return;
   }
@@ -1608,9 +1853,9 @@ saveCatsBtn.addEventListener("click", async () => {
     toast(t("settings.saved"));
     await scan();
   } catch (e) {
-    settingsStatus.textContent = t("settings.saveFail", { msg: msg(e) });
+    settingsStatus.textContent = t("settings.saveFail", { msg: errText(e) });
     settingsStatus.classList.add("err");
-    toast(t("settings.saveFail", { msg: msg(e) }), "err");
+    toast(t("settings.saveFail", { msg: errText(e) }), "err");
   } finally {
     setBusy(saveCatsBtn, false);
   }
