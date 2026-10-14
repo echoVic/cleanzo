@@ -41,7 +41,7 @@ bun run dev      # 开发模式，带热更新
 bun run build
 # 产物：
 #   build/darwin-arm64/Cleanzo.app
-#   build/darwin-arm64/Cleanzo 0.1.3.dmg
+#   build/darwin-arm64/Cleanzo 0.1.4.dmg
 ```
 
 `bun run build` 会用 `mygo.config.ts` 里配置的 Developer ID 证书签名，并提交苹果公证，只有存着这张证书的机器能完成（发版步骤见 [docs/RELEASING.md](docs/RELEASING.md)）。没有证书时，构建一个 ad hoc 签名、不公证的版本，只适合在自己的 Mac 上用：
@@ -50,7 +50,7 @@ bun run build
 bun run build -- -sign=- -skip-notarize
 ```
 
-版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.3」），同时挂着几个版本也分得清。
+版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.4」），同时挂着几个版本也分得清。
 
 ## 测试
 
