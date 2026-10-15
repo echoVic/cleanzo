@@ -2,7 +2,7 @@ import { defineConfig } from "mygo-cli";
 
 // The one place the version lives: the app reads it at run time, and the
 // disk image's volume carries it, so mounted versions are told apart.
-const version = "0.1.4";
+const version = "0.1.5";
 
 export default defineConfig({
   name: "Cleanzo",
@@ -16,6 +16,13 @@ export default defineConfig({
   frontendDist: "dist",
   bindings: "src/mygo.ts",
   out: "build",
+  // Signed auto-updates from this repository's GitHub releases. The secret
+  // key stays on the build machine, outside the repository.
+  updates: {
+    publicKey: "0ZE+ktIAa8WWCN9qm3Gyg+4q1He4iPKclVBRfi7lEQc=",
+    github: "echoVic/cleanzo",
+    privateKey: "~/Library/Application Support/mygo/update-keys/mygo-update.key",
+  },
   // `mygo build` signs the app and the dmg with this Developer ID (hardened
   // runtime + timestamp), notarizes the dmg and staples both; `mygo dev`
   // stays ad hoc. The profile is from `xcrun notarytool store-credentials`.

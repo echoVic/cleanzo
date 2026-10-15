@@ -246,6 +246,10 @@ addBtn.addEventListener("click", async () => {
 $("#settings-open-permission").addEventListener("click", () => {
   void Cleaner.openFullDiskAccessSettings().catch((e) => { permissionError = e; renderPermission(); });
 });
+// 更新窗口自己会说明结果（已是最新、找到新版本或检查失败）。
+$("#settings-check-update").addEventListener("click", () => {
+  void Cleaner.checkForUpdates().catch(() => {});
+});
 window.addEventListener("focus", () => {
   if (!view.classList.contains("hidden")) void checkPermission();
 });

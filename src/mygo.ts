@@ -301,6 +301,13 @@ export const Cleaner = {
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
+  /**
+   * CheckForUpdates opens the update window, which says when Cleanzo is up to
+   * date or offers the new version.
+   */
+  checkForUpdates(): Promise<void> {
+    return call("Cleaner.CheckForUpdates");
+  },
   /** CleanJunk streams progress, refreshing file usage before each selected item. */
   cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
     return call("Cleaner.CleanJunk", selections, scannedAt, ch);

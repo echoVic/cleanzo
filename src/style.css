@@ -1315,3 +1315,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .settings-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .setting-permission { align-items: flex-start; flex-wrap: wrap; }
 }
+
+/* 版本号与「检查更新」并排 */
+.setting-version { display: inline-flex; align-items: center; gap: 10px; }

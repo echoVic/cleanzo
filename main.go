@@ -35,6 +35,7 @@ import (
 	"unicode"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 )
 
 // TopItem is one of the largest entries inside a junk item.
@@ -509,6 +510,12 @@ func (Cleaner) OpenFullDiskAccessSettings() error {
 // Info returns basic system information.
 func (Cleaner) Info() SystemInfo {
 	return SystemInfo{Version: mygo.App.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version()}
+}
+
+// CheckForUpdates opens the update window, which says when Cleanzo is up to
+// date or offers the new version.
+func (Cleaner) CheckForUpdates() {
+	updater.CheckForUpdates()
 }
 
 // ---------------------------------------------------------------------------
@@ -2226,6 +2233,7 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 }
 
 func main() {
+	mygo.Use(updater.Plugin)
 	mygo.Bind(Cleaner{})
 
 	mygo.App.WhenReady(func() {
