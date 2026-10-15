@@ -2,7 +2,7 @@ import { defineConfig } from "mygo-cli";
 
 // The one place the version lives: the app reads it at run time, and the
 // disk image's volume carries it, so mounted versions are told apart.
-const version = "0.1.6";
+const version = "0.1.8";
 
 export default defineConfig({
   name: "Cleanzo",

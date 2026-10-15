@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cleanzo 0.1.7 · 系统状态页 · 视觉稿（离线评审版）</title>
+<style>
+:root, [data-theme="light"] {
+  --bg: #f5f6f7; --panel: #ffffff; --sidebar: #ffffff;
+  --text: #1f2329; --muted: #646a73; --faint: #8f959e;
+  --border: #e5e6eb; --hairline: #eceef1;
+  --primary: #0fb986; --primary-deep: #0a9e8e; --primary-bg: rgba(15,185,134,.10);
+  --danger: #ff3b30; --danger-deep: #e54d42;
+  --warn: #c77700; --warn-raw: #ff9500; --warn-bg: rgba(255,149,0,.10);
+  --crit: #d92c20; --crit-bg: rgba(255,59,48,.10);
+  --seg-app: #3b82f6; --seg-wired: #8b5cf6; --seg-comp: #f59e0b;
+  --skeleton: #eceef1; --skeleton-hi: #f6f7f9;
+  --toast-bg: #2b2c30; --toast-fg: #ffffff;
+  --shadow-card: 0 1px 2px rgba(30,32,36,.04);
+  --shadow-pop: 0 8px 28px rgba(30,32,36,.14);
+  --track: #eceef1; --track-used: #d3d6db;
+}
+[data-theme="dark"] {
+  --bg: #16171a; --panel: #232428; --sidebar: #1d1e22;
+  --text: #e8eaed; --muted: #9aa0a6; --faint: #6b7075;
+  --border: #34363b; --hairline: #2c2e33;
+  --primary: #12c790; --primary-deep: #0fb986; --primary-bg: rgba(18,199,144,.14);
+  --danger: #ff453a; --danger-deep: #ff453a;
+  --warn: #ffb02e; --warn-raw: #ff9f0a; --warn-bg: rgba(255,159,10,.12);
+  --crit: #ff6961; --crit-bg: rgba(255,69,58,.12);
+  --seg-app: #60a5fa; --seg-wired: #a78bfa; --seg-comp: #fbbf24;
+  --skeleton: #2c2e33; --skeleton-hi: #34363b;
+  --toast-bg: #3a3b40; --toast-fg: #f2f3f5;
+  --shadow-card: 0 1px 2px rgba(0,0,0,.28);
+  --shadow-pop: 0 8px 28px rgba(0,0,0,.45);
+  --track: #34363b; --track-used: #4a4d53;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--text); }
+body {
+  font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased; padding-bottom: 64px;
+}
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+/* 文档说明条 */
+.docbar {
+  max-width: 1200px; margin: 0 auto; padding: 20px 20px 8px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.docbar h1 { font-size: 16px; font-weight: 600; }
+.docbar .doc-tag {
+  font-size: 11px; font-weight: 600; color: var(--primary-deep);
+  background: var(--primary-bg); padding: 2px 8px; border-radius: 999px;
+}
+.docbar .doc-note { flex: 1 1 320px; color: var(--muted); font-size: 12px; }
+.docbar .doc-note b { color: var(--warn); }
+
+/* 按钮（复刻 cleanzo btn 词汇） */
+.btn {
+  appearance: none; border: 1px solid transparent; border-radius: 8px; cursor: pointer;
+  font: 500 13px/1 inherit; padding: 0 14px; height: 32px; color: var(--text);
+  background: transparent; transition: background .15s, border-color .15s, opacity .15s;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.btn.small { height: 26px; font-size: 12px; padding: 0 10px; border-radius: 7px; }
+.btn.primary { background: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-deep); }
+.btn.ghost { border-color: var(--border); background: var(--panel); }
+.btn.ghost:hover { border-color: var(--primary); color: var(--primary-deep); }
+.btn.danger { background: var(--danger-deep); color: #fff; }
+.btn.danger:hover { background: var(--danger); }
+.btn:disabled { opacity: .5; cursor: default; pointer-events: none; }
+
+/* 应用窗口 */
+.app-frame {
+  max-width: 1200px; margin: 12px auto 0; border-radius: 14px; overflow: hidden;
+  display: flex; border: 1px solid var(--border); box-shadow: var(--shadow-card); min-height: 660px;
+}
+.sidebar {
+  width: 208px; flex: none; background: var(--sidebar); border-right: 1px solid var(--border);
+  padding: 16px 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 14px; }
+.brand .logo { width: 26px; height: 26px; flex: none; }
+.brand-name { font-weight: 700; font-size: 15px; letter-spacing: .2px; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 10px;
+  border: none; border-radius: 8px; background: transparent; cursor: pointer;
+  font: 500 13.5px/1 inherit; color: var(--muted); width: 100%; text-align: left;
+}
+.nav-item:hover { background: var(--primary-bg); color: var(--text); }
+.nav-item.active { background: var(--primary-bg); color: var(--primary-deep); font-weight: 600; }
+.nav-item svg { flex: none; }
+.nav-section { font-size: 11px; color: var(--faint); padding: 14px 10px 4px; font-weight: 600; }
+.nav-separator { border-top: 1px solid var(--hairline); margin: 12px 4px; }
+.sidebar-foot { margin-top: auto; padding: 8px 10px; font-size: 11px; color: var(--faint); }
+
+/* 内容区 */
+.content { flex: 1; min-width: 0; padding: 20px 22px 28px; background: var(--bg); }
+.view-head h2 { font-size: 20px; font-weight: 700; }
+.view-head .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.machine-line { font-size: 12px; color: var(--muted); margin: 8px 0 14px; }
+
+/* 提示条 */
+.callout {
+  display: flex; align-items: center; gap: 12px; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 14px; background: var(--warn-bg);
+  border: 1px solid rgba(255,149,0,.25);
+}
+.callout.crit { background: var(--crit-bg); border-color: rgba(255,59,48,.25); }
+.callout .ico { flex: none; width: 18px; height: 18px; color: var(--warn-raw); }
+.callout.crit .ico { color: var(--danger); }
+.callout .body { flex: 1; min-width: 0; font-size: 13px; line-height: 1.55; }
+.callout .body .extra { display: block; color: var(--muted); margin-top: 2px; }
+
+/* 指标卡 */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(226px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 15px 16px; box-shadow: var(--shadow-card); }
+.card .head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.card .head svg { color: var(--muted); }
+.card .head .name { font-size: 13px; font-weight: 600; flex: 1; }
+.badge { font-size: 11px; font-weight: 600; padding: 1.5px 8px; border-radius: 999px; }
+.badge.warn { color: var(--warn); background: var(--warn-bg); }
+.badge.crit { color: var(--crit); background: var(--crit-bg); }
+.main-val { font-size: 24px; font-weight: 600; letter-spacing: -.2px; }
+.main-val .unit { font-size: 14px; font-weight: 500; color: var(--muted); }
+.caption { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.bar { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; display: flex; margin-top: 10px; }
+.bar .seg-app { background: var(--seg-app); }
+.bar .seg-wired { background: var(--seg-wired); }
+.bar .seg-comp { background: var(--seg-comp); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; font-size: 11px; color: var(--muted); }
+.legend i { display: inline-block; width: 7px; height: 7px; border-radius: 3px; margin-right: 4px; vertical-align: 1px; }
+.subline { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.subline + .subline { margin-top: 3px; }
+.spark { margin-top: 10px; }
+.spark svg { display: block; width: 100%; height: 28px; }
+.dbar { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; margin-top: 10px; }
+.dbar > div { height: 100%; background: var(--primary); }
+.card .head-actions { margin-top: 10px; }
+
+/* 应用列表 */
+.list-head { display: flex; align-items: center; gap: 12px; margin: 22px 0 6px; }
+.list-head h3 { font-size: 14px; font-weight: 600; flex: 1; }
+.seg { display: inline-flex; background: var(--track); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button {
+  border: none; background: transparent; height: 26px; padding: 0 12px; border-radius: 7px;
+  font: 500 12px/1 inherit; color: var(--muted); cursor: pointer;
+}
+.seg button.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.10); }
+.app-list { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-card); }
+.app-list.hl { outline: 2px solid var(--primary); outline-offset: 2px; }
+.row { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--hairline); transition: opacity .3s; }
+.row:last-child { border-bottom: none; }
+.row.quitted { opacity: .45; }
+.row.fadeout { opacity: 0; transition: opacity .45s; }
+.row .ico {
+  width: 24px; height: 24px; border-radius: 7px; flex: none; color: #fff;
+  font: 600 12px/24px inherit; text-align: center;
+}
+.row .app-name { font-size: 13.5px; min-width: 0; flex: none; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .procs { font-size: 12px; color: var(--muted); flex: 1; min-width: 0; }
+.row .col-mem, .row .col-cpu { font-size: 13px; width: 86px; text-align: right; flex: none; }
+.row .col-cpu { width: 64px; color: var(--muted); }
+.list-cols { display: flex; gap: 10px; padding: 8px 14px 4px; font-size: 11px; color: var(--faint); }
+.list-cols .spacer { flex: 1; }
+.list-cols .c-mem { width: 86px; text-align: right; }
+.list-cols .c-cpu { width: 64px; text-align: right; }
+.list-cols .c-act { width: 50px; text-align: right; }
+.footnote { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+/* toast（示意复用既有组件的调用与位置，非本页新组件） */
+.toast {
+  position: fixed; right: 24px; bottom: 24px; z-index: 60;
+  background: var(--toast-bg); color: var(--toast-fg); font-size: 13px;
+  border-radius: 10px; padding: 10px 16px; box-shadow: var(--shadow-pop);
+  opacity: 0; transform: translateY(8px); pointer-events: none;
+  transition: opacity .18s, transform .18s;
+}
+.toast.show { opacity: 1; transform: none; pointer-events: auto; }
+
+/* modal */
+.overlay {
+  position: fixed; inset: 0; z-index: 50; background: rgba(20,22,26,.42);
+  display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none;
+  transition: opacity .15s;
+}
+.overlay.open { opacity: 1; pointer-events: auto; }
+.modal {
+  width: 400px; max-width: calc(100vw - 48px); background: var(--panel); border-radius: 14px;
+  padding: 22px 24px 18px; box-shadow: var(--shadow-pop); border: 1px solid var(--border);
+  transform: scale(.97); transition: transform .15s;
+}
+.overlay.open .modal { transform: none; }
+.modal h4 { font-size: 15.5px; font-weight: 600; margin-bottom: 8px; }
+.modal .modal-body { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* 状态小样 */
+.samples { max-width: 1200px; margin: 26px auto 0; padding: 0 20px; }
+.samples > h3 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+.samples > .hint { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.sample-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(266px, 1fr)); gap: 12px; }
+.sample { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--bg); }
+.sample .cap { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 10px; }
+.sample .mini-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.sk-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.sk-line { height: 9px; border-radius: 5px; background: var(--skeleton); margin-top: 8px; }
+.sk-line.w40 { width: 40%; } .sk-line.w70 { width: 70%; } .sk-line.w90 { width: 90%; } .sk-line.w55 { width: 55%; }
+.shimmer .sk-line { background: linear-gradient(90deg, var(--skeleton) 25%, var(--skeleton-hi) 45%, var(--skeleton) 65%); background-size: 220% 100%; animation: shimmer 1.4s infinite linear; }
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -80% 0; } }
+.sk-row { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; padding: 8px 10px; }
+.err-state { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+.err-state .eico { color: var(--danger); }
+.err-state p { font-size: 13px; margin: 6px 0 12px; }
+.modal-shot { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 14px; }
+.modal-shot h5 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.modal-shot p { font-size: 12px; color: var(--muted); }
+.modal-shot .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* 页脚 */
+.docfoot { max-width: 1200px; margin: 22px auto 0; padding: 0 20px; font-size: 12px; color: var(--muted); }
+.docfoot b { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 720px) {
+  .sidebar { display: none; }
+  .row .col-mem { width: 66px; }
+}
+</style>
+</head>
+<body>
+
+<header class="docbar">
+  <h1>Cleanzo 0.1.7 · 系统状态页 · 视觉稿</h1>
+  <span class="doc-tag">离线评审版 · 2026-10-15</span>
+  <span class="doc-note">数据为设计原文那台 M2 Pro 的<b>示例实测读数</b>，仅作视觉与布局基准。实现依据以《系统状态页设计优化稿》16 节全文为准，本稿不替代规格。可交互：亮暗切换、排序切换、退出确认流程。</span>
+  <button class="btn ghost small" id="theme-btn" type="button">🌙 暗色</button>
+</header>
+
+<div class="app-frame">
+  <aside class="sidebar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
+        <rect x="1" y="1" width="22" height="22" rx="6.5" fill="url(#lg)"/>
+        <path d="M12 4.5c.65 4.2 3.1 6.65 7.3 7.3-4.2.65-6.65 3.1-7.3 7.3-.65-4.2-3.1-6.65-7.3-7.3 4.2-.65 6.65-3.1 7.3-7.3z" fill="#fff"/>
+        <circle cx="15.6" cy="8" r="1.35" fill="#fff"/><circle cx="8.4" cy="16.4" r=".9" fill="#fff" opacity=".9"/>
+      </svg>
+      <span class="brand-name">Cleanzo</span>
+    </div>
+    <nav>
+      <button class="nav-item" type="button">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.7 4.4 3.3 7 7.7 7.7-4.4.7-7 3.3-7.7 7.7-.7-4.4-3.3-7-7.7-7.7 4.4-.7 7-3.3 7.7-7.7z"/><circle cx="17.5" cy="17.5" r="1.4"/></svg>
+        <span>垃圾清理</span>
+      </button>
+      <button class="nav-item active" type="button">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+        <span>系统状态</span>
+      </button>
+      <div class="nav-section">空间</div>
+      <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/><path d="M8.5 11h5M11 8.5v5"/></svg><span>空间分析</span></button>
+      <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15h4.5L11 8l3 9 2.5-5H20"/><circle cx="12" cy="12" r="9"/></svg><span>大文件</span></button>
+      <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg><span>相似照片</span></button>
+      <div class="nav-section">应用</div>
+      <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="2"/><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="2"/><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="2"/><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="2"/></svg><span>应用卸载</span></button>
+      <div class="nav-separator" role="separator"></div>
+      <button class="nav-item" type="button"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg><span>设置</span></button>
+    </nav>
+    <div class="sidebar-foot">Cleanzo 0.1.7</div>
+  </aside>
+
+  <main class="content">
+    <header class="view-head">
+      <h2>系统状态</h2>
+      <p class="sub">内存、CPU、磁盘和电池的状态，紧张时告诉你怎么办</p>
+    </header>
+    <p class="machine-line num">Apple M2 Pro · 32 GB 内存 · macOS 26.6.2 · 已运行 4 天 10 小时</p>
+
+    <div class="callout" role="status">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <div class="body">内存紧张：系统正在压缩内存、写交换文件，应用会变慢。退出不用的应用能缓解。
+        <span class="extra num">交换文件占了 22 GB 磁盘。</span>
+      </div>
+      <button class="btn ghost small" id="view-apps-btn" type="button">查看占内存的应用</button>
+    </div>
+
+    <section class="card-grid" aria-label="指标卡">
+      <div class="card">
+        <div class="head">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 10v4M11 10v4M15 10v4"/></svg>
+          <span class="name">内存</span>
+          <span class="badge warn">紧张</span>
+        </div>
+        <div class="main-val num">27.2 <span class="unit">/ 32 GB</span></div>
+        <div class="bar" role="img" aria-label="已使用 27.2 GB：App 内存 11.9 GB、联动内存 3.8 GB、被压缩 11.5 GB">
+          <div class="seg-app" style="width:43.8%"></div>
+          <div class="seg-wired" style="width:14.0%"></div>
+          <div class="seg-comp" style="width:42.2%"></div>
+        </div>
+        <div class="legend num">
+          <span><i style="background:var(--seg-app)"></i>App 内存 11.9 GB</span>
+          <span><i style="background:var(--seg-wired)"></i>联动内存 3.8 GB</span>
+          <span><i style="background:var(--seg-comp)"></i>被压缩 11.5 GB</span>
+        </div>
+        <div class="subline num">已缓存文件 4.1 GB</div>
+        <div class="subline num">交换文件 已用 21.5 GB · 占磁盘 22 GB</div>
+      </div>
+
+      <div class="card">
+        <div class="head">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>
+          <span class="name">CPU</span>
+        </div>
+        <div class="main-val num">23%</div>
+        <div class="caption">占总核心 · 最近 1 分钟</div>
+        <div class="spark" aria-hidden="true">
+          <svg viewBox="0 0 120 28" preserveAspectRatio="none">
+            <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--primary)" stop-opacity=".28"/><stop offset="1" stop-color="var(--primary)" stop-opacity="0"/></linearGradient></defs>
+            <path fill="url(#sg)" d="M0,22 L4,21 8,22 12,19 16,20 20,16 24,18 28,14 32,15 36,12 40,13 44,10 48,12 52,9 56,11 60,8 64,10 68,7 72,9 76,6 80,8 84,10 88,7 92,9 96,6 100,8 104,5 108,7 112,9 116,6 120,7 L120,28 L0,28 Z"/>
+            <path fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-linejoin="round" d="M0,22 L4,21 8,22 12,19 16,20 20,16 24,18 28,14 32,15 36,12 40,13 44,10 48,12 52,9 56,11 60,8 64,10 68,7 72,9 76,6 80,8 84,10 88,7 92,9 96,6 100,8 104,5 108,7 112,9 116,6 120,7"/>
+          </svg>
+        </div>
+        <div class="subline num">负载 8.3 · 5.3 · 4.9</div>
+        <div class="subline num">12 核</div>
+      </div>
+
+      <div class="card">
+        <div class="head">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.2"/><path d="M17.5 7.5h.01"/></svg>
+          <span class="name">磁盘</span>
+        </div>
+        <div class="main-val num">可用 91 GB</div>
+        <div class="dbar"><div style="width:80%"></div></div>
+        <div class="subline num">共 460 GB · 已用 80%</div>
+        <div class="head-actions"><button class="btn ghost small" type="button">去清理 ›</button></div>
+      </div>
+
+      <div class="card">
+        <div class="head">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="8" width="17" height="9" rx="2"/><path d="M21.5 11v3"/><path d="m10 10-2 3h2.2L10 16"/></svg>
+          <span class="name">电池</span>
+        </div>
+        <div class="main-val num">100%</div>
+        <div class="caption">已充满 · 已接电源</div>
+        <div class="subline num">最大容量 83% · 循环 170 次</div>
+      </div>
+    </section>
+
+    <div class="list-head" id="apps-anchor">
+      <h3>占用最多的应用</h3>
+      <div class="seg" role="tablist" aria-label="排序方式">
+        <button class="on" id="seg-mem" type="button" role="tab" aria-selected="true">按内存</button>
+        <button id="seg-cpu" type="button" role="tab" aria-selected="false">按 CPU</button>
+      </div>
+    </div>
+    <div class="list-cols num"><span class="spacer"></span><span class="c-mem">内存</span><span class="c-cpu">CPU · 单核</span><span class="c-act"></span></div>
+    <section class="app-list" id="app-list" aria-live="polite"></section>
+    <p class="footnote">已统计你账户下的 740 个进程，系统和其他账户的进程未计入。应用 CPU 与活动监视器一致，按单核计算，可以超过 100%。</p>
+  </main>
+</div>
+
+<section class="samples">
+  <h3>状态一览（实现需覆盖）</h3>
+  <p class="hint">加载骨架 · 错误态 · 无电池（3 卡） · 退出确认框。规格对应设计稿 §8、§11.1。</p>
+  <div class="sample-grid">
+    <div class="sample">
+      <div class="cap">① 加载中 · 骨架（首份采样 ≤3s；禁 0/假值；机器行先显）</div>
+      <div class="muted small num" style="margin-bottom:8px">Apple M2 Pro · 32 GB 内存 · macOS 26.6.2 · 已运行 4 天 10 小时</div>
+      <div class="mini-grid shimmer">
+        <div class="sk-card"><div class="sk-line w40"></div><div class="sk-line w70"></div><div class="sk-line w90"></div></div>
+        <div class="sk-card"><div class="sk-line w40"></div><div class="sk-line w55"></div><div class="sk-line w70"></div></div>
+        <div class="sk-card"><div class="sk-line w40"></div><div class="sk-line w55"></div><div class="sk-line w70"></div></div>
+        <div class="sk-card"><div class="sk-line w40"></div><div class="sk-line w55"></div><div class="sk-line w70"></div></div>
+      </div>
+      <div class="sk-row"><div class="sk-line w40"></div><div class="sk-line w90"></div></div>
+      <div class="sk-row"><div class="sk-line w40"></div><div class="sk-line w70"></div></div>
+    </div>
+    <div class="sample">
+      <div class="cap">② 错误态（通道出错 · errorState + 重试）</div>
+      <div class="err-state">
+        <svg class="eico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+        <p>读取系统状态失败</p>
+        <button class="btn ghost small" type="button">重试</button>
+      </div>
+    </div>
+    <div class="sample">
+      <div class="cap">③ 无电池（Battery == nil · 3 卡自动降列）</div>
+      <div class="mini-grid">
+        <div class="sk-card" style="padding:10px"><div class="sk-line w40" style="background:var(--track-used)"></div><div class="sk-line w70" style="background:var(--track-used)"></div><div class="sk-line w90" style="background:var(--track-used)"></div></div>
+        <div class="sk-card" style="padding:10px"><div class="sk-line w40" style="background:var(--track-used)"></div><div class="sk-line w55" style="background:var(--track-used)"></div><div class="sk-line w70" style="background:var(--track-used)"></div></div>
+        <div class="sk-card" style="padding:10px"><div class="sk-line w40" style="background:var(--track-used)"></div><div class="sk-line w55" style="background:var(--track-used)"></div><div class="sk-line w70" style="background:var(--track-used)"></div></div>
+      </div>
+      <div class="muted small" style="margin-top:8px">电池卡不渲染，网格 auto-fill 自动降为 3 卡，无占位。</div>
+    </div>
+    <div class="sample">
+      <div class="cap">④ 退出确认（沿用现有 modal · 确认期间列表冻结）</div>
+      <div class="modal-shot">
+        <h5>退出「Google Chrome」？</h5>
+        <p>和在 Dock 里选「退出」一样，有没存的内容时，它会先问你。</p>
+        <div class="acts">
+          <button class="btn ghost small" type="button">取消</button>
+          <button class="btn danger small" type="button">退出</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="docfoot">
+  <b>交接说明</b>：本文件为离线视觉基准稿，交互演示（排序切换 / 退出确认 → 等待 → toast / 提示条联动 / 亮暗主题）仅示意最终行为；数值口径、阈值、状态矩阵、退出结果文案与研发映射以《Cleanzo 0.1.7 系统状态页设计优化稿》16 节全文为准（评审确认：四卡重组、口径前移、骨架加载、数值图例、安全退出协议、排序会话记忆、退出反馈复用既有 toast；指标卡列数经评审后修正为 auto-fill 公式推导：内容宽 ≥940px 4 列、476–939px 2–3 列、<476px 1 列）。
+</footer>
+
+<div class="overlay" id="quit-overlay" role="dialog" aria-modal="true" aria-labelledby="quit-title">
+  <div class="modal">
+    <h4 id="quit-title">退出「Google Chrome」？</h4>
+    <div class="modal-body" id="quit-body">和在 Dock 里选「退出」一样，有没存的内容时，它会先问你。</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="quit-cancel" type="button">取消</button>
+      <button class="btn danger" id="quit-ok" type="button">退出</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  var APPS = [
+    { name: 'Google Chrome', procs: 62, mem: 20.5, cpu: 11,  color: '#4285f4' },
+    { name: 'Arc',           procs: 14, mem: 11.7, cpu: 31,  color: '#8b5cf6' },
+    { name: 'TRAE CN',       procs: 79, mem: 6.1,  cpu: 10,  color: '#0fb986' },
+    { name: '飞书',          procs: 23, mem: 4.7,  cpu: 3,   color: '#3370ff' },
+    { name: '豆包工作',      procs: 35, mem: 3.8,  cpu: 2,   color: '#06b6d4' },
+    { name: 'cmux',          procs: 66, mem: 3.7,  cpu: 5,   color: '#f59e0b' }
+  ];
+  var order = 'mem';
+  var quitted = {};
+
+  function render() {
+    var list = APPS.slice().sort(function (a, b) { return order === 'mem' ? b.mem - a.mem : b.cpu - a.cpu; });
+    var box = document.getElementById('app-list');
+    box.innerHTML = '';
+    list.forEach(function (app) {
+      var row = document.createElement('div');
+      row.className = 'row';
+      if (quitted[app.name]) row.classList.add('quitted');
+      var letter = app.name.trim().charAt(0).toUpperCase();
+      row.innerHTML =
+        '<span class="ico" style="background:' + app.color + '">' + letter + '</span>' +
+        '<span class="app-name" title="' + app.name + '">' + app.name + '</span>' +
+        '<span class="procs num">' + app.procs + ' 个进程</span>' +
+        '<span class="col-mem num">' + app.mem.toFixed(1) + ' GB</span>' +
+        '<span class="col-cpu num">' + app.cpu + '%</span>';
+      if (!quitted[app.name]) {
+        var btn = document.createElement('button');
+        btn.className = 'btn ghost small'; btn.type = 'button'; btn.textContent = '退出';
+        btn.addEventListener('click', function () { openQuit(app, btn, row); });
+        row.appendChild(btn);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  var themeBtn = document.getElementById('theme-btn');
+  themeBtn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    themeBtn.textContent = next === 'dark' ? '☀️ 亮色' : '🌙 暗色';
+  });
+
+  document.getElementById('seg-mem').addEventListener('click', function () { setOrder('mem'); });
+  document.getElementById('seg-cpu').addEventListener('click', function () { setOrder('cpu'); });
+  function setOrder(o) {
+    order = o;
+    document.getElementById('seg-mem').classList.toggle('on', o === 'mem');
+    document.getElementById('seg-cpu').classList.toggle('on', o === 'cpu');
+    document.getElementById('seg-mem').setAttribute('aria-selected', o === 'mem');
+    document.getElementById('seg-cpu').setAttribute('aria-selected', o === 'cpu');
+    render();
+  }
+
+  document.getElementById('view-apps-btn').addEventListener('click', function () {
+    setOrder('mem');
+    var el = document.getElementById('app-list');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('hl');
+    setTimeout(function () { el.classList.remove('hl'); }, 1200);
+  });
+
+  var toastTimer = null;
+  function showToast(text) {
+    var t = document.getElementById('toast');
+    t.textContent = text; t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 3000);
+  }
+
+  var current = null;
+  function openQuit(app, btn, row) {
+    current = { app: app, btn: btn, row: row };
+    document.getElementById('quit-title').textContent = '退出「' + app.name + '」？';
+    document.getElementById('quit-overlay').classList.add('open');
+  }
+  document.getElementById('quit-cancel').addEventListener('click', closeQuit);
+  document.getElementById('quit-overlay').addEventListener('click', function (e) {
+    if (e.target === this) closeQuit();
+  });
+  function closeQuit() {
+    document.getElementById('quit-overlay').classList.remove('open');
+    current = null;
+  }
+  document.getElementById('quit-ok').addEventListener('click', function () {
+    if (!current) return;
+    var app = current.app, btn = current.btn, row = current.row;
+    document.getElementById('quit-overlay').classList.remove('open');
+    btn.disabled = true; btn.textContent = '正在退出…';
+    setTimeout(function () {
+      quitted[app.name] = true;
+      showToast('已退出「' + app.name + '」');
+      row.classList.add('fadeout');
+      setTimeout(render, 500);
+    }, 800);
+    current = null;
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

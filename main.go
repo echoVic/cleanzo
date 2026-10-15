@@ -136,6 +136,11 @@ type SystemInfo struct {
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
 	GoVersion string `json:"goVersion"`
+	Chip      string `json:"chip"`      // e.g. "Apple M2 Pro"; empty under go test
+	Memory    uint64 `json:"memory"`    // bytes
+	Cores     uint64 `json:"cores"`     // logical cores
+	OSVersion string `json:"osVersion"` // e.g. "26.6.2"
+	BootTime  int64  `json:"bootTime"`  // unix seconds
 }
 
 // Cleaner is callable from the frontend: `mygo generate` turns its methods
@@ -507,9 +512,14 @@ func (Cleaner) OpenFullDiskAccessSettings() error {
 	return exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Run()
 }
 
-// Info returns basic system information.
+// Info returns basic system information, including the About This Mac
+// line the status page's header shows.
 func (Cleaner) Info() SystemInfo {
-	return SystemInfo{Version: mygo.App.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version()}
+	chip, mem, cores, ver, boot := nativeMachineInfo()
+	return SystemInfo{
+		Version: mygo.App.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH, GoVersion: runtime.Version(),
+		Chip: chip, Memory: mem, Cores: cores, OSVersion: ver, BootTime: boot,
+	}
 }
 
 // CheckForUpdates opens the update window, which says when Cleanzo is up to

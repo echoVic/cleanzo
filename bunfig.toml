@@ -1,0 +1,4 @@
+[test]
+# 排除项目快照（参考用旧基线代码），避免其 mock 覆盖当前 src 的同名模块
+exclude = ["**/downloads/**", "**/node_modules/**"]
+root = "tests"

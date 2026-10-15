@@ -10,7 +10,7 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:web": "bun test tests/"
+    "test:web": "bun test tests/junk.test.ts && bun test tests/status.test.ts"
   },
   "dependencies": {
     "mygo-runtime": "^0.3.6"
@@ -19,5 +19,6 @@
     "mygo-cli": "^0.3.6",
     "typescript": "^7",
     "vite": "^8"
-  }
+  },
+  "packageManager": "pnpm@12.11.2+sha512.25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9"
 }

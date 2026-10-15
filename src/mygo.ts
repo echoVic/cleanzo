@@ -17,11 +17,53 @@ export interface AppInfo {
   running: boolean;
 }
 
+/**
+ * AppUsage is one merged row: a bundle's processes summed up. CPU is a
+ * single-core percentage like Activity Monitor's CPU column, so it can
+ * exceed 100 while the card above stays below it.
+ */
+export interface AppUsage {
+  key: string;
+  name: string;
+  path: string;
+  memory: number;
+  cpu: number;
+  procs: number;
+  quit: boolean;
+}
+
+/**
+ * BatteryStatus mirrors what System Settings shows. Fields the system
+ * does not report stay zero/empty and render as dashes.
+ */
+export interface BatteryStatus {
+  percent: number;
+  charging: boolean;
+  full: boolean;
+  plugged: boolean;
+  cycles: number;
+  maxCapacity: number;
+  /** e.g. "Normal"; "" unknown */
+  condition: string;
+}
+
 /** BigItem is a large directory discovered by the full scan. */
 export interface BigItem {
   path: string;
   size: number;
   trashable: boolean;
+}
+
+/**
+ * CPUStatus is the overall CPU card: usage is a percentage of all cores,
+ * matching Activity Monitor's "User + System" at the bottom of its window.
+ * Loads are the 1/5/15-minute averages from sysctl vm.loadavg.
+ */
+export interface CPUStatus {
+  usage: number;
+  load1: number;
+  load5: number;
+  load15: number;
 }
 
 /** CleanResult reports what a clean pass did. */
@@ -160,6 +202,31 @@ export interface LargeScanResult {
   threshold: number;
 }
 
+/**
+ * MemoryStatus is the memory picture in Activity Monitor's terms.
+ * All byte values; zero means "could not be read" and shows as a dash.
+ */
+export interface MemoryStatus {
+  /** hw.memsize */
+  total: number;
+  /** app + wired + compressed */
+  used: number;
+  /** internal − purgeable */
+  app: number;
+  /** pages wired down */
+  wired: number;
+  /** pages the compressor holds in physical memory */
+  compressed: number;
+  /** external + purgeable, not part of Used */
+  cached: number;
+  /** 1 normal, 2 warn, 4 critical; unknown → normal */
+  pressure: number;
+  /** sysctl vm.swapusage used */
+  swapUsed: number;
+  /** = disk space the swap files take */
+  swapTotal: number;
+}
+
 /** OrphanItem is a leftover directory or file not owned by an installed app. */
 export interface OrphanItem {
   path: string;
@@ -237,6 +304,18 @@ export interface SimilarPhotosResult {
   elapsedMs: number;
 }
 
+/** StatusSample is one complete reading, sent every two seconds. */
+export interface StatusSample {
+  memory: MemoryStatus;
+  cpu: CPUStatus;
+  disk: DiskStat;
+  /** nil: desktop Mac, or not read yet */
+  battery: BatteryStatus | null;
+  apps: AppUsage[];
+  /** processes counted, this user only */
+  procs: number;
+}
+
 /** SubItem is a separately selectable part of an item. */
 export interface SubItem {
   path: string;
@@ -253,6 +332,16 @@ export interface SystemInfo {
   os: string;
   arch: string;
   goVersion: string;
+  /** e.g. "Apple M2 Pro"; empty under go test */
+  chip: string;
+  /** bytes */
+  memory: number;
+  /** logical cores */
+  cores: number;
+  /** e.g. "26.6.2" */
+  osVersion: string;
+  /** unix seconds */
+  bootTime: number;
 }
 
 /** TopItem is one of the largest entries inside a junk item. */
@@ -348,7 +437,10 @@ export const Cleaner = {
   getSettings(): Promise<Settings> {
     return call("Cleaner.GetSettings");
   },
-  /** Info returns basic system information. */
+  /**
+   * Info returns basic system information, including the About This Mac
+   * line the status page's header shows.
+   */
   info(): Promise<SystemInfo> {
     return call("Cleaner.Info");
   },
@@ -381,6 +473,18 @@ export const Cleaner = {
   /** PickFolder opens a folder panel on the calling window, returning empty on cancel. */
   pickFolder(): Promise<string> {
     return call("Cleaner.PickFolder");
+  },
+  /**
+   * QuitApp asks the apps at path to terminate, exactly like choosing Quit
+   * in the Dock: it re-checks the running list at call time, never force
+   * kills, excludes Finder and Cleanzo itself, and waits up to five seconds
+   * for them to finish. Returns true when they are all gone. (false, nil)
+   * means the quit was sent but an app was still running after the wait
+   * (typically an unsaved-work dialog); the errors carry not-running and
+   * cannot-quit, the latter when terminate was refused outright.
+   */
+  quitApp(path: string): Promise<boolean> {
+    return call("Cleaner.QuitApp", path);
   },
   /**
    * RevealInFinder shows path in Finder: plain folders open in place; files
@@ -421,5 +525,16 @@ export const Cleaner = {
    */
   uninstallApp(path: string): Promise<UninstallResult> {
     return call("Cleaner.UninstallApp", path);
+  },
+  /**
+   * WatchStatus streams one StatusSample every two seconds while the status
+   * page is open. The first sample waits for the CPU's second reading (so
+   * usage is real, not a since-boot average) and for the first battery read,
+   * three seconds at most; afterwards battery refreshes once a minute in the
+   * background and rides along with each sample. Cancel the context (the
+   * frontend closes the channel) to stop.
+   */
+  watchStatus(ch: Channel<StatusSample>): Promise<void> {
+    return call("Cleaner.WatchStatus", ch);
   },
 } as const;

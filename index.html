@@ -25,7 +25,11 @@
           <span class="brand-name">Cleanzo</span>
         </div>
         <nav class="nav">
-          <button class="nav-item active" data-view="clean" type="button">
+          <button class="nav-item active" data-view="status" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+            <span data-i18n="nav.status">系统状态</span>
+          </button>
+          <button class="nav-item" data-view="clean" type="button">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.7 4.4 3.3 7 7.7 7.7-4.4.7-7 3.3-7.7 7.7-.7-4.4-3.3-7-7.7-7.7 4.4-.7 7-3.3 7.7-7.7z"/><circle cx="17.5" cy="17.5" r="1.4"/></svg>
             <span data-i18n="nav.clean">垃圾清理</span>
           </button>
@@ -57,8 +61,38 @@
       </aside>
 
       <main class="content">
+        <!-- 系统状态 -->
+        <section id="view-status" class="view">
+          <header class="view-head">
+            <div>
+              <h2 data-i18n="nav.status">系统状态</h2>
+              <p class="muted" data-i18n="status.sub">内存、CPU、磁盘和电池的状态，紧张时告诉你怎么办</p>
+              <p id="st-machine" class="st-machine num"></p>
+            </div>
+          </header>
+          <div id="st-alerts"></div>
+          <section id="st-cards" class="st-grid" aria-label="指标卡"></section>
+          <section class="st-listcard">
+            <div class="st-list-head" id="st-list-head">
+              <h3 data-i18n="status.apps.title">占用最多的应用</h3>
+              <div class="seg" role="tablist" aria-label="排序方式">
+                <button id="st-seg-mem" class="on" type="button" role="tab" aria-selected="true" data-i18n="status.apps.byMemory">按内存</button>
+                <button id="st-seg-cpu" type="button" role="tab" aria-selected="false" data-i18n="status.apps.byCpu">按 CPU</button>
+              </div>
+            </div>
+            <div class="st-cols num">
+              <span class="c-app" data-i18n="status.apps.appCol">应用</span>
+              <span class="c-mem" data-i18n="status.apps.memCol">内存</span>
+              <span class="c-cpu" data-i18n="status.apps.cpuCol">CPU · 单核</span>
+              <span class="c-act"></span>
+            </div>
+            <section id="st-list" class="st-list" aria-live="polite"></section>
+            <p id="st-footnote" class="st-footnote muted small"></p>
+          </section>
+        </section>
+
         <!-- 垃圾清理 -->
-        <section id="view-clean" class="view">
+        <section id="view-clean" class="view hidden">
           <header class="view-head">
             <div>
               <h2 data-i18n="nav.clean">垃圾清理</h2>

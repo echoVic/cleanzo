@@ -1,5 +1,6 @@
 import { showSettings, refreshSettingsI18n } from "./settings";
 import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
+import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
   $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
   skeletonRows, setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
@@ -145,6 +146,7 @@ function refreshI18n() {
     renderPhotoClusters();
   }
   syncPhotoViewer();
+  refreshStatusI18n();
 }
 
 langSelect.addEventListener("change", () => {
@@ -162,6 +164,7 @@ const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stoppe
 function switchView(v: View) {
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
+  if (v === "status") startStatus(); else stopStatus();
   if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showSettings();
@@ -1447,6 +1450,10 @@ document.addEventListener("keydown", (e) => {
 setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
 initJunk();
+initStatus();
+// 默认落在「系统状态」（HTML 初始高亮已同步），启动即开始采样
+switchView("status");
+setGoCleanView(() => switchView("clean"));
 setOpenLeftovers(() => {
   appsTab = "leftovers";
   switchView("apps");

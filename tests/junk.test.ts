@@ -101,6 +101,11 @@ mock.module("../src/mygo", () => ({ Cleaner: {
   saveSettings: async (s: unknown) => { if (saveError) throw Error("blocked"); saved = s; },
   revealInFinder: async (p: string) => { revealed = p; },
   openFullDiskAccessSettings: async () => {},
+  // 兼容 status.test.ts 的 Cleaner 调用面（junk 不使用，但 mock.module
+  // 注册表跨文件共享，缺这些方法会让 status 的 watchStatus/quitApp 变 undefined）
+  info: async () => ({ chip: "", memory: 0, cores: 0, osVersion: "", bootTime: 0 }),
+  watchStatus: (_ch: unknown) => new Promise<void>(() => {}),
+  quitApp: async (_path: string) => true,
 } }));
 
 let junk: typeof import("../src/junk");

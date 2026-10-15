@@ -15,6 +15,7 @@ const heroSub = $("#hero-sub");
 const heroProgress = $("#hero-progress");
 const heroBar = $("#hero-bar");
 const hero = $("#view-clean .hero");
+const headActions = $("#view-clean .head-actions");
 const scanBtn = $<HTMLButtonElement>("#scan");
 const cleanBtn = $<HTMLButtonElement>("#clean-all");
 
@@ -203,9 +204,16 @@ function render() {
     return;
   }
   if (phase === "idle") {
-    listEl.innerHTML = `<div class="empty-guide"><div class="junk-idle-icon" aria-hidden="true">${icon({ group: "updates" } as JunkItem)}</div>
-      <h3>${esc(t("clean.idle.title"))}</h3><p>${esc(t("clean.idle.desc"))}</p>
-      <button class="btn primary big" type="button" data-action="scan">${esc(t("clean.idle.cta"))}</button></div>`;
+    // 中轴组合块：扫描环 + 可释放空间 + 引导语 + CTA + 安全说明 + 范围 chips
+    listEl.innerHTML = `<div class="home-axis">
+      <div class="ha-ring" aria-hidden="true"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></div>
+      <div class="ha-avail-label">${esc(t("hero.ready"))}</div>
+      <div class="ha-avail num"><b>--</b><span>${esc(t("clean.idleSub"))}</span></div>
+      <div class="ha-guide">${esc(t("clean.idle.title"))}</div>
+      <button class="ha-cta" type="button" data-action="scan">${esc(t("clean.idle.cta"))}</button>
+      <div class="ha-safety"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg><span>${esc(t("clean.idle.desc"))}</span></div>
+      <div class="ha-chips"><span>${esc(t("clean.chip.caches"))}</span><span>${esc(t("clean.chip.logs"))}</span><span>${esc(t("clean.chip.temp"))}</span></div>
+    </div>`;
     return;
   }
   let html = "";
@@ -228,7 +236,9 @@ function render() {
 }
 
 function renderHero() {
-  hero.classList.toggle("compact", phase === "idle");
+  // 决策①：闲置态 hero 整卡与右上「扫描」按钮均不渲染；扫描中自动变停止；完成态原位「重新扫描」ghost
+  hero.classList.toggle("hidden", phase === "idle");
+  headActions.classList.toggle("hidden", phase === "idle");
   heroProgress.classList.toggle("hidden", phase !== "cleaning" && phase !== "cleaned");
   cleanBtn.classList.toggle("danger", phase !== "cleaning" && phase !== "cleaned");
   cleanBtn.classList.toggle("ghost", phase === "cleaning");

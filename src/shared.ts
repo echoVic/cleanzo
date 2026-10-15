@@ -185,7 +185,7 @@ function errorState(text: string, retry?: () => void): string {
   return `<div class="empty err"><div class="err-icon">⚠</div><div>${esc(text)}</div>${btn}</div>`;
 }
 
-const VIEWS = ["clean", "fullscan", "large", "photos", "apps", "settings"] as const;
+const VIEWS = ["clean", "status", "fullscan", "large", "photos", "apps", "settings"] as const;
 type View = (typeof VIEWS)[number];
 
 const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
