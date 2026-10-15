@@ -2233,7 +2233,8 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 }
 
 func main() {
-	mygo.Use(updater.Plugin)
+	// 自动检查更新的频率：4 小时一次（默认一天），新发布的版本当天就能被看到。
+	mygo.Use(updater.New(updater.Options{Interval: 4 * time.Hour}))
 	mygo.Bind(Cleaner{})
 
 	mygo.App.WhenReady(func() {
