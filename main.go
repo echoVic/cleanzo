@@ -35,6 +35,7 @@ import (
 	"unicode"
 
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/plugins/updater"
 )
 
@@ -2243,9 +2244,11 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 }
 
 func main() {
+	mygo.App.SetLanguages("en", "zh-Hans")
 	// 自动检查更新的频率：4 小时一次（默认一天），新发布的版本当天就能被看到。
 	mygo.Use(updater.New(updater.Options{Interval: 4 * time.Hour}))
 	mygo.Bind(Cleaner{})
+	mygo.Bind(LanguageSettings{})
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

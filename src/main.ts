@@ -8,10 +8,11 @@ import {
   hideModal, currentModalSeq, setPending, setBeforeModalShow, type View,
 } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
-import { Cleaner } from "./mygo";
+import { Cleaner, LanguageSettings } from "./mygo";
 import { Channel } from "mygo-runtime";
 import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
-import { t, kindLabel, getPref, setPref, currentLang, type LangPref } from "./i18n";
+import { t, kindLabel, getPref, currentLang, type LangPref } from "./i18n";
+import { connectLanguage } from "./language";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 const appSort = $<HTMLSelectElement>("#app-sort");
@@ -149,10 +150,23 @@ function refreshI18n() {
   refreshStatusI18n();
 }
 
-langSelect.addEventListener("change", () => {
-  setPref(langSelect.value as LangPref);
-  refreshI18n();
-  toast(t("settings.languageChanged"));
+const language = connectLanguage(window.mygo ? {
+  locale: window.mygo.locale,
+  setLanguage: preference => LanguageSettings.setLanguage(preference),
+  onLocaleChange: listener => window.mygo!.on<{ locale: string }>("mygo:locale", data => listener(data.locale)),
+} : undefined, refreshI18n);
+
+langSelect.addEventListener("change", async () => {
+  langSelect.disabled = true;
+  try {
+    await language.change(langSelect.value as LangPref);
+    toast(t("settings.languageChanged"));
+  } catch {
+    langSelect.value = getPref();
+    toast(t("settings.languageFailed"));
+  } finally {
+    langSelect.disabled = false;
+  }
 });
 
 // ---- 交互态组件 ----
@@ -1466,3 +1480,8 @@ Cleaner.info()
     if (i.version) $("#app-version").textContent = `Cleanzo v${i.version}`;
   })
   .catch(() => {});
+
+langSelect.disabled = true;
+void language.initialize()
+  .catch(() => toast(t("settings.languageFailed")))
+  .finally(() => { langSelect.disabled = false; });

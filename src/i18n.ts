@@ -433,6 +433,7 @@ const dict = {
     "settings.loading": "正在读取设置…",
     "settings.folderMissing": "目录不存在：{path}",
     "settings.languageChanged": "界面语言已切换",
+    "settings.languageFailed": "语言未能同步，请重新选择后重试",
     "settings.readFail": "读取配置失败：{msg}",
     "settings.name": "名称",
     "settings.enabled": "启用",
@@ -953,6 +954,7 @@ const dict = {
     "settings.loading": "Loading settings…",
     "settings.folderMissing": "Folder does not exist: {path}",
     "settings.languageChanged": "Language changed",
+    "settings.languageFailed": "Could not sync the language. Select it again to retry.",
     "settings.readFail": "Failed to read config: {msg}",
     "settings.name": "Name",
     "settings.enabled": "Enabled",
@@ -1051,8 +1053,15 @@ const dict = {
 } as const;
 
 const STORAGE_KEY = "cleanzo.lang";
+let sessionPref: LangPref | undefined;
+let nativeLocale: string | undefined;
+
+export function setNativeLocale(locale: string) {
+  nativeLocale = locale;
+}
 
 export function getPref(): LangPref {
+  if (sessionPref !== undefined) return sessionPref;
   try {
     const v = localStorage.getItem(STORAGE_KEY);
     if (v === "zh" || v === "en") return v;
@@ -1063,6 +1072,7 @@ export function getPref(): LangPref {
 }
 
 export function setPref(p: LangPref) {
+  sessionPref = p;
   try {
     localStorage.setItem(STORAGE_KEY, p);
   } catch {
@@ -1073,6 +1083,7 @@ export function setPref(p: LangPref) {
 function resolveLang(): Lang {
   const pref = getPref();
   if (pref !== "system") return pref;
+  if (nativeLocale) return nativeLocale.toLowerCase().startsWith("zh") ? "zh" : "en";
   try {
     return (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
   } catch {

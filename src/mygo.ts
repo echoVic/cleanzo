@@ -538,3 +538,13 @@ export const Cleaner = {
     return call("Cleaner.WatchStatus", ch);
   },
 } as const;
+
+export const LanguageSettings = {
+  /**
+   * SetLanguage keeps MyGo's menus and update window in the page's language.
+   * An empty locale restores the user's preferred system languages.
+   */
+  setLanguage(preference: string): Promise<string> {
+    return call("LanguageSettings.SetLanguage", preference);
+  },
+} as const;
