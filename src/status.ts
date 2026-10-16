@@ -460,14 +460,28 @@ function renderList(s: StatusSample) {
 
 // ---- 渲染入口 ----
 
+/**
+ * 每 2 秒整页重绘会重建指标卡和应用列表的 DOM。重建时记下滚动位置再还原，
+ * 否则正在看下面的内容时，刷新会把视图弹回顶部。
+ */
+function preserveScroll<T>(fn: () => T): T {
+  const scroller = document.querySelector(".content");
+  const y = scroller?.scrollTop ?? 0;
+  const out = fn();
+  if (scroller) scroller.scrollTop = y;
+  return out;
+}
+
 function render() {
   const s = sample;
   if (!s) { renderSkeleton(); return; }
-  renderMachine();
-  renderAlerts(s);
-  renderCards(s);
-  renderList(s);
-  footnoteEl.textContent = t("status.footnote", { n: s.procs.toLocaleString() });
+  preserveScroll(() => {
+    renderMachine();
+    renderAlerts(s);
+    renderCards(s);
+    renderList(s);
+    footnoteEl.textContent = t("status.footnote", { n: s.procs.toLocaleString() });
+  });
 }
 
 /** 语言切换后整页按新语言重绘 */

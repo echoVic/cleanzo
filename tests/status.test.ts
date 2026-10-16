@@ -19,6 +19,7 @@ class Element {
     toggle: (n: string, on = !this.classes.has(n)) => on ? this.classes.add(n) : this.classes.delete(n),
   };
   listeners = new Map<string, Function[]>();
+  scrollTop = 0;
   constructor(public id = "") {}
   addEventListener(type: string, fn: Function) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
@@ -158,6 +159,15 @@ test("QA P2-2: Info() 失败时 CPU 卡核数显示「—」而不是「0 核」
   expect(node("#st-cards").innerHTML).toContain("12 核");
   status.stopStatus();
   await settle();
+});
+
+test("refreshing the numbers keeps the user's scroll position", async () => {
+  await open(sample());
+  status.stopStatus();
+  const content = node(".content");
+  content.scrollTop = 480;
+  await send(sample());
+  expect(content.scrollTop).toBe(480);
 });
 
 test("skeleton first, machine line from Info(), then real numbers replace it", async () => {
