@@ -115,7 +115,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-button, input, select, textarea { font: inherit; color: inherit; }
+/* 放入 @layer base：无 layer 规则会压过 Tailwind @layer utilities，导致 React 按钮上的
+   text-* / font-* 工具类失效（字色退为 currentColor、字重退为 400）。原生页无 utilities，
+   该 reset 仍作为基础默认生效；原生 .btn 等组件类是无 layer 规则，不受影响。 */
+@layer base {
+  button, input, select, textarea { font: inherit; color: inherit; }
+}
 
 ::selection { background: var(--accent-soft); }
 

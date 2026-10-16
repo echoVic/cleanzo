@@ -68,7 +68,6 @@
   --color-hover: var(--hover);
   --color-btn-bg: var(--btn-bg);
   --shadow-card: var(--shadow);
-  --shadow-lift: var(--shadow-lift);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -80,4 +79,3 @@
   color: var(--foreground);
 }
 .cz-react *, .cz-react *::before, .cz-react *::after { box-sizing: border-box; }
-.cz-react button { font: inherit; }
