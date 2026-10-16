@@ -332,7 +332,7 @@ export function CleanPage() {
   let heroProgressShown = false;
   let cleanBtnLabel = t("clean.now");
   let cleanBtnDisabled = true;
-  let cleanBtnVariant: "destructive" | "ghost" | "default" = "destructive";
+  let cleanBtnVariant: "destructive" | "ghost" | "default" = "default";
 
   if (scanFailed !== null) {
     heroPrefix = t("hero.ready");

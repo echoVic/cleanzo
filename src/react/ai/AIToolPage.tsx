@@ -231,7 +231,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                   : t("ai.sub.scanned", { size: human(cleanable) })}
               </div>
             </div>
-            <Button variant="destructive" size="lg" disabled={chosenTotal === 0} onClick={() => setConfirmOpen(true)}>
+            <Button variant="default" size="lg" disabled={chosenTotal === 0} onClick={() => setConfirmOpen(true)}>
               {t("ai.clean", { size: human(chosenTotal) })}
             </Button>
           </Card>
