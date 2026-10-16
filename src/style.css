@@ -1682,6 +1682,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* AI 工具页：每个工具一页，沿用垃圾页的组与行。 */
 #ai-list.junk-list { display: flex; flex-direction: column; gap: 16px; background: none; border: none; padding: 0; }
+.ai-ring-spin svg { animation: spin 1.1s linear infinite; }
 .ai-hero { margin-bottom: 20px; }
 .ai-tool { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .ai-running { padding: 10px 16px; font-size: 12px; line-height: 1.7; background: var(--warn-soft); color: var(--warn-text); border-radius: 10px; }

@@ -145,6 +145,14 @@ function render() {
     return;
   }
   if (!s.tool) {
+    // 统计 5 GB 目录要几秒到几十秒，扫描期间中轴卡片显示转动的环和提示，不能停在「尚未扫描」。
+    if (s.phase === "scanning") {
+      listEl.innerHTML = `<div class="home-axis">
+        <div class="ha-ring ai-ring-spin" aria-label="${esc(t("ai.sub.scanning"))}">${refreshRing}</div>
+        <div class="ha-guide">${esc(t("ai.sub.scanning"))}</div>
+      </div>`;
+      return;
+    }
     // 闲置态与垃圾清理页一致：中轴圆环、可释放空间、引导、CTA、安全说明和分类标签。
     const chips = s.id === "codex"
       ? [t("ai.chip.oldVersions"), t("ai.chip.sessions"), t("ai.chip.cache")]
@@ -181,8 +189,8 @@ function renderHead(s: ToolState) {
   titleEl.textContent = s.name;
   const head = t(`ai.head.${s.id}` as never);
   headSubEl.textContent = head.startsWith("ai.head.") ? "" : head;
-  // 闲置态隐藏占用条和右上角按钮，和垃圾清理页一致；扫描入口只在中轴卡片里。
-  const idle = !s.tool;
+  // 只有真正没扫过（idle）才隐藏占用条；扫描中要显示「正在统计」。
+  const idle = s.phase === "idle";
   heroEl.classList.toggle("hidden", idle);
   headActionsEl.classList.toggle("hidden", idle);
   const busy = s.phase === "scanning" || s.phase === "cleaning";
