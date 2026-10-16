@@ -1,6 +1,7 @@
 import { showSettings, refreshSettingsI18n } from "./settings";
 import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
-import { initAITools, refreshAIToolsI18n, showAITool } from "./aitools";
+import { initReactAITools, showReactAITool } from "./react/ai/entry";
+import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
   $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
@@ -133,7 +134,7 @@ function refreshI18n() {
   // 每个已有内容的视图都按新语言重绘，不只是当前这个。垃圾清理页随时可以重绘；
   // 其他扫描中的视图等它结束后自己会重绘
   refreshJunkI18n();
-  refreshAIToolsI18n();
+  bumpLang();
   if (apps.length > 0) renderApps();
   refreshSettingsI18n();
   if (fsDisk) renderDisk(fsDisk);
@@ -182,7 +183,10 @@ function switchView(v: View, tool?: string) {
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool)));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
   if (v === "status") startStatus(); else stopStatus();
-  if (v === "aitools" && tool) showAITool(tool);
+  if (v === "aitools" && tool) {
+    const names: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+    showReactAITool(tool, names[tool] ?? tool);
+  }
   if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showSettings();
@@ -1468,9 +1472,10 @@ document.addEventListener("keydown", (e) => {
 setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
 initJunk();
-initAITools();
+// AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
 initStatus();
 // 默认落在「系统状态」（HTML 初始高亮已同步），启动即开始采样
+void initReactAITools();
 switchView("status");
 setGoCleanView(() => switchView("clean"));
 setOpenLeftovers(() => {

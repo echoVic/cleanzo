@@ -136,30 +136,9 @@
           <section id="list" class="cat-grid" aria-live="polite"></section>
         </section>
 
-        <!-- AI 工具 -->
+        <!-- AI 工具（React 页面，内容由 React 挂载） -->
         <section id="view-aitools" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 id="ai-title">AI</h2>
-              <p id="ai-head-sub" class="muted"></p>
-            </div>
-            <div class="head-actions">
-              <button id="ai-scan" class="btn ghost" type="button">开始扫描</button>
-            </div>
-          </header>
-          <div class="ai-head-row">
-            <div class="ai-head-info">
-              <div class="banner-title">
-                <span data-i18n="ai.occupied">占用空间</span>
-                <span id="ai-total" class="hero-num">--</span>
-              </div>
-              <div id="ai-sub" class="hero-sub"></div>
-            </div>
-            <div class="banner-actions">
-              <button id="ai-clean" class="btn danger big" type="button" disabled>移到废纸篓</button>
-            </div>
-          </div>
-          <section id="ai-list" class="junk-list" aria-live="polite"></section>
+          <div id="ai-react-root" class="relative"></div>
         </section>
 
         <!-- 全盘扫描 -->

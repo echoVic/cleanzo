@@ -1,0 +1,59 @@
+/* Tailwind v4 + shadcn 风格令牌。颜色直接沿用 Cleanzo 现有变量，保证与原生页面视觉一致。 */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--card);
+  --card-foreground: var(--fg);
+  --muted: var(--muted);
+  --muted-background: var(--bg-subtle);
+  --border: var(--border);
+  --primary: var(--accent-strong);
+  --primary-foreground: #ffffff;
+  --destructive: #d92d20;
+  --destructive-foreground: #ffffff;
+  --warning: var(--warn);
+  --warning-soft: var(--warn-soft);
+  --warning-text: var(--warn-text);
+  --ring: var(--accent-ring);
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--card);
+  --card-foreground: var(--fg);
+  --border: var(--border);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-background: var(--muted-background);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-text: var(--warning-text);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/* 只有迁移到 React 的区域使用 Tailwind 的 preflight，避免重写原生页面样式。 */
+.cz-react {
+  font: inherit;
+  color: var(--foreground);
+}
+.cz-react *, .cz-react *::before, .cz-react *::after { box-sizing: border-box; }
+.cz-react button { font: inherit; }
