@@ -18,7 +18,7 @@ const subEl = $("#ai-sub");
 const titleEl = $("#ai-title");
 const headSubEl = $("#ai-head-sub");
 const sectionEl = $("#nav-ai-section");
-const heroEl = $("#view-aitools .hero");
+const heroEl = $(".ai-head-row");
 const headActionsEl = $("#view-aitools .head-actions");
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";

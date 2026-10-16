@@ -39,7 +39,7 @@ const node = (s: string) => {
   return nodes.get(s)!;
 };
 // 复合选择器只在测试断言里出现，夹具里给它们各自一个稳定节点。
-const fixtureSelectors = ["#view-aitools .hero", "#view-aitools .head-actions"];
+const fixtureSelectors = [".ai-head-row", "#view-aitools .head-actions"];
 for (const sel of fixtureSelectors) node(sel);
 const navItem = (id: string) => node(`.nav-item[data-tool="${id}"]`);
 const storage = new Map([["cleanzo.lang", "zh"]]);
@@ -146,7 +146,7 @@ test("opening a tool page never scans; scanning is explicit and its result is ke
   expect(idleHtml).toContain("一键扫描，找出 Codex");
   expect(idleHtml).toContain("旧版本");
   expect(idleHtml).toContain("扫描仅在本机进行");
-  expect(node("#view-aitools .hero").classList.contains("hidden")).toBe(true);
+  expect(node(".ai-head-row").classList.contains("hidden")).toBe(true);
 
   const start = new Element();
   Object.assign(start.dataset, { action: "scan" });
