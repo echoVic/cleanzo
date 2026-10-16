@@ -1,5 +1,6 @@
 import { showSettings, refreshSettingsI18n } from "./settings";
 import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
+import { initAITools, refreshAIToolsI18n, showAITool } from "./aitools";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
   $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
@@ -132,6 +133,7 @@ function refreshI18n() {
   // 每个已有内容的视图都按新语言重绘，不只是当前这个。垃圾清理页随时可以重绘；
   // 其他扫描中的视图等它结束后自己会重绘
   refreshJunkI18n();
+  refreshAIToolsI18n();
   if (apps.length > 0) renderApps();
   refreshSettingsI18n();
   if (fsDisk) renderDisk(fsDisk);
@@ -175,16 +177,18 @@ const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stoppe
 
 // ---- 视图切换 ----
 
-function switchView(v: View) {
-  navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v));
+function switchView(v: View, tool?: string) {
+  // AI 工具的几个侧栏项共用一个视图，按 data-tool 区分高亮。
+  navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool)));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
   if (v === "status") startStatus(); else stopStatus();
+  if (v === "aitools" && tool) showAITool(tool);
   if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showSettings();
   if (v === "photos" && !phTried) startPhotoScan();
 }
-navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View)));
+navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View, b.dataset.tool)));
 
 // ---- 垃圾清理 ----
 
@@ -1464,6 +1468,7 @@ document.addEventListener("keydown", (e) => {
 setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
 initJunk();
+initAITools();
 initStatus();
 // 默认落在「系统状态」（HTML 初始高亮已同步），启动即开始采样
 switchView("status");

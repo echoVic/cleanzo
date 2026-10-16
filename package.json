@@ -10,7 +10,7 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:web": "bun test tests/junk.test.ts && bun test tests/status.test.ts && bun test tests/language.test.ts"
+    "test:web": "bun test tests/junk.test.ts && bun test tests/status.test.ts && bun test tests/language.test.ts && bun test tests/aitools.test.ts"
   },
   "dependencies": {
     "mygo-runtime": "0.5.0"

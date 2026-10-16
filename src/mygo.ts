@@ -4,6 +4,118 @@ import { call, type Channel } from "mygo-runtime";
 
 // ---- Types ----
 
+/** AICleanResult is what CleanAITools returns. */
+export interface AICleanResult {
+  parts: AIPartResult[];
+  freed: number;
+}
+
+/** AIEntry is one of the largest things inside a part, shown when it expands. */
+export interface AIEntry {
+  name: string;
+  path: string;
+  size: number;
+  isDir: boolean;
+  last: number;
+}
+
+/**
+ * AIGroup is a pickable slice of a sensitive part (a project's or a month's
+ * sessions) or of old releases (one release folder).
+ */
+export interface AIGroup {
+  /** project folder or yyyy/mm; release name */
+  key: string;
+  /** project path or yyyy-mm; release version */
+  label: string;
+  /** bytes on disk, recent sessions included */
+  size: number;
+  /** sessions, or 1 for a release */
+  count: number;
+  /** newest write, unix seconds */
+  last: number;
+  /** sessions written in the last 24 hours, left alone */
+  recent: number;
+  /** the project folder no longer exists */
+  gone: boolean;
+  /** the group's folder, for Show in Finder */
+  path: string;
+}
+
+/** AIPart is one part of a tool's folder as the page lists it. */
+export interface AIPart {
+  /** known part id, or "unknown:<name>" */
+  id: string;
+  /** file or folder name, for unknown parts */
+  name: string;
+  /** absolute */
+  path: string;
+  level: string;
+  size: number;
+  files: number;
+  last: number;
+  /** pickable groups; empty when the part is offered whole */
+  groups: AIGroup[];
+  /** largest entries inside, for parts without groups */
+  top: AIEntry[];
+  /** entries beyond Top */
+  more: number;
+  /** the release kept for old releases */
+  keep: string;
+  /** can be cleaned while the tool runs */
+  runSafe: boolean;
+}
+
+/** AIPartResult reports one selection's outcome. */
+export interface AIPartResult {
+  tool: string;
+  part: string;
+  /** paths moved to the Trash */
+  moved: number;
+  /** bytes */
+  freed: number;
+  /** recent sessions left alone */
+  kept: number;
+  /** running, blocked, unknown, in-use; "" when cleaned */
+  skipped: string;
+  failed: string[];
+}
+
+/** AIScanResult is what ScanAITools returns. */
+export interface AIScanResult {
+  tools: AITool[];
+  scannedAt: number;
+}
+
+/** AISelection picks a part, or some of its groups. */
+export interface AISelection {
+  tool: string;
+  part: string;
+  /** group keys; required for parts with groups */
+  groups: string[];
+}
+
+/** AITool is one tool's folder as the page lists it. */
+export interface AITool {
+  id: string;
+  name: string;
+  path: string;
+  /** its folder exists */
+  installed: boolean;
+  /** nothing is cleaned while it runs */
+  running: boolean;
+  size: number;
+  parts: AIPart[];
+}
+
+/** AIToolInfo is one supported tool as the sidebar lists it. */
+export interface AIToolInfo {
+  id: string;
+  name: string;
+  /** its folder exists */
+  installed: boolean;
+}
+
 /** AppInfo describes an installed application. */
 export interface AppInfo {
   name: string;
@@ -397,6 +509,15 @@ export const Cleaner = {
   checkForUpdates(): Promise<void> {
     return call("Cleaner.CheckForUpdates");
   },
+  /**
+   * CleanAITools moves the selected parts to the Trash. While a tool runs only
+   * its run-safe parts (old releases, sessions, leftovers) are cleaned; files
+   * it has open are still left alone. Protected and unknown parts are refused;
+   * sessions written in the last 24 hours are kept.
+   */
+  cleanAITools(selections: AISelection[]): Promise<AICleanResult> {
+    return call("Cleaner.CleanAITools", selections);
+  },
   /** CleanJunk streams progress, refreshing file usage before each selected item. */
   cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
     return call("Cleaner.CleanJunk", selections, scannedAt, ch);
@@ -451,6 +572,13 @@ export const Cleaner = {
   largeScan(minSize: number, ch: Channel<LargeScanEvent>): Promise<void> {
     return call("Cleaner.LargeScan", minSize, ch);
   },
+  /**
+   * ListAITools reports which supported tools have a folder, without measuring
+   * anything, so the sidebar can show one entry per installed tool at start.
+   */
+  listAITools(): Promise<AIToolInfo[]> {
+    return call("Cleaner.ListAITools");
+  },
   /** ListApps returns installed applications and whether they are running. */
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
@@ -497,6 +625,14 @@ export const Cleaner = {
   /** SaveSettings validates and persists the settings. */
   saveSettings(s: Settings): Promise<void> {
     return call("Cleaner.SaveSettings", s);
+  },
+  /** ScanAITool measures one tool's folder; each tool has its own page. */
+  scanAITool(id: string): Promise<AIScanResult> {
+    return call("Cleaner.ScanAITool", id);
+  },
+  /** ScanAITools measures the folders of the supported AI coding tools. */
+  scanAITools(): Promise<AIScanResult> {
+    return call("Cleaner.ScanAITools");
   },
   /** ScanJunk streams an initial list, measured rows and a final summary. */
   scanJunk(ch: Channel<JunkScanEvent>): Promise<void> {
