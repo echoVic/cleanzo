@@ -1,6 +1,6 @@
-import { showSettings, refreshSettingsI18n } from "./settings";
 import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
+import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
@@ -13,7 +13,7 @@ import {
 import { Cleaner, LanguageSettings } from "./mygo";
 import { Channel } from "mygo-runtime";
 import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
-import { t, kindLabel, getPref, currentLang, type LangPref } from "./i18n";
+import { t, kindLabel, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
@@ -30,7 +30,6 @@ const fsUsed = $("#fs-used");
 const fsFree = $("#fs-free");
 const fsTotal = $("#fs-total");
 const fsBar = $("#fs-bar") as HTMLDivElement;
-const langSelect = $<HTMLSelectElement>("#lang-select");
 const lgScanBtn = $<HTMLButtonElement>("#lg-scan");
 const lgProgress = $("#lg-progress");
 const lgCurrent = $("#lg-current");
@@ -125,7 +124,6 @@ function applyStaticI18n() {
   });
   // 正在扫描的按钮是「停止扫描」，不是它的静态文案
   scanChans.forEach((_, btn) => (btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`));
-  langSelect.value = getPref();
 }
 
 /** Re-render the current view so all dynamic text follows the new language. */
@@ -136,7 +134,6 @@ function refreshI18n() {
   refreshJunkI18n();
   bumpLang();
   if (apps.length > 0) renderApps();
-  refreshSettingsI18n();
   if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   renderIdleScanPages();
@@ -159,18 +156,17 @@ const language = connectLanguage(window.mygo ? {
   onLocaleChange: listener => window.mygo!.on<{ locale: string }>("mygo:locale", data => listener(data.locale)),
 } : undefined, refreshI18n);
 
-langSelect.addEventListener("change", async () => {
-  langSelect.disabled = true;
+// 语言切换由 React 设置页的 <select> 触发，统一走这里：成功/失败 toast 与旧页一致。
+async function changeLanguage(pref: LangPref): Promise<void> {
   try {
-    await language.change(langSelect.value as LangPref);
+    await language.change(pref);
     toast(t("settings.languageChanged"));
   } catch {
-    langSelect.value = getPref();
     toast(t("settings.languageFailed"));
-  } finally {
-    langSelect.disabled = false;
+    throw new Error("language change failed");
   }
-});
+}
+setSettingsLangHandler(changeLanguage);
 
 // ---- 交互态组件 ----
 
@@ -189,7 +185,7 @@ function switchView(v: View, tool?: string) {
   }
   if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
-  if (v === "settings") showSettings();
+  if (v === "settings") showReactSettings();
   if (v === "photos" && !phTried) startPhotoScan();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View, b.dataset.tool)));
@@ -1491,7 +1487,5 @@ Cleaner.info()
   })
   .catch(() => {});
 
-langSelect.disabled = true;
 void language.initialize()
-  .catch(() => toast(t("settings.languageFailed")))
-  .finally(() => { langSelect.disabled = false; });
+  .catch(() => toast(t("settings.languageFailed")));

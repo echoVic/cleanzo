@@ -275,78 +275,9 @@
           </div>
         </section>
 
-        <!-- 设置 -->
+        <!-- 设置（React 页面，内容由 React 挂载） -->
         <section id="view-settings" class="view hidden">
-          <header class="view-head"><h2 data-i18n="nav.settings">设置</h2></header>
-          <p id="settings-status" class="settings-status hidden" role="status"></p>
-          <section class="settings-section">
-            <h3 data-i18n="settings.general">通用</h3>
-            <div class="setting-block card">
-              <div class="setting-row">
-                <label class="setting-label" for="lang-select" data-i18n="settings.lang">界面语言</label>
-                <select id="lang-select" class="select">
-                  <option value="system" data-i18n="settings.langSystem">跟随系统</option>
-                  <option value="zh" data-i18n="settings.langZh">中文</option>
-                  <option value="en" data-i18n="settings.langEn">English</option>
-                </select>
-              </div>
-            </div>
-          </section>
-          <section class="settings-section">
-            <h3 data-i18n="nav.clean">垃圾清理</h3>
-            <div class="setting-block card">
-              <div class="setting-row setting-stack">
-                <h4 class="setting-label" data-i18n="settings.scope">扫描范围</h4>
-                <div id="settings-groups" class="settings-groups"></div>
-              </div>
-              <div class="setting-row setting-stack">
-                <h4 class="setting-label" data-i18n="settings.ignored">不再清理的项目</h4>
-                <div id="settings-ignored" class="settings-list"></div>
-              </div>
-              <div class="setting-row setting-stack">
-                <h4 class="setting-label" data-i18n="settings.custom">自定义目录</h4>
-                <div id="settings-custom" class="settings-list"></div>
-                <div class="settings-add">
-                  <button id="settings-add" class="btn ghost small" type="button" data-i18n="settings.addFolder">＋ 添加目录…</button>
-                  <span class="muted small" data-i18n="settings.trashNote">清理时移到废纸篓</span>
-                </div>
-                <p id="settings-add-error" class="err-inline hidden" role="alert"></p>
-              </div>
-            </div>
-          </section>
-          <section class="settings-section">
-            <h3 data-i18n="settings.permissions">权限</h3>
-            <div class="setting-block card">
-              <div class="setting-row setting-permission">
-                <div class="settings-permission-info">
-                  <span class="setting-label" data-i18n="settings.fullDiskAccess">完全磁盘访问权限</span>
-                  <span id="settings-fda" class="permission-status" role="status"></span>
-                  <p class="muted small" data-i18n="settings.permissionNote">用于：废纸篓、沙盒应用缓存、iOS 备份、邮件附件</p>
-                  <p id="settings-permission-error" class="err-inline hidden" role="alert"></p>
-                </div>
-                <button id="settings-open-permission" class="btn ghost small" type="button" data-i18n="settings.openSystem">打开系统设置</button>
-              </div>
-            </div>
-          </section>
-          <section class="settings-section">
-            <h3 data-i18n="settings.about">关于</h3>
-            <div class="setting-block card">
-              <div class="setting-row">
-                <span class="setting-label" data-i18n="settings.version">版本</span>
-                <span class="setting-version">
-                  <span id="settings-version" class="muted"></span>
-                  <button id="settings-check-update" class="btn ghost small" type="button"
-                          data-i18n="settings.checkUpdate">检查更新</button>
-                </span>
-              </div>
-              <div class="setting-row">
-                <span class="setting-label" data-i18n="settings.feedback">问题反馈</span>
-                <a class="btn ghost small" target="_blank" rel="noopener noreferrer"
-                   href="https://github.com/echoVic/cleanzo/issues/new"
-                   data-i18n="settings.feedbackBtn">报告问题或建议</a>
-              </div>
-            </div>
-          </section>
+          <div id="settings-react-root"></div>
         </section>
       </main>
     </div>
