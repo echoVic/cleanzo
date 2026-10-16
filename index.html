@@ -141,38 +141,9 @@
           <div id="ai-react-root" class="relative"></div>
         </section>
 
-        <!-- 全盘扫描 -->
+        <!-- 全盘扫描（React 页面，内容由 React 挂载） -->
         <section id="view-fullscan" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.fullscan">空间分析</h2>
-              <p class="muted" data-i18n="fs.sub">扫描整个磁盘，找出最占空间的位置</p>
-            </div>
-            <div class="head-actions">
-              <button id="fs-scan" class="btn primary" type="button" data-i18n="fs.scanBtn">开始扫描</button>
-            </div>
-          </header>
-
-          <div class="disk-card card">
-            <div class="disk-stats">
-              <div class="disk-stat"><span class="label" data-i18n="fs.used">已用</span><span id="fs-used" class="value">--</span></div>
-              <div class="disk-stat"><span class="label" data-i18n="fs.free">可用</span><span id="fs-free" class="value">--</span></div>
-              <div class="disk-stat"><span class="label" data-i18n="fs.total">总量</span><span id="fs-total" class="value">--</span></div>
-            </div>
-            <div class="bar"><div id="fs-bar" class="bar-fill"></div></div>
-            <p class="muted small fs-hint" data-i18n="fs.hint">全盘扫描会遍历磁盘上的主要目录，通常需要一两分钟，完成后可按占用排行清理。</p>
-          </div>
-
-          <div id="fs-progress" class="fs-progress hidden">
-            <div class="spinner"></div>
-            <div class="fs-progress-text">
-              <div id="fs-current">准备扫描…</div>
-              <div id="fs-count" class="muted small"></div>
-            </div>
-          </div>
-
-          <div id="fs-toolbar" class="fs-toolbar hidden"></div>
-          <section id="fs-list" class="fs-list" aria-live="polite"></section>
+          <div id="fullscan-react-root"></div>
         </section>
 
         <!-- 大文件专清（React 页面，内容由 React 挂载） -->

@@ -4,39 +4,18 @@ import { setSettingsLangHandler, showReactSettings } from "./react/settings/entr
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
 import { showReactApps } from "./react/apps/entry";
+import { showReactFullScan } from "./react/fullscan/entry";
 import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
-  $, errText, human, esc, displayPath, toast, emptyState, errorState,
-  setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
-  markRescan, VIEWS, overlay, modalTitle, modalBody, modalOk, showModal,
-  hideModal, currentModalSeq, setPending, type View,
+  $, esc, toast, scanChans, VIEWS, overlay, hideModal, type View,
 } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner, LanguageSettings } from "./mygo";
-import { Channel } from "mygo-runtime";
-import type { BigItem, DirItem, DiskStat, FullScanResult } from "./mygo";
 import { t, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
-const fsScanBtn = $<HTMLButtonElement>("#fs-scan");
-const fsProgress = $("#fs-progress");
-const fsCurrent = $("#fs-current");
-const fsCount = $("#fs-count");
-const fsList = $("#fs-list");
-const fsToolbar = $("#fs-toolbar");
-const fsUsed = $("#fs-used");
-const fsFree = $("#fs-free");
-const fsTotal = $("#fs-total");
-const fsBar = $("#fs-bar") as HTMLDivElement;
-
-let fsResult: FullScanResult | null = null;
-let fsDisk: DiskStat | null = null;
-let fsDiskSeq = 0;
-let fsDiskPending = 0;
-let fsRunning = false;
-let fsItems: BigItem[] = [];
 
 // ---- i18n ----
 
@@ -53,7 +32,7 @@ function applyStaticI18n() {
     el.title = text;
     el.setAttribute("aria-label", text);
   });
-  // 正在扫描的按钮是「停止扫描」，不是它的静态文案
+  // 正在扫描的按钮是「停止扫描」，不是它的静态文案（垃圾清理页仍用原生按钮）
   scanChans.forEach((_, btn) => (btn.innerHTML = `<span class="spin"></span>${esc(t("scan.stop"))}`));
 }
 
@@ -61,12 +40,9 @@ function applyStaticI18n() {
 function refreshI18n() {
   applyStaticI18n();
   // 每个已有内容的视图都按新语言重绘，不只是当前这个。垃圾清理页随时可以重绘；
-  // 其他扫描中的视图等它结束后自己会重绘
+  // 其他扫描中的视图等它结束后自己会重绘（React 页面经 bumpLang 重渲染）。
   refreshJunkI18n();
   bumpLang();
-  if (fsDisk) renderDisk(fsDisk);
-  if (fsResult && !fsRunning) renderFullScan(fsResult);
-  renderIdleScanPages();
   refreshStatusI18n();
 }
 
@@ -88,10 +64,6 @@ async function changeLanguage(pref: LangPref): Promise<void> {
 }
 setSettingsLangHandler(changeLanguage);
 
-// ---- 交互态组件 ----
-
-const stoppedFoot = () => `<div class="fs-foot muted small">${esc(t("scan.stopped"))}</div>`;
-
 // ---- 视图切换 ----
 
 function switchView(v: View, tool?: string) {
@@ -104,527 +76,15 @@ function switchView(v: View, tool?: string) {
     showReactAITool(tool, names[tool] ?? tool);
   }
   if (v === "apps") showReactApps();
-  if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
+  if (v === "fullscan") showReactFullScan();
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
   if (v === "photos") showReactPhotos();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View, b.dataset.tool)));
 
-// ---- 垃圾清理 ----
-
-function renderIdleScanPages() {
-  const guides = [
-    { list: fsList, running: fsRunning, key: "fs", start: startFullScan,
-      path: '<circle cx="12" cy="12" r="6.8" opacity="0.25"/><path d="M12 5.2v6.8h6.8"/><path d="M12 12l-4.8 4.8"/>' },
-  ] as const;
-  for (const g of guides) {
-    if (g.running || (g.list.childElementCount > 0 && !g.list.querySelector(".empty-guide"))) continue;
-    const grad = `eg-${g.key}-grad`;
-    g.list.innerHTML = `
-      <div class="empty-guide">
-        <svg class="eg-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="10.2" stroke="url(#${grad})" stroke-width="1.4" stroke-dasharray="3.4 2.8" opacity="0.7"/>
-          <g stroke="url(#${grad})" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${g.path}</g>
-          <defs><linearGradient id="${grad}" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
-        </svg>
-        <h3>${esc(t(`${g.key}.idle.title`))}</h3>
-        <p>${esc(t(`${g.key}.idle.desc`))}</p>
-        <button class="btn primary big" type="button">${esc(t(`${g.key}.idle.cta`))}</button>
-      </div>`;
-    g.list.querySelector("button")?.addEventListener("click", g.start);
-  }
-}
-
-// ---- 全盘扫描 ----
-
-function renderFsRows(items: BigItem[], live: boolean, foot = "") {
-  items = items.filter((it) => !isGone(lists.fullscan, it.path));
-  if (items.length === 0) {
-    fsList.innerHTML = emptyState(live ? t("fs.live") : t("fs.empty")) + foot;
-    fsToolbar.classList.add("hidden");
-    fsToolbar.innerHTML = "";
-    return;
-  }
-  const sorted = [...items].sort((a, b) => b.size - a.size).slice(0, 30);
-  const maxSize = sorted[0]?.size || 1;
-  const rows = sorted
-    .map(
-      (it, i) =>
-        fsRowHtml(lists.fullscan, {
-          path: it.path,
-          name: esc(displayPath(it.path)),
-          size: it.size,
-          rank: `${i + 1}`,
-          expandable: true,
-          trashable: it.trashable,
-          locked: !it.trashable,
-          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
-        }),
-    )
-    .join("");
-  const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("fs.live"))}</div>` : "") + foot;
-  renderFsListInto({
-    st: lists.fullscan,
-    list: fsList,
-    toolbar: fsToolbar,
-    rerender: () => renderFsRows(fsItems, false),
-    removeRows: (removed) => {
-      updateRowsAfterRemoved(fsItems, removed, lists.fullscan);
-      if (fsResult) fsResult.items = fsItems;
-    },
-    sizeOf: (path) => fsItems.find((it) => it.path === path)?.size ?? childSize(lists.fullscan, path),
-  }, rows + footHtml);
-}
-
-async function startFullScan() {
-  if (fsRunning) return;
-  resetList("fullscan");
-  fsResult = null;
-  fsRunning = true;
-  fsItems = [];
-  fsProgress.classList.remove("hidden");
-  fsList.innerHTML = "";
-  fsCurrent.textContent = t("fs.prep");
-  fsCount.textContent = "";
-  const ch = new Channel<import("./mygo").FullScanEvent>();
-  setStoppable(fsScanBtn, ch);
-  try {
-    const done = Cleaner.fullScan(ch);
-    for await (const ev of ch) {
-      if (ev.kind === "item" && ev.path) {
-        fsCurrent.textContent = t("fs.scanning", { path: displayPath(ev.path) });
-        fsItems.push({ path: ev.path, size: ev.size ?? 0, trashable: ev.trashable ?? false });
-        fsCount.textContent = t("fs.count", { n: fsItems.length.toLocaleString() });
-        renderFsRows(fsItems, true);
-      } else if (ev.kind === "done" && ev.result) {
-        fsDiskSeq++; // 不让先前的磁盘读取覆盖扫描结果
-        fsResult = ev.result;
-        fsItems = ev.result.items;
-        renderFullScan(ev.result);
-      }
-    }
-    await done;
-    if (!stoppedScans.has(fsScanBtn) || fsItems.length > 0) markRescan(fsScanBtn);
-  } catch (e) {
-    if (!stoppedScans.has(fsScanBtn)) {
-      fsResult = null;
-      fsList.innerHTML = errorState(t("fs.fail", { msg: errText(e) }), startFullScan);
-      toast(t("fs.fail", { msg: errText(e) }), "err");
-    }
-  } finally {
-    fsRunning = false;
-    fsProgress.classList.add("hidden");
-    if (stoppedScans.has(fsScanBtn) && fsItems.length > 0) markRescan(fsScanBtn);
-    if (endScan(fsScanBtn)) {
-      // 停止时保留已经扫到的，并说明是停止了，而不是没找到
-      if (fsItems.length > 0) renderFsRows(fsItems, false, stoppedFoot());
-      else fsList.innerHTML = emptyState(t("scan.stopped"));
-    }
-  }
-}
-
-// ---- 勾选与展开（全盘扫描 / 大文件 / 残留 / 相似照片） ----
-
-/** 展开后的子项：存数据而不是 HTML，每次重绘都按当前勾选状态生成 */
-type ChildList = { items: DirItem[]; total: number } | { error: string };
-
-/** 每个列表视图自己的勾选和展开状态，视图之间互不影响 */
-interface ListState {
-  sel: Set<string>;
-  expanded: Set<string>;
-  children: Map<string, ChildList>;
-  gone: Set<string>;
-  busy: boolean;
-}
-
-const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
-const lists = { fullscan: newList() };
-/** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
-function resetList(v: keyof typeof lists) {
-  lists[v] = newList();
-  const toolbar = { fullscan: fsToolbar }[v];
-  toolbar.classList.add("hidden");
-  toolbar.innerHTML = "";
-}
-
-/** 一个列表视图的上下文：状态、容器和重绘 */
-interface ListCtx {
-  st: ListState;
-  list: HTMLElement;
-  toolbar: HTMLElement;
-  rerender: () => void;
-  removeRows: (removed: string[]) => void;
-  sizeOf: (path: string) => number | undefined;
-}
-
-function under(path: string, ancestor: string): boolean {
-  return path === ancestor || path.startsWith(ancestor + "/");
-}
-
-function effectiveRemoved(paths: string[]): string[] {
-  return [...new Set(paths)].filter((p, _, all) => !all.some((other) => other !== p && under(p, other)));
-}
-
-function isGone(st: ListState, path: string): boolean {
-  for (const gone of st.gone) if (under(path, gone)) return true;
-  return false;
-}
-
-function checkHtml(st: ListState, path: string, parent?: string, size = -1, disabled = false): string {
-  const par = parent ? ` data-parent="${esc(parent)}"` : "";
-  return `<label class="fs-check${disabled ? " disabled" : ""}" title="${esc(path)}"><input type="checkbox" data-check="${esc(path)}" data-size="${size}"${par} ${st.sel.has(path) ? "checked" : ""}${disabled || st.busy ? " disabled" : ""}></label>`;
-}
-
-/** 展开的文件夹里已经加载出来的子项 */
-function loadedKids(st: ListState, path: string): string[] {
-  const c = st.children.get(path);
-  return c && "items" in c ? c.items.filter((i) => !isGone(st, i.path)).map((i) => i.path) : [];
-}
-
-/** 勾选一整行：文件夹连同已加载的子项一起勾上或取消 */
-function toggleRow(st: ListState, path: string, on: boolean) {
-  if (isGone(st, path)) return;
-  if (on) {
-    st.sel.add(path);
-    for (const p of loadedKids(st, path)) st.sel.add(p);
-    return;
-  }
-  for (const p of [...st.sel]) if (under(p, path)) st.sel.delete(p);
-}
-
-/** 勾选文件夹里的一项。取消其中一项时，文件夹不再整个移走，改为勾选其余已加载子项 */
-function toggleChild(st: ListState, parent: string, child: string, on: boolean) {
-  if (isGone(st, child)) return;
-  if (on) {
-    st.sel.add(child);
-    return;
-  }
-  if (st.sel.delete(parent)) {
-    for (const k of loadedKids(st, parent)) st.sel.add(k);
-  }
-  st.sel.delete(child);
-}
-
-/** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项 */
-function pickedPaths(st: ListState): string[] {
-  return [...st.sel].filter((p) => !isGone(st, p) && ![...st.sel].some((q) => q !== p && under(p, q)));
-}
-
-function applyIndeterminate(ctx: ListCtx) {
-  ctx.list.querySelectorAll<HTMLDivElement>(".fs-row-wrap").forEach((wrap) => {
-    const p = wrap.dataset.path!;
-    const cb = wrap.querySelector<HTMLInputElement>("input[data-check]");
-    if (!cb || cb.disabled || ctx.st.sel.has(p)) return;
-    cb.indeterminate = loadedKids(ctx.st, p).some((k) => ctx.st.sel.has(k));
-  });
-}
-
-function expandBtnHtml(st: ListState, path: string): string {
-  const open = st.expanded.has(path);
-  return `<button class="btn small ghost fs-expand" data-expand="${esc(path)}" type="button"${st.busy ? " disabled" : ""}>${open ? esc(t("fs.collapse")) : esc(t("fs.expand"))} <span class="caret">▸</span></button>`;
-}
-
-function revealBtnHtml(path: string): string {
-  return `<button class="btn small ghost icon fs-reveal" data-reveal="${esc(path)}" type="button" title="${esc(t("fs.reveal"))}" aria-label="${esc(t("fs.reveal"))}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg></button>`;
-}
-
-function fsRowHtml(st: ListState, o: {
-  path: string;
-  name: string;
-  size: number;
-  sub?: string;
-  rank?: string;
-  expandable?: boolean;
-  trashable: boolean;
-  locked?: boolean;
-}): string {
-  if (isGone(st, o.path)) return "";
-  const open = st.expanded.has(o.path);
-  const name = !o.trashable && o.locked ? `${o.name} <span class="tag dim">${esc(t("fs.locked"))}</span>` : o.name;
-  const trash = o.trashable
-    ? `<button class="btn small danger fs-trash" data-path="${esc(o.path)}" data-size="${o.size}" type="button"${st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trash"))}</button>`
-    : "";
-  return `
-      <div class="fs-row-wrap" data-path="${esc(o.path)}">
-        <div class="fs-row card ${open ? "open" : ""}">
-          ${checkHtml(st, o.path, undefined, o.size, !o.trashable)}
-          ${o.rank ? `<div class="fs-rank">${o.rank}</div>` : ""}
-          <div class="fs-main">
-            <div class="fs-path" title="${esc(o.path)}">${name}</div>
-            ${o.sub ? `<div class="fs-sub">${o.sub}</div>` : ""}
-          </div>
-          <div class="fs-size">${o.size >= 0 ? human(o.size) : "--"}</div>
-          ${o.expandable ? expandBtnHtml(st, o.path) : ""}
-          ${revealBtnHtml(o.path)}
-          ${trash}
-        </div>
-        ${open ? `<div class="fs-children">${childrenHtml(st, o.path)}</div>` : ""}
-      </div>`;
-}
-
-function childrenHtml(st: ListState, parent: string): string {
-  const c = st.children.get(parent);
-  if (!c) return `<span class="muted small">${esc(t("fs.children"))}</span>`;
-  if ("error" in c) return `<div class="fs-child err-inline">${esc(t("fs.childrenFail", { msg: c.error }))}</div>`;
-  const items = c.items.filter((it) => !isGone(st, it.path));
-  if (items.length === 0) return `<div class="fs-child muted small">${esc(t("fs.childrenEmpty"))}</div>`;
-  const rows = items
-    .map(
-      (it) => `
-      <div class="fs-child">
-        ${checkHtml(st, it.path, parent, it.size, !it.trashable)}
-        <span class="fs-child-name" title="${esc(it.path)}">${esc(it.name)}${it.trashable ? "" : ` <span class="tag dim">${esc(t("fs.locked"))}</span>`}</span>
-        <span class="fs-child-size">${it.size >= 0 ? human(it.size) : "--"}</span>
-        ${revealBtnHtml(it.path)}
-        ${it.trashable ? `<button class="btn small danger fs-child-trash" data-path="${esc(it.path)}" data-size="${it.size}" type="button"${st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trash"))}</button>` : ""}
-      </div>`,
-    )
-    .join("");
-  const more = c.total > items.length ? `<div class="fs-child muted small">${esc(t("fs.childrenMore", { n: items.length, total: c.total }))}</div>` : "";
-  return rows + more;
-}
-
-function subtractRemovedFromState(st: ListState, removed: string[]) {
-  const roots = effectiveRemoved(removed);
-  const known = new Map<string, number>();
-  for (const c of st.children.values()) {
-    if (!("items" in c)) continue;
-    for (const it of c.items) if (it.size >= 0) known.set(it.path, it.size);
-  }
-  for (const path of roots) st.gone.add(path);
-  for (const p of [...st.sel]) if (isGone(st, p)) st.sel.delete(p);
-  for (const p of [...st.expanded]) if (isGone(st, p)) st.expanded.delete(p);
-  for (const p of [...st.children.keys()]) if (isGone(st, p)) st.children.delete(p);
-  for (const [parent, c] of st.children) {
-    if (!("items" in c)) continue;
-    const kept = c.items.filter((it) => !roots.some((r) => under(it.path, r)));
-    c.total = Math.max(kept.length, c.total - (c.items.length - kept.length));
-    for (const it of kept) {
-      if (it.size < 0) continue;
-      const delta = roots
-        .filter((r) => r !== it.path && under(r, it.path))
-        .reduce((sum, r) => sum + (known.get(r) ?? 0), 0);
-      if (delta > 0) it.size = Math.max(0, it.size - delta);
-    }
-    c.items = kept;
-    st.children.set(parent, c);
-  }
-}
-
-function updateRowsAfterRemoved<T extends { path: string; size: number }>(items: T[], removed: string[], st: ListState): void {
-  const roots = effectiveRemoved(removed);
-  const known = new Map<string, number>();
-  for (const it of items) if (it.size >= 0) known.set(it.path, it.size);
-  for (const c of st.children.values()) {
-    if (!("items" in c)) continue;
-    for (const it of c.items) if (it.size >= 0) known.set(it.path, it.size);
-  }
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i]!;
-    if (roots.some((r) => under(it.path, r))) {
-      items.splice(i, 1);
-      continue;
-    }
-    if (it.size >= 0) {
-      const delta = roots
-        .filter((r) => r !== it.path && under(r, it.path))
-        .reduce((sum, r) => sum + (known.get(r) ?? 0), 0);
-      if (delta > 0) it.size = Math.max(0, it.size - delta);
-    }
-  }
-}
-
-function applyRemoved(ctx: ListCtx, removed: string[]) {
-  if (removed.length === 0) return;
-  // 先改各行的数据：它要从还没删掉的子项列表里查出移走的子项有多大
-  ctx.removeRows(removed);
-  subtractRemovedFromState(ctx.st, removed);
-  ctx.rerender();
-  if (ctx.st === lists.fullscan) void refreshDisk();
-}
-
-async function toggleExpand(ctx: ListCtx, path: string) {
-  const { st } = ctx;
-  if (st.busy || isGone(st, path)) return;
-  if (st.expanded.delete(path)) {
-    st.children.delete(path);
-    ctx.rerender();
-    return;
-  }
-  st.expanded.add(path);
-  ctx.rerender();
-  try {
-    const r = await Cleaner.dirChildren(path);
-    if (!isGone(st, path)) {
-      st.children.set(path, { items: r.items, total: r.total });
-      if (st.sel.has(path)) toggleRow(st, path, true);
-    }
-  } catch (e) {
-    if (!isGone(st, path)) st.children.set(path, { error: errText(e) });
-  }
-  if (st.expanded.has(path)) ctx.rerender();
-}
-
-function childSize(st: ListState, path: string): number | undefined {
-  for (const c of st.children.values()) {
-    if (!("items" in c)) continue;
-    const it = c.items.find((item) => item.path === path);
-    if (it) return it.size;
-  }
-  return undefined;
-}
-
-function updateToolbar(ctx: ListCtx) {
-  const { st, toolbar } = ctx;
-  const allInputs = Array.from(ctx.list.querySelectorAll<HTMLInputElement>("input[data-check]:not([data-parent])"));
-  const rows = allInputs.filter((i) => !i.disabled).map((i) => i.dataset.check!);
-  const hasRows = ctx.list.querySelectorAll(".fs-row-wrap").length > 0;
-  const picked = pickedPaths(st);
-  const size = picked.reduce((sum, p) => {
-    const n = ctx.sizeOf(p);
-    return sum + (n !== undefined && n >= 0 ? n : 0);
-  }, 0);
-  if (!hasRows) {
-    toolbar.classList.add("hidden");
-    toolbar.innerHTML = "";
-    return;
-  }
-  const some = rows.some((p) => st.sel.has(p));
-  const all = rows.length > 0 && rows.every((p) => st.sel.has(p));
-  toolbar.classList.remove("hidden");
-  toolbar.innerHTML = `
-    <label class="fs-check"><input type="checkbox" class="fs-checkall" ${all ? "checked" : ""}${rows.length === 0 || st.busy ? " disabled" : ""}></label>
-    <span class="fs-toolbar-count">${esc(picked.length > 0 ? t("fs.checkedSize", { n: picked.length, size: human(size) }) : t("fs.nothing"))}</span>
-    <button class="btn danger small fs-toolbar-trash" type="button"${picked.length === 0 || st.busy ? " disabled" : ""}>${st.busy ? `<span class="spin"></span>${esc(t("fs.moving"))}` : esc(t("fs.trashChecked"))}</button>`;
-  const allBox = toolbar.querySelector<HTMLInputElement>(".fs-checkall");
-  if (allBox) allBox.indeterminate = !all && some;
-  allBox?.addEventListener("change", () => {
-    rows.forEach((p) => toggleRow(st, p, allBox.checked));
-    ctx.rerender();
-  });
-  toolbar.querySelector<HTMLButtonElement>(".fs-toolbar-trash")?.addEventListener("click", () => trashChecked(ctx));
-}
-
-async function trashChecked(ctx: ListCtx) {
-  const paths = pickedPaths(ctx.st);
-  if (paths.length === 0 || ctx.st.busy) return;
-  setPending(async () => {
-    ctx.st.busy = true;
-    ctx.rerender();
-    try {
-      const r = await Cleaner.cleanPaths(paths);
-      const parts: string[] = [];
-      if (r.moved > 0) parts.push(t("fs.trashChecked.ok", { n: r.moved, size: human(r.freed) }));
-      if (r.inUse > 0) parts.push(t("fs.trashChecked.inUse", { n: r.inUse }));
-      if (r.failed.length > 0) parts.push(t("fs.trashChecked.fail", { n: r.failed.length }));
-      toast(parts.join(t("phrase.sep")) || t("fs.trashChecked.none"), r.moved > 0 && r.failed.length === 0 ? "ok" : "err");
-      applyRemoved(ctx, r.removed);
-    } catch (e) {
-      toast(t("fs.actionFail", { msg: errText(e) }), "err");
-    } finally {
-      ctx.st.busy = false;
-      ctx.rerender();
-    }
-  });
-  modalTitle.textContent = t("fs.trashChecked.title");
-  modalBody.textContent = t("fs.trashChecked.body", { n: paths.length });
-  modalOk.textContent = t("fs.trash.confirm");
-  showModal();
-}
-
-function bindFsList(ctx: ListCtx) {
-  const { st, list } = ctx;
-  list.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      if (cb.disabled) return;
-      const p = cb.dataset.check!;
-      const parent = cb.dataset.parent;
-      if (parent) toggleChild(st, parent, p, cb.checked);
-      else toggleRow(st, p, cb.checked);
-      ctx.rerender();
-    });
-  });
-  list.querySelectorAll<HTMLButtonElement>(".fs-expand").forEach((b) => {
-    b.addEventListener("click", () => toggleExpand(ctx, b.dataset.expand!));
-  });
-  list.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
-    b.addEventListener("click", () => {
-      const path = b.dataset.reveal!;
-      Cleaner.revealInFinder(path).catch((e) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
-    });
-  });
-  list.querySelectorAll<HTMLButtonElement>(".fs-trash, .fs-child-trash").forEach((b) => {
-    b.addEventListener("click", () => askTrash(b.dataset.path!, Number(b.dataset.size ?? 0), ctx));
-  });
-}
-
-function renderFsListInto(ctx: ListCtx, html: string) {
-  ctx.list.innerHTML = html;
-  bindFsList(ctx);
-  applyIndeterminate(ctx);
-  updateToolbar(ctx);
-}
-
-/** 磁盘卡不依赖目录扫描。 */
-function renderDisk(disk: DiskStat) {
-  fsDisk = disk;
-  const usedPct = disk.total ? Math.min(100, Math.round((disk.used / disk.total) * 100)) : 0;
-  fsUsed.textContent = human(disk.used);
-  fsFree.textContent = human(disk.free);
-  fsTotal.textContent = human(disk.total);
-  fsBar.style.width = `${usedPct}%`;
-}
-
-async function refreshDisk() {
-  const seq = ++fsDiskSeq;
-  fsDiskPending++;
-  try {
-    const disk = await Cleaner.disk();
-    if (seq !== fsDiskSeq) return;
-    if (fsResult) fsResult.disk = disk;
-    renderDisk(disk);
-  } catch {
-    // 读取失败时保留上次容量。
-  } finally {
-    fsDiskPending--;
-  }
-}
-
-function renderFullScan(r: FullScanResult) {
-  renderDisk(r.disk);
-  fsCount.textContent = "";
-  renderFsRows(r.items, false);
-}
-
-/** 将一次性移动错误翻成当前语言。 */
-const failText = (e: unknown) => t("fs.actionFail", { msg: errText(e) });
-
-function askTrash(path: string, size: number, ctx: ListCtx) {
-  if (ctx.st.busy || isGone(ctx.st, path)) return;
-  setPending(async () => {
-    ctx.st.busy = true;
-    ctx.rerender();
-    try {
-      const res = await Cleaner.trashPath(path);
-      toast(t("fs.trash.ok", { path: displayPath(path), size: human(res.freed) }));
-      applyRemoved(ctx, [path]);
-    } catch (e) {
-      toast(failText(e), "err");
-    } finally {
-      ctx.st.busy = false;
-      ctx.rerender();
-    }
-  });
-  modalTitle.textContent = t("fs.trash.title");
-  modalBody.textContent = t("fs.trash.body", { path: displayPath(path), size: human(size) });
-  modalOk.textContent = t("fs.trash.confirm");
-  showModal();
-}
-
 // ---- 事件 ----
 
-fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
 });
@@ -638,7 +98,6 @@ void initReactAITools();
 switchView("status");
 setGoCleanView(() => switchView("clean"));
 setOpenLeftovers(() => showReactApps("leftovers"));
-renderIdleScanPages();
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {
