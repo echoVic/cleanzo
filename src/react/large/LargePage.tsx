@@ -1,7 +1,8 @@
 import * as React from "react";
-import { RefreshCw, HardDrive } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { LargeFile, LargeScanResult } from "../../mygo";
 import { Button } from "../../ui/components/button";
+import { IdleHero } from "../../ui/components/idle-hero";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -300,14 +301,15 @@ export function LargePage() {
       )}
 
       {showIdle && (
-        <div className="empty-guide">
-          <HardDrive className="eg-icon" />
-          <h3>{t("large.idle.title")}</h3>
-          <p>{t("large.idle.desc", { size: human(threshold) })}</p>
-          <button className="btn primary big" type="button" onClick={() => void startScan()}>
-            {t("large.idle.cta")}
-          </button>
-        </div>
+        <IdleHero
+          label={t("hero.ready")}
+          value="--"
+          sub={t("clean.idleSub")}
+          guide={t("large.idle.title")}
+          note={t("large.idle.desc", { size: human(threshold) })}
+          ctaText={t("large.idle.cta")}
+          onCta={() => void startScan()}
+        />
       )}
 
       {showEmptyScanned && (

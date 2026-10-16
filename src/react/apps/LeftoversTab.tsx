@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Trash2 } from "lucide-react";
 import type { OrphanItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
+import { IdleHero } from "../../ui/components/idle-hero";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -307,14 +307,15 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
       )}
 
       {showIdle && (
-        <div className="empty-guide">
-          <Trash2 className="eg-icon" />
-          <h3>{t("orphans.idle.title")}</h3>
-          <p>{t("orphans.idle.desc")}</p>
-          <button className="btn primary big" type="button" onClick={() => void startScan()}>
-            {t("orphans.idle.cta")}
-          </button>
-        </div>
+        <IdleHero
+          label={t("hero.ready")}
+          value="--"
+          sub={t("clean.idleSub")}
+          guide={t("orphans.idle.title")}
+          note={t("orphans.idle.desc")}
+          ctaText={t("orphans.idle.cta")}
+          onCta={() => void startScan()}
+        />
       )}
 
       {!scanning && error && (

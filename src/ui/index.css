@@ -1,8 +1,6 @@
 /* Tailwind v4 + shadcn 风格令牌。颜色直接沿用 Cleanzo 现有变量，保证与原生页面视觉一致。 */
 @import "tailwindcss";
 
-@custom-variant dark (&:where(.dark, .dark *));
-
 :root {
   --background: var(--bg);
   --foreground: var(--fg);
@@ -11,9 +9,10 @@
   --muted: var(--muted);
   --muted-background: var(--bg-subtle);
   --border: var(--border);
-  --primary: var(--accent-strong);
+  /* 与原生 .btn.primary 一致：底色 var(--accent)，hover 才加深。 */
+  --primary: var(--accent);
   --primary-foreground: #ffffff;
-  --destructive: #d92d20;
+  --destructive: var(--danger);
   --destructive-foreground: #ffffff;
   --warning: var(--warn);
   --warning-soft: var(--warn-soft);
@@ -22,12 +21,12 @@
   --radius: 0.75rem;
 }
 
-.dark {
-  --background: var(--bg);
-  --foreground: var(--fg);
-  --card: var(--card);
-  --card-foreground: var(--fg);
-  --border: var(--border);
+/* 项目不使用 .dark 类，深色一律走系统媒体查询（与 style.css 一致）。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 原生 .btn.primary 深色下文字 #062812；danger 按钮深色仍为白字。 */
+    --primary-foreground: #062812;
+  }
 }
 
 @theme inline {
@@ -38,13 +37,27 @@
   --color-muted: var(--muted);
   --color-muted-background: var(--muted-background);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ring: var(--accent-ring);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-soft: var(--danger-soft);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-warning-text: var(--warning-text);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-hover: var(--hover);
+  --color-btn-bg: var(--btn-bg);
+  --shadow-card: var(--shadow);
+  --shadow-lift: var(--shadow-lift);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

@@ -3,6 +3,7 @@ import { RefreshCw, ShieldCheck } from "lucide-react";
 import type { AIPart, AITool } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import { Card } from "../../ui/components/card";
+import { IdleHero } from "../../ui/components/idle-hero";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -178,15 +179,34 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
 
   return (
     <div className="cz-react px-1">
-      <header className="mb-5">
-        <h2 className="text-[26px] font-bold tracking-tight">{toolName}</h2>
-        <p className="mt-1 text-sm text-muted">{headText.startsWith("ai.head.") ? "" : headText}</p>
+      <header className="view-head">
+        <div>
+          <h2>{toolName}</h2>
+          <p className="muted">{headText.startsWith("ai.head.") ? "" : headText}</p>
+        </div>
+        <div className="head-actions">
+          {tool && (
+            <Button variant="ghost" size="sm" onClick={scan} disabled={phase === "scanning"}>
+              <RefreshCw className={cn("h-3.5 w-3.5", phase === "scanning" && "animate-spin")} />
+              {phase === "scanning" ? t("scan.busy") : t("fs.rescan")}
+            </Button>
+          )}
+        </div>
       </header>
 
       {phase === "idle" && (
-        <IdleCard toolId={toolId} chips={toolId === "codex"
-          ? [t("ai.chip.oldVersions"), t("ai.chip.sessions"), t("ai.chip.cache")]
-          : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]} onScan={scan} />
+        <IdleHero
+          label={t("hero.ready")}
+          value="--"
+          sub={t("clean.idleSub")}
+          guide={t(`ai.idle.guide.${toolId}` as DictKey)}
+          ctaText={t("ai.idle.cta")}
+          onCta={scan}
+          safetyText={t("ai.idle.desc")}
+          chips={toolId === "codex"
+            ? [t("ai.chip.oldVersions"), t("ai.chip.sessions"), t("ai.chip.cache")]
+            : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]}
+        />
       )}
       {phase === "scanning" && (
         <div className="flex flex-col items-center py-20 text-center">
@@ -217,7 +237,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
           </Card>
 
           {tool.running && (
-            <div className="mb-4 rounded-lg px-4 py-2.5 text-[13px] leading-relaxed text-warning-text"
+            <div className="mb-4 rounded-[10px] px-4 py-2.5 text-[12px] leading-relaxed text-warning-text"
                  style={{ background: "var(--warning-soft)" }}>
               {t("ai.running", { name: toolName })}
             </div>
@@ -283,17 +303,8 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
             )}
           </Card>
           <p className="mt-3 text-xs text-muted">{t("ai.foot")}</p>
-
-          <Button variant="ghost" className="absolute right-7 top-7 hidden" onClick={scan}>{t("fs.rescan")}</Button>
         </>
       )}
-
-      <div className="absolute right-7 top-7">
-        {tool && <Button variant="ghost" size="sm" onClick={scan} disabled={phase === "scanning"}>
-          <RefreshCw className={cn("h-3.5 w-3.5", phase === "scanning" && "animate-spin")} />
-          {phase === "scanning" ? t("scan.busy") : t("fs.rescan")}
-        </Button>}
-      </div>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -310,28 +321,6 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
 
 function isSessionsPart(p: AIPart) {
   return p.level === "sensitive";
-}
-
-function IdleCard({ toolId, chips, onScan }: { toolId: string; chips: string[]; onScan: () => void }) {
-  const t = useT();
-  return (
-    <div className="flex flex-col items-center py-20 text-center">
-      <div className="grid h-16 w-16 place-items-center rounded-full bg-primary/10 text-primary">
-        <RefreshCw className="h-7 w-7" />
-      </div>
-      <div className="mt-5 text-sm text-muted">{t("hero.ready")}</div>
-      <div className="mt-1 text-2xl font-semibold text-muted">-- <span className="text-sm">{t("clean.idleSub")}</span></div>
-      <div className="mt-4 text-[15px]">{t(`ai.idle.guide.${toolId}` as DictKey)}</div>
-      <Button size="lg" className="mt-5" onClick={onScan}>{t("ai.idle.cta")}</Button>
-      <div className="mt-4 flex max-w-md items-center gap-1.5 text-xs text-muted">
-        <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
-        {t("ai.idle.desc")}
-      </div>
-      <div className="mt-6 flex flex-wrap justify-center gap-2.5">
-        {chips.map((c) => <span key={c} className="rounded-full border border-border px-3 py-1 text-xs text-muted">{c}</span>)}
-      </div>
-    </div>
-  );
 }
 
 function ConfirmDialog({

@@ -1,7 +1,6 @@
 import * as React from "react";
 import type { CustomFolder, Settings } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
-import { Card } from "../../ui/components/card";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey, type LangPref } from "../../ui/i18n-react";
@@ -222,22 +221,22 @@ export function SettingsPage({ callbacks, session }: Props) {
 
   return (
     <div className="cz-react flex flex-col gap-4">
-      <header className="mb-0.5">
-        <h2 className="text-[21px] font-bold tracking-[-0.25px]">{t("nav.settings")}</h2>
+      <header className="view-head">
+        <h2>{t("nav.settings")}</h2>
       </header>
 
       {statusText && (
-        <p className={cn("text-[12.5px] min-h-[1.2em]", !!readError && "text-[var(--danger)]")} role="status">
+        <p className={cn("settings-status", !!readError && "err")} role="status">
           {statusText}
         </p>
       )}
 
       {/* 通用 */}
-      <section className="flex flex-col gap-2.5">
-        <h3 className="text-[14px] font-semibold">{t("settings.general")}</h3>
-        <Card className="rounded-xl px-4">
-          <div className="flex items-center justify-between gap-4 py-2.5">
-            <span className="text-[13px] font-semibold">{t("settings.lang")}</span>
+      <section className="settings-section">
+        <h3>{t("settings.general")}</h3>
+        <div className="setting-block card">
+          <div className="setting-row">
+            <label className="setting-label" htmlFor="lang-select">{t("settings.lang")}</label>
             <select
               id="lang-select"
               className="select"
@@ -250,19 +249,19 @@ export function SettingsPage({ callbacks, session }: Props) {
               <option value="en">{t("settings.langEn")}</option>
             </select>
           </div>
-        </Card>
+        </div>
       </section>
 
       {/* 垃圾清理 */}
-      <section className="flex flex-col gap-2.5">
-        <h3 className="text-[14px] font-semibold">{t("nav.clean")}</h3>
-        <Card className="rounded-xl px-4">
-          <div className="flex flex-col gap-3 border-b border-border py-4">
-            <h4 className="m-0 text-[13px] font-semibold">{t("settings.scope")}</h4>
-            <div className="grid grid-cols-2 gap-3.5 min-[780px]:grid-cols-3">
+      <section className="settings-section">
+        <h3>{t("nav.clean")}</h3>
+        <div className="setting-block card">
+          <div className="setting-row setting-stack">
+            <h4 className="setting-label">{t("settings.scope")}</h4>
+            <div className="settings-groups">
               {GROUPS.map((g) => (
                 <div key={g}>
-                  <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-muted">
+                  <label className="check">
                     <Checkbox
                       checked={!settings?.disabledGroups.includes(g)}
                       disabled={busy}
@@ -271,41 +270,41 @@ export function SettingsPage({ callbacks, session }: Props) {
                     <span>{g === "review" ? t("settings.reviewItems") : t(`junk.group.${g}` as DictKey)}</span>
                   </label>
                   {errors.has(`group:${g}`) && (
-                    <p className="py-1.5 text-[12.5px] text-[var(--danger)]" role="alert">{errText(errors.get(`group:${g}`))}</p>
+                    <p className="err-inline" role="alert">{errText(errors.get(`group:${g}`))}</p>
                   )}
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 border-b border-border py-4">
-            <h4 className="m-0 text-[13px] font-semibold">{t("settings.ignored")}</h4>
-            <div className="flex flex-col gap-3">
+          <div className="setting-row setting-stack">
+            <h4 className="setting-label">{t("settings.ignored")}</h4>
+            <div className="settings-list">
               {settings && settings.ignored.length > 0
                 ? settings.ignored.map((id) => (
-                  <div key={id} className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 [overflow-wrap:anywhere]">{ignoredLabel(id, appNames, ruleName)}</span>
+                  <div key={id} className="settings-item">
+                    <div className="settings-item-line">
+                      <span>{ignoredLabel(id, appNames, ruleName)}</span>
                       <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRestore(id)}>
                         {t("settings.restore")}
                       </Button>
                     </div>
                     {errors.has(`ignored:${id}`) && (
-                      <p className="py-1.5 text-[12.5px] text-[var(--danger)]" role="alert">{errText(errors.get(`ignored:${id}`))}</p>
+                      <p className="err-inline" role="alert">{errText(errors.get(`ignored:${id}`))}</p>
                     )}
                   </div>
                 ))
-                : <p className="m-0 text-xs text-muted">{t("settings.ignoredEmpty")}</p>}
+                : <p className="muted small">{t("settings.ignoredEmpty")}</p>}
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 py-4">
-            <h4 className="m-0 text-[13px] font-semibold">{t("settings.custom")}</h4>
-            <div className="flex flex-col gap-3">
+          <div className="setting-row setting-stack">
+            <h4 className="setting-label">{t("settings.custom")}</h4>
+            <div className="settings-list">
               {settings?.custom.map((c) => (
-                <div key={c.path} className="flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex min-w-[180px] flex-1 flex-col gap-1.5">
+                <div key={c.path} className="settings-item">
+                  <div className="settings-custom-line">
+                    <div className="settings-folder-info">
                       <input
                         key={`${c.path}:${c.name}`}
                         defaultValue={c.name}
@@ -315,11 +314,10 @@ export function SettingsPage({ callbacks, session }: Props) {
                         onKeyDown={(e) => {
                           if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
                         }}
-                        className="w-full rounded-lg border border-border bg-[var(--bg-subtle)] px-2.5 py-[7px]"
                       />
-                      <span className="[overflow-wrap:anywhere] text-xs text-muted">{displayPath(c.path)}</span>
+                      <span className="settings-folder-path muted small">{displayPath(c.path)}</span>
                     </div>
-                    <label className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-muted">
+                    <label className="check">
                       <Checkbox
                         checked={c.enabled}
                         disabled={busy}
@@ -332,44 +330,38 @@ export function SettingsPage({ callbacks, session }: Props) {
                     </Button>
                   </div>
                   {errors.has(`custom:${c.path}`) && (
-                    <p className="py-1.5 text-[12.5px] text-[var(--danger)]" role="alert">{errText(errors.get(`custom:${c.path}`))}</p>
+                    <p className="err-inline" role="alert">{errText(errors.get(`custom:${c.path}`))}</p>
                   )}
                 </div>
               ))}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="settings-add">
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onAddFolder()}>
                 {t("settings.addFolder")}
               </Button>
-              <span className="text-xs text-muted">{t("settings.trashNote")}</span>
+              <span className="muted small">{t("settings.trashNote")}</span>
             </div>
             {errors.has("add") && (
-              <p className="py-1.5 text-[12.5px] text-[var(--danger)]" role="alert">{errText(errors.get("add"))}</p>
+              <p className="err-inline" role="alert">{errText(errors.get("add"))}</p>
             )}
           </div>
-        </Card>
+        </div>
       </section>
 
       {/* 权限 */}
-      <section className="flex flex-col gap-2.5">
-        <h3 className="text-[14px] font-semibold">{t("settings.permissions")}</h3>
-        <Card className="rounded-xl px-4">
-          <div className="flex flex-wrap items-center justify-between gap-4 py-2.5">
-            <div className="flex flex-col gap-2">
-              <span className="text-[13px] font-semibold">{t("settings.fullDiskAccess")}</span>
-              <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "h-[7px] w-[7px] rounded-full border border-muted",
-                    access === true && "border-[var(--accent)] bg-[var(--accent)]",
-                  )}
-                />
+      <section className="settings-section">
+        <h3>{t("settings.permissions")}</h3>
+        <div className="setting-block card">
+          <div className="setting-row setting-permission">
+            <div className="settings-permission-info">
+              <span className="setting-label">{t("settings.fullDiskAccess")}</span>
+              <span className={cn("permission-status", access === true && "granted")} role="status">
+                <span className="permission-dot" aria-hidden="true" />
                 {t(permissionKey as DictKey)}
               </span>
-              <p className="m-0 text-xs text-muted">{t("settings.permissionNote")}</p>
+              <p className="muted small">{t("settings.permissionNote")}</p>
               {permissionError ? (
-                <p className="m-0 py-1.5 text-[12.5px] text-[var(--danger)]" role="alert">{errText(permissionError)}</p>
+                <p className="err-inline" role="alert">{errText(permissionError)}</p>
               ) : null}
             </div>
             <Button
@@ -380,24 +372,24 @@ export function SettingsPage({ callbacks, session }: Props) {
               {t("settings.openSystem")}
             </Button>
           </div>
-        </Card>
+        </div>
       </section>
 
       {/* 关于 */}
-      <section className="flex flex-col gap-2.5">
-        <h3 className="text-[14px] font-semibold">{t("settings.about")}</h3>
-        <Card className="rounded-xl px-4">
-          <div className="flex items-center justify-between gap-4 border-b border-border py-2.5">
-            <span className="text-[13px] font-semibold">{t("settings.version")}</span>
-            <span className="inline-flex items-center gap-2.5">
-              <span className="text-muted">{version}</span>
+      <section className="settings-section">
+        <h3>{t("settings.about")}</h3>
+        <div className="setting-block card">
+          <div className="setting-row">
+            <span className="setting-label">{t("settings.version")}</span>
+            <span className="setting-version">
+              <span className="muted">{version}</span>
               <Button variant="ghost" size="sm" onClick={() => { void settingsApi.checkForUpdates().catch(() => {}); }}>
                 {t("settings.checkUpdate")}
               </Button>
             </span>
           </div>
-          <div className="flex items-center justify-between gap-4 py-2.5">
-            <span className="text-[13px] font-semibold">{t("settings.feedback")}</span>
+          <div className="setting-row">
+            <span className="setting-label">{t("settings.feedback")}</span>
             <a
               className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
               target="_blank"
@@ -407,7 +399,7 @@ export function SettingsPage({ callbacks, session }: Props) {
               {t("settings.feedbackBtn")}
             </a>
           </div>
-        </Card>
+        </div>
       </section>
     </div>
   );

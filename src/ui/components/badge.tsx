@@ -2,15 +2,16 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../cn";
 
+/** 对齐原生 .tag：11px/600、padding 1px 7px、圆角 999px。 */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium",
+  "inline-flex items-center rounded-full px-[7px] py-[1px] text-[11px] font-semibold leading-[1.5]",
   {
     variants: {
       variant: {
-        safe: "bg-primary/10 text-primary",
-        optional: "bg-muted-background text-muted",
-        warn: "bg-destructive/10 text-destructive",
-        protected: "bg-muted-background text-muted",
+        safe: "bg-accent-soft text-accent-strong",
+        optional: "bg-bg-subtle text-muted",
+        warn: "bg-danger-soft text-danger",
+        protected: "bg-bg-subtle text-muted",
       },
     },
     defaultVariants: { variant: "safe" },
