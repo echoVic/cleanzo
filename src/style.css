@@ -648,15 +648,15 @@ body {
 }
 .fs-progress.hidden { display: none; }
 .fs-progress-text { min-width: 0; flex: 1; }
-#ph-progress .hero-progress { width: 100%; }
-#fs-current {
+#ph-progress .hero-progress, .fs-progress-text .hero-progress { width: 100%; }
+#fs-current, .fs-progress-current {
   font-size: 13px;
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#fs-count { font-size: 12px; }
+#fs-count, .fs-progress-text .muted.small { font-size: 12px; }
 
 .spinner {
   width: 24px;
@@ -1232,7 +1232,7 @@ body {
 }
 
 /* 垃圾页：组头与行共用一条基线，长路径不挤压操作。 */
-#list.junk-list { display: flex; flex-direction: column; gap: 20px; background: none; border: none; padding: 0; }
+#list.junk-list, #clean-react-root .junk-list { display: flex; flex-direction: column; gap: 20px; background: none; border: none; padding: 0; }
 .junk-group { min-width: 0; }
 .junk-group-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .junk-group-head input, .junk-sub-row input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
@@ -1303,7 +1303,7 @@ body {
 .apps-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .apps-tab { padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .apps-tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); font-weight: 600; }
-#apps-installed, #apps-leftovers { display: flex; flex-direction: column; gap: 16px; }
+#apps-installed, #apps-leftovers, #apps-react-root [role=tabpanel] > div { display: flex; flex-direction: column; gap: 16px; }
 .leftovers-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 
 /* 设置即时保存 */
@@ -1375,6 +1375,11 @@ body {
 #view-status #st-alerts,
 #view-status #st-cards,
 #view-status .st-listcard { margin-top: 24px; }
+/* React 版状态页：.st-alerts 是空容器时不占位（旧版 #st-alerts 同样 0 高），margin 随其折叠。 */
+#view-status .st-alerts:empty { display: none; }
+#view-status .cz-react .st-grid,
+#view-status .cz-react .st-listcard { margin-top: 24px; }
+#view-status .cz-react .st-alerts:not(:empty) + .st-grid { margin-top: 24px; }
 
 /* ---- 指标卡栅格：auto-fill 公式推导，禁止固定列数 ---- */
 .st-grid {
@@ -1668,7 +1673,7 @@ body {
 }
 
 /* AI 工具页：每个工具一页，沿用垃圾页的组与行。 */
-#ai-list.junk-list { display: flex; flex-direction: column; gap: 16px; background: none; border: none; padding: 0; }
+#ai-list.junk-list, #ai-react-root .junk-list { display: flex; flex-direction: column; gap: 16px; background: none; border: none; padding: 0; }
 .ai-head-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; margin-bottom: 20px; }
 .ai-head-info { min-width: 0; }
 .ai-head-info .banner-title { display: flex; align-items: baseline; gap: 10px; }

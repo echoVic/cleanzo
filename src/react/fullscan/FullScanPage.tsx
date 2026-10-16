@@ -271,7 +271,7 @@ export function FullScanPage() {
   const showStoppedEmpty = !scanning && stopped && sorted.length === 0;
 
   return (
-    <div className="cz-react px-1">
+    <div className="cz-react">
       <header className="view-head">
         <div>
           <h2>{t("nav.fullscan")}</h2>
@@ -291,7 +291,7 @@ export function FullScanPage() {
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
-            <div>{currentPath ? t("fs.scanning", { path: displayPath(currentPath) }) : t("fs.prep")}</div>
+            <div className="fs-progress-current">{currentPath ? t("fs.scanning", { path: displayPath(currentPath) }) : t("fs.prep")}</div>
             <div className="muted small">{t("fs.count", { n: items.length.toLocaleString() })}</div>
           </div>
         </div>

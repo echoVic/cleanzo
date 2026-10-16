@@ -210,7 +210,7 @@ export function PhotosPage() {
   const showEmptyScanned = !scanning && !error && !stopped && visible.length === 0 && tried;
 
   return (
-    <div className="cz-react px-1">
+    <div className="cz-react">
       <header className="view-head">
         <div>
           <h2>{t("nav.photos")}</h2>

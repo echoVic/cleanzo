@@ -134,7 +134,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     path: o.path,
     name: (
       <>
-        {o.path.replace(/^\/Users\/[^/]+/, "~/")}
+        {o.path.replace(/^\/Users\/[^/]+/, "~")}
         <span className="tag dim"> {kindLabel(o.kind)}</span>
       </>
     ),
@@ -275,7 +275,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     : null;
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <div className="leftovers-head">
         <p className="muted">{t("orphans.sub")}</p>
         <Button onClick={() => (scanning ? stopScanNow() : void startScan())} disabled={busy && !scanning}>
@@ -361,7 +361,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
             <DialogDescription>
               {t("fs.trash.body", {
-                path: trashTarget ? trashTarget.path.replace(/^\/Users\/[^/]+/, "~/") : "",
+                path: trashTarget ? trashTarget.path.replace(/^\/Users\/[^/]+/, "~") : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}
             </DialogDescription>

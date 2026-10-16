@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronRight, FolderSearch } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { DirItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
@@ -37,14 +37,17 @@ interface RowCallbacks {
 function RevealButton({ path, onReveal }: { path: string; onReveal: (path: string) => void }) {
   const t = useT();
   return (
+    /* 对齐原生 .btn.small.ghost.icon：30×30、圆角 8px、描边半透明白底的图标按钮。 */
     <button
       type="button"
       title={t("fs.reveal")}
       aria-label={t("fs.reveal")}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-muted-background hover:text-foreground"
+      className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[8px] border border-border bg-btn-bg p-0 text-[12px] font-[590] leading-[18px] text-muted transition-colors hover:bg-hover hover:text-foreground"
       onClick={() => onReveal(path)}
     >
-      <FolderSearch className="h-[15px] w-[15px]" />
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+      </svg>
     </button>
   );
 }
@@ -64,7 +67,7 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
         checked={selection.sel.has(item.path)}
         disabled={busy || !item.trashable}
         onCheckedChange={(v) => callbacks.onToggleChild(parent, item.path, v === true)}
-        className="h-[15px] w-[15px]"
+        className="box-content h-[15px] w-[15px] p-1"
       />
       <span className="fs-child-name" title={item.path}>
         {item.name}
@@ -74,10 +77,9 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
       <RevealButton path={item.path} onReveal={callbacks.onReveal} />
       {item.trashable && (
         <Button
-          variant="ghost"
+          variant="destructive"
           size="sm"
           disabled={busy}
-          className="h-7 px-2 text-xs text-destructive"
           onClick={() => callbacks.onTrashRow(item.path, item.size)}
         >
           {busy ? <span className="spin" /> : null}
@@ -110,6 +112,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
           checked={checked ? true : indeterminate ? "indeterminate" : false}
           disabled={busy || !row.trashable}
           onCheckedChange={(v) => cb.onToggleRow(row.path, v === true)}
+          className="box-content p-1"
         />
         {row.rank && <div className="fs-rank">{row.rank}</div>}
         <div className="fs-main">
@@ -125,7 +128,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
             variant="ghost"
             size="sm"
             disabled={busy}
-            className="fs-expand h-7 px-2 text-xs"
+            className="fs-expand"
             onClick={() => cb.onExpand(row.path)}
           >
             {open ? t("fs.collapse") : t("fs.expand")}
@@ -135,10 +138,9 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
         <RevealButton path={row.path} onReveal={cb.onReveal} />
         {row.trashable && (
           <Button
-            variant="ghost"
+            variant="destructive"
             size="sm"
             disabled={busy}
-            className="h-7 px-2 text-xs text-destructive"
             onClick={() => cb.onTrashRow(row.path, row.size)}
           >
             {busy ? <span className="spin" /> : null}
@@ -210,6 +212,7 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
         checked={all ? true : some ? "indeterminate" : false}
         disabled={busy || selectableRows.length === 0}
         onCheckedChange={(v) => onToggleAll(v === true)}
+        className="box-content p-1"
       />
       <span className="fs-toolbar-count">
         {picked.length > 0
@@ -217,10 +220,9 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
           : t("fs.nothing")}
       </span>
       <Button
-        variant="ghost"
+        variant="destructive"
         size="sm"
         disabled={busy || picked.length === 0}
-        className="h-8 px-3 text-xs text-destructive"
         onClick={onTrashChecked}
       >
         {busy ? <span className="spin" /> : null}

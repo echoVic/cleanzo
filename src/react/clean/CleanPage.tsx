@@ -22,14 +22,14 @@ import {
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";
 
-const groupIcons: Record<string, string> = {
-  system: '<path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2M16 8l2-2"/><circle cx="12" cy="12" r="5"/>',
-  apps: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
-  browsers: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
-  updates: '<path d="M4 10a8 8 0 0 1 14-5l2 2M20 3v4h-4M20 14a8 8 0 0 1-14 5l-2-2M4 21v-4h4"/>',
-  dev: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 4l-4 16"/>',
-  review: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3v1"/>',
-  custom: '<path d="M3 7V5h7l2 3h9v12H3z"/>',
+const groupIcons: Record<string, React.ReactNode> = {
+  system: <><path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2M16 8l2-2" /><circle cx="12" cy="12" r="5" /></>,
+  apps: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
+  browsers: <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></>,
+  updates: <path d="M4 10a8 8 0 0 1 14-5l2 2M20 3v4h-4M20 14a8 8 0 0 1-14 5l-2-2M4 21v-4h4" />,
+  dev: <path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 4l-4 16" />,
+  review: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6m0 3v1" /></>,
+  custom: <path d="M3 7V5h7l2 3h9v12H3z" />,
 };
 
 const caret = (
@@ -563,7 +563,7 @@ export function CleanPage() {
   ].filter(Boolean) : [];
 
   return (
-    <div className="cz-react px-1">
+    <div className="cz-react">
       <header className="view-head">
         <div>
           <h2>{t("nav.clean")}</h2>
@@ -572,6 +572,7 @@ export function CleanPage() {
         {phase !== "idle" && (
           <div className="head-actions">
             <Button
+              variant="ghost"
               onClick={() => (phase === "scanning" ? stopScan() : void startScan())}
               disabled={phase === "cleaning" || ignoring}
             >

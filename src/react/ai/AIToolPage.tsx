@@ -178,7 +178,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const headText = t(headKey);
 
   return (
-    <div className="cz-react px-1">
+    <div className="cz-react">
       <header className="view-head">
         <div>
           <h2>{toolName}</h2>

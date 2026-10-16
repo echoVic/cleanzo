@@ -203,7 +203,7 @@ const SkRow = () => (
 );
 
 const segTrigger =
-  "cursor-pointer rounded-md px-3 py-1 text-xs text-[var(--muted)] transition-colors " +
+  "cursor-pointer rounded-[6px] px-3 py-1 text-xs leading-[18px] text-[var(--muted)] transition-colors " +
   "data-[state=active]:bg-[var(--card)] data-[state=active]:font-semibold data-[state=active]:text-[var(--fg)] " +
   "data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.1)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]";
@@ -408,29 +408,32 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
         </div>
       </header>
 
-      {alerts.map((a: PickedAlert) => (
-        <div key={a.kind} className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
-          <CalloutIcon />
-          <div className="st-callout-body">
-            {a.kind === "memWarn" && t("status.alert.memWarn")}
-            {a.kind === "memCrit" && t("status.alert.memCrit")}
-            {a.kind === "swapOnly" && t("status.alert.swapOnly", { size: fmtMem(a.swapDisk ?? 0) })}
-            {a.kind === "diskLow" && t("status.alert.diskLow", { size: fmtMem(a.free ?? 0) })}
-            {a.swapDisk != null && (a.kind === "memWarn" || a.kind === "memCrit") && (
-              <span className="st-extra num">{t("status.alert.swapLine", { size: fmtMem(a.swapDisk) })}</span>
+      {/* 与原生 #st-alerts 一致：告警始终占一个区块位（为空时也保留节奏），多条告警紧贴排列。 */}
+      <div className="st-alerts">
+        {alerts.map((a: PickedAlert) => (
+          <div key={a.kind} className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
+            <CalloutIcon />
+            <div className="st-callout-body">
+              {a.kind === "memWarn" && t("status.alert.memWarn")}
+              {a.kind === "memCrit" && t("status.alert.memCrit")}
+              {a.kind === "swapOnly" && t("status.alert.swapOnly", { size: fmtMem(a.swapDisk ?? 0) })}
+              {a.kind === "diskLow" && t("status.alert.diskLow", { size: fmtMem(a.free ?? 0) })}
+              {a.swapDisk != null && (a.kind === "memWarn" || a.kind === "memCrit") && (
+                <span className="st-extra num">{t("status.alert.swapLine", { size: fmtMem(a.swapDisk) })}</span>
+              )}
+            </div>
+            {a.action && (
+              <button
+                className="btn ghost small"
+                type="button"
+                onClick={() => (a.action === "apps" ? viewApps() : goCleanRef.current())}
+              >
+                {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
+              </button>
             )}
           </div>
-          {a.action && (
-            <button
-              className="btn ghost small"
-              type="button"
-              onClick={() => (a.action === "apps" ? viewApps() : goCleanRef.current())}
-            >
-              {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
-            </button>
-          )}
-        </div>
-      ))}
+        ))}
+      </div>
 
       {error ? (
         <div className="empty err">
@@ -465,7 +468,7 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
           <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
             <TabsList
               aria-label="排序方式"
-              className="ml-auto flex flex-none gap-[2px] rounded-lg bg-[var(--bg-subtle)] p-[2px]"
+              className="ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
             >
               <TabsTrigger value="mem" className={segTrigger}>{t("status.apps.byMemory")}</TabsTrigger>
               <TabsTrigger value="cpu" className={segTrigger}>{t("status.apps.byCpu")}</TabsTrigger>

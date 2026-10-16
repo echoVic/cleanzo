@@ -122,7 +122,7 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
   const visible = sortApps(filterApps(apps, q), sortBy, currentLang());
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <div className="app-filters">
         <div className="search-wrap">
           <Search className="h-[14px] w-[14px]" aria-hidden="true" />

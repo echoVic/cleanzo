@@ -35,7 +35,7 @@ export function AppsPage({ initialTab, nonce }: AppsPageProps) {
   }, [installedBusy, orphanBusy]);
 
   return (
-    <div className="cz-react px-1">
+    <div className="cz-react">
       <header className="view-head">
         <div>
           <h2>{t("nav.apps")}</h2>

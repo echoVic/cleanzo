@@ -220,7 +220,7 @@ export function SettingsPage({ callbacks, session }: Props) {
     : loading ? t("settings.loading") : "";
 
   return (
-    <div className="cz-react flex flex-col gap-4">
+    <div className="cz-react">
       <header className="view-head">
         <h2>{t("nav.settings")}</h2>
       </header>

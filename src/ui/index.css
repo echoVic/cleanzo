@@ -77,5 +77,16 @@
 .cz-react {
   font: inherit;
   color: var(--foreground);
+  /* 与原生 .view 一致：React 根节点内的头部 / 主卡片 / 列表之间保持 16px 间距。
+     React 内容被包在一层 div 里，父级 section.view 的 flex gap 作用不到这些子元素。 */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Tailwind preflight 把 <p> 外边距清零；原生页面里没有专门类规则的 <p> 依赖浏览器默认的
+   1em 上下外边距（如空间分析说明、设置页提示）。放在 base 层：类规则与工具类仍可覆盖。 */
+@layer base {
+  p { margin-block: 1em; }
 }
 .cz-react *, .cz-react *::before, .cz-react *::after { box-sizing: border-box; }
