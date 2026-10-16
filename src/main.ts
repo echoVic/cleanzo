@@ -5,8 +5,8 @@ import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
 import { showReactApps } from "./react/apps/entry";
 import { showReactFullScan } from "./react/fullscan/entry";
+import { setGoCleanHandler, showReactStatus } from "./react/status/entry";
 import { bumpLang } from "./ui/i18n-react";
-import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
   $, esc, toast, scanChans, VIEWS, overlay, hideModal, type View,
 } from "./shared";
@@ -43,7 +43,6 @@ function refreshI18n() {
   // 其他扫描中的视图等它结束后自己会重绘（React 页面经 bumpLang 重渲染）。
   refreshJunkI18n();
   bumpLang();
-  refreshStatusI18n();
 }
 
 const language = connectLanguage(window.mygo ? {
@@ -70,7 +69,8 @@ function switchView(v: View, tool?: string) {
   // AI 工具的几个侧栏项共用一个视图，按 data-tool 区分高亮。
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool)));
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
-  if (v === "status") startStatus(); else stopStatus();
+  if (v === "status") showReactStatus(true);
+  else showReactStatus(false);
   if (v === "aitools" && tool) {
     const names: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
     showReactAITool(tool, names[tool] ?? tool);
@@ -92,11 +92,10 @@ document.addEventListener("keydown", (e) => {
 applyStaticI18n();
 initJunk();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
-initStatus();
-// 默认落在「系统状态」（HTML 初始高亮已同步），启动即开始采样
+// 默认落在「系统状态」（HTML 初始高亮已同步），switchView("status") 即开采样。
 void initReactAITools();
 switchView("status");
-setGoCleanView(() => switchView("clean"));
+setGoCleanHandler(() => switchView("clean"));
 setOpenLeftovers(() => showReactApps("leftovers"));
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()

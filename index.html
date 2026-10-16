@@ -70,34 +70,9 @@
       </aside>
 
       <main class="content">
-        <!-- 系统状态 -->
+        <!-- 系统状态（React 页面，内容由 React 挂载） -->
         <section id="view-status" class="view">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.status">系统状态</h2>
-              <p class="muted" data-i18n="status.sub">内存、CPU、磁盘和电池的状态，紧张时告诉你怎么办</p>
-              <p id="st-machine" class="st-machine num"></p>
-            </div>
-          </header>
-          <div id="st-alerts"></div>
-          <section id="st-cards" class="st-grid" aria-label="指标卡"></section>
-          <section class="st-listcard">
-            <div class="st-list-head" id="st-list-head">
-              <h3 data-i18n="status.apps.title">占用最多的应用</h3>
-              <div class="seg" role="tablist" aria-label="排序方式">
-                <button id="st-seg-mem" class="on" type="button" role="tab" aria-selected="true" data-i18n="status.apps.byMemory">按内存</button>
-                <button id="st-seg-cpu" type="button" role="tab" aria-selected="false" data-i18n="status.apps.byCpu">按 CPU</button>
-              </div>
-            </div>
-            <div class="st-cols num">
-              <span class="c-app" data-i18n="status.apps.appCol">应用</span>
-              <span class="c-mem" data-i18n="status.apps.memCol">内存</span>
-              <span class="c-cpu" data-i18n="status.apps.cpuCol">CPU · 单核</span>
-              <span class="c-act"></span>
-            </div>
-            <section id="st-list" class="st-list" aria-live="polite"></section>
-            <p id="st-footnote" class="st-footnote muted small"></p>
-          </section>
+          <div id="status-react-root"></div>
         </section>
 
         <!-- 垃圾清理 -->

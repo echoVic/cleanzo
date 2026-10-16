@@ -53,6 +53,15 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-warning-text: var(--warning-text);
+  /* 系统状态页语义色：全部映射 style.css 既有变量，浅/深色由变量承担，不硬编码。 */
+  --color-status-ok: var(--status-ok);
+  --color-status-warn: var(--status-warn);
+  --color-status-critical: var(--status-critical);
+  --color-seg-app: var(--seg-app);
+  --color-seg-wired: var(--seg-wired);
+  --color-seg-compressed: var(--seg-compressed);
+  --color-callout-warn-bg: var(--callout-warn-bg);
+  --color-callout-critical-bg: var(--callout-critical-bg);
   --color-bg-subtle: var(--bg-subtle);
   --color-hover: var(--hover);
   --color-btn-bg: var(--btn-bg);
