@@ -2,7 +2,7 @@ import * as React from "react";
 import { RefreshCw } from "lucide-react";
 import type { LargeFile, LargeScanResult } from "../../mygo";
 import { Button } from "../../ui/components/button";
-import { IdleHero } from "../../ui/components/idle-hero";
+import { EmptyGuide } from "../../ui/components/empty-guide";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -301,15 +301,16 @@ export function LargePage() {
       )}
 
       {showIdle && (
-        <IdleHero
-          label={t("hero.ready")}
-          value="--"
-          sub={t("clean.idleSub")}
-          guide={t("large.idle.title")}
-          note={t("large.idle.desc", { size: human(threshold) })}
+        <EmptyGuide
+          gradId="eg-large-grad"
+          title={t("large.idle.title")}
+          desc={t("large.idle.desc", { size: human(threshold) })}
           ctaText={t("large.idle.cta")}
           onCta={() => void startScan()}
-        />
+        >
+          <path d="M7 4.8h6.5l4 4v10.4H7z" />
+          <path d="M13.5 4.8v4h4M10 12.5h4.5M10 15.5h4.5" />
+        </EmptyGuide>
       )}
 
       {showEmptyScanned && (

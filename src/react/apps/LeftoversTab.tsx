@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { OrphanItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
-import { IdleHero } from "../../ui/components/idle-hero";
+import { EmptyGuide } from "../../ui/components/empty-guide";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -307,15 +307,16 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
       )}
 
       {showIdle && (
-        <IdleHero
-          label={t("hero.ready")}
-          value="--"
-          sub={t("clean.idleSub")}
-          guide={t("orphans.idle.title")}
-          note={t("orphans.idle.desc")}
+        <EmptyGuide
+          gradId="eg-orphans-grad"
+          title={t("orphans.idle.title")}
+          desc={t("orphans.idle.desc")}
           ctaText={t("orphans.idle.cta")}
           onCta={() => void startScan()}
-        />
+        >
+          <path d="M4.8 9V7h5l2 2h7.4v9H4.8z" />
+          <path d="M9.5 13.5h5" strokeDasharray="1 2" />
+        </EmptyGuide>
       )}
 
       {!scanning && error && (

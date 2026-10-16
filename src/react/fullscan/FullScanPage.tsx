@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { BigItem, DiskStat, FullScanResult } from "../../mygo";
 import { Button } from "../../ui/components/button";
-import { IdleHero } from "../../ui/components/idle-hero";
+import { EmptyGuide } from "../../ui/components/empty-guide";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -298,15 +298,17 @@ export function FullScanPage() {
       )}
 
       {showIdle && (
-        <IdleHero
-          label={t("hero.ready")}
-          value="--"
-          sub={t("clean.idleSub")}
-          guide={t("fs.idle.title")}
-          note={t("fs.idle.desc")}
+        <EmptyGuide
+          gradId="eg-fs-grad"
+          title={t("fs.idle.title")}
+          desc={t("fs.idle.desc")}
           ctaText={t("fs.idle.cta")}
           onCta={() => void startScan()}
-        />
+        >
+          <circle cx="12" cy="12" r="6.8" opacity="0.25" />
+          <path d="M12 5.2v6.8h6.8" />
+          <path d="M12 12l-4.8 4.8" />
+        </EmptyGuide>
       )}
 
       {showEmptyScanned && <div className="empty">{t("fs.empty")}</div>}
