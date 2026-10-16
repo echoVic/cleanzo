@@ -13,8 +13,8 @@ import {
 /** 一行顶层数据（文件或目录）。 */
 export interface ListRowData {
   path: string;
-  /** 已折叠 home 的展示名。 */
-  name: string;
+  /** 已折叠 home 的展示名（可内联标签）。 */
+  name: React.ReactNode;
   size: number;
   /** 排名序号（1 起）；不显示则不传。 */
   rank?: string;

@@ -3,25 +3,23 @@ import { initReactAITools, showReactAITool } from "./react/ai/entry";
 import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
+import { showReactApps } from "./react/apps/entry";
 import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
-  $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
-  skeletonRows, setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
-  markRescan, setNavBusy, VIEWS, overlay, modalTitle, modalBody, modalOk, showModal,
+  $, errText, human, esc, displayPath, toast, emptyState, errorState,
+  setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
+  markRescan, VIEWS, overlay, modalTitle, modalBody, modalOk, showModal,
   hideModal, currentModalSeq, setPending, type View,
 } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner, LanguageSettings } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, OrphanItem } from "./mygo";
-import { t, kindLabel, currentLang, type LangPref } from "./i18n";
+import type { BigItem, DirItem, DiskStat, FullScanResult } from "./mygo";
+import { t, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
-const appSort = $<HTMLSelectElement>("#app-sort");
-const appSearch = $<HTMLInputElement>("#app-search");
-const appListEl = $("#app-list");
 const fsScanBtn = $<HTMLButtonElement>("#fs-scan");
 const fsProgress = $("#fs-progress");
 const fsCurrent = $("#fs-current");
@@ -32,44 +30,13 @@ const fsUsed = $("#fs-used");
 const fsFree = $("#fs-free");
 const fsTotal = $("#fs-total");
 const fsBar = $("#fs-bar") as HTMLDivElement;
-const orScanBtn = $<HTMLButtonElement>("#or-scan");
-const orSummary = $("#or-summary");
-const orTotal = $("#or-total");
-const orProgress = $("#or-progress");
-const orCurrent = $("#or-current");
-const orList = $("#or-list");
-const orToolbar = $("#or-toolbar");
 
-/** 小偏好：存储不可用时仍可操作。 */
-function readChoice<T extends string>(key: string, choices: readonly T[], fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    if (choices.includes(value as T)) return value as T;
-  } catch { /* 忽略 */ }
-  return fallback;
-}
-function saveChoice(key: string, value: string) {
-  try { localStorage.setItem(key, value); } catch { /* 忽略 */ }
-}
-const appSorts = ["name", "size", "opened"] as const;
-let appSortBy = readChoice("cleanzo.appSort", appSorts, "name");
-appSort.value = appSortBy;
-
-let apps: AppInfo[] = [];
-const appBusy = new Set<string>();
-let appsLoading = false;
 let fsResult: FullScanResult | null = null;
 let fsDisk: DiskStat | null = null;
 let fsDiskSeq = 0;
 let fsDiskPending = 0;
 let fsRunning = false;
 let fsItems: BigItem[] = [];
-let orRunning = false;
-let orTried = false;
-let appsTab: "installed" | "leftovers" = "installed";
-const appsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".apps-tab"));
-let orItems: OrphanItem[] = [];
-let orFoot: { n: string; size: string; t: string } | null = null;
 
 // ---- i18n ----
 
@@ -97,15 +64,9 @@ function refreshI18n() {
   // 其他扫描中的视图等它结束后自己会重绘
   refreshJunkI18n();
   bumpLang();
-  if (apps.length > 0) renderApps();
   if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   renderIdleScanPages();
-  if (!orRunning && orItems.length > 0) {
-    if (orFoot) orTotal.textContent = t("orphans.foot", orFoot);
-    renderOrphanRows(orItems);
-  }
-  renderAppsTabs();
   refreshStatusI18n();
 }
 
@@ -142,7 +103,7 @@ function switchView(v: View, tool?: string) {
     const names: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
     showReactAITool(tool, names[tool] ?? tool);
   }
-  if (v === "apps") selectAppsTab(appsTab);
+  if (v === "apps") showReactApps();
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
@@ -156,8 +117,6 @@ function renderIdleScanPages() {
   const guides = [
     { list: fsList, running: fsRunning, key: "fs", start: startFullScan,
       path: '<circle cx="12" cy="12" r="6.8" opacity="0.25"/><path d="M12 5.2v6.8h6.8"/><path d="M12 12l-4.8 4.8"/>' },
-    { list: orList, running: orRunning, key: "orphans", start: startOrphanScan,
-      path: '<path d="M4.8 9V7h5l2 2h7.4v9H4.8z"/><path d="M9.5 13.5h5" stroke-dasharray="1 2"/>' },
   ] as const;
   for (const g of guides) {
     if (g.running || (g.list.childElementCount > 0 && !g.list.querySelector(".empty-guide"))) continue;
@@ -280,11 +239,11 @@ interface ListState {
 }
 
 const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
-const lists = { fullscan: newList(), orphans: newList() };
+const lists = { fullscan: newList() };
 /** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
 function resetList(v: keyof typeof lists) {
   lists[v] = newList();
-  const toolbar = { fullscan: fsToolbar, orphans: orToolbar }[v];
+  const toolbar = { fullscan: fsToolbar }[v];
   toolbar.classList.add("hidden");
   toolbar.innerHTML = "";
 }
@@ -663,270 +622,9 @@ function askTrash(path: string, size: number, ctx: ListCtx) {
   showModal();
 }
 
-// ---- 残留清理 ----
-
-async function startOrphanScan() {
-  if (orRunning) return;
-  resetList("orphans");
-  orFoot = null;
-  orRunning = true;
-  orTried = true;
-  orItems = [];
-  renderAppsTabs();
-  orSummary.classList.add("hidden");
-  orProgress.classList.remove("hidden");
-  orCurrent.textContent = t("orphans.live");
-  orList.innerHTML = "";
-  const ch = new Channel<OrphanItem>();
-  setStoppable(orScanBtn, ch);
-  try {
-    const done = Cleaner.scanOrphans(ch);
-    for await (const o of ch) {
-      if (o.kind === "__done") {
-        const total = o.size ?? 0;
-        const elapsed = Number(o.path ?? 0) / 1000;
-        orProgress.classList.add("hidden");
-        orSummary.classList.remove("hidden");
-        orFoot = { n: orItems.length.toLocaleString(), size: human(total), t: elapsed.toFixed(1) };
-        orTotal.textContent = t("orphans.foot", orFoot);
-        if (orItems.length === 0) {
-          orList.innerHTML = emptyState(t("orphans.empty"));
-        }
-        continue;
-      }
-      orItems.push(o);
-      renderAppsTabs();
-      orCurrent.textContent = t("orphans.count", { n: orItems.length.toLocaleString() });
-      renderOrphanRows(orItems);
-    }
-    await done;
-    if (!stoppedScans.has(orScanBtn) || orItems.length > 0) markRescan(orScanBtn);
-  } catch (e) {
-    if (!stoppedScans.has(orScanBtn)) {
-      orItems = [];
-      orList.innerHTML = errorState(t("orphans.fail", { msg: errText(e) }), startOrphanScan);
-      toast(t("orphans.fail", { msg: errText(e) }), "err");
-    }
-  } finally {
-    orRunning = false;
-    orProgress.classList.add("hidden");
-    if (stoppedScans.has(orScanBtn) && orItems.length > 0) markRescan(orScanBtn);
-    if (endScan(orScanBtn) && orItems.length === 0) orList.innerHTML = emptyState(t("scan.stopped"));
-    renderAppsTabs();
-    syncAppsBusy();
-  }
-}
-
-function renderOrphanRows(items: OrphanItem[]) {
-  items = items.filter((o) => !isGone(lists.orphans, o.path));
-  if (items.length === 0) {
-    orList.innerHTML = emptyState(t("orphans.empty"));
-    orToolbar.classList.add("hidden");
-    orToolbar.innerHTML = "";
-    return;
-  }
-  const sorted = [...items].sort((a, b) => b.size - a.size);
-  const maxSize = sorted[0]?.size || 1;
-  const rows = sorted
-    .map(
-      (o, i) =>
-        fsRowHtml(lists.orphans, {
-          path: o.path,
-          name: `${esc(displayPath(o.path))} <span class="tag dim">${esc(kindLabel(o.kind))}</span>`,
-          size: o.size,
-          rank: `${i + 1}`,
-          expandable: o.isDir,
-          trashable: o.trashable,
-          locked: !o.trashable,
-          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((o.size / maxSize) * 100))}%"></div></div>`,
-        }),
-    )
-    .join("");
-  renderFsListInto({
-    st: lists.orphans,
-    list: orList,
-    toolbar: orToolbar,
-    rerender: () => renderOrphanRows(orItems),
-    removeRows: (removed) => {
-      updateRowsAfterRemoved(orItems, removed, lists.orphans);
-      renderAppsTabs();
-      if (orFoot) {
-        orFoot.n = orItems.length.toLocaleString();
-        orFoot.size = human(orItems.reduce((sum, it) => sum + (it.size >= 0 ? it.size : 0), 0));
-        orTotal.textContent = t("orphans.foot", orFoot);
-      }
-    },
-    sizeOf: (path) => orItems.find((it) => it.path === path)?.size ?? childSize(lists.orphans, path),
-  }, rows);
-}
-
-// ---- 应用卸载 ----
-
-/** 应用与残留的后台任务共用导航提示。 */
-function syncAppsBusy() {
-  setNavBusy("apps", appsLoading || appBusy.size > 0 || orRunning);
-}
-
-function renderAppsTabs() {
-  appsTabs.forEach((b) => {
-    const active = b.dataset.tab === appsTab;
-    b.classList.toggle("active", active);
-    b.setAttribute("aria-selected", String(active));
-    b.tabIndex = active ? 0 : -1;
-  });
-  $("#apps-tab-leftovers").textContent = t("apps.tab.leftoversCount", { n: orItems.length });
-}
-
-function selectAppsTab(tab: typeof appsTab) {
-  appsTab = tab;
-  $("#apps-installed").classList.toggle("hidden", tab !== "installed");
-  $("#apps-leftovers").classList.toggle("hidden", tab !== "leftovers");
-  renderAppsTabs();
-  if (tab === "installed" && apps.length === 0 && !appsLoading) void loadApps();
-  if (tab === "leftovers" && !orTried) void startOrphanScan();
-}
-
-appsTabs.forEach((b, i) => {
-  b.addEventListener("click", () => selectAppsTab(b.dataset.tab as typeof appsTab));
-  b.addEventListener("keydown", (e) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-    e.preventDefault();
-    const next = e.key === "Home" ? 0 : e.key === "End" ? appsTabs.length - 1 : (i + 1) % appsTabs.length;
-    appsTabs[next]?.click();
-    appsTabs[next]?.focus();
-  });
-});
-
-async function loadApps() {
-  if (appsLoading) return;
-  appsLoading = true;
-  syncAppsBusy();
-  appListEl.innerHTML = skeletonRows(8);
-  try {
-    apps = await Cleaner.listApps();
-    renderApps();
-  } catch (e) {
-    apps = [];
-    appListEl.innerHTML = errorState(t("apps.loadFail", { msg: errText(e) }), loadApps);
-    toast(t("apps.loadFail", { msg: errText(e) }), "err");
-  } finally {
-    appsLoading = false;
-    syncAppsBusy();
-  }
-}
-
-function renderApps() {
-  const q = appSearch.value.trim().toLowerCase();
-  const list = apps.filter(
-    (a) => !q || a.name.toLowerCase().includes(q) || a.path.toLowerCase().includes(q),
-  ).sort((a, b) => {
-    const byName = () => a.name.localeCompare(b.name, currentLang() === "zh" ? "zh-CN" : "en");
-    if (appSortBy === "size") return b.size - a.size || byName();
-    if (appSortBy === "opened") return b.lastOpened - a.lastOpened || byName();
-    return byName();
-  });
-  if (apps.length === 0) {
-    appListEl.innerHTML = emptyState(t("apps.empty"));
-    return;
-  }
-  if (list.length === 0) {
-    appListEl.innerHTML = emptyState(t("apps.noMatch", { q }));
-    return;
-  }
-  appListEl.innerHTML = list
-    .map(
-      (a) => `
-      <div class="app-row card">
-        <div class="app-icon">${esc(a.name.charAt(0).toUpperCase())}</div>
-        <div class="app-main">
-          <div class="app-name">${esc(a.name)}${a.running ? ` <span class="tag ok">${esc(t("apps.running"))}</span>` : ""}${a.version ? ` <span class="ver muted">${esc(a.version)}</span>` : ""}</div>
-          <div class="app-path muted">${esc(a.path)}</div>
-        </div>
-        <div class="app-meta">
-          <div class="app-size">${human(a.size)}</div>
-          <div class="app-used muted small">${a.lastOpened ? fmtDate(a.lastOpened) : esc(t("apps.never"))}</div>
-        </div>
-        <button class="btn small uninstall-detail" data-path="${esc(a.path)}"${appBusy.has(a.path) ? " disabled" : ""}>${appBusy.has(a.path) ? `<span class="spin"></span>${esc(t("apps.moving"))}` : esc(t("apps.detail"))}</button>
-      </div>`,
-    )
-    .join("");
-  appListEl.querySelectorAll<HTMLButtonElement>(".uninstall-detail").forEach((b) => {
-    b.addEventListener("click", () => showUninstallDetail(b.dataset.path!));
-  });
-}
-
-async function showUninstallDetail(path: string) {
-  modalTitle.textContent = t("apps.analyzing");
-  modalBody.textContent = t("apps.analyzingBody");
-  modalOk.disabled = true;
-  modalOk.textContent = t("apps.wait");
-  showModal();
-  const seq = currentModalSeq();
-  try {
-    const d = await Cleaner.appUninstallDetail(path);
-    if (seq !== currentModalSeq()) return; // 这个框已经关掉或换成了别的
-    modalTitle.textContent = t("apps.title", { name: d.app.name });
-    const rows = d.items
-      .map(
-        (it) =>
-          `<div class="detail-item"><span class="kind">${esc(kindLabel(it.kind))}</span><span class="path">${esc(it.path)}</span><span class="size">${human(it.size)}</span></div>`,
-      )
-      .join("");
-    // 正在运行的应用卸不了：照样列出文件，但不问「确定卸载吗」，只请用户先退出
-    const note = d.app.running ? t("apps.inUse", { name: d.app.name }) : t("apps.body", { n: d.items.length, size: human(d.totalSize) });
-    modalBody.innerHTML = `<div class="detail-list">${rows}</div>
-      <p class="warn-text">${esc(note)}</p>`;
-    if (d.app.running) {
-      setPending(null);
-      modalOk.textContent = t("btn.close");
-      return;
-    }
-    setPending(async () => {
-      if (appBusy.has(d.app.path)) return;
-      appBusy.add(d.app.path);
-      syncAppsBusy();
-      renderApps();
-      try {
-        const res = await Cleaner.uninstallApp(d.app.path);
-        const bundleFailed = res.failed.some((f) => f === res.path || f.startsWith(`${res.path}:`));
-        if (res.moved === 0 && res.failed.some((f) => f.endsWith(": in-use"))) {
-          toast(t("apps.inUse", { name: d.app.name }), "err");
-        } else if (res.failed.length > 0) {
-          toast(t("apps.partial", { name: d.app.name, n: res.failed.length }), "err");
-        } else {
-          toast(t("apps.ok", { name: d.app.name, size: human(res.freed) }));
-        }
-        if (!bundleFailed) apps = apps.filter((a) => a.path !== res.path);
-        renderApps();
-      } catch (e) {
-        toast(t("apps.fail", { msg: errText(e) }), "err");
-      } finally {
-        appBusy.delete(d.app.path);
-        syncAppsBusy();
-        renderApps();
-      }
-    });
-    modalOk.textContent = t("apps.confirm");
-  } catch (e) {
-    if (seq !== currentModalSeq()) return;
-    modalBody.innerHTML = `<div class="err-inline">${esc(t("apps.analyzeFail", { msg: errText(e) }))}</div>`;
-    setPending(null);
-    modalOk.textContent = t("btn.close");
-  } finally {
-    if (seq === currentModalSeq()) modalOk.disabled = false;
-  }
-}
-
 // ---- 事件 ----
 
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
-orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
-appSearch.addEventListener("input", renderApps);
-appSort.addEventListener("change", () => {
-  appSortBy = appSort.value as typeof appSortBy;
-  saveChoice("cleanzo.appSort", appSortBy);
-  if (!appsLoading) renderApps();
-});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
 });
@@ -939,12 +637,8 @@ initStatus();
 void initReactAITools();
 switchView("status");
 setGoCleanView(() => switchView("clean"));
-setOpenLeftovers(() => {
-  appsTab = "leftovers";
-  switchView("apps");
-});
+setOpenLeftovers(() => showReactApps("leftovers"));
 renderIdleScanPages();
-renderAppsTabs();
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

@@ -185,50 +185,9 @@
           <div id="photos-react-root"></div>
         </section>
 
-        <!-- 应用卸载 -->
+        <!-- 应用卸载（React 页面，内容由 React 挂载） -->
         <section id="view-apps" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.apps">应用卸载</h2>
-              <p class="muted" data-i18n="apps.sub">卸载应用时，连同偏好设置、缓存等关联文件一起移入废纸篓</p>
-            </div>
-          </header>
-          <div class="apps-tabs" role="tablist" data-i18n-title="nav.apps">
-            <button id="apps-tab-installed" class="apps-tab active" type="button" role="tab" aria-selected="true" aria-controls="apps-installed" data-tab="installed" data-i18n="apps.tab.installed">已安装</button>
-            <button id="apps-tab-leftovers" class="apps-tab" type="button" role="tab" aria-selected="false" aria-controls="apps-leftovers" tabindex="-1" data-tab="leftovers"></button>
-          </div>
-          <div id="apps-installed" role="tabpanel" aria-labelledby="apps-tab-installed">
-            <div class="app-filters">
-              <div class="search-wrap">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
-                <input id="app-search" class="search" data-i18n-ph="apps.search" placeholder="搜索应用…" autocomplete="off" />
-              </div>
-              <select id="app-sort" class="select" data-i18n-title="apps.sort">
-                <option value="name" data-i18n="apps.sortName">名称</option>
-                <option value="size" data-i18n="apps.sortSize">大小</option>
-                <option value="opened" data-i18n="apps.sortOpened">上次打开</option>
-              </select>
-            </div>
-            <section id="app-list" class="app-list" aria-live="polite"></section>
-          </div>
-          <div id="apps-leftovers" class="hidden" role="tabpanel" aria-labelledby="apps-tab-leftovers">
-            <div class="leftovers-head">
-              <p class="muted" data-i18n="orphans.sub">找出已卸载应用留下的残留文件</p>
-              <button id="or-scan" class="btn primary" type="button" data-i18n="orphans.scanBtn">扫描残留</button>
-            </div>
-            <div id="or-summary" class="orphan-summary hidden">
-              <div id="or-total" class="orphan-total"></div>
-              <div id="or-note" class="muted small" data-i18n="orphans.safeNote">残留项可能包含仍在使用的数据，移入废纸篓前请先确认。</div>
-            </div>
-            <div id="or-progress" class="fs-progress hidden">
-              <div class="spinner"></div>
-              <div class="fs-progress-text">
-                <div id="or-current" class="muted small"></div>
-              </div>
-            </div>
-            <div id="or-toolbar" class="fs-toolbar hidden"></div>
-            <section id="or-list" class="fs-list" aria-live="polite"></section>
-          </div>
+          <div id="apps-react-root"></div>
         </section>
 
         <!-- 设置（React 页面，内容由 React 挂载） -->

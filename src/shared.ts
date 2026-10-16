@@ -99,7 +99,7 @@ function setNavBusy(view: View, on: boolean) {
 }
 
 const scanViews: Record<string, View> = {
-  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "or-scan": "apps", "ph-scan": "photos",
+  scan: "clean", "fs-scan": "fullscan", "lg-scan": "large", "ph-scan": "photos",
 };
 
 /** 恢复按钮时仍按当前语言显示「重新扫描」。 */

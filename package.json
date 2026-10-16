@@ -10,11 +10,12 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:web": "bun test tests/junk.test.ts && bun test tests/status.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts"
+    "test:web": "bun test tests/junk.test.ts && bun test tests/status.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.4.1",
     "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-tabs": "^1.2.1",
     "mygo-runtime": "0.5.0",
     "react": "^19",
     "react-dom": "^19"
