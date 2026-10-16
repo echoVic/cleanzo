@@ -75,16 +75,18 @@ function partial(it: JunkItem): boolean {
   return selected.has(it.id) && hasSubs(it) && count > 0 && count < subsOf(it).filter((s) => s.size > 0).length;
 }
 
-/** 重绘后恢复三态，勾选状态不放在 DOM 里。 */
+/** 重绘后恢复三态，勾选状态不放在 DOM 里。
+ *  分组三态按所有可见行算（含运行中、被锁住的）：只要有行没勾，父框就是半选，
+ *  不能因为运行中的行不可选就把父框显示成「全选」。 */
 function syncChecks() {
   listEl.querySelectorAll<HTMLInputElement>('input[data-action="item"]').forEach((cb) => {
     const it = items.find((x) => x.id === cb.dataset.id);
     cb.indeterminate = !!it && partial(it);
   });
   listEl.querySelectorAll<HTMLInputElement>('input[data-action="group"]').forEach((cb) => {
-    const members = items.filter((it) => it.group === cb.dataset.group && selectable(it));
-    const picked = members.filter((it) => selected.has(it.id));
-    cb.indeterminate = picked.length > 0 && (picked.length < members.length || picked.some(partial));
+    const shown = items.filter((it) => it.group === cb.dataset.group && visible(it));
+    const chosen = shown.filter((it) => selected.has(it.id));
+    cb.indeterminate = chosen.length > 0 && chosen.length < shown.length;
   });
 }
 
@@ -185,7 +187,8 @@ function groupHtml(group: string, members: JunkItem[]): string {
   const text = members.some((it) => pending.has(it.id)) ? t("cat.scanning") : t("junk.groupSummary", { total: human(total), sel: human(chosen) });
   return `<section class="junk-group"><div class="junk-group-head">
       <input type="checkbox" data-action="group" data-group="${group}" aria-label="${esc(t("junk.select", { name: t(`junk.group.${group}` as never) }))}"
-        ${phase !== "scanned" || eligible.length === 0 ? "disabled" : ""} ${picked.length > 0 && picked.length === eligible.length ? "checked" : ""}>
+        ${phase !== "scanned" || eligible.length === 0 ? "disabled" : ""}
+        ${shown.some(visible) && shown.filter(visible).every((it) => selected.has(it.id)) ? "checked" : ""}>
       <button class="junk-group-toggle" type="button" data-action="fold" data-group="${group}" aria-expanded="${!folded}">
         <span class="group-name">${esc(t(`junk.group.${group}` as never))}</span><span class="group-sel">${esc(text)}</span>
         <span class="junk-fold${folded ? "" : " open"}">${caret}</span></button></div>

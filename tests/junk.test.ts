@@ -231,6 +231,36 @@ test("stopping a scan retains measured rows and drops buffered and unmeasured ro
   expect(node("#list").innerHTML).toContain("已停止扫描");
 });
 
+test("group checkbox is half-checked, never fully checked, while running or denied rows are unselected", async () => {
+  await scan([item("app:ready", "apps", 1024, { default: true }), item("app:busy", "apps", 8192, { running: true }),
+    item("app:denied", "apps", 4096, { denied: true })]);
+  // 只有可清的 ready 默认勾选；busy/denied 没勾，父框不能显示成「全选」。
+  expect(node("#list").innerHTML.match(/data-action="group" data-group="apps"[^>]*>/)?.[0]).not.toContain("checked");
+
+  // 用能记录 indeterminate 的节点，直接调 syncChecks 的等价逻辑验证。
+  // 这里通过点组框触发 setSelected + render；qsa 只给组框，子项 qsa 为空不影响判断。
+  const groupBox = new Element();
+  let indeterminate = false;
+  Object.defineProperty(groupBox, "indeterminate", { set(v: boolean) { indeterminate = v; }, get: () => indeterminate });
+  Object.assign(groupBox.dataset, { action: "group", group: "apps" });
+  // syncChecks 在 #list 元素上调 querySelectorAll，所以替换它的实现。
+  const list = node("#list");
+  const originalQSA = list.querySelectorAll;
+  (list as { querySelectorAll: (s: string) => Element[] }).querySelectorAll = ((sel: string) =>
+    sel.includes('data-action="group"') ? [groupBox] : []) as typeof originalQSA;
+  const junkMod = await import("../src/junk");
+  junkMod.refreshJunkI18n();
+  (list as { querySelectorAll: typeof originalQSA }).querySelectorAll = originalQSA;
+  expect(indeterminate).toBe(true);
+});
+
+test("group is fully checked only when every visible row is selected", async () => {
+  await scan([item("app:one", "apps", 1024), item("app:two", "apps", 2048)]);
+  const cb = new Element(); cb.dataset = { action: "group", group: "apps" }; cb.checked = true;
+  await node("#list").fire("change", cb);
+  expect(node("#list").innerHTML.match(/data-action="group" data-group="apps"[^>]*>/)?.[0]).toContain("checked");
+});
+
 test("group selection never includes a running app or a denied item", async () => {
   await scan([item("app:ready", "apps", 1024), item("app:busy", "apps", 8192, { running: true }),
     item("app:denied", "apps", 4096, { denied: true })]);
