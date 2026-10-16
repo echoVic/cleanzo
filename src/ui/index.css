@@ -1,14 +1,16 @@
 /* Tailwind v4 + shadcn 风格令牌。颜色直接沿用 Cleanzo 现有变量，保证与原生页面视觉一致。 */
 @import "tailwindcss";
 
+/*
+ * 注意：--card / --muted / --border 已由 style.css 的 :root 定义（浅/深色都有），
+ * 这里绝不能再写 `--card: var(--card)` 之类的自引用——循环引用会让变量在计算时失效
+ * （值为空），导致描边退化成 currentColor 黑线、次要文字与卡片底色全部丢失。
+ */
 :root {
   --background: var(--bg);
   --foreground: var(--fg);
-  --card: var(--card);
   --card-foreground: var(--fg);
-  --muted: var(--muted);
   --muted-background: var(--bg-subtle);
-  --border: var(--border);
   /* 与原生 .btn.primary 一致：底色 var(--accent)，hover 才加深。 */
   --primary: var(--accent);
   --primary-foreground: #ffffff;
