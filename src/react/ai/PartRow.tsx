@@ -64,7 +64,7 @@ export function PartRow(p: Props) {
 
   return (
     <div className={cn("border-b border-border last:border-b-0", !isOffered && "opacity-90")}>
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-3 px-4 pb-[10px] pt-[9px] hover:bg-hover">
         {isOffered ? (
           <Checkbox
             checked={indeterminate ? "indeterminate" : checked}
@@ -76,24 +76,24 @@ export function PartRow(p: Props) {
           <Lock className="h-4 w-4 text-muted" aria-hidden />
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2 text-[15px]">
-            <span className="font-medium">{name}</span>
+          <div className="flex flex-wrap items-center gap-1.5 text-[13.5px] font-semibold">
+            <span>{name}</span>
             <Badge variant={badge.variant}>{t(badge.label)}</Badge>
             {blockedByRun && isOffered && <Badge variant="warn">{t("ai.quitFirst")}</Badge>}
           </div>
-          {desc && <div className="mt-0.5 truncate text-[13px] text-muted">{desc}</div>}
+          {desc && <div className="mt-px truncate text-[12px] text-muted">{desc}</div>}
           {part.keep && (
-            <div className="mt-0.5 text-xs text-muted">
+            <div className="mt-[3px] text-[11.5px] text-muted">
               {t("ai.keepRelease", { v: part.keep.split("-")[0] ?? part.keep })}
             </div>
           )}
         </div>
-        <div className="shrink-0 text-sm tabular-nums text-foreground/80">
+        <div className="shrink-0 text-[12.5px] font-[590] tabular-nums text-foreground">
           {part.groups.length > 0 && p.picked ? `${human(p.chosenSize)} / ` : ""}{human(part.size)}
         </div>
         <button
           type="button"
-          className="grid h-8 w-8 place-items-center rounded-md text-muted hover:bg-muted-background hover:text-foreground"
+          className="grid h-[30px] w-[30px] place-items-center rounded-[6px] text-muted hover:bg-bg-subtle hover:text-foreground"
           title={t("fs.reveal")}
           aria-label={t("fs.reveal")}
           onClick={() => p.onReveal(part.path)}
@@ -103,18 +103,18 @@ export function PartRow(p: Props) {
         {hasDetails ? (
           <button
             type="button"
-            className="grid h-8 w-8 place-items-center rounded-md text-muted hover:bg-muted-background hover:text-foreground"
+            className="grid h-[30px] w-[30px] place-items-center rounded-[6px] text-muted hover:bg-bg-subtle hover:text-foreground"
             onClick={p.onExpand}
             aria-expanded={p.expanded}
             aria-label={p.expanded ? t("fs.collapse") : t("fs.expand")}
           >
             <ChevronRight className={cn("h-4 w-4 transition-transform", p.expanded && "rotate-90")} />
           </button>
-        ) : <span className="h-8 w-8" />}
+        ) : <span className="h-[30px] w-[30px]" />}
       </div>
 
       {p.expanded && (
-        <div className="border-t border-border bg-muted-background/40 px-4 py-2 pl-11">
+        <div className="border-t border-border px-4 pb-3 pl-11 pt-1">
           {part.groups.length > 0 && (
             <Groups
               part={part}
@@ -134,18 +134,18 @@ export function PartRow(p: Props) {
                 <button
                   key={e.path}
                   type="button"
-                  className="flex w-full items-center gap-3 py-1.5 text-left"
+                  className="flex w-full items-center gap-3 py-2 text-left"
                   title={t("fs.reveal")}
                   onClick={() => p.onReveal(e.path)}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] text-foreground hover:text-primary">{e.name}{e.isDir ? "/" : ""}</span>
+                    <span className="block truncate text-[13px] text-foreground hover:text-accent-strong">{e.name}{e.isDir ? "/" : ""}</span>
                     <span className="block truncate text-xs text-muted">{displayPath(e.path)}</span>
                   </span>
                   <span className="text-xs tabular-nums text-muted">{human(e.size)}</span>
                 </button>
               ))}
-              {part.more > 0 && <div className="py-1 text-xs text-muted">{t("ai.more", { n: part.more })}</div>}
+              {part.more > 0 && <div className="ai-more muted small">{t("ai.more", { n: part.more })}</div>}
             </div>
           )}
         </div>
@@ -172,36 +172,35 @@ function Groups({
   return (
     <div>
       {sessions && (
-        <div className="mb-2 flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted">{t("ai.window.label")}</span>
-          <div className="flex gap-1 rounded-lg bg-background/60 p-0.5">
-            {([7, 30, 90] as WindowDays[]).map((d) => (
-              <button
-                key={d}
-                type="button"
-                role="radio"
-                aria-checked={windowDays === d}
-                className={cn(
-                  "rounded-md px-3 py-1 text-xs",
-                  windowDays === d ? "bg-card font-semibold shadow-sm" : "text-muted",
-                )}
-                onClick={() => onWindowChange(d)}
-              >
-                {t("ai.window.days", { n: d })}
-              </button>
-            ))}
+        <>
+          <div className="ai-window">
+            <span className="muted small">{t("ai.window.label")}</span>
+            <div className="seg" role="radiogroup" aria-label={t("ai.window.label")}>
+              {([7, 30, 90] as WindowDays[]).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  role="radio"
+                  aria-checked={windowDays === d}
+                  className={cn(windowDays === d && "on")}
+                  onClick={() => onWindowChange(d)}
+                >
+                  {t("ai.window.days", { n: d })}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="junk-link"
+              disabled={locked}
+              onClick={onPickOld}
+            >
+              {t("ai.pickOld")}
+            </button>
           </div>
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline disabled:opacity-40"
-            disabled={locked}
-            onClick={onPickOld}
-          >
-            {t("ai.pickOld")}
-          </button>
-        </div>
+          <p className="muted small ai-hint">{t("ai.sessionHint")}</p>
+        </>
       )}
-      {sessions && <p className="mb-2 text-xs leading-relaxed text-muted">{t("ai.sessionHint")}</p>}
       {part.groups.map((g) => {
         const can = !locked && groupSelectable(part, g, windowDays, now);
         const label = sessions && g.label.startsWith("/") ? displayPath(g.label) : g.label;
@@ -213,7 +212,7 @@ function Groups({
             ].filter(Boolean).join(" · ")
           : t("ai.group.release");
         return (
-          <div key={g.key} className="flex items-center gap-3 py-1.5">
+          <div key={g.key} className="flex items-center gap-3 py-2">
             <Checkbox
               checked={groupsState.has(g.key)}
               disabled={!can}
@@ -227,7 +226,7 @@ function Groups({
               onClick={() => g.path && onReveal(g.path)}
             >
               <span className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-[13px] hover:text-primary">{label}</span>
+                <span className="truncate text-[13px] hover:text-accent-strong">{label}</span>
                 {g.gone && <Badge variant="protected">{t("ai.group.gone")}</Badge>}
                 {!can && sessions && (
                   <Badge variant="protected">{g.count <= g.recent ? t("ai.group.allRecent") : t("ai.group.inWindow")}</Badge>

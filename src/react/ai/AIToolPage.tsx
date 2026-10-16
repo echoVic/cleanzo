@@ -217,13 +217,13 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
 
       {(phase === "scanned" || phase === "cleaned") && tool && (
         <>
-          <Card className="mb-5 flex items-center justify-between gap-4 p-5">
+          <Card className="mb-5 flex items-center justify-between gap-4 p-[18px] px-[22px]">
             <div className="min-w-0">
-              <div className="flex items-baseline gap-3">
-                <span className="text-sm text-muted">{t("ai.occupied")}</span>
-                <span className="text-2xl font-semibold tabular-nums">{human(tool.size)}</span>
+              <div className="flex items-baseline gap-[10px]">
+                <span className="text-[13px] text-muted">{t("ai.occupied")}</span>
+                <span className="text-[26px] font-semibold tabular-nums tracking-[-0.4px]">{human(tool.size)}</span>
               </div>
-              <div className="mt-1 text-xs text-muted">
+              <div className="mt-[2px] text-xs text-muted">
                 {lastClean
                   ? [t("ai.done", { size: human(lastClean.freed) }),
                      lastClean.kept > 0 ? t("ai.done.kept", { n: lastClean.kept }) : "",
