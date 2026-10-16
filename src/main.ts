@@ -2,18 +2,19 @@ import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
 import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
+import { showReactPhotos } from "./react/photos/entry";
 import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
   $, errText, human, esc, fmtDate, displayPath, baseName, toast, emptyState, errorState,
   skeletonRows, setBusy, setStoppable, stopScan, endScan, stoppedScans, scanChans,
   markRescan, setNavBusy, VIEWS, overlay, modalTitle, modalBody, modalOk, showModal,
-  hideModal, currentModalSeq, setPending, setBeforeModalShow, type View,
+  hideModal, currentModalSeq, setPending, type View,
 } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner, LanguageSettings } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, OrphanItem } from "./mygo";
 import { t, kindLabel, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
@@ -38,23 +39,6 @@ const orProgress = $("#or-progress");
 const orCurrent = $("#or-current");
 const orList = $("#or-list");
 const orToolbar = $("#or-toolbar");
-const phScanBtn = $<HTMLButtonElement>("#ph-scan");
-const phProgress = $("#ph-progress");
-const phCurrent = $("#ph-current");
-const phBar = $("#ph-bar");
-const phList = $("#ph-list");
-const phToolbar = $("#ph-toolbar");
-const photoViewer = $("#photo-viewer");
-const pvName = $("#pv-name");
-const pvMeta = $("#pv-meta");
-const pvKeep = $("#pv-keep");
-const pvImage = $<HTMLImageElement>("#pv-image");
-const pvLoading = $("#pv-loading");
-const pvError = $("#pv-error");
-const pvCheck = $<HTMLInputElement>("#pv-check");
-const pvClose = $<HTMLButtonElement>("#pv-close");
-const pvPrev = $<HTMLButtonElement>("#pv-prev");
-const pvNext = $<HTMLButtonElement>("#pv-next");
 
 /** 小偏好：存储不可用时仍可操作。 */
 function readChoice<T extends string>(key: string, choices: readonly T[], fallback: T): T {
@@ -86,11 +70,6 @@ let appsTab: "installed" | "leftovers" = "installed";
 const appsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".apps-tab"));
 let orItems: OrphanItem[] = [];
 let orFoot: { n: string; size: string; t: string } | null = null;
-let phRunning = false;
-let phClusters: PhotoCluster[] = [];
-let phScanned = 0;
-/** 相似照片扫描是否已经开始过：停掉之后再进这个视图不会自己重新开始 */
-let phTried = false;
 
 // ---- i18n ----
 
@@ -127,10 +106,6 @@ function refreshI18n() {
     renderOrphanRows(orItems);
   }
   renderAppsTabs();
-  if (phClusters.length > 0 && !phRunning) {
-    renderPhotoClusters();
-  }
-  syncPhotoViewer();
   refreshStatusI18n();
 }
 
@@ -171,7 +146,7 @@ function switchView(v: View, tool?: string) {
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
-  if (v === "photos" && !phTried) startPhotoScan();
+  if (v === "photos") showReactPhotos();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View, b.dataset.tool)));
 
@@ -305,11 +280,11 @@ interface ListState {
 }
 
 const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
-const lists = { fullscan: newList(), orphans: newList(), photos: newList() };
+const lists = { fullscan: newList(), orphans: newList() };
 /** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
 function resetList(v: keyof typeof lists) {
   lists[v] = newList();
-  const toolbar = { fullscan: fsToolbar, orphans: orToolbar, photos: phToolbar }[v];
+  const toolbar = { fullscan: fsToolbar, orphans: orToolbar }[v];
   toolbar.classList.add("hidden");
   toolbar.innerHTML = "";
 }
@@ -785,356 +760,6 @@ function renderOrphanRows(items: OrphanItem[]) {
   }, rows);
 }
 
-// ---- 相似照片 ----
-
-let viewerPhoto: { cluster: number; path: string } | null = null;
-let viewerOpener: HTMLElement | null = null;
-let viewerSeq = 0;
-let viewerError: unknown = null;
-const photoPreviews = new Map<string, string>();
-const photoPreviewLoads = new Map<string, Promise<string>>();
-
-function viewerItems() {
-  return phClusters.find((cl) => cl.id === viewerPhoto?.cluster)?.items.filter((it) => !isGone(lists.photos, it.path)) ?? [];
-}
-
-/** 查看器与网格共用勾选；重绘不改变当前预览。 */
-function syncPhotoViewer() {
-  if (!viewerPhoto) return;
-  const items = viewerItems();
-  const index = items.findIndex((it) => it.path === viewerPhoto!.path);
-  const it = items[index];
-  if (!it) { closePhotoViewer(); return; }
-  pvName.textContent = baseName(it.path);
-  pvName.title = it.path;
-  pvImage.alt = baseName(it.path);
-  pvMeta.textContent = t("photos.detail", { w: it.width, h: it.height, size: human(it.size) });
-  pvKeep.classList.toggle("hidden", !it.keep);
-  pvCheck.checked = lists.photos.sel.has(it.path);
-  pvCheck.disabled = lists.photos.busy;
-  pvPrev.disabled = index === 0;
-  pvNext.disabled = index === items.length - 1;
-  if (viewerError !== null) pvError.textContent = errText(viewerError);
-}
-
-async function showPhotoViewer(path: string) {
-  const cluster = phClusters.find((cl) => cl.items.some((it) => it.path === path));
-  const it = cluster?.items.find((it) => it.path === path);
-  if (!cluster || !it || isGone(lists.photos, path)) return;
-  const opening = viewerPhoto === null;
-  if (opening) viewerOpener = document.activeElement as HTMLElement | null;
-  viewerPhoto = { cluster: cluster.id, path };
-  const seq = ++viewerSeq;
-  viewerError = null;
-  const cached = photoPreviews.get(path);
-  pvImage.src = cached ?? it.thumb;
-  pvImage.classList.remove("hidden");
-  pvLoading.classList.toggle("hidden", !!cached);
-  pvError.classList.add("hidden");
-  photoViewer.classList.remove("hidden");
-  $(".app").inert = true;
-  syncPhotoViewer();
-  if (opening) pvClose.focus();
-  if (cached) return;
-  try {
-    let load = photoPreviewLoads.get(path);
-    if (!load) {
-      const request = Cleaner.photoPreview(path).then((data) => {
-        // 重扫已清空缓存时，旧请求不能把它填回来
-        if (photoPreviewLoads.get(path) === request) photoPreviews.set(path, data);
-        return data;
-      }).finally(() => {
-        if (photoPreviewLoads.get(path) === request) photoPreviewLoads.delete(path);
-      });
-      photoPreviewLoads.set(path, request);
-      load = request;
-    }
-    const data = await load;
-    if (seq !== viewerSeq) return;
-    pvImage.src = data;
-  } catch (e) {
-    if (seq !== viewerSeq) return;
-    viewerError = e;
-    pvImage.classList.add("hidden");
-    pvError.textContent = errText(e);
-    pvError.classList.remove("hidden");
-  } finally {
-    if (seq === viewerSeq) pvLoading.classList.add("hidden");
-  }
-}
-
-function movePhotoViewer(step: number) {
-  if (!viewerPhoto) return;
-  const items = viewerItems();
-  const index = items.findIndex((it) => it.path === viewerPhoto!.path);
-  const next = items[index + step];
-  if (next) void showPhotoViewer(next.path);
-}
-
-function closePhotoViewer() {
-  if (!viewerPhoto) return;
-  const path = viewerPhoto.path;
-  viewerPhoto = null;
-  viewerSeq++;
-  viewerError = null;
-  photoViewer.classList.add("hidden");
-  $(".app").inert = false;
-  pvImage.removeAttribute("src");
-  const target = viewerOpener?.isConnected ? viewerOpener : phList.querySelector<HTMLElement>(`[data-preview="${CSS.escape(path)}"]`);
-  (target ?? phScanBtn).focus();
-  viewerOpener = null;
-}
-
-pvClose.addEventListener("click", closePhotoViewer);
-pvPrev.addEventListener("click", () => movePhotoViewer(-1));
-pvNext.addEventListener("click", () => movePhotoViewer(1));
-pvCheck.addEventListener("change", () => {
-  if (!viewerPhoto || pvCheck.disabled) return;
-  const path = viewerPhoto.path;
-  if (pvCheck.checked) lists.photos.sel.add(path);
-  else lists.photos.sel.delete(path);
-  renderPhotoClusters();
-});
-photoViewer.addEventListener("click", (e) => {
-  if (e.target === photoViewer) closePhotoViewer();
-});
-
-async function startPhotoScan() {
-  if (phRunning) return;
-  closePhotoViewer();
-  photoPreviews.clear();
-  photoPreviewLoads.clear();
-  resetList("photos");
-  phClusters = [];
-  phTried = true;
-  phRunning = true;
-  phProgress.classList.remove("hidden");
-  phList.innerHTML = "";
-  phCurrent.textContent = t("photos.busy");
-  phBar.style.width = "0%";
-  const ch = new Channel<import("./mygo").SimilarPhotoEvent>();
-  setStoppable(phScanBtn, ch);
-  try {
-    const done = Cleaner.scanSimilarPhotos(ch);
-    for await (const ev of ch) {
-      if (ev.kind === "progress") {
-        const total = ev.total ?? 0;
-        const pct = total > 0 ? Math.max(0, Math.min(100, ((ev.processed ?? 0) / total) * 100)) : 0;
-        phBar.style.width = `${pct}%`;
-        phCurrent.textContent = t("photos.progress", {
-          n: (ev.processed ?? 0).toLocaleString(),
-          total: (ev.total ?? 0).toLocaleString(),
-        });
-      } else if (ev.kind === "done" && ev.result) {
-        phClusters = ev.result.clusters;
-        phScanned = ev.result.scanned;
-        // 默认只勾选「完全相同」的副本（推荐保留的那份不勾）；「相似」的分组由用户自己挑
-        const sel = lists.photos.sel;
-        sel.clear();
-        for (const cl of phClusters) {
-          if (cl.kind !== "exact") continue;
-          for (const it of cl.items) if (!it.keep) sel.add(it.path);
-        }
-        renderPhotoClusters();
-      }
-    }
-    await done;
-    if (!stoppedScans.has(phScanBtn) || phClusters.length > 0) markRescan(phScanBtn);
-  } catch (e) {
-    if (!stoppedScans.has(phScanBtn)) {
-      phClusters = [];
-      phList.innerHTML = errorState(t("photos.fail", { msg: errText(e) }), startPhotoScan);
-      toast(t("photos.fail", { msg: errText(e) }), "err");
-    }
-  } finally {
-    phRunning = false;
-    phProgress.classList.add("hidden");
-    if (stoppedScans.has(phScanBtn) && phClusters.length > 0) markRescan(phScanBtn);
-    if (endScan(phScanBtn) && phClusters.length === 0) phList.innerHTML = emptyState(t("scan.stopped"));
-  }
-}
-
-function renderPhotoClusters() {
-  phClusters = phClusters.filter((cl) => cl.items.filter((it) => !isGone(lists.photos, it.path)).length >= 2);
-  syncPhotoViewer();
-  if (phClusters.length === 0) {
-    phToolbar.classList.add("hidden");
-    phToolbar.innerHTML = "";
-    phList.innerHTML = emptyState(t("photos.empty"));
-    return;
-  }
-  const cards = phClusters
-    .map((cl) => {
-      const items = cl.items.filter((it) => !isGone(lists.photos, it.path));
-      const badge =
-        cl.kind === "exact"
-          ? `<span class="photo-badge exact">${esc(t("photos.kindExact"))}</span>`
-          : `<span class="photo-badge similar">${esc(t("photos.kindSimilar"))}</span>`;
-      const cells = items
-        .map((it) => {
-          const keepCls = it.keep ? " keep" : "";
-          const keepTag = it.keep
-            ? `<span class="photo-keep-tag">${esc(t("photos.keep"))}</span>`
-            : "";
-          return `
-        <figure class="photo-cell${keepCls}">
-          <div class="photo-thumb-wrap">
-            ${checkHtml(lists.photos, it.path, undefined, it.size)}
-            ${keepTag}
-            <img class="photo-thumb" data-photo="${esc(it.path)}" src="${it.thumb}" alt="" loading="lazy">
-          </div>
-          <figcaption class="photo-meta" title="${esc(it.path)}">
-            <div class="photo-name">${esc(baseName(it.path))}</div>
-            <div class="photo-sub muted small">${esc(t("photos.sizeDim", { w: it.width, h: it.height }))} · ${human(it.size)}</div>
-          </figcaption>
-          <div class="photo-actions">
-            <button class="btn small ghost icon ph-preview" data-preview="${esc(it.path)}" type="button" title="${esc(t("photos.viewLarger"))}" aria-label="${esc(t("photos.viewLarger"))}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6M7 10h6M10 7v6"/></svg></button>
-            ${revealBtnHtml(it.path)}
-          </div>
-        </figure>`;
-        })
-        .join("");
-      return `
-      <div class="photo-cluster card" data-cluster="${cl.id}">
-        <div class="photo-cluster-head">
-          <span class="photo-cluster-title">${esc(t("photos.cluster", { id: cl.id }))} ${badge}</span>
-          <span class="photo-cluster-meta muted">${esc(t("photos.photoCount", { n: items.length }))} · ${esc(t("photos.waste", { size: human(cl.waste) }))}</span>
-          <button class="btn small ghost ph-keep-only" type="button" data-cluster="${cl.id}"${lists.photos.busy ? " disabled" : ""}>${esc(t("photos.keepOnly"))}</button>
-        </div>
-        <div class="photo-grid">${cells}</div>
-      </div>`;
-    })
-    .join("");
-  const foot = `<div class="fs-foot muted small">${esc(t("photos.count", { n: phScanned, c: phClusters.length }))}</div>`;
-  phList.innerHTML = cards + foot;
-  bindPhotoList();
-  updatePhotoToolbar();
-}
-
-function bindPhotoList() {
-  phList.querySelectorAll<HTMLButtonElement>(".ph-preview").forEach((b) => {
-    b.addEventListener("click", () => void showPhotoViewer(b.dataset.preview!));
-  });
-  phList.querySelectorAll<HTMLInputElement>("input[data-check]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      if (cb.disabled) return;
-      const p = cb.dataset.check!;
-      if (cb.checked) lists.photos.sel.add(p);
-      else lists.photos.sel.delete(p);
-      renderPhotoClusters();
-    });
-  });
-  phList.querySelectorAll<HTMLImageElement>("img[data-photo]").forEach((img) => {
-    img.addEventListener("click", () => {
-      const p = img.dataset.photo!;
-      const cb = phList.querySelector<HTMLInputElement>(`input[data-check="${CSS.escape(p)}"]`);
-      if (!cb || cb.disabled) return;
-      if (cb.checked) lists.photos.sel.delete(p);
-      else lists.photos.sel.add(p);
-      renderPhotoClusters();
-    });
-  });
-  phList.querySelectorAll<HTMLButtonElement>(".fs-reveal").forEach((b) => {
-    b.addEventListener("click", () => {
-      Cleaner.revealInFinder(b.dataset.reveal!).catch((e) =>
-        toast(t("fs.revealFail", { msg: errText(e) }), "err"),
-      );
-    });
-  });
-  phList.querySelectorAll<HTMLButtonElement>(".ph-keep-only").forEach((b) => {
-    b.addEventListener("click", () => {
-      if (lists.photos.busy) return;
-      const cl = phClusters.find((c) => String(c.id) === b.dataset.cluster);
-      if (!cl) return;
-      for (const it of cl.items) {
-        if (it.keep) lists.photos.sel.delete(it.path);
-        else lists.photos.sel.add(it.path);
-      }
-      renderPhotoClusters();
-    });
-  });
-}
-
-/** 全选只选可以移走的：每组推荐保留的那份不在其中 */
-function visiblePhotoPaths(): string[] {
-  return phClusters.flatMap((c) => c.items.filter((i) => !i.keep && !isGone(lists.photos, i.path)).map((i) => i.path));
-}
-
-function updatePhotoToolbar() {
-  const visible = visiblePhotoPaths();
-  const sel = lists.photos.sel;
-  for (const p of [...sel]) if (isGone(lists.photos, p)) sel.delete(p);
-  const n = sel.size;
-  const size = phClusters
-    .flatMap((c) => c.items)
-    .filter((it) => sel.has(it.path) && it.size >= 0)
-    .reduce((sum, it) => sum + it.size, 0);
-  if (visible.length === 0) {
-    phToolbar.classList.add("hidden");
-    phToolbar.innerHTML = "";
-    return;
-  }
-  const all = visible.every((p) => sel.has(p));
-  const some = visible.some((p) => sel.has(p));
-  phToolbar.classList.remove("hidden");
-  phToolbar.innerHTML = `
-    <label class="fs-check"><input type="checkbox" class="ph-checkall" ${all ? "checked" : ""}${lists.photos.busy ? " disabled" : ""}></label>
-    <span class="fs-toolbar-count">${esc(n > 0 ? t("photos.checkedSize", { n, size: human(size) }) : t("photos.nothing"))}</span>
-    <button class="btn danger small ph-trash" type="button"${n === 0 || lists.photos.busy ? " disabled" : ""}>${lists.photos.busy ? `<span class="spin"></span>${esc(t("photos.moving"))}` : esc(t("photos.clean"))}</button>`;
-  const allBox = phToolbar.querySelector<HTMLInputElement>(".ph-checkall");
-  if (allBox) allBox.indeterminate = !all && some;
-  allBox?.addEventListener("change", () => {
-    if (allBox.disabled) return;
-    visible.forEach((p) => (allBox.checked ? sel.add(p) : sel.delete(p)));
-    renderPhotoClusters();
-  });
-  phToolbar.querySelector<HTMLButtonElement>(".ph-trash")?.addEventListener("click", askTrashPhotos);
-}
-
-function removePhotos(removed: string[]) {
-  const roots = effectiveRemoved(removed);
-  for (const path of roots) lists.photos.gone.add(path);
-  for (const p of [...lists.photos.sel]) if (isGone(lists.photos, p)) lists.photos.sel.delete(p);
-  phClusters = phClusters.flatMap((cl) => {
-    const items = cl.items.filter((it) => !roots.some((r) => under(it.path, r)));
-    if (items.length < 2) return [];
-    const keep = items.find((it) => it.keep) ?? items.reduce((best, it) => (it.size > best.size ? it : best), items[0]!);
-    for (const it of items) it.keep = it.path === keep.path;
-    cl.items = items;
-    cl.totalSize = items.reduce((sum, it) => sum + (it.size >= 0 ? it.size : 0), 0);
-    cl.waste = Math.max(0, cl.totalSize - (keep.size >= 0 ? keep.size : 0));
-    return [cl];
-  });
-}
-
-function askTrashPhotos() {
-  const paths = [...lists.photos.sel].filter((p) => !isGone(lists.photos, p));
-  if (paths.length === 0 || lists.photos.busy) return;
-  setPending(async () => {
-    lists.photos.busy = true;
-    renderPhotoClusters();
-    try {
-      const r = await Cleaner.cleanPaths(paths);
-      const parts: string[] = [];
-      if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
-      if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
-      if (r.failed.length > 0) parts.push(t("photos.trashFail", { n: r.failed.length }));
-      toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved > 0 ? "ok" : "err");
-      removePhotos(r.removed);
-      renderPhotoClusters();
-    } catch (e) {
-      toast(t("fs.actionFail", { msg: errText(e) }), "err");
-    } finally {
-      lists.photos.busy = false;
-      renderPhotoClusters();
-    }
-  });
-  modalTitle.textContent = t("photos.clean");
-  modalBody.textContent = t("photos.trashBody", { n: paths.length });
-  modalOk.textContent = t("fs.trash.confirm");
-  showModal();
-}
-
 // ---- 应用卸载 ----
 
 /** 应用与残留的后台任务共用导航提示。 */
@@ -1296,7 +921,6 @@ async function showUninstallDetail(path: string) {
 
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
 orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
-phScanBtn.addEventListener("click", () => stopScan(phScanBtn) || startPhotoScan());
 appSearch.addEventListener("input", renderApps);
 appSort.addEventListener("change", () => {
   appSortBy = appSort.value as typeof appSortBy;
@@ -1304,25 +928,9 @@ appSort.addEventListener("change", () => {
   if (!appsLoading) renderApps();
 });
 document.addEventListener("keydown", (e) => {
-  if (viewerPhoto) {
-    if (e.key === "Escape") closePhotoViewer();
-    else if (e.key === "ArrowLeft") movePhotoViewer(-1);
-    else if (e.key === "ArrowRight") movePhotoViewer(1);
-    else if (e.key === "Tab") {
-      const controls = Array.from(photoViewer.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"));
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-      return;
-    } else return;
-    e.preventDefault();
-    return;
-  }
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) hideModal();
 });
 
-setBeforeModalShow(closePhotoViewer);
 applyStaticI18n();
 initJunk();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。

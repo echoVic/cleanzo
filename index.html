@@ -180,26 +180,9 @@
           <div id="large-react-root"></div>
         </section>
 
-        <!-- 相似照片 -->
+        <!-- 相似照片（React 页面，内容由 React 挂载） -->
         <section id="view-photos" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.photos">相似照片</h2>
-              <p class="muted" data-i18n="photos.sub">找出近乎重复、相似截图与连拍的照片簇</p>
-            </div>
-            <div class="head-actions">
-              <button id="ph-scan" class="btn primary" type="button" data-i18n="photos.scanBtn">扫描相似照片</button>
-            </div>
-          </header>
-          <div id="ph-progress" class="fs-progress hidden">
-            <div class="spinner"></div>
-            <div class="fs-progress-text">
-              <div id="ph-current" class="muted small"></div>
-              <div class="hero-progress"><div id="ph-bar" class="hero-bar"></div></div>
-            </div>
-          </div>
-          <div id="ph-toolbar" class="fs-toolbar hidden"></div>
-          <section id="ph-list" class="fs-list photo-clusters" aria-live="polite"></section>
+          <div id="photos-react-root"></div>
         </section>
 
         <!-- 应用卸载 -->
@@ -263,33 +246,6 @@
           <button id="modal-cancel" class="btn ghost" type="button" data-i18n="btn.cancel">取消</button>
           <button id="modal-ok" class="btn danger" type="button" data-i18n="btn.ok">确认</button>
         </div>
-      </div>
-    </div>
-
-    <div id="photo-viewer" class="overlay hidden">
-      <div class="photo-viewer-panel" role="dialog" aria-modal="true" aria-labelledby="pv-name" aria-describedby="pv-meta">
-        <header class="photo-viewer-head">
-          <h2 id="pv-name"></h2>
-          <button id="pv-close" class="btn small ghost icon" type="button" data-i18n-title="photos.close">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
-          </button>
-        </header>
-        <div class="photo-viewer-stage">
-          <img id="pv-image" alt="">
-          <div id="pv-loading" class="photo-viewer-loading" role="status"><span class="spin"></span><span data-i18n="photos.loading">正在加载大图…</span></div>
-          <p id="pv-error" class="err-inline hidden" role="alert"></p>
-        </div>
-        <div class="photo-viewer-info">
-          <p id="pv-meta" class="muted small"></p>
-          <span id="pv-keep" class="tag ok" data-i18n="photos.keep">建议保留</span>
-        </div>
-        <footer class="photo-viewer-controls">
-          <label class="check"><input id="pv-check" type="checkbox"><span data-i18n="photos.selectTrash">选中，移到废纸篓</span></label>
-          <div class="photo-viewer-nav">
-            <button id="pv-prev" class="btn small ghost" type="button"><span aria-hidden="true">←</span> <span data-i18n="photos.previous">上一张</span></button>
-            <button id="pv-next" class="btn small ghost" type="button"><span data-i18n="photos.next">下一张</span> <span aria-hidden="true">→</span></button>
-          </div>
-        </footer>
       </div>
     </div>
 
