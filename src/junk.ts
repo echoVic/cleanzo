@@ -198,7 +198,17 @@ function groupHtml(group: string, members: JunkItem[]): string {
         <button class="btn small ghost" type="button" data-action="leftovers">${esc(t("junk.view"))}</button></div>` : ""}</div>`}</section>`;
 }
 
+/** 勾选、翻页等交互会重绘整个列表，DOM 重建会把视图弹回顶部；重绘前后保持滚动位置。 */
+function preserveScroll<T>(fn: () => T): T {
+  const scroller = document.querySelector(".content");
+  const y = scroller?.scrollTop ?? 0;
+  const out = fn();
+  if (scroller) scroller.scrollTop = y;
+  return out;
+}
+
 function render() {
+  preserveScroll(() => {
   renderHero();
   listEl.classList.remove("cat-grid", "grouped", "idle-list");
   listEl.classList.add("junk-list");
@@ -236,6 +246,7 @@ function render() {
   if (scanStopped) html += `<div class="junk-foot muted small">${esc(t("scan.stopped"))}</div>`;
   listEl.innerHTML = html;
   syncChecks();
+  });
 }
 
 function renderHero() {

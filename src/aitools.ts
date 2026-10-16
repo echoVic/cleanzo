@@ -136,7 +136,17 @@ const levelTag: Record<Level, [string, string]> = {
 };
 const tagHtml = (key: string, kind: string) => `<span class="tag ${kind}">${esc(t(key as never))}</span>`;
 
+/** 勾选、展开等交互会重绘整个列表，DOM 重建会把视图弹回顶部；重绘前后保持滚动位置。 */
+function preserveScroll<T>(fn: () => T): T {
+  const scroller = document.querySelector(".content");
+  const y = scroller?.scrollTop ?? 0;
+  const out = fn();
+  if (scroller) scroller.scrollTop = y;
+  return out;
+}
+
 function render() {
+  preserveScroll(() => {
   const s = cur();
   if (!s) return;
   renderHead(s);
@@ -183,6 +193,7 @@ function render() {
       ${s.showLocked ? `<div class="group-rows ai-locked">${locked.map((p) => partHtml(s, p)).join("")}</div>` : ""}` : ""}
   </section><div class="junk-foot muted small">${esc(t("ai.foot"))}</div>`;
   syncChecks(s);
+  });
 }
 
 function renderHead(s: ToolState) {
