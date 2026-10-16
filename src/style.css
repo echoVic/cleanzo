@@ -930,24 +930,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   place-items: center;
 }
 .overlay.hidden { display: none; }
-.modal {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 22px 24px 20px;
-  max-width: 560px;
-  width: 92vw;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
-  animation: pop 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-}
-@keyframes pop {
-  from { transform: scale(0.95) translateY(6px); opacity: 0; }
-  to { transform: scale(1) translateY(0); opacity: 1; }
-}
-.modal h2 { margin: 0 0 10px; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
-.modal p { color: var(--muted); line-height: 1.6; font-size: 13px; margin: 0; }
-.modal p + p { margin-top: 6px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 .detail-list {
   max-height: 42vh;

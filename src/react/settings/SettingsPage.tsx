@@ -6,7 +6,7 @@ import { cn } from "../../ui/cn";
 import { useT, type DictKey, type LangPref } from "../../ui/i18n-react";
 import { errText, displayPath } from "../../shared";
 import { ruleName, getPref } from "../../i18n";
-import { markJunkStale } from "../../junk";
+import { markCleanStale } from "../clean/entry";
 import { settingsApi } from "./api";
 import {
   GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue,
@@ -140,7 +140,7 @@ export function SettingsPage({ callbacks, session }: Props) {
         await settingsApi.saveSettings(next);
         settingsRef.current = next;
         setSettings(next);
-        markJunkStale();
+        markCleanStale();
       } catch (e) {
         setErrors((prev) => withError(prev, key, e));
       } finally {

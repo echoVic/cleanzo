@@ -75,40 +75,9 @@
           <div id="status-react-root"></div>
         </section>
 
-        <!-- 垃圾清理 -->
+        <!-- 垃圾清理（React 页面，内容由 React 挂载） -->
         <section id="view-clean" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.clean">垃圾清理</h2>
-              <p class="muted" data-i18n="clean.sub">扫描缓存、日志、临时文件等垃圾，一键释放空间</p>
-            </div>
-            <div class="head-actions">
-              <button id="scan" class="btn ghost" type="button" data-i18n="fs.rescan">重新扫描</button>
-            </div>
-          </header>
-
-          <div class="hero">
-            <div class="hero-left">
-              <div class="banner-title">
-                <span id="total-prefix" data-i18n="hero.ready">可释放空间</span>
-                <span id="total" class="hero-num">--</span>
-              </div>
-              <div id="hero-sub" class="hero-sub">正在扫描…</div>
-              <div id="hero-progress" class="hero-progress hidden"><div id="hero-bar" class="hero-bar"></div></div>
-            </div>
-            <div class="banner-actions">
-              <button id="clean-all" class="btn danger big" type="button" data-i18n="clean.now">立即清理</button>
-            </div>
-            <div class="hero-spark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="60" height="60" fill="currentColor">
-                <path d="M12 2c.9 6 4.4 9.5 10.4 10.4-6 .9-9.5 4.4-10.4 10.4-.9-6-4.4-9.5-10.4-10.4 6-.9 9.5-4.4 10.4-10.4z"/>
-                <circle cx="17.6" cy="6" r="1.7"/>
-                <circle cx="6.4" cy="17.6" r="1.2"/>
-              </svg>
-            </div>
-          </div>
-
-          <section id="list" class="cat-grid" aria-live="polite"></section>
+          <div id="clean-react-root"></div>
         </section>
 
         <!-- AI 工具（React 页面，内容由 React 挂载） -->
@@ -141,17 +110,6 @@
           <div id="settings-react-root"></div>
         </section>
       </main>
-    </div>
-
-    <div id="overlay" class="overlay hidden">
-      <div class="modal" role="dialog" aria-modal="true">
-        <h2 id="modal-title">确认</h2>
-        <div id="modal-body"></div>
-        <div class="modal-actions">
-          <button id="modal-cancel" class="btn ghost" type="button" data-i18n="btn.cancel">取消</button>
-          <button id="modal-ok" class="btn danger" type="button" data-i18n="btn.ok">确认</button>
-        </div>
-      </div>
     </div>
 
     <script type="module" src="./src/main.ts"></script>
