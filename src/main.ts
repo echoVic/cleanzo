@@ -1,6 +1,7 @@
 import { initJunk, refreshJunkI18n, setOpenLeftovers } from "./junk";
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
 import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
+import { showReactLarge } from "./react/large/entry";
 import { bumpLang } from "./ui/i18n-react";
 import { initStatus, startStatus, stopStatus, refreshStatusI18n, setGoCleanView } from "./status";
 import {
@@ -12,7 +13,7 @@ import {
 // Services and types are generated from the Go code by `mygo generate`.
 import { Cleaner, LanguageSettings } from "./mygo";
 import { Channel } from "mygo-runtime";
-import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, LargeFile, LargeScanResult, OrphanItem, PhotoCluster } from "./mygo";
+import type { AppInfo, BigItem, DirItem, DiskStat, FullScanResult, OrphanItem, PhotoCluster } from "./mygo";
 import { t, kindLabel, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
@@ -30,13 +31,6 @@ const fsUsed = $("#fs-used");
 const fsFree = $("#fs-free");
 const fsTotal = $("#fs-total");
 const fsBar = $("#fs-bar") as HTMLDivElement;
-const lgScanBtn = $<HTMLButtonElement>("#lg-scan");
-const lgProgress = $("#lg-progress");
-const lgCurrent = $("#lg-current");
-const lgCount = $("#lg-count");
-const lgList = $("#lg-list");
-const lgToolbar = $("#lg-toolbar");
-const lgSize = $<HTMLSelectElement>("#lg-size");
 const orScanBtn = $<HTMLButtonElement>("#or-scan");
 const orSummary = $("#or-summary");
 const orTotal = $("#or-total");
@@ -75,10 +69,7 @@ function saveChoice(key: string, value: string) {
 }
 const appSorts = ["name", "size", "opened"] as const;
 let appSortBy = readChoice("cleanzo.appSort", appSorts, "name");
-const largeSizes = ["104857600", "524288000", "1073741824", "5368709120"] as const;
-let lgMinSize = Number(readChoice("cleanzo.largeSize", largeSizes, "1073741824"));
 appSort.value = appSortBy;
-lgSize.value = String(lgMinSize);
 
 let apps: AppInfo[] = [];
 const appBusy = new Set<string>();
@@ -89,12 +80,6 @@ let fsDiskSeq = 0;
 let fsDiskPending = 0;
 let fsRunning = false;
 let fsItems: BigItem[] = [];
-let lgRunning = false;
-let lgItems: LargeFile[] = [];
-let lgResult: LargeScanResult | null = null;
-let lgScannedThreshold: number | null = null;
-let lgRestartQueued = false;
-let lgStopped = false;
 let orRunning = false;
 let orTried = false;
 let appsTab: "installed" | "leftovers" = "installed";
@@ -137,7 +122,6 @@ function refreshI18n() {
   if (fsDisk) renderDisk(fsDisk);
   if (fsResult && !fsRunning) renderFullScan(fsResult);
   renderIdleScanPages();
-  if (lgResult || lgItems.length > 0) renderLargeCurrent();
   if (!orRunning && orItems.length > 0) {
     if (orFoot) orTotal.textContent = t("orphans.foot", orFoot);
     renderOrphanRows(orItems);
@@ -186,6 +170,7 @@ function switchView(v: View, tool?: string) {
   if (v === "apps") selectAppsTab(appsTab);
   if (v === "fullscan" && !fsDisk && fsDiskPending === 0) void refreshDisk();
   if (v === "settings") showReactSettings();
+  if (v === "large") showReactLarge();
   if (v === "photos" && !phTried) startPhotoScan();
 }
 navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view as View, b.dataset.tool)));
@@ -196,8 +181,6 @@ function renderIdleScanPages() {
   const guides = [
     { list: fsList, running: fsRunning, key: "fs", start: startFullScan,
       path: '<circle cx="12" cy="12" r="6.8" opacity="0.25"/><path d="M12 5.2v6.8h6.8"/><path d="M12 12l-4.8 4.8"/>' },
-    { list: lgList, running: lgRunning, key: "large", start: startLargeScan,
-      path: '<path d="M7 4.8h6.5l4 4v10.4H7z"/><path d="M13.5 4.8v4h4M10 12.5h4.5M10 15.5h4.5"/>' },
     { list: orList, running: orRunning, key: "orphans", start: startOrphanScan,
       path: '<path d="M4.8 9V7h5l2 2h7.4v9H4.8z"/><path d="M9.5 13.5h5" stroke-dasharray="1 2"/>' },
   ] as const;
@@ -212,7 +195,7 @@ function renderIdleScanPages() {
           <defs><linearGradient id="${grad}" x1="0" y1="0" x2="24" y2="24"><stop offset="0" stop-color="#0fb986"/><stop offset="1" stop-color="#0a9e8e"/></linearGradient></defs>
         </svg>
         <h3>${esc(t(`${g.key}.idle.title`))}</h3>
-        <p>${esc(t(`${g.key}.idle.desc`, { size: human(lgMinSize) }))}</p>
+        <p>${esc(t(`${g.key}.idle.desc`))}</p>
         <button class="btn primary big" type="button">${esc(t(`${g.key}.idle.cta`))}</button>
       </div>`;
     g.list.querySelector("button")?.addEventListener("click", g.start);
@@ -322,11 +305,11 @@ interface ListState {
 }
 
 const newList = (): ListState => ({ sel: new Set(), expanded: new Set(), children: new Map(), gone: new Set(), busy: false });
-const lists = { fullscan: newList(), large: newList(), orphans: newList(), photos: newList() };
+const lists = { fullscan: newList(), orphans: newList(), photos: newList() };
 /** 扫描重新开始：换一份新状态，并收起还握着旧勾选的工具栏 */
 function resetList(v: keyof typeof lists) {
   lists[v] = newList();
-  const toolbar = { fullscan: fsToolbar, large: lgToolbar, orphans: orToolbar, photos: phToolbar }[v];
+  const toolbar = { fullscan: fsToolbar, orphans: orToolbar, photos: phToolbar }[v];
   toolbar.classList.add("hidden");
   toolbar.innerHTML = "";
 }
@@ -703,130 +686,6 @@ function askTrash(path: string, size: number, ctx: ListCtx) {
   modalBody.textContent = t("fs.trash.body", { path: displayPath(path), size: human(size) });
   modalOk.textContent = t("fs.trash.confirm");
   showModal();
-}
-
-// ---- 大文件专清 ----
-
-async function startLargeScan() {
-  if (lgRunning) return;
-  resetList("large");
-  lgResult = null;
-  lgScannedThreshold = lgMinSize;
-  lgStopped = false;
-  lgRunning = true;
-  lgItems = [];
-  lgProgress.classList.remove("hidden");
-  lgList.innerHTML = "";
-  lgCurrent.textContent = t("fs.prep");
-  lgCount.textContent = "";
-  const ch = new Channel<import("./mygo").LargeScanEvent>();
-  setStoppable(lgScanBtn, ch);
-  try {
-    const done = Cleaner.largeScan(lgScannedThreshold, ch);
-    for await (const ev of ch) {
-      if (lgRestartQueued) continue; // 停下后重扫，旧结果不再显示
-      if (ev.kind === "item" && ev.path) {
-        lgCurrent.textContent = t("fs.scanning", { path: displayPath(ev.path) });
-        lgItems.push({ path: ev.path, size: ev.size ?? 0, trashable: ev.trashable ?? false });
-        renderLargeRows(lgItems, true);
-      } else if (ev.kind === "done" && ev.result) {
-        lgItems = ev.result.items;
-        lgResult = ev.result;
-        lgScannedThreshold = ev.result.threshold;
-        renderLargeDone(ev.result);
-      }
-    }
-    await done;
-    if (!stoppedScans.has(lgScanBtn) || lgItems.length > 0) markRescan(lgScanBtn);
-  } catch (e) {
-    if (!stoppedScans.has(lgScanBtn)) {
-      lgItems = [];
-      lgList.innerHTML = errorState(t("large.fail", { msg: errText(e) }), startLargeScan);
-      toast(t("large.fail", { msg: errText(e) }), "err");
-    }
-  } finally {
-    lgRunning = false;
-    lgProgress.classList.add("hidden");
-    if (stoppedScans.has(lgScanBtn) && lgItems.length > 0) markRescan(lgScanBtn);
-    lgStopped = endScan(lgScanBtn);
-    if (lgStopped) {
-      if (lgItems.length > 0) renderLargeCurrent();
-      else lgList.innerHTML = emptyState(t("scan.stopped"));
-    }
-    if (lgRestartQueued) {
-      lgRestartQueued = false;
-      void startLargeScan();
-    }
-  }
-}
-
-/** 提高下限复用结果；降低下限等旧扫描退出后再扫。 */
-function changeLargeSize() {
-  lgMinSize = Number(lgSize.value);
-  saveChoice("cleanzo.largeSize", lgSize.value);
-  if (lgRestartQueued) {
-    if (lgResult || lgItems.length > 0) renderLargeCurrent();
-    return;
-  }
-  if (lgScannedThreshold !== null && lgMinSize >= lgScannedThreshold && (lgResult || lgItems.length > 0)) {
-    renderLargeCurrent();
-  } else if (lgRunning) {
-    lgRestartQueued = true;
-    stopScan(lgScanBtn, true);
-  } else {
-    void startLargeScan();
-  }
-}
-
-function renderLargeCurrent() {
-  if (lgResult) renderLargeDone(lgResult);
-  else renderLargeRows(lgItems, lgRunning, lgStopped ? stoppedFoot() : "");
-}
-
-function renderLargeRows(items: LargeFile[], live: boolean, foot = "") {
-  items = items.filter((it) => it.size >= lgMinSize && !isGone(lists.large, it.path));
-  const visible = new Set(items.map((it) => it.path));
-  for (const path of lists.large.sel) if (!visible.has(path)) lists.large.sel.delete(path);
-  lgCount.textContent = t("large.count", { n: items.length.toLocaleString() });
-  if (items.length === 0) {
-    lgList.innerHTML = emptyState(live ? t("large.live") : t("large.empty", { size: human(lgMinSize) })) + foot;
-    lgToolbar.classList.add("hidden");
-    lgToolbar.innerHTML = "";
-    return;
-  }
-  const sorted = [...items].sort((a, b) => b.size - a.size).slice(0, 50);
-  const maxSize = sorted[0]?.size || 1;
-  const rows = sorted
-    .map(
-      (it, i) =>
-        fsRowHtml(lists.large, {
-          path: it.path,
-          name: esc(displayPath(it.path)),
-          size: it.size,
-          rank: `${i + 1}`,
-          trashable: it.trashable,
-          locked: !it.trashable,
-          sub: `<div class="fs-track"><div class="fs-fill" style="width:${Math.max(2, Math.round((it.size / maxSize) * 100))}%"></div></div>`,
-        }),
-    )
-    .join("");
-  const footHtml = (live ? `<div class="fs-foot muted small">${esc(t("large.live"))}</div>` : "") + foot;
-  renderFsListInto({
-    st: lists.large,
-    list: lgList,
-    toolbar: lgToolbar,
-    rerender: renderLargeCurrent,
-    removeRows: (removed) => {
-      updateRowsAfterRemoved(lgItems, removed, lists.large);
-      if (lgResult) lgResult.items = lgItems;
-    },
-    sizeOf: (path) => lgItems.find((it) => it.path === path)?.size ?? childSize(lists.large, path),
-  }, rows + footHtml);
-}
-
-function renderLargeDone(r: LargeScanResult) {
-  const foot = `<div class="fs-foot muted small">${esc(t("large.foot", { n: r.scanned.toLocaleString(), t: (r.elapsedMs / 1000).toFixed(1), s: r.skipped.toLocaleString() }))}</div>`;
-  renderLargeRows(r.items, false, foot);
 }
 
 // ---- 残留清理 ----
@@ -1436,7 +1295,6 @@ async function showUninstallDetail(path: string) {
 // ---- 事件 ----
 
 fsScanBtn.addEventListener("click", () => stopScan(fsScanBtn) || startFullScan());
-lgScanBtn.addEventListener("click", () => stopScan(lgScanBtn) || startLargeScan());
 orScanBtn.addEventListener("click", () => stopScan(orScanBtn) || startOrphanScan());
 phScanBtn.addEventListener("click", () => stopScan(phScanBtn) || startPhotoScan());
 appSearch.addEventListener("input", renderApps);
@@ -1445,7 +1303,6 @@ appSort.addEventListener("change", () => {
   saveChoice("cleanzo.appSort", appSortBy);
   if (!appsLoading) renderApps();
 });
-lgSize.addEventListener("change", changeLargeSize);
 document.addEventListener("keydown", (e) => {
   if (viewerPhoto) {
     if (e.key === "Escape") closePhotoViewer();

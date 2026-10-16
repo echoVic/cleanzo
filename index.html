@@ -175,36 +175,9 @@
           <section id="fs-list" class="fs-list" aria-live="polite"></section>
         </section>
 
-        <!-- 大文件专清 -->
+        <!-- 大文件专清（React 页面，内容由 React 挂载） -->
         <section id="view-large" class="view hidden">
-          <header class="view-head">
-            <div>
-              <h2 data-i18n="nav.large">大文件专清</h2>
-              <p class="muted" data-i18n="large.sub">找出占用最大的单个文件，快速清理磁盘</p>
-            </div>
-            <div class="head-actions">
-              <button id="lg-scan" class="btn primary" type="button" data-i18n="large.scanBtn">扫描大文件</button>
-            </div>
-          </header>
-          <label id="lg-threshold" class="muted small fs-hint threshold-control">
-            <span data-i18n="large.thresholdBefore">只显示大于</span>
-            <select id="lg-size" class="select" data-i18n-title="large.minSize">
-              <option value="104857600" data-i18n="large.size100">100 MB</option>
-              <option value="524288000" data-i18n="large.size500">500 MB</option>
-              <option value="1073741824" data-i18n="large.size1">1 GB</option>
-              <option value="5368709120" data-i18n="large.size5">5 GB</option>
-            </select>
-            <span data-i18n="large.thresholdAfter">的文件</span>
-          </label>
-          <div id="lg-progress" class="fs-progress hidden">
-            <div class="spinner"></div>
-            <div class="fs-progress-text">
-              <div id="lg-current">准备扫描…</div>
-              <div id="lg-count" class="muted small"></div>
-            </div>
-          </div>
-          <div id="lg-toolbar" class="fs-toolbar hidden"></div>
-          <section id="lg-list" class="fs-list" aria-live="polite"></section>
+          <div id="large-react-root"></div>
         </section>
 
         <!-- 相似照片 -->
