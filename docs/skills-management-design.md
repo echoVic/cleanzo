@@ -109,3 +109,32 @@ UI 文案对应：
 - Claude Code 默认只保留约 30 天会话，它观测的技能「久未使用」窗口受此限制。
 - 超过 64 MB 的技能目录不计算内容哈希，不会被判为「重复」，也不提供合并。
 - 插件自带的技能（如 `superpowers:*`）不在用户技能目录里，不列出。
+
+
+---
+
+## 九、技能升级
+
+### 来源（只读识别）
+| 来源 | 记录 | 能知道什么 |
+|---|---|---|
+| skills CLI | `~/.agents/.skill-lock.json` | 仓库、仓库内 SKILL.md 路径、**安装时的文件夹 git 树哈希** |
+| git 克隆 | 技能目录本身是 `.git` 仓库 | 远端和分支 |
+| CC Switch | `~/.cc-switch/cc-switch.db` 的 `skills` 表 | 仓库和 SKILL.md 路径；**数据库只读，绝不写入** |
+| Cleanzo | 自己升级过的技能记录（`Application Support/Cleanzo/skill-updates.json`） | 同上，含升级后的树哈希 |
+
+### 版本与检查
+- 文件夹版本 = 用 git 的算法算的目录**树哈希**（`.git`、`.DS_Store` 排除，软链按 120000，可执行位保留），和 GitHub trees API 报的、以及 skills 锁文件记的哈希完全一致（已与本机文件和 GitHub 实测对齐）。
+- 检查更新：每个仓库只调一次 trees API（并发 4），对比本地树和远端树。git 克隆只发 `git ls-remote`，不动工作区。
+- 状态：`current` / `update` / `missing`（来源里已删）/ `error`（限流、网络等）；本地与安装时树哈希不一致标 `modified`。CC Switch 的 `content_hash` 是它自己的算法，不拿它判修改。
+- 检查需要联网且受 GitHub 限流（无 token 每小时 60 次，14 秒可查完本机 9 个仓库）；未检查前只显示来源，不显示「最新」。
+
+### 升级
+- GitHub 来源：从 codeload 下载仓库 tar.gz（单仓库 256 MB 上限），用 Go 自带 gzip/tar 解压；**拒绝**目录逃逸、绝对链接、外链、硬链接、设备/FIFO、多顶层目录、`O_EXCL` 防覆盖。解出的技能文件夹再算一次树哈希，与 trees API 报的一致才安装，不一致报 `mismatch` 中止。
+- 安装方式：先在旁边复制出新版 → 旧版移废纸篓 → 新版改名就位（失败可回退），所有指向该目录的软链继续有效。
+- git 克隆：`git fetch` + `merge --ff-only`，不允许非快进；本地有修改时先 `git stash` 保存（含 untracked），不丢弃。
+- 本地改过的技能：默认拒绝（`modified`），确认弹窗逐条标出，用户显式「覆盖并升级」才动；旧内容同样进废纸篓。
+- CC Switch 管理的技能：Cleanzo 可以升级，但不写它的库；UI 明确提示升级后 CC Switch 可能显示为本地已修改。
+
+### 已验证
+本机只读检查（14 秒）：64 个有来源的技能中 10 个有更新、2 个本地改过（含一个你自己的 git 仓库 spec-flow）；升级路径在临时 HOME 单测（伪 GitHub 服务器 + 哈希校验 + 各类拒绝）和真实 tar.gz/API 上都验证过。

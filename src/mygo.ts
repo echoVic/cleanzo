@@ -462,6 +462,22 @@ export interface SkillCopy {
   removable: boolean;
 }
 
+/** SkillOrigin is where a skill folder came from. */
+export interface SkillOrigin {
+  /** cleanzo, skills-cli, git, cc-switch */
+  kind: string;
+  /** owner/name on GitHub; "" for non-GitHub git remotes */
+  repo: string;
+  /** branch, or "" for the default branch */
+  ref: string;
+  /** folder inside the repository; "" for its root */
+  path: string;
+  /** git remote URL, for git clones */
+  remote: string;
+  /** git tree hash the folder was installed at; "" when unknown */
+  tree: string;
+}
+
 /** SkillRoot is a skills folder that exists, as the page lists it. */
 export interface SkillRoot {
   tool: string;
@@ -504,6 +520,40 @@ export interface SkillTrashResult {
   items: SkillTrashItem[];
   moved: number;
   freed: number;
+}
+
+/** SkillUpdate is a skill folder's update state, for one entry. */
+export interface SkillUpdate {
+  /** the folder (resolved), the one an upgrade replaces */
+  path: string;
+  name: string;
+  origin: SkillOrigin;
+  /** tree hash of the folder now */
+  local: string;
+  /** tree hash at the source; "" before a check */
+  remote: string;
+  /** unknown, current, update, missing, error */
+  status: string;
+  /** the folder differs from the tree it was installed at */
+  modified: boolean;
+  error: string;
+  checkedAt: number;
+}
+
+/** SkillUpgradeRequest asks to upgrade one folder. */
+export interface SkillUpgradeRequest {
+  path: string;
+  /** overwrite local changes */
+  force: boolean;
+}
+
+/** SkillUpgradeResult reports one upgrade. */
+export interface SkillUpgradeResult {
+  path: string;
+  /** the folder's tree hash after the upgrade */
+  tree: string;
+  /** "" on success; no-origin, modified, mismatch, not-found, rate-limited, ... */
+  error: string;
 }
 
 /** SkillUse is a skill's recorded calls in one tool. */
@@ -608,6 +658,13 @@ export const Cleaner = {
     return call("Cleaner.CheckForUpdates");
   },
   /**
+   * CheckSkillUpdates compares the skills that have an origin with their
+   * source. Repositories are listed once each; nothing is downloaded.
+   */
+  checkSkillUpdates(): Promise<SkillUpdate[]> {
+    return call("Cleaner.CheckSkillUpdates");
+  },
+  /**
    * CleanAITools moves the selected parts to the Trash. While a tool runs only
    * its run-safe parts (old releases, sessions, leftovers) are cleaned; files
    * it has open are still left alone. Protected and unknown parts are refused;
@@ -689,6 +746,13 @@ export const Cleaner = {
   /** ListApps returns installed applications and whether they are running. */
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
+  },
+  /**
+   * ListSkillOrigins reports the skills that have an origin, without going
+   * to the network.
+   */
+  listSkillOrigins(): Promise<SkillUpdate[]> {
+    return call("Cleaner.ListSkillOrigins");
   },
   /**
    * ListSkillRoots reports the skills folders that exist, without measuring
@@ -788,6 +852,14 @@ export const Cleaner = {
    */
   uninstallApp(path: string): Promise<UninstallResult> {
     return call("Cleaner.UninstallApp", path);
+  },
+  /**
+   * UpgradeSkills upgrades the requested folders to their source. Each one is
+   * checked again first; a folder with local changes is upgraded only with
+   * Force. Archives are downloaded once per repository.
+   */
+  upgradeSkills(reqs: SkillUpgradeRequest[]): Promise<SkillUpgradeResult[]> {
+    return call("Cleaner.UpgradeSkills", reqs);
   },
   /**
    * WatchStatus streams one StatusSample every two seconds while the status

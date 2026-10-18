@@ -1,6 +1,6 @@
 import type { Skill, SkillCopy, SkillSource } from "../../mygo";
 
-export type SkillFilter = "all" | "idle" | "issues" | "unobserved";
+export type SkillFilter = "all" | "idle" | "issues" | "updates" | "unobserved";
 export type SkillSort = "last" | "count" | "size" | "name";
 
 const DAY = 86400;
