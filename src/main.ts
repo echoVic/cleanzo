@@ -1,4 +1,5 @@
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
+import { initReactSkills, showReactSkills } from "./react/skills/entry";
 import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
@@ -70,6 +71,7 @@ function switchView(v: View, tool?: string) {
     const names: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
     showReactAITool(tool, names[tool] ?? tool);
   }
+  if (v === "skills") showReactSkills();
   if (v === "apps") showReactApps();
   if (v === "fullscan") showReactFullScan();
   if (v === "settings") showReactSettings();
@@ -81,7 +83,7 @@ navItems.forEach((b) => b.addEventListener("click", () => switchView(b.dataset.v
 applyStaticI18n();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
 // 默认落在「系统状态」（HTML 初始高亮已同步），switchView("status") 即开采样。
-void initReactAITools();
+void initReactAITools().then(initReactSkills);
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
 // 版本号以应用自己为准，不写死在页面里

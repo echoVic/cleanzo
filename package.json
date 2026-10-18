@@ -10,7 +10,7 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:web": "bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts"
+    "test:web": "bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts && bun test tests/skills-react.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.4.1",

@@ -416,6 +416,104 @@ export interface SimilarPhotosResult {
   elapsedMs: number;
 }
 
+/** Skill is one skill name across the skills folders. */
+export interface Skill {
+  name: string;
+  description: string;
+  copies: SkillCopy[];
+  /** distinct folders, on disk */
+  size: number;
+  /** oldest entry's modification time */
+  installed: number;
+  uses: SkillUse[];
+  /** newest call in any tool; 0 for none */
+  last: number;
+  /** calls in all tools */
+  count: number;
+  /** a tool with usage records can see it */
+  observed: boolean;
+  /** all those tools' records reach back to here */
+  since: number;
+  /** observed, installed before Since, not called since, and Since is skillIdleWindow ago or more */
+  idle: boolean;
+  /** broken, invalid, duplicate, diverged */
+  issues: string[];
+}
+
+/** SkillCopy is one entry for a skill in one skills folder. */
+export interface SkillCopy {
+  /** the folder's tool */
+  tool: string;
+  /** the entry, not resolved */
+  path: string;
+  /** dir, link, broken, invalid (a folder without SKILL.md) */
+  kind: string;
+  target: string;
+  /** resolved folder; "" for broken links */
+  real: string;
+  /** on disk; 0 for links */
+  size: number;
+  /** contents of Real; "" when not compared */
+  hash: string;
+  modified: number;
+  /** entries in skills folders that link to this folder */
+  linkedBy: string[];
+  /** passes the safety checks */
+  removable: boolean;
+}
+
+/** SkillRoot is a skills folder that exists, as the page lists it. */
+export interface SkillRoot {
+  tool: string;
+  name: string;
+  path: string;
+  /** entries, links included */
+  count: number;
+}
+
+/** SkillScanResult is what ScanSkills returns. */
+export interface SkillScanResult {
+  roots: SkillRoot[];
+  skills: Skill[];
+  sources: SkillSource[];
+  scannedAt: number;
+}
+
+/** SkillSource reports one usage source. */
+export interface SkillSource {
+  tool: string;
+  name: string;
+  /** ok, none (no records), unsupported, error */
+  status: string;
+  /** records reach back at least to here */
+  since: number;
+  /** calls found */
+  records: number;
+}
+
+/** SkillTrashItem reports one entry's outcome. */
+export interface SkillTrashItem {
+  path: string;
+  /** "" when moved; not-a-skill, linked, in-use or the Trash's error */
+  error: string;
+  freed: number;
+}
+
+/** SkillTrashResult is what TrashSkills returns. */
+export interface SkillTrashResult {
+  items: SkillTrashItem[];
+  moved: number;
+  freed: number;
+}
+
+/** SkillUse is a skill's recorded calls in one tool. */
+export interface SkillUse {
+  tool: string;
+  count: number;
+  /** unix seconds */
+  last: number;
+}
+
 /** StatusSample is one complete reading, sent every two seconds. */
 export interface StatusSample {
   memory: MemoryStatus;
@@ -573,6 +671,15 @@ export const Cleaner = {
     return call("Cleaner.LargeScan", minSize, ch);
   },
   /**
+   * LinkSkillCopy replaces the folder at path with a link to target, another
+   * skills folder's copy of the same skill with the same contents. The folder
+   * goes to the Trash; copies that have drifted apart are refused, so nothing
+   * is lost.
+   */
+  linkSkillCopy(path: string, target: string): Promise<void> {
+    return call("Cleaner.LinkSkillCopy", path, target);
+  },
+  /**
    * ListAITools reports which supported tools have a folder, without measuring
    * anything, so the sidebar can show one entry per installed tool at start.
    */
@@ -582,6 +689,13 @@ export const Cleaner = {
   /** ListApps returns installed applications and whether they are running. */
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
+  },
+  /**
+   * ListSkillRoots reports the skills folders that exist, without measuring
+   * or reading transcripts, so the sidebar can show the page at start.
+   */
+  listSkillRoots(): Promise<SkillRoot[]> {
+    return call("Cleaner.ListSkillRoots");
   },
   /**
    * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
@@ -650,9 +764,22 @@ export const Cleaner = {
   scanSimilarPhotos(ch: Channel<SimilarPhotoEvent>): Promise<void> {
     return call("Cleaner.ScanSimilarPhotos", ch);
   },
+  /** ScanSkills lists the skills, their copies and problems, and their usage. */
+  scanSkills(): Promise<SkillScanResult> {
+    return call("Cleaner.ScanSkills");
+  },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {
     return call("Cleaner.TrashPath", path);
+  },
+  /**
+   * TrashSkills moves skill entries to the Trash. A link moves as a link; its
+   * target stays. A folder that a skills folder links to is moved only when
+   * all those links are moved with it, so no tool is left with a broken link.
+   * Folders with files a process has open are left alone.
+   */
+  trashSkills(paths: string[]): Promise<SkillTrashResult> {
+    return call("Cleaner.TrashSkills", paths);
   },
   /**
    * UninstallApp moves an app to the Trash, then its associated files. When

@@ -42,6 +42,10 @@
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7.5 10 2.5 2-2.5 2M12.5 14.5h4"/></svg>
             <span>Codex</span>
           </button>
+          <button class="nav-item hidden" data-view="skills" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7l8 4 8-4z"/><path d="m4 12 8 4 8-4"/><path d="m4 17 8 4 8-4"/></svg>
+            <span data-i18n="nav.skills">技能</span>
+          </button>
           <div class="nav-section" data-i18n="nav.section.space">空间</div>
           <button class="nav-item" data-view="fullscan" type="button">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/><path d="M8.5 11h5M11 8.5v5"/></svg>
@@ -83,6 +87,11 @@
         <!-- AI 工具（React 页面，内容由 React 挂载） -->
         <section id="view-aitools" class="view hidden">
           <div id="ai-react-root" class="relative"></div>
+        </section>
+
+        <!-- 技能（React 页面，内容由 React 挂载） -->
+        <section id="view-skills" class="view hidden">
+          <div id="skills-react-root"></div>
         </section>
 
         <!-- 全盘扫描（React 页面，内容由 React 挂载） -->

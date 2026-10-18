@@ -89,7 +89,7 @@ function setNavBusy(view: View, on: boolean) {
   navItems.find((b) => b.dataset.view === view)?.classList.toggle("busy", on);
 }
 
-const VIEWS = ["clean", "status", "aitools", "fullscan", "large", "photos", "apps", "settings"] as const;
+const VIEWS = ["clean", "status", "aitools", "skills", "fullscan", "large", "photos", "apps", "settings"] as const;
 type View = (typeof VIEWS)[number];
 
 export { $, errText, human, fmtDate, displayPath, baseName, toast, setNavBusy, VIEWS };
