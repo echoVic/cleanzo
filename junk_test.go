@@ -100,6 +100,38 @@ func TestAppItemsMergeSourcesByOwner(t *testing.T) {
 	}
 }
 
+func TestChromeShaderCachesIncludeRootAndProfilesButNeverStorage(t *testing.T) {
+	env := testEnv(t)
+	base := filepath.Join(env.home, "Library/Application Support/Google/Chrome")
+	for _, path := range []string{"ShaderCache/data", "GrShaderCache/data", "GraphiteDawnCache/data", "Default/DawnGraphiteCache/data", "Profile 2/DawnWebGPUCache/data"} {
+		writeFile(t, filepath.Join(base, path), 100)
+	}
+	for _, path := range []string{"Default/Service Worker/CacheStorage/keep", "Default/WebStorage/keep", "Default/IndexedDB/keep", "Default/Local Storage/keep", "Default/Cookies"} {
+		writeFile(t, filepath.Join(base, path), 500)
+	}
+	specs, _ := expandItems(&env)
+	for _, s := range specs {
+		if s.item.ID != "browser.chrome" {
+			continue
+		}
+		p := planItem(context.Background(), s, env, make(chan struct{}, 2), nil)
+		if p.item.Size != 500 {
+			t.Fatalf("chrome shader capacity = %d; want 500", p.item.Size)
+		}
+		for _, e := range p.entries {
+			rel, err := filepath.Rel(resolvePath(base), e.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(rel, "Storage") || strings.Contains(rel, "Cookies") || strings.Contains(rel, "Service Worker") {
+				t.Fatalf("persistent data entered cleanup: %s", e.path)
+			}
+		}
+		return
+	}
+	t.Fatal("Chrome cache rule missing")
+}
+
 // TestNoFullDiskAccessStaysOutOfContainers checks junk expansion.
 func TestNoFullDiskAccessStaysOutOfContainers(t *testing.T) {
 	env := testEnv(t)
@@ -244,6 +276,46 @@ func TestPlanItemMeasuresAndSkips(t *testing.T) {
 	}
 	if len(p.item.Top) != 2 || p.item.Top[0].Size != 3000 {
 		t.Fatalf("top = %+v", p.item.Top)
+	}
+}
+
+// TestObservedInUseCapacityKeepsDeletionPlanUnchanged separates discovery from eligibility.
+func TestObservedInUseCapacityKeepsDeletionPlanUnchanged(t *testing.T) {
+	env := testEnv(t)
+	env.observe = true
+	open := filepath.Join(env.home, ".npm/_npx/busy")
+	writeFile(t, filepath.Join(open, "data"), 500)
+	writeFile(t, filepath.Join(env.home, ".npm/_npx/ready/data"), 1000)
+	env.guard.open = []string{strings.ToLower(resolvePath(filepath.Join(open, "data")))}
+	specs, _ := expandItems(&env)
+	p := planItem(context.Background(), specs[0], env, make(chan struct{}, 4), nil)
+	if p.item.FoundSize != 1500 || p.item.Size != 1000 || p.item.InUse != 1 || len(p.entries) != 1 {
+		t.Fatalf("discovery must include busy capacity without granting deletion: %+v", p)
+	}
+	if len(p.item.Details) != 2 || p.item.Details[1].Reason == "" {
+		t.Fatalf("candidate outcomes must remain inspectable: %+v", p.item.Details)
+	}
+}
+
+func TestDiscoveryDoesNotAuthorizeBusyCleanup(t *testing.T) {
+	env := testEnv(t)
+	env.observe = true
+	path := filepath.Join(env.home, ".npm/_npx/busy/data")
+	writeFile(t, path, 500)
+	env.guard.open = []string{strings.ToLower(resolvePath(path))}
+	results := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.npx"}}, time.Time{}, cleanHooks{})
+	if len(results) != 1 || results[0].Freed != 0 || !exists(path) {
+		t.Fatalf("discovery capacity must never enter cleanup: %+v", results)
+	}
+}
+
+func TestMeasurementFailureIsReportedNotEmpty(t *testing.T) {
+	env := testEnv(t)
+	env.observe = true
+	missing := filepath.Join(env.home, "gone")
+	p := planItem(context.Background(), itemSpec{item: JunkItem{ID: "test"}, cands: []junkCand{{path: missing}}}, env, make(chan struct{}, 1), nil)
+	if p.item.ReadErrors != 1 || len(p.item.Details) == 0 || p.item.Details[0].Reason != "read-error" || len(p.entries) != 0 {
+		t.Fatalf("missing candidate must be reported, not a clean empty result: %+v", p)
 	}
 }
 

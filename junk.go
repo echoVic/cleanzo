@@ -21,21 +21,40 @@ import (
 
 // JunkItem is one rule, app cache or custom folder on the junk page.
 type JunkItem struct {
-	ID       string    `json:"id"`
-	Group    string    `json:"group"`
-	Name     string    `json:"name"`
-	Size     int64     `json:"size"`
-	Files    int64     `json:"files"`
-	Default  bool      `json:"default"`
-	Trash    bool      `json:"trash"`
-	Running  bool      `json:"running"`
-	InUse    int       `json:"inUse"`
-	Denied   bool      `json:"denied"`
-	Estimate bool      `json:"estimate"`
-	Paths    []string  `json:"paths"`
-	Top      []TopItem `json:"top"`
-	Subs     []SubItem `json:"subs"`
-	Skipped  string    `json:"skipped,omitempty"`
+	ID             string       `json:"id"`
+	Group          string       `json:"group"`
+	Name           string       `json:"name"`
+	Size           int64        `json:"size"`
+	Files          int64        `json:"files"`
+	Default        bool         `json:"default"`
+	Trash          bool         `json:"trash"`
+	Running        bool         `json:"running"`
+	InUse          int          `json:"inUse"`
+	Denied         bool         `json:"denied"`
+	Estimate       bool         `json:"estimate"`
+	Paths          []string     `json:"paths"`
+	Top            []TopItem    `json:"top"`
+	Subs           []SubItem    `json:"subs"`
+	Skipped        string       `json:"skipped,omitempty"`
+	FoundSize      int64        `json:"foundSize,omitempty"` // measured candidates, including in-use entries
+	ReadErrors     int          `json:"readErrors,omitempty"`
+	Details        []JunkDetail `json:"details,omitempty"`
+	DetailsDropped int          `json:"detailsDropped,omitempty"`
+}
+
+// JunkDetail records a candidate outcome; it never authorizes deletion.
+type JunkDetail struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Reason string `json:"reason"` // eligible, running, in-use, too-new, boundary, read-error
+}
+
+func (it *JunkItem) recordDetail(path string, size int64, reason string) {
+	if len(it.Details) < 200 {
+		it.Details = append(it.Details, JunkDetail{Path: path, Size: size, Reason: reason})
+	} else {
+		it.DetailsDropped++
+	}
 }
 
 // SubItem is a separately selectable part of an item.
@@ -69,6 +88,7 @@ type junkEnv struct {
 	refreshGuard  func() *usageGuard
 	commandClaims map[string]claimSet
 	lstat         func(string) (fs.FileInfo, error)
+	observe       bool // scanning only: measure excluded capacity, never create extra deletion entries
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
@@ -503,11 +523,14 @@ func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}
 		return plan
 	}
 	plan.item.Size, plan.item.Files, plan.item.Top, plan.item.Subs = 0, 0, nil, nil
-	// A running owner's item is measured only to show what quitting it would
-	// free; it gets no entries, so nothing of it is removed.
+	plan.item.FoundSize, plan.item.ReadErrors, plan.item.Details, plan.item.DetailsDropped = 0, 0, nil, 0
+	// Discovery may measure a busy candidate, but only eligible entries can
+	// reach a deletion plan. Cleaning never enables observe.
 	running := spec.item.Running
 	measured := make([]cleanEntry, len(spec.cands))
 	newest := make([]time.Time, len(spec.cands))
+	errorsSeen := make([]int, len(spec.cands))
+	reasons := make([]string, len(spec.cands))
 	parentOK := map[string]bool{}
 	var wg sync.WaitGroup
 	started := make([]bool, len(spec.cands))
@@ -516,27 +539,44 @@ candidates:
 		if ctx.Err() != nil {
 			break
 		}
-		// A folder swapped for a link since expansion (say into another app's
-		// container) must not be read through: check each parent folder once,
-		// and the entry itself below. cleanItem checks every entry again in
-		// full before it removes anything.
 		parent := filepath.Dir(c.path)
 		ok, seen := parentOK[parent]
 		if !seen {
 			ok = !env.traversalBlocked(parent)
 			parentOK[parent] = ok
 		}
-		if !ok || !running && env.guard.inUse(c.path) {
+		if !ok {
 			plan.item.InUse++
+			plan.item.ReadErrors++
+			plan.item.recordDetail(env.displayable(c.path), 0, "boundary")
 			continue
+		}
+		busy := !running && env.guard.inUse(c.path)
+		if busy {
+			plan.item.InUse++
+			if !env.observe {
+				continue
+			}
 		}
 		info, err := os.Lstat(c.path)
-		if err != nil || info.Mode()&fs.ModeSymlink != 0 || removalRefused(c.path, info) {
+		if err != nil {
+			plan.item.ReadErrors++
+			plan.item.recordDetail(env.displayable(c.path), 0, "read-error")
 			continue
 		}
-		// An entry changed within the minimum age is too new whatever is inside.
-		if c.minAge > 0 && now().Sub(changedAt(info)) < c.minAge {
+		if info.Mode()&fs.ModeSymlink != 0 || removalRefused(c.path, info) {
+			plan.item.recordDetail(env.displayable(c.path), 0, "boundary")
 			continue
+		}
+		if c.minAge > 0 && now().Sub(changedAt(info)) < c.minAge {
+			plan.item.recordDetail(env.displayable(c.path), 0, "too-new")
+			continue
+		}
+		reasons[i] = "eligible"
+		if running {
+			reasons[i] = "running"
+		} else if busy {
+			reasons[i] = "in-use"
 		}
 		select {
 		case sem <- struct{}{}:
@@ -555,8 +595,8 @@ candidates:
 			if measuring != nil {
 				measuring(c.path)
 			}
-			size, files, t := measure(c.path)
-			measured[i], newest[i] = cleanEntry{c.path, size, files}, t
+			size, files, changed, failures := measureChecked(c.path)
+			measured[i], newest[i], errorsSeen[i] = cleanEntry{c.path, size, files}, changed, failures
 		}()
 	}
 	wg.Wait()
@@ -565,10 +605,22 @@ candidates:
 		if !started[i] {
 			continue
 		}
+		reason := reasons[i]
 		if age := spec.cands[i].minAge; age > 0 && t.Sub(newest[i]) < age {
-			continue
+			reason = "too-new"
 		}
-		plan.entries = append(plan.entries, e)
+		if errorsSeen[i] > 0 {
+			plan.item.ReadErrors += errorsSeen[i]
+			reason = "read-error"
+		}
+		// Too-new data remains outside the rule's candidate-capacity metric.
+		if reason != "too-new" {
+			plan.item.FoundSize += e.size
+		}
+		plan.item.recordDetail(env.displayable(e.path), e.size, reason)
+		if reason == "eligible" || reason == "running" {
+			plan.entries = append(plan.entries, e)
+		}
 	}
 	sort.SliceStable(plan.entries, func(i, j int) bool { return plan.entries[i].size > plan.entries[j].size })
 	for _, e := range plan.entries {
@@ -696,6 +748,7 @@ type JunkSelection struct {
 // scanJunk expands and measures items with serialized callbacks.
 func scanJunk(ctx context.Context, env junkEnv, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
 	env.ctx = ctx
+	env.observe = true
 	specs, summary := expandItems(&env)
 	return measureJunk(ctx, specs, env, summary, measuring, sized)
 }
@@ -759,6 +812,7 @@ func measureItems(ctx context.Context, specs []itemSpec, env junkEnv, measuring 
 // cleanJunk cleans selections in order, taking a fresh look before each item.
 func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, scannedAt time.Time, hooks cleanHooks) []CleanResult {
 	env.ctx = ctx
+	env.observe = false
 	specs, _ := expandItems(&env)
 	byID := make(map[string]itemSpec, len(specs))
 	for _, s := range specs {
@@ -873,6 +927,9 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 		res.Failed = append(res.Failed, "blocked")
 	}
 	trash := canonical(userTrashDir())
+	if plan.item.ReadErrors > 0 {
+		res.Failed = append(res.Failed, "blocked")
+	}
 	for _, e := range plan.entries {
 		if ctx.Err() != nil {
 			break
@@ -940,6 +997,7 @@ func (env junkEnv) removable(path string, trash bool) bool {
 func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) error {
 	env := currentJunkEnv()
 	env.ctx = ctx
+	env.observe = true
 	specs, summary := expandItems(&env)
 	initial := make([]JunkItem, len(specs))
 	for i := range specs {

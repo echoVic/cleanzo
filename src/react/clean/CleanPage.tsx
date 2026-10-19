@@ -13,7 +13,7 @@ import { setCleanStaleHandler, takeStalePending } from "./entry";
 import { cleanApi } from "./api";
 import {
   GROUPS, applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
-  finalizeCleanRows, finalizeScan, groupCheckState, hasSubs,
+  finalizeCleanRows, finalizeScan, groupCheckState, hasSubs, heroTotals, discoveredSize,
   isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible,
   removeFromSel, rowStateNote, scanItem, scanStart, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
@@ -321,9 +321,8 @@ export function CleanPage() {
   // ---- hero 派生 ----
 
   const eligible = st.items.filter(isSelectable);
-  const reviewBytes = eligible.filter((it) => it.group === "review").reduce((n, it) => n + it.size, 0);
-  const foundBytes = eligible.filter((it) => it.group !== "review").reduce((n, it) => n + it.size, 0);
-  const selectedBytes = eligible.filter((it) => it.group !== "review").reduce((n, it) => n + chosenSize(it, st.sel), 0);
+  const totals = heroTotals(st.items, st.sel);
+  const { foundBytes, reviewBytes, selectedBytes } = totals;
 
   let heroPrefix = t("hero.ready");
   let heroTotal = "--";
@@ -353,7 +352,10 @@ export function CleanPage() {
       : t("clean.selected", { size: human(selectedBytes) });
     heroSub = [
       text,
+      t("junk.availableTotal", { size: human(totals.availableBytes) }),
+      totals.runningBytes > 0 ? t("junk.runningTotal", { size: human(totals.runningBytes) }) : "",
       reviewBytes > 0 ? t("junk.reviewTotal", { size: human(reviewBytes) }) : "",
+      totals.incompleteItems > 0 ? t("junk.incompleteTotal", { n: totals.incompleteItems }) : "",
     ].filter(Boolean).join(t("phrase.sep"));
     cleanBtnLabel = t("clean.now");
     cleanBtnDisabled = phase !== "scanned" || ignoring || eligible.every((it) => chosenSize(it, st.sel) === 0);
@@ -411,10 +413,10 @@ export function CleanPage() {
       );
     }
     if (st.pending.has(it.id)) return <span className="spin" aria-label={t("cat.scanning")} />;
-    if (it.denied) return "--";
+    if (it.denied && discoveredSize(it) === 0) return "--";
     return (
       <>
-        {it.estimate ? <Tag text={t("junk.estimate")} /> : null} {human(it.size)}
+        {it.estimate ? <Tag text={t("junk.estimate")} /> : null} {human(discoveredSize(it))}
       </>
     );
   };
@@ -442,7 +444,7 @@ export function CleanPage() {
     const row = rowStates.get(it.id);
     const used = row?.result?.inUse ?? it.inUse;
     const dimmed = (phase === "cleaning" || phase === "cleaned") && !row;
-    const expandable = hasSubs(it) || (it.top?.length ?? 0) > 0;
+    const expandable = hasSubs(it) || (it.details?.length ?? 0) > 0 || (it.top?.length ?? 0) > 0;
     const open = expanded.has(it.id);
     return (
       <div className={`junk-item${dimmed ? " is-dim" : ""}`} key={it.id}>
@@ -466,6 +468,8 @@ export function CleanPage() {
             </div>
             <div className="cat-desc muted">{rowDesc(it)}</div>
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
+            {!it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
+            {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
           </div>
           <div className="cat-note">{rowNote(it, row)}</div>
           <div className="junk-row-actions">
@@ -528,7 +532,7 @@ export function CleanPage() {
                 </div>
                 <span className="junk-size">{human(s.size)}</span>
               </div>
-            )) : (it.top ?? []).map((top) => (
+            )) : (it.details?.length ? [] : it.top ?? []).map((top) => (
               <div className="junk-top-row" key={top.path}>
                 <div>
                   <div>{top.name}</div>
@@ -537,6 +541,16 @@ export function CleanPage() {
                 <span className="junk-size">{human(top.size)}</span>
               </div>
             ))}
+            {(it.details ?? []).map((detail, i) => (
+              <div className="junk-top-row" key={`${detail.path}:${i}`}>
+                <div>
+                  <div>{t(`junk.reason.${detail.reason}` as DictKey)}</div>
+                  <div className="muted small junk-path">{displayPath(detail.path)}</div>
+                </div>
+                <span className="junk-size">{detail.reason === "boundary" || (detail.reason === "too-new" && detail.size === 0) ? "--" : `${detail.reason === "read-error" ? "≥ " : ""}${human(detail.size)}`}</span>
+              </div>
+            ))}
+            {(it.detailsDropped ?? 0) > 0 ? <div className="muted small">{t("junk.detailsDropped", { n: it.detailsDropped! })}</div> : null}
           </div>
         )}
       </div>
@@ -648,8 +662,9 @@ export function CleanPage() {
             const gState = groupCheckState(g, st.items, st.sel);
             const folded = collapsed.has(g);
             const scanningGroup = members.some((it) => st.pending.has(it.id));
-            const gTotal = eligibleM.reduce((n, it) => n + it.size, 0);
-            const gChosen = eligibleM.reduce((n, it) => n + chosenSize(it, st.sel), 0);
+            const gTotals = heroTotals(members, st.sel);
+            const gTotal = gTotals.foundBytes;
+            const gChosen = gTotals.selectedBytes;
             const appsSplit = g === "apps" ? splitApps(members, showAllApps) : { shown: members, rest: [] };
             return (
               <section className="junk-group" key={g}>
@@ -674,6 +689,7 @@ export function CleanPage() {
                     <span className="group-name">{t(`junk.group.${g}` as DictKey)}</span>
                     <span className="group-sel">
                       {scanningGroup ? t("cat.scanning") : t("junk.groupSummary", { total: human(gTotal), sel: human(gChosen) })}
+                      {!scanningGroup && gTotals.runningBytes > 0 ? ` · ${t("junk.runningTotal", { size: human(gTotals.runningBytes) })}` : ""}
                     </span>
                     <span className={`junk-fold${folded ? "" : " open"}`}>{caret}</span>
                   </button>
@@ -685,7 +701,7 @@ export function CleanPage() {
                       <button className="junk-more" type="button" onClick={() => setShowAllApps(true)}>
                         {t("junk.moreApps", {
                           n: appsSplit.rest.length,
-                          size: human(appsSplit.rest.filter(isSelectable).reduce((n, it) => n + it.size, 0)),
+                          size: human(appsSplit.rest.reduce((n, it) => n + discoveredSize(it), 0)),
                         })}
                         {caret}
                       </button>

@@ -10,7 +10,7 @@ import {
   finalizeCleanRows, finalizeScan, groupCheckState, isSelectable, isVisible, itemTitle,
   keepLatestVisible, removeFromSel,
   rowStateNote, scanItem, scanStart, splitApps, toggleGroup, toggleRow, toggleSub,
-  withIgnored, withIgnoredSummary, emptySel,
+  withIgnored, withIgnoredSummary, emptySel, heroTotals,
   type RowState,
 } from "../src/react/clean/helpers";
 
@@ -30,7 +30,7 @@ function scan(items: JunkItem[]): ReturnType<typeof finalizeScan> {
   return finalizeScan(st);
 }
 
-test("pending rows spin; measured zero rows disappear; running and denied rows never add to totals", () => {
+test("pending rows spin; measured zero rows disappear; running and denied rows remain unselectable", () => {
   const items = [
     item("dev.npx", "dev", 1024), item("dev.npm", "dev", 0),
     item("browser.chrome", "browsers", 8192, { running: true }),
@@ -57,6 +57,52 @@ test("pending rows spin; measured zero rows disappear; running and denied rows n
   expect(t("junk.quit", { app: "Chrome" })).toBe("退出「Chrome」后可清理");
   // 未默认的行不进默认勾选。
   expect(sel.selected.has("browser.chrome")).toBe(false);
+});
+
+test("discovered bytes include running and review candidates without making them selectable", () => {
+  const st = scan([
+    item("dev.npx", "dev", 1024),
+    item("browser.chrome", "browsers", 8192, { running: true }),
+    item("review.ipsw", "review", 2048, { default: false }),
+    item("app:partial", "apps", 4096, { denied: true }),
+    item("app:pending", "apps", -1),
+  ]);
+  const totals = heroTotals(st.items, st.sel);
+  expect(totals.foundBytes).toBe(15360);
+  expect(totals.selectedBytes).toBe(1024);
+  expect(totals.reviewBytes).toBe(2048);
+  expect(buildCleanPlan(st.items, st.sel)!.selections).toEqual([{ id: "dev.npx" }]);
+});
+
+test("selected review bytes agree with the confirmation plan", () => {
+  const st = scan([item("dev.npx", "dev", 1024), item("review.ipsw", "review", 2048, { default: false })]);
+  const sel = toggleRow(st.items[1]!, true, st.sel);
+  expect(heroTotals(st.items, sel).selectedBytes).toBe(buildCleanPlan(st.items, sel)!.bytes);
+});
+
+test("group totals and hidden apps use discovered capacity, while busy entries remain unselectable", () => {
+  const st = scan([
+    item("app:partial", "apps", 1024, { foundSize: 4096, inUse: 1 }),
+    item("app:busy", "apps", 2048, { running: true }),
+    item("app:error", "apps", 0, { readErrors: 1 }),
+  ]);
+  const totals = heroTotals(st.items, st.sel);
+  expect(totals.foundBytes).toBe(6144);
+  expect(totals.availableBytes).toBe(1024);
+  expect(totals.runningBytes).toBe(2048);
+  expect(totals.incompleteItems).toBe(1);
+  expect(isVisible(st.items[2]!)).toBe(true);
+  expect(buildCleanPlan(st.items, st.sel)!.bytes).toBe(1024);
+});
+
+test("review and running are overlapping labels, not additive buckets", () => {
+  const st = scan([item("review.ipsw", "review", 2048, { running: true, default: false })]);
+  const totals = heroTotals(st.items, st.sel);
+  expect(totals.foundBytes).toBe(2048);
+  expect(totals.runningBytes).toBe(2048);
+  expect(totals.reviewBytes).toBe(2048);
+  expect(totals.availableBytes).toBe(0);
+  expect(buildCleanPlan(st.items, st.sel)).toBeNull();
 });
 
 test("detail selection uses only default children and confirmation sends their paths", () => {

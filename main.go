@@ -209,12 +209,20 @@ func scanPath(p string) (size, files int64) {
 // on disk when that is less than its length (sparse or compressed files), so
 // sizes say what removing it frees.
 func measure(p string) (size, files int64, newest time.Time) {
+	size, files, newest, _ = measureChecked(p)
+	return
+}
+
+// measureChecked preserves partial byte counts and reports every traversal failure.
+func measureChecked(p string) (size, files int64, newest time.Time, readErrors int) {
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil {
+			readErrors++
 			return nil
 		}
 		info, ierr := d.Info()
 		if ierr != nil {
+			readErrors++
 			return nil
 		}
 		if t := changedAt(info); t.After(newest) {
@@ -226,7 +234,7 @@ func measure(p string) (size, files int64, newest time.Time) {
 		}
 		return nil
 	})
-	return size, files, newest
+	return size, files, newest, readErrors
 }
 
 // onDisk is a file's length, or the space its blocks take when that is less.

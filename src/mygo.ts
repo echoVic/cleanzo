@@ -254,6 +254,14 @@ export interface JunkCleanEvent {
   result?: CleanResult;
 }
 
+/** JunkDetail records a candidate outcome; it never authorizes deletion. */
+export interface JunkDetail {
+  path: string;
+  size: number;
+  /** eligible, running, in-use, too-new, boundary, read-error */
+  reason: string;
+}
+
 /** JunkItem is one rule, app cache or custom folder on the junk page. */
 export interface JunkItem {
   id: string;
@@ -271,6 +279,11 @@ export interface JunkItem {
   top: TopItem[];
   subs: SubItem[];
   skipped?: string;
+  /** measured candidates, including in-use entries */
+  foundSize?: number;
+  readErrors?: number;
+  details?: JunkDetail[];
+  detailsDropped?: number;
 }
 
 /** JunkScanEvent reports a streamed junk scan. */

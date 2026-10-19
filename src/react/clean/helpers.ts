@@ -15,12 +15,12 @@ export function itemTitle(it: JunkItem, ruleName: (id: string) => string): strin
   return isDynamicId(it.id) ? it.name : ruleName(it.id);
 }
 
-/** size===-1 是测量中的骨架行；size 0 且未被拒绝的行不显示。 */
+/** pending、已测到容量、权限失败或读取错误都可见，未知不冒充零。 */
 export function isVisible(it: JunkItem): boolean {
-  return it.size === -1 || it.size > 0 || it.denied;
+  return it.size === -1 || discoveredSize(it) > 0 || it.denied || (it.readErrors ?? 0) > 0;
 }
 
-/** 运行中 / 被锁住 / 无大小的行不可选，也永不进入分组全选与总量。 */
+/** 运行中 / 权限拒绝 / 无可清容量的行不可选；发现容量另行统计。 */
 export function isSelectable(it: JunkItem): boolean {
   return it.size > 0 && !it.running && !it.denied;
 }
@@ -184,21 +184,29 @@ export function buildCleanPlan(items: JunkItem[], sel: JunkSel): CleanPlan | nul
 
 // ---- hero 派生数字 ----
 
-export interface HeroTotals {
-  /** 可清且非 review 的总大小（大数字「共发现」）。 */
-  foundBytes: number;
-  /** review 组可清大小（副行「另有…需要你确认」）。 */
-  reviewBytes: number;
-  /** 非 review 已勾字节（副行「已选择垃圾」）。 */
-  selectedBytes: number;
+/** 已测量的候选容量；旧后端未提供 foundSize 时沿用 size。 */
+export function discoveredSize(it: JunkItem): number {
+  return Math.max(0, it.foundSize ?? it.size);
 }
 
+export interface HeroTotals {
+  foundBytes: number;
+  availableBytes: number;
+  runningBytes: number;
+  reviewBytes: number;
+  selectedBytes: number;
+  incompleteItems: number;
+}
+
+/** 发现、可选择、状态标签分别统计；review 与 running 可以重叠，不可相加。 */
 export function heroTotals(items: JunkItem[], sel: JunkSel): HeroTotals {
-  const eligible = items.filter(isSelectable);
   return {
-    foundBytes: eligible.filter((it) => it.group !== "review").reduce((n, it) => n + it.size, 0),
-    reviewBytes: eligible.filter((it) => it.group === "review").reduce((n, it) => n + it.size, 0),
-    selectedBytes: eligible.filter((it) => it.group !== "review").reduce((n, it) => n + chosenSize(it, sel), 0),
+    foundBytes: items.reduce((n, it) => n + discoveredSize(it), 0),
+    availableBytes: items.filter(isSelectable).reduce((n, it) => n + it.size, 0),
+    runningBytes: items.filter((it) => it.running).reduce((n, it) => n + discoveredSize(it), 0),
+    reviewBytes: items.filter((it) => it.group === "review").reduce((n, it) => n + discoveredSize(it), 0),
+    selectedBytes: items.reduce((n, it) => n + chosenSize(it, sel), 0),
+    incompleteItems: items.filter((it) => it.denied || (it.readErrors ?? 0) > 0).length,
   };
 }
 

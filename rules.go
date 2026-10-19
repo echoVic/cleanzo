@@ -80,7 +80,8 @@ var junkRules = []Rule{
 
 	// browsers: caches only, never profiles, cookies or history
 	{ID: "browser.chrome", Group: groupBrowsers, Default: true, Owners: []string{"com.google.Chrome"},
-		Targets: append([]Target{{Pattern: "Library/Caches/Google/Chrome", Mode: entriesOf}},
+		Targets: append(append([]Target{{Pattern: "Library/Caches/Google/Chrome", Mode: entriesOf}},
+			chromiumProfileCaches("Library/Application Support/Google/Chrome")...),
 			chromiumProfileCaches("Library/Application Support/Google/Chrome/*")...)},
 	{ID: "browser.chromium", Group: groupBrowsers, Default: true, Owners: []string{"org.chromium.Chromium"},
 		Targets: []Target{{Pattern: "Library/Caches/Chromium", Mode: entriesOf}}},
@@ -163,7 +164,7 @@ var junkRules = []Rule{
 // under profiles, a pattern such as ".../Google/Chrome/*".
 func chromiumProfileCaches(profiles string) []Target {
 	var ts []Target
-	for _, d := range []string{"Code Cache", "GPUCache", "DawnCache", "GrShaderCache", "GraphiteDawnCache"} {
+	for _, d := range []string{"Code Cache", "GPUCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "GraphiteDawnCache"} {
 		ts = append(ts, Target{Pattern: profiles + "/" + d, Mode: entriesOf})
 	}
 	return ts
