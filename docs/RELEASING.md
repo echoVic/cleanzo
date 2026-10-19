@@ -9,6 +9,14 @@
 
 公证通常要几分钟。
 
+自动更新包用更新签名私钥签名。私钥不在仓库和 `mygo.config.ts` 里，发布时通过环境变量传入：
+
+```sh
+MYGO_UPDATER_PRIVATE_KEY="$(cat <私钥文件>)" bun run build
+```
+
+没有私钥时照常构建，只是不生成更新包（`update-darwin-arm64.json`、完整包和增量包），已安装的 Cleanzo 就收不到这一版。上传前先确认这些文件在 `build/darwin-arm64` 里。
+
 检查产物：
 
 ```sh

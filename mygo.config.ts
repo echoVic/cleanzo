@@ -17,11 +17,11 @@ export default defineConfig({
   bindings: "src/mygo.ts",
   out: "build",
   // Signed auto-updates from this repository's GitHub releases. The secret
-  // key stays on the build machine, outside the repository.
+  // key stays outside the repository: release builds read it from
+  // MYGO_UPDATER_PRIVATE_KEY (docs/RELEASING.md).
   updates: {
     publicKey: "0ZE+ktIAa8WWCN9qm3Gyg+4q1He4iPKclVBRfi7lEQc=",
     github: "echoVic/cleanzo",
-    privateKey: "~/Library/Application Support/mygo/update-keys/mygo-update.key",
   },
   // `mygo build` signs the app and the dmg with this Developer ID (hardened
   // runtime + timestamp), notarizes the dmg and staples both; `mygo dev`
