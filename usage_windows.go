@@ -77,7 +77,8 @@ func platformUsage() *usageGuard {
 				continue
 			}
 			root := usagePathKey(path)
-			if !broad[root] && root != strings.ToLower(filepath.VolumeName(root)+string(filepath.Separator)) {
+			// Every cleanable path is below home; an ancestor root would block all cleanup.
+			if !within(home, root) && !broad[root] && root != strings.ToLower(filepath.VolumeName(root)+string(filepath.Separator)) {
 				roots[root] = true
 			}
 		}

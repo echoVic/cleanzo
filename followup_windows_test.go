@@ -398,3 +398,46 @@ func TestWindowsDirectoryAndFileSymlinks(t *testing.T) {
 		})
 	}
 }
+
+// TestWindowsUsageAncestorRoots excludes profile ancestors from exe and argument roots while preserving narrow ownership.
+func TestWindowsUsageAncestorRoots(t *testing.T) {
+	env := testEnv(t)
+	ancestor := filepath.Dir(env.home)
+	narrow := filepath.Join(env.home, "projects", "app-data")
+	cache := filepath.Join(narrow, "Cache")
+	writeFile(t, filepath.Join(cache, "data"), 1)
+	saved := snapshotProcesses
+	t.Cleanup(func() { snapshotProcesses = saved })
+	cases := []struct {
+		name    string
+		process procInfo
+		busy    bool
+	}{
+		{"exe-in-ancestor", procInfo{Exe: filepath.Join(ancestor, "ancestor-tool.exe"), Name: "ancestor-tool.exe", Product: "Ancestor Tool"}, false},
+		{"argument-is-ancestor", procInfo{Name: "ancestor-tool.exe", CmdLine: `ancestor-tool.exe --user-data-dir="` + ancestor + `"`}, false},
+		{"argument-inside-home", procInfo{Name: "ancestor-tool.exe", CmdLine: `ancestor-tool.exe --user-data-dir="` + narrow + `"`}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshotProcesses = func() ([]procInfo, error) { return []procInfo{tc.process}, nil }
+			guard := probeUsage()
+			if guard.failed || guard.inUse(resolvePath(cache)) != tc.busy {
+				t.Fatalf("failed=%t inUse=%t want=%t roots=%q", guard.failed, guard.inUse(resolvePath(cache)), tc.busy, guard.roots)
+			}
+			homeKey := usagePathKey(env.home)
+			for _, root := range guard.roots {
+				if within(homeKey, root) {
+					t.Errorf("profile ancestor retained: home=%q root=%q", homeKey, root)
+				}
+			}
+			if tc.busy {
+				if !guard.inUse(resolvePath(filepath.Dir(narrow))) {
+					t.Fatal("narrow root lost ancestor matching")
+				}
+				if guard.inUse(resolvePath(filepath.Join(env.home, "unrelated-cache"))) {
+					t.Fatal("narrow root blocks unrelated cache")
+				}
+			}
+		})
+	}
+}
