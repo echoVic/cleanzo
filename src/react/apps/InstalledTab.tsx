@@ -1,8 +1,9 @@
+import { isWindows } from "../../platform";
 import * as React from "react";
 import { Search } from "lucide-react";
 import type { AppInfo, UninstallDetail } from "../../mygo";
 import { useT } from "../../ui/i18n-react";
-import { currentLang } from "../../i18n";
+import { currentLang, t } from "../../i18n";
 import { errText, fmtDate, human, toast } from "../../shared";
 import { appsApi } from "./api";
 import {
@@ -97,20 +98,30 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
     const d = dialog.detail;
     if (!d) return;
     closeDialog();
-    const path = d.app.path;
+    const path = d.app.id;
+    const seq = seqRef.current;
     setBusyPaths((prev) => [...prev, path]);
     try {
       const res = await appsApi.uninstallApp(path);
       const name = d.app.name;
       const outcome = classifyUninstall(res);
-      if (outcome === "inUse") {
+      if (outcome === "launched") {
+        if (seq === seqRef.current) {
+          setDialog({ stage: "launched", detail: d, failMsg: null });
+          setDialogOpen(true);
+        }
+      } else if (outcome === "inUse") {
         toast(t("apps.inUse", { name }), "err");
       } else if (outcome === "partial") {
-        toast(t("apps.partial", { name, n: res.failed.length }), "err");
+        if (isWindows()) {
+          toast(t("apps.fail", { msg: errText(res.failed[0]?.slice(res.path.length + 2) ?? "blocked") }), "err");
+        } else {
+          toast(t("apps.partial", { name, n: res.failed.length }), "err");
+        }
       } else {
         toast(t("apps.ok", { name, size: human(res.freed) }));
       }
-      if (!bundleFailed(res)) setApps((prev) => prev.filter((a) => a.path !== res.path));
+      if (!bundleFailed(res)) setApps((prev) => prev.filter((a) => a.id !== res.path));
     } catch (e) {
       toast(t("apps.fail", { msg: errText(e) }), "err");
     } finally {
@@ -167,37 +178,9 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
 
       {!loading && !loadError && visible.length > 0 && (
         <div className="app-list">
-          {visible.map((a) => {
-            const moving = busyPaths.includes(a.path);
-            return (
-              <div className="app-row card" key={a.path}>
-                <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
-                <div className="app-main">
-                  <div className="app-name">
-                    {a.name}
-                    {a.running && <span className="tag ok"> {t("apps.running")}</span>}
-                    {a.version && <span className="ver muted"> {a.version}</span>}
-                  </div>
-                  <div className="app-path muted" title={a.path}>{a.path}</div>
-                </div>
-                <div className="app-meta">
-                  <div className="app-size">{human(a.size)}</div>
-                  <div className="app-used muted small">
-                    {a.lastOpened ? fmtDate(a.lastOpened) : t("apps.never")}
-                  </div>
-                </div>
-                <button
-                  className="btn small uninstall-detail"
-                  type="button"
-                  disabled={moving}
-                  onClick={() => void openDetail(a.path)}
-                >
-                  {moving && <span className="spin" />}
-                  {moving ? t("apps.moving") : t("apps.detail")}
-                </button>
-              </div>
-            );
-          })}
+          {visible.map((a) => (
+            <InstalledAppRow key={a.id} app={a} moving={busyPaths.includes(a.id)} onDetail={(id) => void openDetail(id)} />
+          ))}
         </div>
       )}
 
@@ -208,7 +191,42 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
         failMsg={dialog.failMsg}
         onOpenChange={(v) => { if (!v) closeDialog(); }}
         onConfirm={() => void confirmUninstall()}
+        onRefresh={() => { closeDialog(); void loadApps(); }}
       />
+    </div>
+  );
+}
+
+// 行动作只传稳定 ID；Windows 的安装位置不作为操作参数。
+export function InstalledAppRow({ app: a, moving, onDetail }: {
+  app: AppInfo; moving: boolean; onDetail: (id: string) => void;
+}) {
+  return (
+    <div className="app-row card" key={a.id}>
+      <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
+      <div className="app-main">
+        <div className="app-name">
+          {a.name}
+          {a.running && <span className="tag ok"> {t("apps.running")}</span>}
+          {a.version && <span className="ver muted"> {a.version}</span>}
+        </div>
+        <div className="app-path muted" title={isWindows() ? a.publisher : a.path}>{isWindows() ? a.publisher : a.path}</div>
+      </div>
+      <div className="app-meta">
+        <div className="app-size">{human(a.size)}</div>
+        <div className="app-used muted small">
+          {a.lastOpened ? fmtDate(a.lastOpened) : t("apps.never")}
+        </div>
+      </div>
+      <button
+        className="btn small uninstall-detail"
+        type="button"
+        disabled={moving}
+        onClick={() => void onDetail(a.id)}
+      >
+        {moving && <span className="spin" />}
+        {moving ? t("apps.moving") : t("apps.detail")}
+      </button>
     </div>
   );
 }

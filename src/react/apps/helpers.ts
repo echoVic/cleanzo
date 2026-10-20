@@ -46,9 +46,10 @@ export function sortApps(apps: readonly AppInfo[], by: AppSortBy, lang: string):
  * - partial：有失败项（但不是上面那种纯 in-use）
  * - ok：全部成功移动
  */
-export type UninstallOutcome = "inUse" | "partial" | "ok";
+export type UninstallOutcome = "inUse" | "partial" | "ok" | "launched";
 
 export function classifyUninstall(res: UninstallResult): UninstallOutcome {
+  if (res.launched) return "launched";
   if (res.moved === 0 && res.failed.length > 0 && res.failed.every((f) => f.endsWith(": in-use"))) {
     return "inUse";
   }
@@ -58,7 +59,7 @@ export function classifyUninstall(res: UninstallResult): UninstallOutcome {
 
 /** bundle 本身删除失败：失败列表里就是 bundle 路径或以「路径:」开头。此时不从列表移除。 */
 export function bundleFailed(res: UninstallResult): boolean {
-  return res.failed.some((f) => f === res.path || f.startsWith(`${res.path}:`));
+  return res.launched || res.failed.some((f) => f === res.path || f.startsWith(`${res.path}:`));
 }
 
 /** 残留项按大小降序。 */

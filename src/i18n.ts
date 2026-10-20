@@ -8,6 +8,17 @@ export type LangPref = "system" | Lang;
 
 const dict = {
   zh: {
+    "apps.sub@win": "通过应用自己的卸载器卸载应用。",
+    "apps.body@win": "将打开应用自己的卸载器，请按其提示完成卸载。",
+    "apps.analyzingBody@win": "正在读取应用的卸载信息…",
+    "apps.moving@win": "正在打开…",
+    "apps.launched": "卸载器已打开，请在完成后刷新",
+    "apps.refresh": "刷新应用列表",
+    "apps.store": "在 Windows 设置中管理 Store 应用",
+    "fs.sub@win": "测量你的用户目录，找出最占空间的位置",
+    "fs.hint@win": "扫描会遍历你的用户目录，通常需要一两分钟，完成后可按占用排行查看。",
+    "skills.idle.guide@win": "汇总 ~\\.agents、Claude Code、Codex、Gemini 等目录里的技能，并从对话记录里统计调用次数",
+
     ...nativeMessages.zh,
     "status.osVersion": "macOS {version}",
     "status.osVersion@win": "{version}",
@@ -19,7 +30,7 @@ const dict = {
     "cat.deniedPart@win": "部分目录不可访问",
     "status.footnote@win": "已统计你账户下的 {n} 个进程，系统和其他账户的进程未计入。应用 CPU 按单核计算，可以超过 100%。",
     "status.quit.body@win": "向应用发送关闭窗口请求。如有未保存的内容，应用会先询问你。",
-    "status.mem.wired@win": "内核非分页内存",
+    "status.mem.wired@win": "内核",
     "status.mem.compressed@win": "—",
     "status.mem.pressureWarn@win": "内存负载较高",
     "status.mem.pressureCrit@win": "内存负载严重",
@@ -852,6 +863,17 @@ const dict = {
     "desc.xcode": "DerivedData 编译数据，清理后要重新编译",
   },
   en: {
+    "apps.sub@win": "Uninstall apps using each app’s own uninstaller.",
+    "apps.body@win": "The app’s own uninstaller will open. Follow its prompts to finish uninstalling.",
+    "apps.analyzingBody@win": "Reading the app’s uninstall information…",
+    "apps.moving@win": "Opening…",
+    "apps.launched": "Uninstaller opened — refresh when it finishes",
+    "apps.refresh": "Refresh apps",
+    "apps.store": "Manage Store apps in Windows Settings",
+    "fs.sub@win": "Measure your user profile and find what takes up the most space",
+    "fs.hint@win": "A scan walks your user profile and usually takes one to two minutes. Review folders by size when it finishes.",
+    "skills.idle.guide@win": "Lists the skills in ~\\.agents, Claude Code, Codex, Gemini and other folders, and counts their calls from your transcripts",
+
     ...nativeMessages.en,
     "status.osVersion": "macOS {version}",
     "status.osVersion@win": "{version}",
@@ -863,7 +885,7 @@ const dict = {
     "cat.deniedPart@win": "Some folders are inaccessible",
     "status.footnote@win": "Counting {n} processes owned by your account; system and other users' processes are excluded. Per-app CPU is single-core and can exceed 100%.",
     "status.quit.body@win": "Sends a close-window request to {name}. If there is unsaved work, the app can ask you first.",
-    "status.mem.wired@win": "Kernel non-paged",
+    "status.mem.wired@win": "Kernel",
     "status.mem.compressed@win": "—",
     "status.mem.pressureWarn@win": "High memory load",
     "status.mem.pressureCrit@win": "Critical memory load",

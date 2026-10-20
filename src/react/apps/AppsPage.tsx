@@ -64,6 +64,11 @@ export function AppsPage({ initialTab, nonce }: AppsPageProps) {
           />
         </TabsContent>}
       </Tabs>
+      {isWindows() && (
+        <footer className="muted small mt-4">
+          <a className="mlink" href="ms-settings:appsfeatures" target="_blank" rel="noopener noreferrer">{t("apps.store")}</a>
+        </footer>
+      )}
     </div>
   );
 }

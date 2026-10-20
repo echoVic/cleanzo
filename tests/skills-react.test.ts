@@ -122,3 +122,24 @@ test("Windows offers no link-copy candidates for identical skill copies", async 
     expect(linkCandidates(s)).toEqual([]);
   } finally { setPlatformForTest(undefined); }
 });
+
+test("Windows Skills empty guide uses a native agents path in zh/en", async () => {
+  await import("./setup-dom");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { SkillsPage } = await import("../src/react/skills/SkillsPage");
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      expect(t("skills.idle.guide")).toContain("~\\.agents");
+      const html = renderToStaticMarkup(createElement(SkillsPage));
+      expect(html).toContain("~\\.agents");
+      expect(html).not.toContain("~/.agents");
+    }
+    setPlatformForTest("darwin");
+    expect(t("skills.idle.guide")).toContain("~/.agents");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});

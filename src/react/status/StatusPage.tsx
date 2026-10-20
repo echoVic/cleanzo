@@ -115,7 +115,7 @@ function SparkSvg({ hist }: { hist: number[] }) {
   );
 }
 
-function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cores: number; hist: number[]; t: T }) {
+export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cores: number; hist: number[]; t: T }) {
   const loads: Array<[string, string]> = [
     [t("status.cpu.load1"), cpu.load1.toFixed(1)],
     [t("status.cpu.load5"), cpu.load5.toFixed(1)],
@@ -127,9 +127,9 @@ function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cores: num
       <div className="mhero num"><b>{Math.round(cpu.usage)}</b><i>%</i></div>
       <div className="mhcapt">{t("status.cpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} /></div>
-      <div className="mloads num">
+      {!isWindows() && <div className="mloads num">
         {loads.map(([label, v], i) => <div key={i}><span>{label}</span><b>{v}</b></div>)}
-      </div>
+      </div>}
       <div className="mfoot num">{cores > 0 ? t("status.cpu.cores", { n: cores }) : "—"}</div>
     </article>
   );

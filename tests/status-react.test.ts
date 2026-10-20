@@ -203,7 +203,7 @@ test("Windows memory card hides zero compressed memory and uses page-file terms"
   try {
     setPlatformForTest("win32");
     const html = renderToStaticMarkup(createElement(MemoryCard, { m, t }));
-    expect(html).toContain("Kernel non-paged");
+    expect(html).toContain("Kernel");
     expect(html).toContain("Page file");
     expect(html).not.toContain("seg-compressed");
     expect(t("status.osVersion", { version: "Windows 11 24H2 (26100)" })).toBe("Windows 11 24H2 (26100)");
@@ -212,5 +212,30 @@ test("Windows memory card hides zero compressed memory and uses page-file terms"
     expect(mac).toContain("Compressed");
     expect(mac).toContain("seg-compressed");
     expect(t("status.osVersion", { version: "26" })).toBe("macOS 26");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+test("Windows CPU hides unsupported load tiles and memory uses the short Kernel label", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { CpuCard, MemoryCard } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      setPlatformForTest("win32");
+      const props = { cpu: sample().cpu, cores: 8, hist: [10], t };
+      const win = renderToStaticMarkup(createElement(CpuCard, props));
+      expect(win).not.toContain("mloads");
+      expect(win).not.toContain(t("status.cpu.load1"));
+      expect(t("status.mem.wired")).toBe(lang === "zh" ? "内核" : "Kernel");
+      expect(renderToStaticMarkup(createElement(MemoryCard, { m: sample().memory, t }))).toContain(t("status.mem.wired"));
+      setPlatformForTest("darwin");
+      const mac = renderToStaticMarkup(createElement(CpuCard, props));
+      expect(mac).toContain("mloads");
+      for (const key of ["status.cpu.load1", "status.cpu.load5", "status.cpu.load15"] as const) expect(mac).toContain(t(key));
+    }
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });

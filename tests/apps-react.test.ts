@@ -6,7 +6,7 @@ import {
 } from "../src/react/apps/helpers";
 
 function app(p: Partial<AppInfo> & { name: string; path: string }): AppInfo {
-  return { bundleId: "", version: "", size: 0, lastOpened: 0, running: false, ...p };
+  return { id: p.path, publisher: "", bundleId: "", version: "", size: 0, lastOpened: 0, running: false, ...p };
 }
 
 function orphan(p: Partial<OrphanItem> & { path: string }): OrphanItem {
@@ -14,7 +14,7 @@ function orphan(p: Partial<OrphanItem> & { path: string }): OrphanItem {
 }
 
 function uninstall(res: Partial<UninstallResult>): UninstallResult {
-  return { path: "/Applications/X.app", moved: 0, freed: 0, failed: [], ...res };
+  return { launched: false, path: "/Applications/X.app", moved: 0, freed: 0, failed: [], ...res };
 }
 
 // ---- 已安装：搜索过滤 ----
@@ -118,4 +118,82 @@ test("Windows Apps cannot mount Leftovers even when requested by an old navigati
     expect(win).not.toContain('content-leftovers');
     expect(win).toContain('content-installed');
   } finally { setPlatformForTest(undefined); }
+});
+
+test("Windows launched result keeps the row until an explicit refresh", () => {
+  const result = uninstall({ launched: true });
+  expect(classifyUninstall(result)).toBe("launched");
+  expect(bundleFailed(result)).toBe(true);
+});
+
+test("Windows app row displays publisher and version and sends only its registry id", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { InstalledAppRow } = await import("../src/react/apps/InstalledTab");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  const a = app({ id: "hklm32:chosen", name: "Acme", path: "", publisher: "Acme Inc", version: "2.4", bundleId: "mac.bundle" });
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      let picked = "";
+      const row = InstalledAppRow({ app: a, moving: false, onDetail: (id) => { picked = id; } });
+      const html = renderToStaticMarkup(row);
+      expect(html).toContain("Acme Inc");
+      expect(html).toContain("2.4");
+      expect(html).not.toContain("mac.bundle");
+      const children = row.props.children as any[];
+      children[children.length - 1].props.onClick();
+      expect(picked).toBe("hklm32:chosen");
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+test("Windows uninstall dialog hides related files and offers refresh after launch in zh/en", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { Dialog } = await import("../src/ui/components/dialog");
+  const { UninstallDialogBody } = await import("../src/react/apps/UninstallDialog");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  const detail = { app: app({ id: "hkcu:chosen", name: "Acme", path: "C:\\Acme" }), items: [{ path: "private-related-file", kind: "cache", size: 4 }], totalSize: 4 };
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      const props = { detail, failMsg: null, onConfirm() {}, onRefresh() {} };
+      const render = (stage: "detail" | "launched") => renderToStaticMarkup(createElement(Dialog, { open: true }, createElement(UninstallDialogBody, { ...props, stage })));
+      expect(render("detail")).toContain(t("apps.body", { n: 1, size: "4 B" }));
+      expect(render("detail")).not.toContain("private-related-file");
+      expect(render("launched")).toContain(t("apps.launched"));
+      expect(render("launched")).toContain(t("apps.refresh"));
+      expect(render("launched")).not.toContain(t("apps.confirm"));
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+test("Windows Apps subtitle explains the uninstaller and Store link uses the OS settings URI", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AppsPage } = await import("../src/react/apps/AppsPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      const html = renderToStaticMarkup(createElement(AppsPage, { initialTab: "installed", nonce: 0 }));
+      expect(html).toContain(t("apps.sub"));
+      expect(t("apps.sub")).toContain(lang === "zh" ? "卸载器" : "uninstaller");
+      expect(html).toContain('href="ms-settings:appsfeatures"');
+      expect(html).toContain(t("apps.store"));
+      expect(html).not.toContain(lang === "zh" ? "关联文件" : "related files");
+    }
+    setPlatformForTest("darwin");
+    expect(renderToStaticMarkup(createElement(AppsPage, { initialTab: "installed", nonce: 0 }))).not.toContain("ms-settings:");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
 });

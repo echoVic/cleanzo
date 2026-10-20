@@ -29,7 +29,7 @@ test("Windows resolves every zh/en dictionary value without macOS terms", () => 
 test("Windows overrides precede the glossary; interpolation does not rewrite paths or app names", () => {
   setPlatformForTest("win32");
   setPref("en");
-  expect(t("status.mem.wired")).toBe("Kernel non-paged");
+  expect(t("status.mem.wired")).toBe("Kernel");
   expect(t("fs.reveal")).toBe("Show in File Explorer");
   expect(ruleName("sys.trash")).toBe("Recycle Bin");
   expect(ruleDesc("review.installers")).toContain("MSI");

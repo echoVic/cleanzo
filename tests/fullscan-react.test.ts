@@ -100,3 +100,26 @@ test("human and displayPath match the rest of the UI", () => {
   expect(displayPath("/Users/alice/foo/bar")).toBe("~/foo/bar");
   expect(displayPath("/var/tmp/x")).toBe("/var/tmp/x");
 });
+
+test("Windows Space Analysis subtitle and body measure the user profile in zh/en", async () => {
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { FullScanPage } = await import("../src/react/fullscan/FullScanPage");
+  const { DiskCard } = await import("../src/react/fullscan/DiskCard");
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      for (const key of ["fs.sub", "fs.hint", "fs.idle.desc"] as const) {
+        expect(t(key)).toContain(lang === "zh" ? "用户目录" : "user profile");
+        expect(t(key)).not.toMatch(/whole disk|main directories of your disk|整个磁盘|磁盘上的主要目录/);
+      }
+      const page = renderToStaticMarkup(createElement(FullScanPage));
+      expect(page).toContain(t("fs.sub"));
+      expect(page).toContain(t("fs.idle.desc"));
+      expect(renderToStaticMarkup(createElement(DiskCard, { disk: { total: 0, used: 0, free: 0 } }))).toContain(t("fs.hint"));
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
