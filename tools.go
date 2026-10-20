@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,20 @@ var goModCleanup = toolCommand{
 		return size, false, roots, err
 	},
 }
+
+// windowsPnpmPrune uses native Windows executable and script command names.
+var windowsPnpmPrune = func() toolCommand {
+	c := pnpmPrune
+	c.Busy = []string{"/pnpm.exe", "/pnpm.cmd", "pnpm.cjs", "pnpm.mjs"}
+	return c
+}()
+
+// windowsGoModCleanup keeps the Go estimator and recognizes Windows command lines.
+var windowsGoModCleanup = func() toolCommand {
+	c := goModCleanup
+	c.Busy = []string{"/go.exe", "gopls"}
+	return c
+}()
 
 // simctlCleanup lets Xcode remove devices whose runtimes are unavailable.
 var simctlCleanup = toolCommand{
@@ -96,7 +111,15 @@ func toolBusy(patterns []string) bool {
 	if err != nil {
 		return true
 	}
-	return slices.ContainsFunc(patterns, func(pattern string) bool { return strings.Contains(string(out), pattern) })
+	return commandBusy(string(out), patterns, runtime.GOOS == "windows")
+}
+
+// commandBusy normalizes Windows separators and case while preserving Darwin matches.
+func commandBusy(out string, patterns []string, windows bool) bool {
+	if windows {
+		out = strings.ToLower(strings.ReplaceAll(out, `\`, "/"))
+	}
+	return slices.ContainsFunc(patterns, func(pattern string) bool { return strings.Contains(out, pattern) })
 }
 
 // runTool bounds an official command and kills its process group on cancellation.

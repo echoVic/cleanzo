@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -9,14 +10,22 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// toolDirs offers no tools until Windows command execution is implemented.
-var toolDirs = func() []string { return nil }
+// toolDirs lists fixed Windows tool installations without trusting inherited PATH.
+var toolDirs = func() []string {
+	return []string{
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "pnpm"), filepath.Join(os.Getenv("APPDATA"), "npm"),
+		filepath.Join(os.Getenv("ProgramFiles"), "nodejs"), filepath.Join(os.Getenv("ProgramFiles"), "Go", "bin"),
+		filepath.Join(homeDir(), "scoop", "shims"), filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "WinGet", "Links"),
+		filepath.Join(homeDir(), ".bun", "bin"), filepath.Join(homeDir(), ".cargo", "bin"),
+	}
+}
 
 // psCommands returns the readable commands from one current-session snapshot.
 var psCommands = func() ([]byte, error) {
@@ -31,14 +40,122 @@ var psCommands = func() ([]byte, error) {
 	return []byte(strings.Join(lines, "\n")), nil
 }
 
-// findTool disables cleanup commands until Task 13 implements Windows tool lookup.
-func findTool(name string) string { return "" }
+// findTool uses PATHEXT without an executable-bit check or shell lookup.
+func findTool(name string) string {
+	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `:/\`) {
+		return ""
+	}
+	extensions := strings.Split(os.Getenv("PATHEXT"), ";")
+	if os.Getenv("PATHEXT") == "" {
+		extensions = []string{".COM", ".EXE", ".BAT", ".CMD"}
+	}
+	for _, dir := range toolDirs() {
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		for _, ext := range extensions {
+			if ext != "" && (!strings.HasPrefix(ext, ".") || strings.ContainsAny(ext, `:/\`)) {
+				continue
+			}
+			path := filepath.Join(dir, name+ext)
+			if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+				return path
+			}
+		}
+	}
+	return ""
+}
 
-// toolPath supplies no executable search path to unsupported commands.
-func toolPath(tool string) string { return "PATH=" }
+// toolPath supplies tools, Node and system binaries using the native list separator.
+func toolPath(tool string) string {
+	dirs := []string{filepath.Dir(tool)}
+	if node := findTool("node"); node != "" {
+		dirs = append(dirs, filepath.Dir(node))
+	}
+	root := os.Getenv("SystemRoot")
+	return "PATH=" + strings.Join(append(dirs, filepath.Join(root, "System32"), root), ";")
+}
 
-// runToolCmd refuses to start a process until Task 13 implements tree cancellation.
-func runToolCmd(cmd *exec.Cmd) ([]byte, error) { return nil, errUnsupported }
+// resumeTool opens the suspended primary thread after its process has joined the job.
+func resumeTool(pid uint32) error {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(snapshot)
+	entry := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
+	for err = windows.Thread32First(snapshot, &entry); err == nil; err = windows.Thread32Next(snapshot, &entry) {
+		if entry.OwnerProcessID != pid {
+			continue
+		}
+		thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
+		if err != nil {
+			return err
+		}
+		_, err = windows.ResumeThread(thread)
+		windows.CloseHandle(thread)
+		return err
+	}
+	return errBlocked
+}
+
+// runToolCmd assigns a suspended process before any child can escape the kill-on-close job.
+func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var mu sync.Mutex
+	defer func() { mu.Lock(); windows.CloseHandle(job); mu.Unlock() }()
+	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
+		return nil, err
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED}
+	if ext := strings.ToLower(filepath.Ext(cmd.Path)); ext == ".cmd" || ext == ".bat" {
+		// Official arguments are fixed; refuse expansion syntax in batch paths and arguments.
+		if strings.ContainsAny(cmd.Path, "%!\"\r\n") {
+			return nil, errBlocked
+		}
+		command := `"` + cmd.Path + `"`
+		for _, arg := range cmd.Args[1:] {
+			if strings.ContainsAny(arg, "%!\"&|<>^\r\n") {
+				return nil, errBlocked
+			}
+			command += ` "` + arg + `"`
+		}
+		cmd.Path = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+		cmd.SysProcAttr.CmdLine = `"` + cmd.Path + `" /d /s /c "` + command + `"`
+	}
+	cmd.Cancel = func() error { mu.Lock(); defer mu.Unlock(); return windows.TerminateJobObject(job, 1) }
+	cmd.WaitDelay = 100 * time.Millisecond
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	// CommandContext may cancel immediately after Start: do not terminate an empty job then resume it.
+	mu.Lock()
+	if err := cmd.Start(); err != nil {
+		mu.Unlock()
+		return nil, err
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
+	if err == nil {
+		err = windows.AssignProcessToJobObject(job, process)
+		windows.CloseHandle(process)
+	}
+	if err == nil {
+		err = resumeTool(uint32(cmd.Process.Pid))
+	}
+	if err != nil {
+		cmd.Process.Kill()
+	}
+	mu.Unlock()
+	waitErr := cmd.Wait()
+	if err != nil {
+		return out.Bytes(), err
+	}
+	return out.Bytes(), waitErr
+}
 
 // snapshotProcesses allows tests to simulate an unavailable process probe.
 var snapshotProcesses = processSnapshot
