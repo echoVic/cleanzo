@@ -9,6 +9,8 @@ import {
 import { useT } from "../../ui/i18n-react";
 import { errText, toast } from "../../shared";
 import { statusApi } from "./api";
+import { crashDumps, oversized } from "../list/crash-dumps";
+import type { CrashDumpSummary } from "../../mygo";
 import {
   GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, pickAlerts, quitErrCode,
   refreshFrozenRows, sortApps, splitMem, syncQuitRows, trimSpark, uptimeParts,
@@ -227,6 +229,14 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
   const [hl, setHl] = React.useState(false);
   const [quit, setQuit] = React.useState<QuitState>(emptyQuit());
   const [quitTarget, setQuitTarget] = React.useState<AppUsage | null>(null);
+  // 崩溃转储只在打开 Cleanzo 后量一次（du），超过阈值才提示。
+  const [crashSum, setCrashSum] = React.useState<CrashDumpSummary | null>(null);
+  React.useEffect(() => {
+    if (!active) return;
+    let live = true;
+    void crashDumps().then((s) => { if (live) setCrashSum(s); });
+    return () => { live = false; };
+  }, [active]);
 
   // 异步循环 / 事件里读最新值，避免闭包捕获旧 state。
   const runRef = React.useRef(0);
@@ -397,6 +407,7 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
   }
 
   const alerts = error || !sample ? [] : pickAlerts(sample);
+  const bigDumps = oversized(crashSum);
 
   return (
     <div className="cz-react">
@@ -433,6 +444,17 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
             )}
           </div>
         ))}
+        {bigDumps[0] && (
+          <div key="crashDumps" className="st-callout warn" role="status">
+            <CalloutIcon />
+            <div className="st-callout-body">
+              {t("status.alert.crashDumps", { app: bigDumps[0].app, size: fmtMem(bigDumps[0].size) })}
+            </div>
+            <button className="btn ghost small" type="button" onClick={() => goCleanRef.current()}>
+              {t("status.disk.clean")}
+            </button>
+          </div>
+        )}
       </div>
 
       {error ? (

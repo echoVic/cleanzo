@@ -63,6 +63,7 @@ type SubItem struct {
 	Name    string `json:"name"`
 	Detail  string `json:"detail"`
 	Size    int64  `json:"size"`
+	Files   int64  `json:"files,omitempty"` // files inside, for folders such as crash dump queues
 	Default bool   `json:"default"`
 	AgeDays *int64 `json:"ageDays,omitempty"` // installer age hint; nil when unavailable
 }
@@ -593,6 +594,9 @@ func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}
 	// Discovery may measure a busy candidate, but only eligible entries can
 	// reach a deletion plan. Cleaning never enables observe.
 	running := spec.item.Running
+	// Crashpad folders stay while their handler writes into them: an open
+	// dump inside is skipped when cleaning, not the whole folder.
+	contents := spec.rule != nil && spec.rule.Contents
 	measured := make([]cleanEntry, len(spec.cands))
 	newest := make([]time.Time, len(spec.cands))
 	errorsSeen := make([]int, len(spec.cands))
@@ -617,7 +621,7 @@ candidates:
 			plan.item.recordDetail(env.displayable(c.path), 0, "boundary")
 			continue
 		}
-		busy := !running && env.guard.inUse(c.path)
+		busy := !running && !contents && env.guard.inUse(c.path)
 		if busy {
 			plan.item.InUse++
 			if !env.observe {
@@ -662,6 +666,9 @@ candidates:
 				measuring(c.path)
 			}
 			size, files, changed, failures := measureChecked(c.path)
+			if contents {
+				size, files, changed, failures = measureCrashpad(c.path)
+			}
 			measured[i], newest[i], errorsSeen[i] = cleanEntry{c.path, size, files}, changed, failures
 		}()
 	}
@@ -700,7 +707,19 @@ candidates:
 		plan.entries = nil
 		return plan
 	}
-	if spec.rule != nil && spec.rule.Detail != detailNone {
+	if spec.rule != nil && spec.rule.Detail == detailCrashpad {
+		// A few empty sidecar files are not worth a row, nor a selection.
+		plan.entries = slices.DeleteFunc(plan.entries, func(e cleanEntry) bool { return e.size < crashpadMinSize })
+		plan.item.Size, plan.item.Files = 0, 0
+		for _, e := range plan.entries {
+			plan.item.Size += e.size
+			plan.item.Files += e.files
+		}
+		plan.item.Subs = crashpadSubs(env, plan.entries)
+		// Each database with dumps is already a sub-item; details keep only
+		// the ones left out, and empty databases are not worth a line.
+		plan.item.Details = slices.DeleteFunc(plan.item.Details, func(d JunkDetail) bool { return d.Reason == "eligible" || d.Size == 0 && d.Reason != "read-error" })
+	} else if spec.rule != nil && spec.rule.Detail != detailNone {
 		plan.item.Subs = itemSubs(ctx, spec.rule.Detail, plan.entries)
 	}
 	return plan
@@ -1016,6 +1035,28 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 		}
 		if removalRefused(e.path, info) {
 			res.Failed = append(res.Failed, "blocked")
+			continue
+		}
+		if spec.rule != nil && spec.rule.Contents {
+			// Empty the report queues; the folders and settings.dat stay, and so
+			// does any dump a process has open.
+			if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+				res.Failed = append(res.Failed, "blocked")
+				continue
+			}
+			base := *cleaned
+			freed, files, inUse, err := emptyCrashpad(ctx, e.path, env.guard, func(b int64) {
+				if hooks.removed != nil {
+					hooks.removed(spec.item.ID, e.path, base+b)
+				}
+			})
+			res.Freed += freed
+			res.Files += files
+			res.InUse += inUse
+			*cleaned += freed
+			if err != nil && ctx.Err() == nil {
+				res.Failed = append(res.Failed, "blocked")
+			}
 			continue
 		}
 		if env.guard.inUse(e.path) {

@@ -192,6 +192,23 @@ export interface CleanResult {
   skipped?: string;
 }
 
+/** CrashDumpDir is one app's Crashpad database with queued reports. */
+export interface CrashDumpDir {
+  app: string;
+  /** the database folder, as the junk page selects it */
+  path: string;
+  size: number;
+}
+
+/** CrashDumpSummary is how much the crash dumps of all apps take. */
+export interface CrashDumpSummary {
+  total: number;
+  /** a database at least this large is pointed out */
+  threshold: number;
+  /** largest first */
+  dirs: CrashDumpDir[];
+}
+
 /** CustomFolder is a user-selected folder whose contents go to the Trash. */
 export interface CustomFolder {
   name: string;
@@ -595,6 +612,8 @@ export interface SubItem {
   name: string;
   detail: string;
   size: number;
+  /** files inside, for folders such as crash dump queues */
+  files?: number;
   default: boolean;
   /** installer age hint; nil when unavailable */
   ageDays?: number;
@@ -699,6 +718,14 @@ export const Cleaner = {
    */
   cleanPaths(paths: string[]): Promise<PathsCleanResult> {
     return call("Cleaner.CleanPaths", paths);
+  },
+  /**
+   * CrashDumps measures every app's crash dump queues quickly with du, for the
+   * status page to point out runaway ones when Cleanzo opens. Nothing is
+   * listed file by file and nothing is changed.
+   */
+  crashDumps(): Promise<CrashDumpSummary> {
+    return call("Cleaner.CrashDumps");
   },
   /**
    * DirChildren lists the direct children of path with sizes: directories are

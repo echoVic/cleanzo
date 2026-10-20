@@ -44,6 +44,7 @@ const (
 	detailArchives
 	detailDeviceSupport
 	detailInstallers
+	detailCrashpad
 )
 
 // Rule describes a known junk location and how to clean it.
@@ -57,6 +58,10 @@ type Rule struct {
 	Detail         detailKind
 	Command        *toolCommand
 	Reserve        []string // folders the rule cleans only in part; no other item takes the rest
+	// Contents empties the report queues inside each matched Crashpad folder
+	// and keeps the folders and settings.dat: the app's crash handler keeps
+	// running and writing there.
+	Contents bool
 }
 
 // junkRules is the rule table, in claim order: a path matched by an earlier
@@ -160,6 +165,11 @@ var junkRules = []Rule{
 	{ID: "dev.pnpm-store", Group: groupDev, Default: true, Command: &pnpmPrune},     // Task 6
 
 	// system
+	// Crash dumps Chromium and Electron apps queue for upload. Codex's desktop
+	// app has been seen to write them without end (openai/codex#25921), up to
+	// hundreds of gigabytes and millions of files, so they are removed rather
+	// than moved to the Trash, and the queue folders stay for the app.
+	{ID: crashRuleID, Group: groupSystem, Default: true, Detail: detailCrashpad, Contents: true, Targets: crashpadTargets()},
 	{ID: "sys.logs", Group: groupSystem, Default: true, Targets: []Target{{Pattern: "Library/Logs", Mode: entriesOf}}},
 	{ID: "sys.temp", Group: groupSystem, Default: true, MinAge: tempMinAge, Targets: []Target{{Pattern: "$TMPDIR", Mode: entriesOf}}},
 	{ID: "sys.trash", Group: groupSystem, Targets: []Target{{Pattern: ".Trash", Mode: entriesOf}}},
@@ -172,6 +182,27 @@ func chromiumProfileCaches(profiles string) []Target {
 	var ts []Target
 	for _, d := range []string{"Code Cache", "GPUCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "GraphiteDawnCache"} {
 		ts = append(ts, Target{Pattern: profiles + "/" + d, Mode: entriesOf})
+	}
+	return ts
+}
+
+// crashRuleID is the crash dump rule; the AI tools and status pages use it too.
+const crashRuleID = "sys.crashdumps"
+
+// crashpadRoots are where apps keep their Crashpad database, one or two
+// folders into Application Support (Codex/Crashpad, com.openai.codex/web/Crashpad).
+var crashpadRoots = []string{"Library/Application Support/*/Crashpad", "Library/Application Support/*/*/Crashpad"}
+
+// crashpadQueues are the folders of a Crashpad database that hold reports.
+// settings.dat (the client id and upload consent) is never touched.
+var crashpadQueues = []string{"pending", "completed", "new", "attachments"}
+
+// crashpadTargets matches every Crashpad database; cleaning empties its
+// report queues (Rule.Contents).
+func crashpadTargets() []Target {
+	var ts []Target
+	for _, root := range crashpadRoots {
+		ts = append(ts, Target{Pattern: root, Mode: matched})
 	}
 	return ts
 }

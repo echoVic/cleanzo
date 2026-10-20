@@ -7,6 +7,7 @@ import { showReactApps } from "./react/apps/entry";
 import { showReactFullScan } from "./react/fullscan/entry";
 import { showReactClean } from "./react/clean/entry";
 import { setGoCleanHandler, showReactStatus } from "./react/status/entry";
+import { setCrashGoClean } from "./react/list/crash-dumps";
 import { bumpLang } from "./ui/i18n-react";
 import { $, toast, VIEWS, type View } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
@@ -86,6 +87,7 @@ applyStaticI18n();
 void initReactAITools().then(initReactSkills);
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
+setCrashGoClean(() => switchView("clean"));
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

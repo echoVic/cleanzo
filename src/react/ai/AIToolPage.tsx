@@ -14,8 +14,12 @@ import { human } from "./format";
 import { offered, groupSelectable, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
 import { aiApi } from "./api";
+import { codexSize, crashDumps, goCleanForCrashDumps } from "../list/crash-dumps";
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaned";
+
+/** 崩溃转储小于这个数不提示：Crashpad 平时也会留几份。 */
+const CRASH_NOTE_BYTES = 100 * 1024 * 1024;
 
 interface AIToolPageProps {
   toolId: string;
@@ -42,6 +46,19 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const [lastClean, setLastClean] = React.useState<{ freed: number; kept: number; skipped: number } | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [scannedAt, setScannedAt] = React.useState(0);
+  // Codex 桌面版的崩溃转储不在 ~/.codex 里，由垃圾清理的「应用崩溃转储」负责；这里只提示。
+  const [crashBytes, setCrashBytes] = React.useState(0);
+  const [crashThreshold, setCrashThreshold] = React.useState(Infinity);
+  React.useEffect(() => {
+    if (toolId !== "codex") return;
+    let live = true;
+    void crashDumps().then((s) => {
+      if (!live || !s) return;
+      setCrashBytes(codexSize(s));
+      setCrashThreshold(s.threshold);
+    });
+    return () => { live = false; };
+  }, [toolId]);
 
   const parts = tool?.parts ?? [];
   const visible = parts.filter(offered);
@@ -193,6 +210,17 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
           )}
         </div>
       </header>
+
+      {crashBytes >= CRASH_NOTE_BYTES && (
+        <div
+          className="mb-4 flex items-center justify-between gap-3 rounded-[10px] px-4 py-2.5 text-[12.5px] leading-relaxed text-warning-text"
+          style={{ background: "var(--warning-soft)" }}
+          role="status"
+        >
+          <span>{t(crashBytes >= crashThreshold ? "ai.crash.big" : "ai.crash.some", { size: human(crashBytes) })}</span>
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={goCleanForCrashDumps}>{t("ai.crash.clean")}</Button>
+        </div>
+      )}
 
       {phase === "idle" && (
         <IdleHero

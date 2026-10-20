@@ -827,6 +827,10 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 		}
 		t.Run(rule.ID, func(t *testing.T) {
 			env := testEnv(t)
+			unit := int64(100)
+			if rule.Contents {
+				unit = crashpadMinSize // smaller databases are not listed
+			}
 			for _, target := range rule.Targets {
 				root := filepath.Join(env.home, strings.ReplaceAll(target.Pattern, "*", "Fixture"))
 				if target.Pattern == "$TMPDIR" {
@@ -842,7 +846,11 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 				} else {
 					path = filepath.Join(root, "entry.bin")
 				}
-				writeFile(t, path, 100)
+				if rule.Contents {
+					// Crashpad rules count only what the report queues hold.
+					path = filepath.Join(root, "pending", "entry.bin")
+				}
+				writeFile(t, path, int(unit))
 			}
 			saved := now
 			now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
@@ -851,8 +859,8 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 			for _, spec := range specs {
 				if spec.item.ID == rule.ID {
 					plan := planItem(context.Background(), spec, env, make(chan struct{}, 4), nil)
-					if plan.item.Size != int64(len(rule.Targets))*100 {
-						t.Fatalf("size = %d, want %d", plan.item.Size, len(rule.Targets)*100)
+					if plan.item.Size != int64(len(rule.Targets))*unit {
+						t.Fatalf("size = %d, want %d", plan.item.Size, int64(len(rule.Targets))*unit)
 					}
 					return
 				}

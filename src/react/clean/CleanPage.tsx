@@ -11,6 +11,7 @@ import { baseName, displayPath, errText, human, setNavBusy, toast } from "../../
 import { showReactApps } from "../apps/entry";
 import { setCleanStaleHandler, takeStalePending } from "./entry";
 import { cleanApi } from "./api";
+import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
@@ -267,6 +268,8 @@ export function CleanPage() {
       const { rows: next, stopped } = tracker.finish();
       setRowStates(next);
       if (stopped) setProgress((pr) => ({ ...pr, stopped: true }));
+      // 清过崩溃转储后，状态页 / Codex 页的提示下次进入时重新量。
+      if (p.selections.some((x) => x.id === CRASH_RULE_ID)) forgetCrashDumps();
       setPhase("cleaned");
     }
   };
@@ -531,7 +534,7 @@ export function CleanPage() {
                 <div className="junk-sub-info">
                   <span>{s.name}</span>
                   {keepLatestVisible(it, s, st.sel) ? <Tag text={t("junk.keepLatest")} /> : null}
-                  <div className="muted small">{s.detail}{it.id === "review.installers" && s.ageDays != null ? ` · ${s.ageDays === 0 ? t("junk.installerAgeToday") : t("junk.installerAge", { n: s.ageDays })}` : ""}</div>
+                  <div className="muted small">{it.id === CRASH_RULE_ID && s.files ? `${t("junk.crashFiles", { n: s.files.toLocaleString() })} · ` : ""}{s.detail}{it.id === "review.installers" && s.ageDays != null ? ` · ${s.ageDays === 0 ? t("junk.installerAgeToday") : t("junk.installerAge", { n: s.ageDays })}` : ""}</div>
                 </div>
                 <span className="junk-size">{human(s.size)}</span>
               </div>
