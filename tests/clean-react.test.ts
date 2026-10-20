@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import "./setup-dom";
 import { setLang } from "./setup-dom";
 import type { JunkItem, Settings } from "../src/mygo";
@@ -293,7 +293,10 @@ test("shared confirmation clears pending on cancel and invalidates old async mod
 });
 
 test("all backend catalog rules have names and descriptions in both languages", () => {
-  const ids = [...readFileSync(new URL("../rules.go", import.meta.url), "utf8").matchAll(/ID: "([^"]+)"/g)].map((m) => m[1]!);
+  const root = new URL("../", import.meta.url);
+  const ids = readdirSync(root).filter((name) => name.endsWith("rules.go")).flatMap((name) =>
+    [...readFileSync(new URL(name, root), "utf8").matchAll(/ID: "([^"]+)"/g)].map((m) => m[1]!));
+  expect(ids.length).toBeGreaterThanOrEqual(55);
   for (const lang of ["zh", "en"]) {
     setLang( lang);
     for (const id of ids) {
@@ -309,6 +312,15 @@ test("v3 errors from ignoring an item are translated rather than showing raw JSO
     const raw = JSON.stringify({ code, args: ["~/cache"] });
     expect(errText(Error(raw))).not.toBe(raw);
   }
+});
+
+test("unsupported platform operations have a translated error in both languages", () => {
+  for (const lang of ["zh", "en"]) {
+    setLang(lang);
+    expect(errText(Error("unsupported"))).toBe(t("fs.unsupported"));
+    expect(errText(Error("unsupported"))).not.toBe("unsupported");
+  }
+  setLang("zh");
 });
 
 test("explicitly selecting the latest version removes Keep Latest and sends only that path", () => {
