@@ -87,9 +87,10 @@ func TestWindowsStubsCleanNothing(t *testing.T) {
 	}
 	source := realStatusSource()
 	busy, total := source.cpu()
-	if busy != 0 || total != 0 || source.memory() != (MemoryStatus{}) || source.disk() != (DiskStat{}) || source.battery(context.Background()) != nil || len(source.procs()) != 0 || len(source.apps()) != 0 || source.terminate(int32(os.Getpid())) {
-		t.Fatal("unsupported status source returned a live reading or action")
+	if total == 0 || busy > total || source.memory().Total == 0 || source.disk().Total <= 0 || len(source.procs()) == 0 || source.terminate(int32(os.Getpid())) {
+		t.Fatal("live status readings unavailable or self termination accepted")
 	}
+
 }
 
 // TestWindowsHomeEnvironment checks the test sandbox and per-test directory overrides.

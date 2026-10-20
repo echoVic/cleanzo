@@ -1586,3 +1586,20 @@ func TestPhotoPreviewPathErrors(t *testing.T) {
 		t.Fatalf("missing error = %v, want gone", err)
 	}
 }
+
+func TestCollectPhotoFiles(t *testing.T) {
+	home := t.TempDir()
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	writeGradientJPEG(t, filepath.Join(pics, "a.png"), 80, 80, false)  // ext doesn't matter for discovery
+	writeGradientJPEG(t, filepath.Join(pics, "b.heic"), 80, 80, false) // heic now discovered
+	mustMkdir(t, filepath.Join(pics, "sub"))
+	writeGradientJPEG(t, filepath.Join(pics, "sub", "c.png"), 80, 80, false)
+	if err := os.WriteFile(filepath.Join(pics, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := collectPhotoFiles([]string{pics}, 100)
+	if len(got) != 3 {
+		t.Fatalf("want 3 image files, got %v", got)
+	}
+}
