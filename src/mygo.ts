@@ -118,6 +118,8 @@ export interface AIToolInfo {
 
 /** AppInfo describes an installed application. */
 export interface AppInfo {
+  id: string;
+  publisher: string;
   name: string;
   path: string;
   bundleId: string;
@@ -667,6 +669,7 @@ export interface UninstallItem {
 
 /** UninstallResult reports what a single uninstall pass did. */
 export interface UninstallResult {
+  launched: boolean;
   path: string;
   moved: number;
   freed: number;
@@ -680,7 +683,7 @@ export interface UninstallResult {
  * into typed TypeScript functions in src/mygo.ts.
  */
 export const Cleaner = {
-  /** AppUninstallDetail returns everything that would be removed for an app. */
+  /** AppUninstallDetail returns the selected app and its platform uninstall details. */
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
@@ -888,9 +891,8 @@ export const Cleaner = {
     return call("Cleaner.TrashSkills", paths);
   },
   /**
-   * UninstallApp moves an app to the Trash, then its associated files. When
-   * the app itself cannot move, its files stay too, rather than leaving it
-   * installed without its settings and data.
+   * UninstallApp uninstalls the selected app: macOS moves its bundle and related
+   * files to the Trash; Windows opens only its registry-declared uninstaller.
    */
   uninstallApp(path: string): Promise<UninstallResult> {
     return call("Cleaner.UninstallApp", path);

@@ -57,6 +57,8 @@ type CleanResult struct {
 
 // AppInfo describes an installed application.
 type AppInfo struct {
+	ID         string `json:"id"`
+	Publisher  string `json:"publisher"`
 	Name       string `json:"name"`
 	Path       string `json:"path"`
 	BundleID   string `json:"bundleId"`
@@ -82,10 +84,11 @@ type UninstallDetail struct {
 
 // UninstallResult reports what a single uninstall pass did.
 type UninstallResult struct {
-	Path   string   `json:"path"`
-	Moved  int64    `json:"moved"`
-	Freed  int64    `json:"freed"`
-	Failed []string `json:"failed"`
+	Launched bool     `json:"launched"`
+	Path     string   `json:"path"`
+	Moved    int64    `json:"moved"`
+	Freed    int64    `json:"freed"`
+	Failed   []string `json:"failed"`
 }
 
 // LargeFile is a single large file discovered by the large-file scan.
@@ -168,7 +171,7 @@ func canonical(p string) string {
 // removeAll deletes path like os.RemoveAll, also when folders inside are
 // read-only, as Go's module cache leaves them: it makes them writable and
 // tries again.
-func removeAll(path string) error {
+var removeAll = func(path string) error {
 	err := os.RemoveAll(path)
 	if err == nil || !errors.Is(err, fs.ErrPermission) {
 		return err
@@ -589,6 +592,8 @@ func listAppsIn(dir string) []AppInfo {
 			}
 			size, _ := scanPath(appPath)
 			a := AppInfo{
+				ID:         appPath,
+				Publisher:  "",
 				Name:       name,
 				Path:       appPath,
 				BundleID:   bid,
@@ -764,15 +769,7 @@ func markRunning(apps []AppInfo, ids map[string]bool, paths []string) {
 
 // ListApps returns installed applications and whether they are running.
 func (Cleaner) ListApps() []AppInfo {
-	var apps []AppInfo
-	for _, dir := range []string{"/Applications", filepath.Join(homeDir(), "Applications")} {
-		apps = append(apps, listAppsIn(dir)...)
-	}
-	if ids, paths, err := runningApps(); err == nil {
-		markRunning(apps, ids, paths)
-	}
-	sort.Slice(apps, func(i, j int) bool { return strings.ToLower(apps[i].Name) < strings.ToLower(apps[j].Name) })
-	return apps
+	return listInstalledApps()
 }
 
 // appInfoFromPath builds an AppInfo for a single app bundle path.
@@ -782,7 +779,7 @@ func appInfoFromPath(appPath string) AppInfo {
 		name = strings.TrimSuffix(filepath.Base(appPath), ".app")
 	}
 	size, _ := scanPath(appPath)
-	return AppInfo{Name: name, Path: appPath, BundleID: bid, Version: version, Size: size, LastOpened: lastOpened(appPath)}
+	return AppInfo{ID: appPath, Publisher: "", Name: name, Path: appPath, BundleID: bid, Version: version, Size: size, LastOpened: lastOpened(appPath)}
 }
 
 // installedApp reports whether path is an app ListApps lists: a .app bundle
@@ -872,56 +869,15 @@ func uninstallPaths(app AppInfo) []UninstallItem {
 	return items
 }
 
-// AppUninstallDetail returns everything that would be removed for an app.
+// AppUninstallDetail returns the selected app and its platform uninstall details.
 func (Cleaner) AppUninstallDetail(path string) UninstallDetail {
-	apps := []AppInfo{appInfoFromPath(path)}
-	if ids, paths, err := runningApps(); err == nil {
-		markRunning(apps, ids, paths)
-	}
-	app := apps[0]
-	items := uninstallPaths(app)
-	var total int64
-	for _, it := range items {
-		total += it.Size
-	}
-	return UninstallDetail{App: app, Items: items, TotalSize: total}
+	return appUninstallDetail(path)
 }
 
-// UninstallApp moves an app to the Trash, then its associated files. When
-// the app itself cannot move, its files stay too, rather than leaving it
-// installed without its settings and data.
+// UninstallApp uninstalls the selected app: macOS moves its bundle and related
+// files to the Trash; Windows opens only its registry-declared uninstaller.
 func (Cleaner) UninstallApp(path string) UninstallResult {
-	name, bid, _ := readBundleInfo(filepath.Join(path, "Contents", "Info.plist"))
-	app := AppInfo{Name: name, Path: path, BundleID: bid}
-	res := UninstallResult{Path: path}
-	items := uninstallPaths(app)
-	if len(items) == 0 || items[0].Kind != "app" {
-		res.Failed = append(res.Failed, path+": not-app")
-		return res
-	}
-	// A running app would recreate what is removed under it, or keep its
-	// moved bundle running.
-	g := probeUsage()
-	if g.inUse(resolvePath(path)) || g.running[strings.ToLower(bid)] {
-		res.Failed = append(res.Failed, path+": "+errInUse.Error())
-		return res
-	}
-	for _, item := range items {
-		if item.Kind != "app" && g.inUse(resolvePath(item.Path)) {
-			res.Failed = append(res.Failed, item.Path+": "+errInUse.Error())
-			continue
-		}
-		if err := trashItem(item.Path); err != nil {
-			res.Failed = append(res.Failed, item.Path+": "+err.Error())
-			if item.Kind == "app" {
-				return res
-			}
-			continue
-		}
-		res.Moved++
-		res.Freed += item.Size
-	}
-	return res
+	return uninstallApp(path)
 }
 
 // codeError is an error the UI translates: its text is the JSON object
@@ -1314,13 +1270,7 @@ func collectOrphans(ctx context.Context, onItem func(o OrphanItem), roots ...str
 
 // ScanOrphans streams leftover files from apps that are no longer installed.
 func (Cleaner) ScanOrphans(ctx context.Context, ch *mygo.Channel[OrphanItem]) error {
-	start := time.Now()
-	_, total := collectOrphans(ctx, func(o OrphanItem) {
-		_ = ch.Send(o)
-	})
-	// send a terminal sentinel so the frontend knows the scan finished
-	_ = ch.Send(OrphanItem{Kind: "__done", Size: total, Path: fmt.Sprintf("%d", time.Since(start).Milliseconds())})
-	return nil
+	return scanOrphans(ctx, ch)
 }
 
 // errInUse is the error for a path a running app uses; the UI translates it.
@@ -1947,6 +1897,14 @@ func main() {
 			opts.Page.PreloadScript = smokeScript
 		}
 		w := mygo.NewWindow(opts)
+		if runtime.GOOS == "windows" {
+			w.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
+				if req.URL == "ms-settings:appsfeatures" || strings.HasPrefix(req.URL, "https://") || strings.HasPrefix(req.URL, "http://") {
+					go mygo.Shell.OpenExternal(req.URL)
+				}
+				return nil
+			})
+		}
 		if smokeDir != "" {
 			startSmoke(w, smokeDir)
 		}
