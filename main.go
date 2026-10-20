@@ -377,6 +377,9 @@ const progressInterval = 100 * time.Millisecond
 
 // userTrashDir is the macOS Trash directory for the current user.
 func userTrashDir() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
 	return filepath.Join(homeDir(), ".Trash")
 }
 
