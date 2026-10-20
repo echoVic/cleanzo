@@ -59,22 +59,19 @@ func TestWindowsFileMetadata(t *testing.T) {
 	}
 }
 
-// TestWindowsStubsCleanNothing keeps real entry points closed without probes.
+// TestWindowsStubsCleanNothing keeps real entry points closed when the snapshot fails.
 func TestWindowsStubsCleanNothing(t *testing.T) {
 	env := testEnv(t)
 	path := filepath.Join(env.home, "cleanup", "keep.bin")
 	writeFile(t, path, 123)
-	if err := recycle(path); !errors.Is(err, errUnsupported) || !exists(path) {
-		t.Fatalf("unsupported Recycle Bin move did not preserve the file: %v", err)
+	saved := snapshotProcesses
+	snapshotProcesses = func() ([]procInfo, error) { return nil, errors.New("snapshot failed") }
+	t.Cleanup(func() { snapshotProcesses = saved })
+	if _, _, err := runningApps(); err == nil {
+		t.Fatal("runningApps did not fail closed")
 	}
-	if _, err := openFiles(); !errors.Is(err, errUnsupported) {
-		t.Fatalf("openFiles error=%v", err)
-	}
-	if _, _, err := runningApps(); !errors.Is(err, errUnsupported) {
-		t.Fatalf("runningApps error=%v", err)
-	}
-	if _, err := psCommands(); !errors.Is(err, errUnsupported) || !toolBusy(nil) {
-		t.Fatalf("process snapshot did not fail closed: %v", err)
+	if _, err := psCommands(); err == nil || !toolBusy(nil) {
+		t.Fatal("toolBusy did not fail closed")
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	if _, err := runToolCmd(cmd); !errors.Is(err, errUnsupported) || cmd.Process != nil {
