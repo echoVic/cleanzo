@@ -18,9 +18,11 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -130,8 +132,15 @@ var (
 // blobs (100644, or 100755 when executable), links are 120000 with their
 // target, folders are subtrees; .git and .DS_Store are left out, as are
 // empty folders, which git cannot hold.
-func gitTreeHash(dir string) (string, error) {
-	h, empty, err := gitTree(dir)
+func gitTreeHash(dir string, recorded ...map[string]string) (string, error) {
+	var modes map[string]string
+	if runtime.GOOS == "windows" {
+		modes = loadSkillRecords()[resolvePath(dir)].Modes
+		if len(recorded) > 0 {
+			modes = recorded[0]
+		}
+	}
+	h, empty, err := gitTreeWithModes(dir, dir, modes, runtime.GOOS == "windows")
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +150,8 @@ func gitTreeHash(dir string) (string, error) {
 	return h, nil
 }
 
-func gitTree(dir string) (hash string, empty bool, err error) {
+// gitTreeWithModes uses Git's recorded modes where Windows has no executable permission bit.
+func gitTreeWithModes(dir, base string, modes map[string]string, windows bool) (hash string, empty bool, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", false, err
@@ -169,7 +179,7 @@ func gitTree(dir string) (hash string, empty bool, err error) {
 			}
 			list = append(list, entry{"120000", name, name, gitObject("blob", []byte(target))})
 		case info.IsDir():
-			sub, subEmpty, err := gitTree(p)
+			sub, subEmpty, err := gitTreeWithModes(p, base, modes, windows)
 			if err != nil {
 				return "", false, err
 			}
@@ -184,7 +194,12 @@ func gitTree(dir string) (hash string, empty bool, err error) {
 				return "", false, err
 			}
 			mode := "100644"
-			if info.Mode()&0o111 != 0 {
+			if windows {
+				rel, _ := filepath.Rel(base, p)
+				if modes[filepath.ToSlash(rel)] == "100755" {
+					mode = "100755"
+				}
+			} else if info.Mode()&0o111 != 0 {
 				mode = "100755"
 			}
 			list = append(list, entry{mode, name, name, gitObject("blob", data)})
@@ -220,8 +235,9 @@ func skillUpdatesPath() string {
 
 // skillRecord is Cleanzo's record of one upgraded folder.
 type skillRecord struct {
-	Origin    SkillOrigin `json:"origin"`
-	UpdatedAt int64       `json:"updatedAt"`
+	Origin    SkillOrigin       `json:"origin"`
+	UpdatedAt int64             `json:"updatedAt"`
+	Modes     map[string]string `json:"modes,omitempty"`
 }
 
 var skillRecordMu sync.Mutex
@@ -294,7 +310,7 @@ func loadSkillLock() map[string]SkillOrigin {
 var ccSwitchQuery = func(ctx context.Context, db string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "/usr/bin/sqlite3", "-readonly", "-json", db,
+	return exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db,
 		"select directory, repo_owner, repo_name, repo_branch, readme_url from skills where repo_owner != '' and repo_name != ''").Output()
 }
 
@@ -564,7 +580,16 @@ func checkSkillUpdates(ctx context.Context, skills []Skill, online bool) []Skill
 
 func checkOne(ctx context.Context, folder, name string, o SkillOrigin, cache *treeCache, online bool, now int64) SkillUpdate {
 	u := SkillUpdate{Path: folder, Name: name, Origin: o, Status: "unknown"}
-	local, err := gitTreeHash(folder)
+	var modes []map[string]string
+	if runtime.GOOS == "windows" && o.Kind == originGit {
+		recorded, err := skillIndexModes(ctx, folder)
+		if err != nil {
+			u.Status, u.Error = "error", err.Error()
+			return u
+		}
+		modes = append(modes, recorded)
+	}
+	local, err := gitTreeHash(folder, modes...)
 	if err != nil {
 		u.Status, u.Error = "error", err.Error()
 		return u
@@ -686,10 +711,10 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 	}
 	origins := skillOrigins(ctx, scan.Skills)
 	cache := &treeCache{trees: map[string]*githubTree{}}
-	archives := map[string]string{} // repo@ref -> extracted root
+	archives := map[string]skillArchive{} // repo@ref -> extracted root and Git modes
 	defer func() {
 		for _, dir := range archives {
-			os.RemoveAll(filepath.Dir(dir))
+			os.RemoveAll(filepath.Dir(dir.root))
 		}
 	}()
 	results := []SkillUpgradeResult{}
@@ -711,7 +736,7 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 	return results, nil
 }
 
-func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]SkillOrigin, cache *treeCache, archives map[string]string, res *SkillUpgradeResult) error {
+func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]SkillOrigin, cache *treeCache, archives map[string]skillArchive, res *SkillUpgradeResult) error {
 	// Origins are keyed by the resolved folder, as the scan reports it.
 	folder := resolvePath(filepath.Clean(r.Path))
 	o, ok := origins[folder]
@@ -742,12 +767,19 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	if o.Kind == originGit {
 		return upgradeGit(ctx, folder, r.Force, res)
 	}
-	root, err := extractedRepo(ctx, o.Repo, o.Ref, archives)
+	archive, err := extractedRepo(ctx, o.Repo, o.Ref, archives)
 	if err != nil {
 		return err
 	}
-	src := filepath.Join(root, filepath.FromSlash(o.Path))
-	got, err := gitTreeHash(src)
+	src := filepath.Join(archive.root, filepath.FromSlash(o.Path))
+	modes := map[string]string{}
+	for name, mode := range archive.modes {
+		relative, err := filepath.Rel(src, filepath.Join(archive.root, filepath.FromSlash(name)))
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			modes[filepath.ToSlash(relative)] = mode
+		}
+	}
+	got, err := gitTreeHash(src, modes)
 	if err != nil {
 		return errSkillNotFound
 	}
@@ -763,7 +795,10 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	// tree the folder was installed at, which CC Switch's record does not.
 	o.Tree = got
 	o.Kind = originCleanzo
-	if err := saveSkillRecord(folder, skillRecord{Origin: o, UpdatedAt: skillNow().Unix()}); err != nil {
+	if runtime.GOOS != "windows" {
+		modes = nil
+	}
+	if err := saveSkillRecord(folder, skillRecord{Origin: o, UpdatedAt: skillNow().Unix(), Modes: modes}); err != nil {
 		return err
 	}
 	res.Tree = got
@@ -791,8 +826,14 @@ func skillFolderOK(folder string, contexts ...context.Context) error {
 	return errSkillNotEntry
 }
 
+// skillArchive retains tar-recorded Git modes without trusting Windows permission bits.
+type skillArchive struct {
+	root  string
+	modes map[string]string
+}
+
 // extractedRepo downloads and unpacks a repository archive once.
-func extractedRepo(ctx context.Context, repo, ref string, cache map[string]string) (string, error) {
+func extractedRepo(ctx context.Context, repo, ref string, cache map[string]skillArchive) (skillArchive, error) {
 	key := repo + "@" + ref
 	if dir, ok := cache[key]; ok {
 		return dir, nil
@@ -802,42 +843,49 @@ func extractedRepo(ctx context.Context, repo, ref string, cache map[string]strin
 	}
 	tmp, err := os.MkdirTemp("", "cleanzo-skill-")
 	if err != nil {
-		return "", err
+		return skillArchive{}, err
 	}
 	u := fmt.Sprintf("%s/%s/tar.gz/%s", skillCodeload, repo, url.PathEscape(ref))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		os.RemoveAll(tmp)
-		return "", err
+		return skillArchive{}, err
 	}
 	req.Header.Set("User-Agent", "Cleanzo")
 	resp, err := skillUpdateHTTP.Do(req)
 	if err != nil {
 		os.RemoveAll(tmp)
-		return "", err
+		return skillArchive{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		os.RemoveAll(tmp)
-		return "", errSkillNotFound
+		return skillArchive{}, errSkillNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		os.RemoveAll(tmp)
-		return "", fmt.Errorf("codeload %d", resp.StatusCode)
+		return skillArchive{}, fmt.Errorf("codeload %d", resp.StatusCode)
 	}
-	root, err := untarSafe(io.LimitReader(resp.Body, skillArchiveLimit), filepath.Join(tmp, "x"))
+	modes := map[string]string{}
+	root, err := untarSafeModes(io.LimitReader(resp.Body, skillArchiveLimit), filepath.Join(tmp, "x"), modes)
 	if err != nil {
 		os.RemoveAll(tmp)
-		return "", err
+		return skillArchive{}, err
 	}
-	cache[key] = root
-	return root, nil
+	archive := skillArchive{root: root, modes: modes}
+	cache[key] = archive
+	return archive, nil
 }
 
 // untarSafe unpacks a GitHub archive into dest and returns its top folder.
 // Entries that would land outside dest, links that point outside the
 // archive, devices and other special files are refused.
 func untarSafe(r io.Reader, dest string) (string, error) {
+	return untarSafeModes(r, dest, nil)
+}
+
+// untarSafeModes retains executable modes from tar before Windows loses that information.
+func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return "", err
@@ -860,6 +908,9 @@ func untarSafe(r io.Reader, dest string) (string, error) {
 			continue
 		}
 		name := path.Clean(h.Name)
+		if runtime.GOOS == "windows" && (strings.ContainsAny(h.Name, `\:`) || strings.ContainsAny(h.Linkname, `\:`)) {
+			return "", errBlocked
+		}
 		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
 			return "", fmt.Errorf("unsafe path %q", h.Name)
 		}
@@ -878,6 +929,13 @@ func untarSafe(r io.Reader, dest string) (string, error) {
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return "", err
+			}
+			if modes != nil {
+				rel := strings.TrimPrefix(name, top+"/") // slash-ok: tar and Git mode names use forward slashes
+				modes[rel] = "100644"
+				if h.Mode&0o111 != 0 {
+					modes[rel] = "100755"
+				}
 			}
 			mode := os.FileMode(0o644)
 			if h.Mode&0o111 != 0 {
@@ -900,7 +958,7 @@ func untarSafe(r io.Reader, dest string) (string, error) {
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return "", err
 			}
-			if err := os.Symlink(h.Linkname, target); err != nil {
+			if err := makeSkillSymlink(h.Linkname, target); err != nil {
 				return "", err
 			}
 		default:
@@ -949,7 +1007,7 @@ func copyTree(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			return os.Symlink(l, target)
+			return makeSkillSymlink(l, target)
 		case info.IsDir():
 			return os.MkdirAll(target, 0o755)
 		default:
@@ -997,4 +1055,33 @@ func upgradeGit(ctx context.Context, dir string, force bool, res *SkillUpgradeRe
 	}
 	res.Tree = strings.TrimSpace(string(out))
 	return nil
+}
+
+// skillSymlink lets Windows tests simulate a standard user's missing symlink privilege.
+var skillSymlink = os.Symlink
+
+// makeSkillSymlink maps Windows privilege failures to a stable code before the old copy moves.
+func makeSkillSymlink(target, path string) error {
+	err := skillSymlink(target, path)
+	if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) {
+		return errUnsupported
+	}
+	return err
+}
+
+// skillIndexModes reads tracked modes from Git's index, including executable files on Windows.
+func skillIndexModes(ctx context.Context, folder string) (map[string]string, error) {
+	out, err := skillGitCommand(ctx, folder, "ls-files", "--stage", "-z", "--", ".")
+	if err != nil {
+		return nil, err
+	}
+	modes := map[string]string{}
+	for _, record := range strings.Split(string(out), "\x00") {
+		meta, name, ok := strings.Cut(record, "\t")
+		fields := strings.Fields(meta)
+		if ok && len(fields) == 3 && fields[2] == "0" {
+			modes[name] = fields[0]
+		}
+	}
+	return modes, nil
 }

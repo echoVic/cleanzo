@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -202,17 +203,29 @@ func aiRunning() map[string]bool {
 			running[tool.ID] = true
 			continue
 		}
-		for _, line := range strings.Split(out, "\n") {
-			line += "\n"
-			if slices.ContainsFunc(tool.Process, func(p string) bool {
-				return strings.Contains(line, p) || strings.HasPrefix(line, strings.TrimLeft(p, "/"))
-			}) {
-				running[tool.ID] = true
-				break
-			}
+		if aiCommandRunning(out, tool, runtime.GOOS == "windows") {
+			running[tool.ID] = true
 		}
 	}
 	return running
+}
+
+// aiCommandRunning recognizes native CLI binaries and Node launchers on either platform.
+func aiCommandRunning(out string, tool aiTool, windows bool) bool {
+	patterns := tool.Process
+	if windows {
+		out = strings.ToLower(strings.ReplaceAll(out, `\`, "/"))
+		patterns = append(append([]string(nil), patterns...), "/"+tool.ID+".exe", tool.ID+".exe ") // slash-ok: Windows command lines are normalized to forward slashes
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line += "\n"
+		if slices.ContainsFunc(patterns, func(p string) bool {
+			return strings.Contains(line, p) || strings.HasPrefix(line, strings.TrimLeft(p, "/"))
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // aiNow is the clock; tests replace it.

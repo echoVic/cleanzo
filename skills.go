@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -833,12 +834,23 @@ func opencodeDB() string {
 	return filepath.Join(homeDir(), ".local/share/opencode/opencode.db")
 }
 
+// sqliteTool preserves the macOS binary and uses ordinary executable lookup on Windows.
+func sqliteTool() string {
+	if runtime.GOOS == "windows" {
+		if tool, err := exec.LookPath("sqlite3"); err == nil {
+			return tool
+		}
+		return "sqlite3" // CommandContext reports the missing tool as unavailable.
+	}
+	return "/usr/bin/sqlite3"
+}
+
 // opencodeQuery runs a read-only query with the system sqlite3; tests
 // replace it.
 var opencodeQuery = func(ctx context.Context, db, query string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "/usr/bin/sqlite3", "-readonly", "-json", db, query).Output()
+	return exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db, query).Output()
 }
 
 // opencodeSkillUsage reads OpenCode's database: the skill tool's calls and
@@ -1073,6 +1085,9 @@ func isLink(p string) bool {
 // goes to the Trash; copies that have drifted apart are refused, so nothing
 // is lost.
 func (Cleaner) LinkSkillCopy(path, target string) error {
+	if runtime.GOOS == "windows" {
+		return errUnsupported
+	}
 	path, target = filepath.Clean(path), filepath.Clean(target)
 	if err := skillEntryOK(path); err != nil {
 		return err
