@@ -1,0 +1,14 @@
+{
+  "zh": {
+    "webview.title": "Cleanzo",
+    "webview.message": "Cleanzo 需要 Microsoft Edge WebView2 Runtime。是否打开下载页面？",
+    "webview.download": "下载",
+    "webview.exit": "退出"
+  },
+  "en": {
+    "webview.title": "Cleanzo",
+    "webview.message": "Cleanzo requires Microsoft Edge WebView2 Runtime. Open the download page?",
+    "webview.download": "Download",
+    "webview.exit": "Exit"
+  }
+}

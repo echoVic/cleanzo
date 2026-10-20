@@ -1,3 +1,5 @@
+import nativeMessages from "./native-i18n.json";
+import { isWindows } from "./platform";
 // Minimal i18n for Cleanzo. Dictionary-based, supports a manual override
 // (Chinese / English) that persists, or "system" which follows the OS language.
 
@@ -6,6 +8,43 @@ export type LangPref = "system" | Lang;
 
 const dict = {
   zh: {
+    ...nativeMessages.zh,
+    "status.osVersion": "macOS {version}",
+    "status.osVersion@win": "{version}",
+    // Windows 专用文案，先于术语替换。
+    "junk.access@win": "部分目录不可读取，请检查目录访问权限。",
+    "settings.fullDiskAccess@win": "目录访问权限",
+    "settings.permissionNote@win": "扫描范围限于当前用户可读取的目录。",
+    "cat.denied@win": "需要目录访问权限",
+    "cat.deniedPart@win": "部分目录不可访问",
+    "status.footnote@win": "已统计你账户下的 {n} 个进程，系统和其他账户的进程未计入。应用 CPU 按单核计算，可以超过 100%。",
+    "status.quit.body@win": "向应用发送关闭窗口请求。如有未保存的内容，应用会先询问你。",
+    "status.mem.wired@win": "内核非分页内存",
+    "status.mem.compressed@win": "—",
+    "status.mem.pressureWarn@win": "内存负载较高",
+    "status.mem.pressureCrit@win": "内存负载严重",
+    "status.mem.caption@win": "已使用的物理内存",
+    "status.mem.barLabel@win": "已使用 {used}：应用内存 {app}、内核非分页内存 {wired}",
+    "status.mem.swap@win": "页面文件 已用 {used} · 总量 {size}",
+    "status.alert.memWarn@win": "内存负载较高，应用可能变慢。关闭暂时不用的应用可释放内存。",
+    "status.alert.memCrit@win": "内存负载严重，应用可能明显变慢。请关闭暂时不用的应用。",
+    "status.alert.swapLine@win": "页面文件分配了 {size} 磁盘空间。",
+    "status.alert.swapOnly@win": "页面文件分配了 {size} 磁盘空间，由 Windows 管理大小。",
+    "status.alert.diskLow@win": "磁盘只剩 {size} 可用。Windows 更新和页面文件都需要空间。",
+    "fs.reveal@win": "在文件资源管理器中显示",
+    "fs.type.app@win": "程序 / 快捷方式：移走文件不能完整卸载程序，请使用程序的卸载器。",
+    "fs.type.library@win": "资料库：可能包含照片、音乐或项目，请勿单独清理内部内容。",
+    "kind.app@win": "程序文件",
+    "fs.blocked@win": "受保护或不允许清理的位置，不能移动。已安装的程序请使用其卸载器。",
+    "fs.idle.desc@win": "测量你的用户目录，按占用空间排序。通常需要一两分钟。",
+    "rule.review.installers.desc@win": "下载、桌面和文档中的 MSI、MSIX、APPX 及安装 EXE，选中后移到回收站。",
+    "rule.sys.temp.desc@win": "用户目录内 7 天未改动的临时文件",
+    "rule.sys.trash.desc@win": "仅清空用户目录所在卷的回收站；扫描后内容变化时跳过，清空后不可恢复。",
+    "rule.update.updaters.desc@win": "本地应用数据中更新器 pending 目录的暂存包",
+    "ai.head.claude@win": "Claude Code 的对话、日志与缓存，清理前先看清楚",
+    "ai.head.codex@win": "Codex 的对话、旧版本与缓存，清理前先看清楚",
+    "ai.idle.desc@win": "扫描全部在本机完成，安全、私密，不上传任何内容",
+    "clean.idle.desc@win": "扫描全部在本机完成，安全、私密，不上传任何内容",
     // 垃圾规则
     "junk.group.system": "系统垃圾",
     "settings.folderEmpty": "请选择目录",
@@ -813,6 +852,43 @@ const dict = {
     "desc.xcode": "DerivedData 编译数据，清理后要重新编译",
   },
   en: {
+    ...nativeMessages.en,
+    "status.osVersion": "macOS {version}",
+    "status.osVersion@win": "{version}",
+    // Windows 专用文案，先于术语替换。
+    "junk.access@win": "Some folders cannot be read. Check their access permissions.",
+    "settings.fullDiskAccess@win": "Folder access",
+    "settings.permissionNote@win": "Scanning is limited to folders readable by the current user.",
+    "cat.denied@win": "Folder access required",
+    "cat.deniedPart@win": "Some folders are inaccessible",
+    "status.footnote@win": "Counting {n} processes owned by your account; system and other users' processes are excluded. Per-app CPU is single-core and can exceed 100%.",
+    "status.quit.body@win": "Sends a close-window request to {name}. If there is unsaved work, the app can ask you first.",
+    "status.mem.wired@win": "Kernel non-paged",
+    "status.mem.compressed@win": "—",
+    "status.mem.pressureWarn@win": "High memory load",
+    "status.mem.pressureCrit@win": "Critical memory load",
+    "status.mem.caption@win": "Physical memory in use",
+    "status.mem.barLabel@win": "Used {used}: app memory {app}, kernel non-paged {wired}",
+    "status.mem.swap@win": "Page file in use {used} · total {size}",
+    "status.alert.memWarn@win": "Memory load is high and apps may slow down. Closing unused apps can free memory.",
+    "status.alert.memCrit@win": "Memory load is critical and apps may slow down noticeably. Close unused apps.",
+    "status.alert.swapLine@win": "The page file has {size} of allocated disk space.",
+    "status.alert.swapOnly@win": "The page file has {size} of allocated disk space. Windows manages its size.",
+    "status.alert.diskLow@win": "Only {size} of disk left. Windows updates and the page file both need room.",
+    "fs.reveal@win": "Show in File Explorer",
+    "fs.type.app@win": "Program / shortcut: moving a file does not fully uninstall a program; use its uninstaller.",
+    "fs.type.library@win": "Data library: may contain photos, music or projects; do not clean individual contents.",
+    "kind.app@win": "Program files",
+    "fs.blocked@win": "Protected or outside the allowed cleanup scope. Use the program's uninstaller for installed software.",
+    "fs.idle.desc@win": "Measures your user profile and ranks folders by size. Usually takes a minute or two.",
+    "rule.review.installers.desc@win": "MSI, MSIX, APPX and setup/install EXE files in Downloads, Desktop and Documents; selected files move to the Recycle Bin.",
+    "rule.sys.temp.desc@win": "Temporary files inside your user profile untouched for 7 days",
+    "rule.sys.trash.desc@win": "Empties the Recycle Bin on the user profile volume only; skips if its contents changed since scanning. Cannot be undone.",
+    "rule.update.updaters.desc@win": "Staged packages in updater pending folders under local app data",
+    "ai.head.claude@win": "Conversations, logs and caches Claude Code leaves on your PC — see them before you clean",
+    "ai.head.codex@win": "Conversations, old versions and caches Codex leaves on your PC — see them before you clean",
+    "ai.idle.desc@win": "The scan runs entirely on your PC — safe, private, nothing uploaded",
+    "clean.idle.desc@win": "The scan runs entirely on your PC — safe, private, nothing uploaded",
     // 垃圾规则
     "junk.group.system": "System Junk",
     "settings.folderEmpty": "Choose a folder",
@@ -1612,6 +1688,13 @@ const dict = {
   },
 } as const;
 
+// 长词优先，避免短词截断复合术语；在插值前应用，不改用户路径。
+const glossary: Record<Lang, readonly (readonly [string, string])[]> = {
+  zh: [["这台 Mac", "这台电脑"], ["废纸篓", "回收站"], ["访达", "文件资源管理器"], ["Finder", "文件资源管理器"], ["macOS", "Windows"], ["系统设置", "Windows 设置"]],
+  en: [["this Mac", "this PC"], ["Trash", "Recycle Bin"], ["Finder", "File Explorer"], ["macOS", "Windows"], ["System Settings", "Windows Settings"]],
+};
+for (const lang of ["zh", "en"] as const) glossary[lang] = [...glossary[lang]].sort((a, b) => b[0].length - a[0].length);
+
 const STORAGE_KEY = "cleanzo.lang";
 let sessionPref: LangPref | undefined;
 let nativeLocale: string | undefined;
@@ -1669,7 +1752,10 @@ export function ruleDesc(id: string): string {
 /** t(key, vars) returns the localized string for the current language. */
 export function t(key: keyof (typeof dict)["zh"] & keyof (typeof dict)["en"], vars?: Record<string, string | number>): string {
   const lang = resolveLang();
-  let s: string = dict[lang][key] ?? dict.en[key] ?? key;
+  const messages: Readonly<Record<string, string>> = dict[lang];
+  const fallback: Readonly<Record<string, string>> = dict.en;
+  let s = (isWindows() ? messages[`${key}@win`] ?? fallback[`${key}@win`] : undefined) ?? messages[key] ?? fallback[key] ?? key;
+  if (isWindows()) for (const [from, to] of glossary[lang]) s = s.replaceAll(from, to);
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       s = s.replaceAll(`{${k}}`, String(v));
