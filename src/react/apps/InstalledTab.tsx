@@ -33,7 +33,10 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [q, setQ] = React.useState("");
-  const [sortBy, setSortBy] = React.useState<AppSortBy>(() => readAppSort());
+  const [sortBy, setSortBy] = React.useState<AppSortBy>(() => {
+    const saved = readAppSort();
+    return isWindows() && saved === "opened" ? "name" : saved;
+  });
   const [busyPaths, setBusyPaths] = React.useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [dialog, setDialog] = React.useState<DialogState>(DIALOG_IDLE);
@@ -148,7 +151,7 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
         <select className="select" title={t("apps.sort")} value={sortBy} onChange={onSortChange}>
           <option value="name">{t("apps.sortName")}</option>
           <option value="size">{t("apps.sortSize")}</option>
-          <option value="opened">{t("apps.sortOpened")}</option>
+          {!isWindows() && <option value="opened">{t("apps.sortOpened")}</option>}
         </select>
       </div>
 
@@ -214,9 +217,9 @@ export function InstalledAppRow({ app: a, moving, onDetail }: {
       </div>
       <div className="app-meta">
         <div className="app-size">{human(a.size)}</div>
-        <div className="app-used muted small">
+        {(!isWindows() || a.lastOpened !== 0) && <div className="app-used muted small">
           {a.lastOpened ? fmtDate(a.lastOpened) : t("apps.never")}
-        </div>
+        </div>}
       </div>
       <button
         className="btn small uninstall-detail"

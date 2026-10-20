@@ -197,3 +197,61 @@ test("Windows Apps subtitle explains the uninstaller and Store link uses the OS 
     expect(renderToStaticMarkup(createElement(AppsPage, { initialTab: "installed", nonce: 0 }))).not.toContain("ms-settings:");
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
+
+test("Windows app rows omit unknown last-opened metadata without an empty line", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { InstalledAppRow } = await import("../src/react/apps/InstalledTab");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  const a = app({ name: "Acme", path: "", size: 1024, lastOpened: 0 });
+  const render = () => renderToStaticMarkup(createElement(InstalledAppRow, { app: a, moving: false, onDetail() {} }));
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      setPlatformForTest("win32");
+      const win = render();
+      expect(win).not.toContain("Never opened");
+      expect(win).not.toContain("从未打开");
+      expect(win).not.toContain("app-used");
+      expect(win).toContain('<div class="app-meta"><div class="app-size">1.0 KB</div></div>');
+
+      setPlatformForTest("darwin");
+      const mac = render();
+      expect(mac).toContain("app-used");
+      expect(mac).toContain(lang === "zh" ? "从未打开" : "Never opened");
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+test("Windows Apps hide last-opened sorting and fall back from a saved opened sort", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { InstalledTab } = await import("../src/react/apps/InstalledTab");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  const savedSort = localStorage.getItem("cleanzo.appSort");
+  const render = () => renderToStaticMarkup(createElement(InstalledTab, { active: false, onBusyChange() {} }));
+  try {
+    localStorage.setItem("cleanzo.appSort", "opened");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      setPlatformForTest("win32");
+      const win = render();
+      expect(win).not.toContain('value="opened"');
+      expect(win).not.toContain(t("apps.sortOpened"));
+      expect(win).toContain('<option value="name" selected="">');
+
+      setPlatformForTest("darwin");
+      const mac = render();
+      expect(mac).toContain('<option value="opened" selected="">');
+      expect(mac).toContain(t("apps.sortOpened"));
+    }
+  } finally {
+    localStorage.setItem("cleanzo.appSort", savedSort ?? "name");
+    setPlatformForTest(undefined);
+    setPref("system");
+  }
+});
