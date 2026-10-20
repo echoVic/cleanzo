@@ -1928,7 +1928,11 @@ func main() {
 	mygo.Bind(LanguageSettings{})
 
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
+		if runtime.GOOS == "windows" && !mygo.WebViewAvailable() {
+			go offerWebView()
+			return
+		}
+		opts := mygo.WindowOptions{
 			Title:           "Cleanzo",
 			Width:           1000,
 			Height:          700,
@@ -1937,7 +1941,15 @@ func main() {
 			BackgroundColor: "light-dark(#f6f7f9, #0f1115)", // the page's --bg in src/style.css
 			StateKey:        "main",
 			URL:             "/",
-		})
+		}
+		smokeDir := os.Getenv("CLEANZO_SMOKE_DIR")
+		if smokeDir != "" {
+			opts.Page.PreloadScript = smokeScript
+		}
+		w := mygo.NewWindow(opts)
+		if smokeDir != "" {
+			startSmoke(w, smokeDir)
+		}
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

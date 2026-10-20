@@ -31,4 +31,6 @@ export default defineConfig({
     signingIdentity: "Developer ID Application: Zijie Hu (8LH7PFQJ89)",
     notarize: { keychainProfile: "clipnest-notary" },
   },
+  // Windows 签名：certificate（密码 MYGO_WINDOWS_CERTIFICATE_PASSWORD）或 signCommand。
+  windows: {},
 });
