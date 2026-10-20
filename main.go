@@ -555,7 +555,7 @@ type PathsCleanResult struct {
 // Trash, honoring the safeToClean gate and leaving alone what is in use. It
 // is the fine-grained counterpart to CleanJunk (which works on junk items).
 func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
-	g := probeUsage()
+	g := pathUsageProbe()
 	res := PathsCleanResult{}
 	for _, p := range paths {
 		abs, err := filepath.Abs(p)
@@ -573,6 +573,10 @@ func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 			} else {
 				res.Failed = append(res.Failed, abs+": "+err.Error())
 			}
+			continue
+		}
+		if g.failed {
+			res.Failed = append(res.Failed, abs+": "+errUsageUnknown.Error())
 			continue
 		}
 		if g.inUse(resolvePath(abs)) {
@@ -1584,6 +1588,12 @@ func (Cleaner) ScanOrphans(ctx context.Context, ch *mygo.Channel[OrphanItem]) er
 // errInUse is the error for a path a running app uses; the UI translates it.
 var errInUse = errors.New("in-use")
 
+// A failed usage probe is not evidence that the target application is running.
+var errUsageUnknown = errors.New("usage-unknown")
+
+// pathUsageProbe is the shared usage snapshot for individual path actions.
+var pathUsageProbe = probeUsage
+
 // errBlocked is the error for a path the safety rules protect.
 var errBlocked = errors.New("blocked")
 
@@ -1605,7 +1615,11 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 		}
 		return TrashResult{}, err
 	}
-	if probeUsage().inUse(resolvePath(abs)) {
+	g := pathUsageProbe()
+	if g.failed {
+		return TrashResult{}, errUsageUnknown
+	}
+	if g.inUse(resolvePath(abs)) {
 		return TrashResult{}, errInUse
 	}
 	// Sized like the rows offering it, by the space it takes on disk.

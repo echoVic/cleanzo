@@ -23,6 +23,7 @@ type targetMode int
 const (
 	entriesOf targetMode = iota
 	matched
+	recursiveFiles // matching files and installer bundles; never ordinary folders
 )
 
 // Target locates a rule's entries, optionally filtering their names.
@@ -42,6 +43,7 @@ const (
 	detailBackups
 	detailArchives
 	detailDeviceSupport
+	detailInstallers
 )
 
 // Rule describes a known junk location and how to clean it.
@@ -71,8 +73,12 @@ var junkRules = []Rule{
 	{ID: "review.device-support", Group: groupReview, Detail: detailDeviceSupport,
 		Targets: []Target{{Pattern: "Library/Developer/Xcode/*DeviceSupport", Mode: entriesOf}}},
 	{ID: "review.simulators", Group: groupReview, Command: &simctlCleanup}, // Task 6
-	{ID: "review.installers", Group: groupReview, Trash: true, Detail: detailFiles, MinAge: 30 * 24 * time.Hour,
-		Targets: []Target{{Pattern: "Downloads", Mode: entriesOf, Names: []string{"*.dmg", "*.pkg", "*.mpkg", "*.xip"}}}},
+	{ID: "review.installers", Group: groupReview, Trash: true, Detail: detailInstallers,
+		Targets: []Target{
+			{Pattern: "Downloads", Mode: recursiveFiles, Names: []string{"*.dmg", "*.pkg", "*.mpkg", "*.xip"}},
+			{Pattern: "Desktop", Mode: recursiveFiles, Names: []string{"*.dmg", "*.pkg", "*.mpkg", "*.xip"}},
+			{Pattern: "Documents", Mode: recursiveFiles, Names: []string{"*.dmg", "*.pkg", "*.mpkg", "*.xip"}},
+		}},
 	{ID: "review.partial-downloads", Group: groupReview, Trash: true, Detail: detailFiles, MinAge: 24 * time.Hour,
 		Targets: []Target{{Pattern: "Downloads", Mode: entriesOf, Names: []string{"*.download", "*.crdownload", "*.part"}}}},
 	{ID: "review.mail-downloads", Group: groupReview, Trash: true,

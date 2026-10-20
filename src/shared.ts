@@ -9,6 +9,7 @@ function errText(e: unknown): string {
   const raw = msg(e);
   const plain: Record<string, string> = {
     "in-use": "fs.inUse",
+    "usage-unknown": "fs.usageUnknown",
     blocked: "fs.blocked",
     gone: "fs.gone",
     "not-app": "fs.notApp",

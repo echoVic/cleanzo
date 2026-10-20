@@ -6,6 +6,7 @@ import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { human, displayPath } from "../ai/format";
+import { pathHintKind } from "./type-hint";
 import {
   isGone, loadedKids, pickedPaths, rowIndeterminate, type ListSelection,
 } from "./selection";
@@ -27,11 +28,12 @@ export interface ListRowData {
 }
 
 interface RowCallbacks {
+  typeHints?: boolean;
   onToggleRow: (path: string, on: boolean) => void;
   onToggleChild: (parent: string, child: string, on: boolean) => void;
   onExpand: (path: string) => void;
   onReveal: (path: string) => void;
-  onTrashRow: (path: string, size: number) => void;
+  onTrashRow: (path: string, size: number, isDir?: boolean) => void;
 }
 
 function RevealButton({ path, onReveal }: { path: string; onReveal: (path: string) => void }) {
@@ -50,6 +52,11 @@ function RevealButton({ path, onReveal }: { path: string; onReveal: (path: strin
       </svg>
     </button>
   );
+}
+
+export function PathTypeHint({ path, isDir = false }: { path: string; isDir?: boolean }) {
+  const t = useT();
+  return <span className="muted small" style={{ display: "block", whiteSpace: "normal", overflowWrap: "anywhere" }}>{t(`fs.type.${pathHintKind(path, isDir)}` as DictKey)}</span>;
 }
 
 function ChildRow({ parent, item, selection, busy, callbacks }: {
@@ -72,6 +79,7 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
       <span className="fs-child-name" title={item.path}>
         {item.name}
         {!item.trashable && <span className="tag dim"> {t("fs.locked")}</span>}
+        {callbacks.typeHints && <PathTypeHint path={item.path} isDir={item.isDir} />}
       </span>
       <span className="fs-child-size">{item.size >= 0 ? human(item.size) : "--"}</span>
       <RevealButton path={item.path} onReveal={callbacks.onReveal} />
@@ -80,7 +88,7 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
           variant="destructive"
           size="sm"
           disabled={busy}
-          onClick={() => callbacks.onTrashRow(item.path, item.size)}
+          onClick={() => callbacks.onTrashRow(item.path, item.size, item.isDir)}
         >
           {busy ? <span className="spin" /> : null}
           {busy ? t("fs.moving") : t("fs.trash")}
@@ -120,6 +128,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
             {row.name}
             {!row.trashable && <span className="tag dim"> {t("fs.locked")}</span>}
           </div>
+          {cb.typeHints && <PathTypeHint path={row.path} isDir={row.expandable ?? false} />}
           {row.sub && <div className="fs-sub">{row.sub}</div>}
         </div>
         <div className="fs-size">{row.size >= 0 ? human(row.size) : "--"}</div>
@@ -141,7 +150,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
             variant="destructive"
             size="sm"
             disabled={busy}
-            onClick={() => cb.onTrashRow(row.path, row.size)}
+            onClick={() => cb.onTrashRow(row.path, row.size, row.expandable ?? false)}
           >
             {busy ? <span className="spin" /> : null}
             {busy ? t("fs.moving") : t("fs.trash")}

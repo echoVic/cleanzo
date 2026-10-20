@@ -12,8 +12,8 @@ import { showReactApps } from "../apps/entry";
 import { setCleanStaleHandler, takeStalePending } from "./entry";
 import { cleanApi } from "./api";
 import {
-  GROUPS, applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
-  finalizeCleanRows, finalizeScan, groupCheckState, hasSubs, heroTotals, discoveredSize,
+  GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
+  finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
   isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible,
   removeFromSel, rowStateNote, scanItem, scanStart, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
@@ -44,9 +44,15 @@ function TriCheck({ checked, indeterminate, disabled, onChange, ariaLabel }: {
   onChange: (on: boolean) => void; ariaLabel: string;
 }) {
   const ref = React.useRef<HTMLInputElement>(null);
-  React.useEffect(() => {
-    if (ref.current) ref.current.indeterminate = !!indeterminate;
-  }, [indeterminate]);
+  // Clicking a native checkbox clears indeterminate even when its React prop
+  // remains true (e.g. selecting a group with blocked rows). Reapply both DOM
+  // properties after every commit, before paint, not only when the prop changes.
+  React.useLayoutEffect(() => {
+    if (ref.current) {
+      ref.current.checked = checked;
+      ref.current.indeterminate = !!indeterminate;
+    }
+  });
   return (
     <input
       ref={ref}
@@ -95,8 +101,6 @@ export function CleanPage() {
   ignoringRef.current = ignoring;
   const stRef = React.useRef(st);
   stRef.current = st;
-  const rowStatesRef = React.useRef(rowStates);
-  rowStatesRef.current = rowStates;
   const progressRef = React.useRef(progress);
   progressRef.current = progress;
 
@@ -225,9 +229,8 @@ export function CleanPage() {
     if (phaseRef.current !== "scanned" || !p) return;
     setPhase("cleaning");
     setMenuID(null);
-    const rows = new Map<string, RowState>();
-    p.selections.forEach((s) => rows.set(s.id, { state: "waiting" }));
-    setRowStates(rows);
+    const tracker = createCleanRowTracker(p.selections);
+    setRowStates(tracker.rows);
     setProgress({ total: p.bytes, bytes: 0, id: "", path: "", stopped: false, error: "" });
     const myRun = ++runRef.current;
     stoppedCleanRef.current = false;
@@ -238,7 +241,7 @@ export function CleanPage() {
       for await (const ev of ch) {
         if (runRef.current !== myRun) continue;
         if (ev.kind === "start" && ev.id) {
-          setRowStates((prev) => applyCleanEvent(prev, ev));
+          setRowStates(tracker.apply(ev));
           setProgress((pr) => ({ ...pr, id: ev.id!, path: "" }));
         } else if (ev.kind === "checking" || ev.kind === "removed") {
           setProgress((pr) => ({
@@ -246,7 +249,7 @@ export function CleanPage() {
             bytes: ev.kind === "removed" ? (ev.bytes ?? pr.bytes) : pr.bytes,
           }));
         } else if (ev.kind === "done" && ev.result) {
-          setRowStates((prev) => applyCleanEvent(prev, ev));
+          setRowStates(tracker.apply(ev));
           setProgress((pr) => ({ ...pr, bytes: ev.bytes ?? pr.bytes }));
         }
       }
@@ -261,7 +264,7 @@ export function CleanPage() {
     } finally {
       if (runRef.current !== myRun) return;
       chanRef.current = null;
-      const { rows: next, stopped } = finalizeCleanRows(rowStatesRef.current);
+      const { rows: next, stopped } = tracker.finish();
       setRowStates(next);
       if (stopped) setProgress((pr) => ({ ...pr, stopped: true }));
       setPhase("cleaned");
@@ -528,7 +531,7 @@ export function CleanPage() {
                 <div className="junk-sub-info">
                   <span>{s.name}</span>
                   {keepLatestVisible(it, s, st.sel) ? <Tag text={t("junk.keepLatest")} /> : null}
-                  <div className="muted small">{s.detail}</div>
+                  <div className="muted small">{s.detail}{it.id === "review.installers" && s.ageDays != null ? ` · ${s.ageDays === 0 ? t("junk.installerAgeToday") : t("junk.installerAge", { n: s.ageDays })}` : ""}</div>
                 </div>
                 <span className="junk-size">{human(s.size)}</span>
               </div>
@@ -674,7 +677,7 @@ export function CleanPage() {
                     indeterminate={gState === "partial"}
                     disabled={phase !== "scanned" || eligibleM.length === 0}
                     ariaLabel={t("junk.select", { name: t(`junk.group.${g}` as DictKey) })}
-                    onChange={(on) => setSt((prev) => ({ ...prev, sel: toggleGroup(g, on, st.items, prev.sel) }))}
+                    onChange={() => setSt((prev) => ({ ...prev, sel: toggleGroup(g, groupToggleOn(g, prev.items, prev.sel), prev.items, prev.sel) }))}
                   />
                   <button
                     className="junk-group-toggle"

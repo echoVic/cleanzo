@@ -1106,6 +1106,38 @@ func TestUsageGuardInUse(t *testing.T) {
 	}
 }
 
+func TestPathCleanupDistinguishesProbeFailureFromOccupancy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "Documents", "keep.bin")
+	writeFile(t, path, 512)
+	saved := pathUsageProbe
+	pathUsageProbe = func() *usageGuard { return &usageGuard{failed: true} }
+	t.Cleanup(func() { pathUsageProbe = saved })
+	if _, err := (Cleaner{}).TrashPath(path); err != errUsageUnknown {
+		t.Fatalf("probe failure error = %v; want usage-unknown", err)
+	}
+	res := (Cleaner{}).CleanPaths([]string{path})
+	if res.Moved != 0 || res.InUse != 0 || !slices.Equal(res.Failed, []string{path + ": usage-unknown"}) || !exists(path) {
+		t.Fatalf("failed probe must refuse without claiming occupancy: %+v", res)
+	}
+	pathUsageProbe = func() *usageGuard { return &usageGuard{open: []string{canonical(path)}} }
+	if _, err := (Cleaner{}).TrashPath(path); err != errInUse {
+		t.Fatalf("real occupancy error = %v", err)
+	}
+	res = (Cleaner{}).CleanPaths([]string{path})
+	if res.InUse != 1 || res.Moved != 0 || !exists(path) {
+		t.Fatalf("real occupancy must still refuse: %+v", res)
+	}
+	pathUsageProbe = func() *usageGuard { return &usageGuard{} }
+	if _, err := (Cleaner{}).TrashPath(path); err != nil {
+		t.Fatal(err)
+	}
+	if exists(path) || !exists(filepath.Join(home, ".Trash", "keep.bin")) {
+		t.Fatal("released path must be movable to Trash")
+	}
+}
+
 // TestOpenFilesSeesOpenFile checks the lsof wiring against a file this test
 // holds open.
 func TestOpenFilesSeesOpenFile(t *testing.T) {

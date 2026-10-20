@@ -7,7 +7,7 @@ import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
 import {
   applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
-  finalizeCleanRows, finalizeScan, groupCheckState, isSelectable, isVisible, itemTitle,
+  finalizeCleanRows, finalizeScan, createCleanRowTracker, groupCheckState, groupToggleOn, isSelectable, isVisible, itemTitle,
   keepLatestVisible, removeFromSel,
   rowStateNote, scanItem, scanStart, splitApps, toggleGroup, toggleRow, toggleSub,
   withIgnored, withIgnoredSummary, emptySel, heroTotals,
@@ -220,6 +220,45 @@ test("group is fully checked only when every visible row is selected", () => {
   expect(off.selected.size).toBe(0);
 });
 
+test("group state follows nested child selection instead of counting a partial row as fully checked", () => {
+  const installers = item("review.installers", "review", 3072, { default: false, trash: true, subs: [
+    { path: "/one.dmg", name: "one.dmg", detail: "", size: 1024, default: true },
+    { path: "/two.pkg", name: "two.pkg", detail: "", size: 2048, default: true },
+  ] });
+  const st = scan([installers]);
+  expect(groupCheckState("review", st.items, st.sel)).toBe("unchecked");
+  const one = toggleSub(installers, "/one.dmg", true, st.sel);
+  expect(groupCheckState("review", st.items, one)).toBe("partial");
+  expect(buildCleanPlan(st.items, one)!.selections).toEqual([{ id: installers.id, paths: ["/one.dmg"] }]);
+  const all = toggleGroup("review", true, st.items, one);
+  expect(groupCheckState("review", st.items, all)).toBe("checked");
+  const partial = toggleSub(installers, "/two.pkg", false, all);
+  expect(groupCheckState("review", st.items, partial)).toBe("partial");
+  const none = toggleGroup("review", false, st.items, partial);
+  expect(groupCheckState("review", st.items, none)).toBe("unchecked");
+  expect(buildCleanPlan(st.items, none)).toBeNull();
+});
+
+test("group select and deselect preserve partial state while blocked rows never enter the plan", () => {
+  const ready = item("review.installers", "review", 1024, { default: false, subs: [
+    { path: "/ready.dmg", name: "ready.dmg", detail: "", size: 1024, default: true },
+  ] });
+  const st = scan([ready,
+    item("review.ios-backups", "review", 4096, { denied: true }),
+    item("review.mail-downloads", "review", 2048, { running: true }),
+  ]);
+  for (let i = 0; i < 3; i++) {
+    expect(groupToggleOn("review", st.items, st.sel)).toBe(true);
+    st.sel = toggleGroup("review", groupToggleOn("review", st.items, st.sel), st.items, st.sel);
+    expect(groupCheckState("review", st.items, st.sel)).toBe("partial");
+    expect(buildCleanPlan(st.items, st.sel)!.selections).toEqual([{ id: ready.id, paths: ["/ready.dmg"] }]);
+    expect(groupToggleOn("review", st.items, st.sel)).toBe(false);
+    st.sel = toggleGroup("review", groupToggleOn("review", st.items, st.sel), st.items, st.sel);
+    expect(groupCheckState("review", st.items, st.sel)).toBe("unchecked");
+    expect(buildCleanPlan(st.items, st.sel)).toBeNull();
+  }
+});
+
 test("group selection never includes a running app or a denied item", () => {
   const st = scan([
     item("app:ready", "apps", 1024), item("app:busy", "apps", 8192, { running: true }),
@@ -300,6 +339,39 @@ test("stopping cleanup retains completed results and marks the remaining rows", 
   expect(rowStateNote(final.get("dev.npx")!, t, human).text).toBe("已释放 1.0 KB");
   // 进度条按已清理比例（1024 / 3072 ≈ 33%）。
   expect(cleanBarWidth(1024, 3072, true, false, "")).toBeCloseTo(33.33, 1);
+});
+
+test("cleanup completion retains final results before React commits the queued render", () => {
+  const tracker = createCleanRowTracker([{ id: "review.installers" }]);
+  const staleRender = tracker.rows;
+  tracker.apply({ kind: "start", id: "review.installers" });
+  const beforeDoneRender = tracker.rows;
+  const result = { name: "review.installers", freed: 0, trashed: 1024, inUse: 0, files: 1, failed: [] };
+  tracker.apply({ kind: "done", id: "review.installers", result });
+  // Both snapshots may still be the last React render when the stream closes.
+  expect(staleRender.get(result.name)!.state).toBe("waiting");
+  expect(beforeDoneRender.get(result.name)!.state).toBe("cleaning");
+  const final = tracker.finish();
+  expect(final.stopped).toBe(false);
+  expect(final.rows.get(result.name)).toEqual({ state: "done", result });
+  expect(cleanTotals(final.rows).trashed).toBe(1024);
+  expect(rowStateNote(final.rows.get(result.name)!, t, human).text).toBe("已移到废纸篓 1.0 KB");
+});
+
+test("cleanup tracker keeps completed and failed results when another row is canceled", () => {
+  const tracker = createCleanRowTracker([{ id: "done" }, { id: "failed" }, { id: "active" }, { id: "waiting" }]);
+  const done = { name: "done", freed: 100, trashed: 0, inUse: 0, files: 1, failed: [] };
+  const failed = { name: "failed", freed: 0, trashed: 0, inUse: 0, files: 0, failed: ["blocked"], skipped: "failed" };
+  tracker.apply({ kind: "done", id: "done", result: done });
+  tracker.apply({ kind: "done", id: "failed", result: failed });
+  tracker.apply({ kind: "start", id: "active" });
+  const final = tracker.finish();
+  expect(final.stopped).toBe(true);
+  expect(final.rows.get("done")!.result).toBe(done);
+  expect(final.rows.get("failed")!.result).toBe(failed);
+  expect(final.rows.get("active")!.state).toBe("stopped");
+  expect(final.rows.get("waiting")!.state).toBe("skipped");
+  expect(cleanTotals(final.rows)).toEqual({ freed: 100, trashed: 0, inUse: 0, failedNames: ["failed"] });
 });
 
 test("rejected cleanup keeps the failure visible and permits a rescan", () => {

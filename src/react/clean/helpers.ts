@@ -100,7 +100,18 @@ export function groupCheckState(group: string, items: JunkItem[], sel: JunkSel):
   if (shown.length === 0) return "unchecked";
   const picked = shown.filter((it) => sel.selected.has(it.id)).length;
   if (picked === 0) return "unchecked";
-  return picked === shown.length ? "checked" : "partial";
+  return picked === shown.length && shown.every((it) => !isPartial(it, sel)) ? "checked" : "partial";
+}
+
+/** Group click toggles the selectable default targets, not blocked rows.
+ * A group can remain visually partial after selecting every available target;
+ * clicking again must deselect them rather than getting stuck selecting forever.
+ */
+export function groupToggleOn(group: string, items: JunkItem[], sel: JunkSel): boolean {
+  const selectable = items.filter((it) => it.group === group && isSelectable(it) &&
+    (!hasSubs(it) || defaultSubPaths(it).size > 0));
+  return !selectable.every((it) => sel.selected.has(it.id) &&
+    (!hasSubs(it) || [...defaultSubPaths(it)].every((path) => sel.subSel.get(it.id)?.has(path))));
 }
 
 /** 分组勾选切换：对组内所有行应用 toggleRow（不可行行会被忽略，即组选永不带 running/denied）。 */
@@ -261,6 +272,23 @@ export function applyCleanEvent(rows: Map<string, RowState>, ev: { kind: string;
   if (ev.kind === "start" && ev.id) next.set(ev.id, { state: "cleaning" });
   else if (ev.kind === "done" && ev.id && ev.result) next.set(ev.id, { state: "done", result: ev.result });
   return next;
+}
+
+/** One cleanup run owns these snapshots independently of React's render timing. */
+export function createCleanRowTracker(selections: JunkSelection[]) {
+  let rows = new Map<string, RowState>(selections.map((sel) => [sel.id, { state: "waiting" }]));
+  return {
+    get rows() { return rows; },
+    apply(ev: { kind: string; id?: string; result?: CleanResult }) {
+      rows = applyCleanEvent(rows, ev);
+      return rows;
+    },
+    finish() {
+      const final = finalizeCleanRows(rows);
+      rows = final.rows;
+      return final;
+    },
+  };
 }
 
 /** 清理收尾（完成 / 停止 / 失败）：正在清理→stopped，等待中→skipped；标记是否有行未完成。 */

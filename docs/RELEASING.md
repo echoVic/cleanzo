@@ -5,7 +5,7 @@
 `bun run build` 用 Developer ID 签名 .app 和 dmg（hardened runtime + 时间戳），把 dmg 提交苹果公证，再把公证票据装订到 dmg 和 .app 上，配置在 `mygo.config.ts` 的 `macos` 字段。构建机需要：
 
 - 钥匙串里有 `Developer ID Application: Zijie Hu (8LH7PFQJ89)` 的证书和私钥（`security find-identity -v -p codesigning` 能列出来）
-- notarytool 凭据 profile `notary`（`xcrun notarytool store-credentials notary --apple-id <Apple ID> --team-id 8LH7PFQJ89`，需要 App 专用密码）
+- notarytool 凭据 profile `clipnest-notary`（与 `mygo.config.ts` 一致；`xcrun notarytool store-credentials clipnest-notary --apple-id <Apple ID> --team-id 8LH7PFQJ89`，需要 App 专用密码）
 
 公证通常要几分钟。
 

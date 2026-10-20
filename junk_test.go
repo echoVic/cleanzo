@@ -226,7 +226,7 @@ func TestCleanJunkRefusesPathsOutsideTheItem(t *testing.T) {
 	env := testEnv(t)
 	old := filepath.Join(env.home, "Downloads/Old.dmg")
 	writeFile(t, old, 100)
-	other := filepath.Join(env.home, "Documents/keep.dmg")
+	other := filepath.Join(env.home, "Pictures/keep.dmg")
 	writeFile(t, other, 100)
 	saved := now
 	now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
@@ -405,8 +405,8 @@ func TestDeviceSupportKeepsNewestPerPlatform(t *testing.T) {
 	}
 }
 
-// TestInstallersNeedThirtyDays checks item measurement.
-func TestInstallersNeedThirtyDays(t *testing.T) {
+// TestInstallersListAllAges checks that age is informational, not eligibility.
+func TestInstallersListAllAges(t *testing.T) {
 	env := testEnv(t)
 	old := filepath.Join(env.home, "Downloads/Old.dmg")
 	writeFile(t, old, 100)
@@ -422,13 +422,217 @@ func TestInstallersNeedThirtyDays(t *testing.T) {
 	for _, s := range specs {
 		if s.item.ID == "review.installers" {
 			p := planItem(context.Background(), s, env, make(chan struct{}, 4), nil)
-			if len(p.item.Subs) != 1 || p.item.Subs[0].Path != resolvePath(old) {
-				t.Fatalf("subs = %+v", p.item.Subs)
+			if len(p.item.Subs) != 2 || p.item.Default || !p.item.Trash || p.item.Size != 200 {
+				t.Fatalf("all ages must be listed unselected and trashable: %+v", p.item)
+			}
+			for _, sub := range p.item.Subs {
+				if sub.Detail == "" || sub.AgeDays == nil {
+					t.Fatalf("age hint missing: %+v", sub)
+				}
+				wantAge := int64(31)
+				if sub.Name == "New.dmg" {
+					wantAge = 0
+				}
+				if *sub.AgeDays != wantAge {
+					t.Fatalf("age for %s = %d; want %d", sub.Name, *sub.AgeDays, wantAge)
+				}
+			}
+			fresh := filepath.Join(env.home, "Downloads/New.dmg")
+			res := cleanJunk(context.Background(), env, []JunkSelection{{ID: s.item.ID, Paths: []string{fresh}}}, time.Time{}, cleanHooks{})
+			if res[0].Trashed != 100 || exists(fresh) || !exists(old) || !exists(filepath.Join(env.home, ".Trash/New.dmg")) {
+				t.Fatalf("young installer must allow explicit Trash selection: %+v", res)
 			}
 			return
 		}
 	}
 	t.Fatal("no installers item")
+}
+
+// installerTestClock advances the age check without changing the real machine clock.
+func installerTestClock(t *testing.T) {
+	t.Helper()
+	saved := now
+	future := time.Now().Add(31 * 24 * time.Hour)
+	now = func() time.Time { return future }
+	t.Cleanup(func() { now = saved })
+}
+
+func TestInstallersScanCommonFoldersRecursively(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	want := []string{"Downloads/old.dmg", "Downloads/nested/deep/disk.DMG", "Desktop/packages/setup.pkg", "Documents/tools/archive.xip", "Documents/Legacy.mpkg/Contents/payload"}
+	for _, path := range want {
+		writeFile(t, filepath.Join(env.home, path), 100)
+	}
+	for _, path := range []string{"Downloads/archive.zip", "Desktop/App.app/Contents/embedded.dmg", "Documents/Book.pages/embedded.pkg", "Documents/.hidden/hidden.dmg", "Documents/not-a-package.dmg/keep.txt", "Pictures/outside.dmg"} {
+		writeFile(t, filepath.Join(env.home, path), 500)
+	}
+	writeFile(t, filepath.Join(env.home, "Documents/new.pkg"), 100)
+	if err := os.Chtimes(filepath.Join(env.home, "Documents/new.pkg"), now(), now()); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	for _, it := range items {
+		if it.ID != "review.installers" {
+			continue
+		}
+		if it.Default || !it.Trash || it.Size != 600 || len(it.Subs) != 6 {
+			t.Fatalf("recursive installer row = %+v", it)
+		}
+		var got []string
+		for _, sub := range it.Subs {
+			rel, _ := filepath.Rel(resolvePath(env.home), sub.Path)
+			got = append(got, rel)
+		}
+		want[4] = "Documents/Legacy.mpkg"
+		want = append(want, "Documents/new.pkg")
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("subs = %v; want %v", got, want)
+		}
+		return
+	}
+	t.Fatal("no installers row")
+}
+
+func TestInstallersTrashOnlySelectedNestedPackage(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	selected := filepath.Join(env.home, "Documents/tools/setup.pkg")
+	keep := filepath.Join(env.home, "Documents/tools/keep.dmg")
+	note := filepath.Join(env.home, "Documents/tools/notes.txt")
+	for _, p := range []string{selected, keep, note} {
+		writeFile(t, p, 100)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{selected, filepath.Dir(selected), note}}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || res[0].Freed != 0 || exists(selected) || !exists(keep) || !exists(note) || !exists(filepath.Join(env.home, ".Trash/setup.pkg")) {
+		t.Fatalf("nested selection violated file boundary: %+v", res)
+	}
+	// A stale selection must not remove the remaining package on retry.
+	res = cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{selected}}}, time.Time{}, cleanHooks{})
+	if res[0].Trashed != 0 || !exists(keep) {
+		t.Fatalf("retry touched unrelated data: %+v", res)
+	}
+}
+
+func TestInstallersNeverFollowLinks(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	real := filepath.Join(env.home, "Pictures/keep.dmg")
+	writeFile(t, real, 100)
+	writeFile(t, filepath.Join(env.home, "Downloads/ready.dmg"), 100)
+	mustMkdir(t, filepath.Join(env.home, "Desktop"))
+	mustMkdir(t, filepath.Join(env.home, "Documents"))
+	for link, target := range map[string]string{"Downloads/link.dmg": real, "Desktop/linked": filepath.Dir(real), "Documents/loop": filepath.Join(env.home, "Documents")} {
+		if err := os.Symlink(target, filepath.Join(env.home, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || !exists(real) {
+		t.Fatalf("link traversal: %+v", res)
+	}
+	for _, link := range []string{"Downloads/link.dmg", "Desktop/linked", "Documents/loop"} {
+		if info, err := os.Lstat(filepath.Join(env.home, link)); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Fatalf("link was changed: %s", link)
+		}
+	}
+}
+
+func TestInstallersRecheckUsageButAgeDoesNotBlockCleaning(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	busy := filepath.Join(env.home, "Desktop/nested/busy.pkg")
+	fresh := filepath.Join(env.home, "Documents/nested/changed.dmg")
+	writeFile(t, busy, 100)
+	writeFile(t, fresh, 100)
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || len(items[0].Subs) != 2 {
+		t.Fatalf("initial row = %+v", items)
+	}
+	env.guard.open = []string{canonical(busy)}
+	if err := os.Chtimes(fresh, now(), now()); err != nil {
+		t.Fatal(err)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{busy, fresh}}}, time.Time{}, cleanHooks{})
+	if res[0].Trashed != 100 || res[0].InUse != 1 || !exists(busy) || exists(fresh) || !exists(filepath.Join(env.home, ".Trash/changed.dmg")) {
+		t.Fatalf("usage must block cleaning but age must not: %+v", res)
+	}
+}
+
+func TestInstallersKeepBundlePackageWhole(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	bundle := filepath.Join(env.home, "Desktop/deep/Legacy.pkg")
+	writeFile(t, filepath.Join(bundle, "Contents/inner.pkg"), 100)
+	writeFile(t, filepath.Join(bundle, "Contents/metadata"), 100)
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || len(items[0].Subs) != 1 || items[0].Subs[0].Path != resolvePath(bundle) {
+		t.Fatalf("bundle split or missing: %+v", items)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{bundle}}}, time.Time{}, cleanHooks{})
+	if res[0].Trashed != 200 || exists(bundle) || !exists(filepath.Join(env.home, ".Trash/Legacy.pkg/Contents/inner.pkg")) {
+		t.Fatalf("bundle trash result: %+v", res)
+	}
+}
+
+func TestInstallersReportBlockedSubfolderAndAllowOtherCandidates(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	blocked := filepath.Join(env.home, "Documents/blocked")
+	writeFile(t, filepath.Join(blocked, "keep.dmg"), 100)
+	ready := filepath.Join(env.home, "Documents/visible/ready.pkg")
+	writeFile(t, ready, 100)
+	blockedResolved := resolvePath(blocked)
+	env.lstat = func(path string) (fs.FileInfo, error) {
+		if path == blockedResolved {
+			return nil, fs.ErrPermission
+		}
+		return os.Lstat(path)
+	}
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || !items[0].Denied || len(items[0].Subs) != 1 || items[0].Subs[0].Path != resolvePath(ready) {
+		t.Fatalf("blocked folder hidden or traversed: %+v", items)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{ready, filepath.Join(blocked, "keep.dmg")}}}, time.Time{}, cleanHooks{})
+	if res[0].Trashed != 100 || len(res[0].Failed) == 0 || !exists(filepath.Join(blocked, "keep.dmg")) {
+		t.Fatalf("blocked selection result: %+v", res)
+	}
+}
+
+func TestInstallersRecursiveWalkStopsWhenCanceled(t *testing.T) {
+	env := testEnv(t)
+	writeFile(t, filepath.Join(env.home, "Downloads/deep/old.dmg"), 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	env.ctx = ctx
+	var spec itemSpec
+	env.collectRecursiveFiles(filepath.Join(env.home, "Downloads"), []string{"*.dmg"}, 0, claimSet{}, &spec)
+	if len(spec.cands) != 0 {
+		t.Fatal("canceled traversal added candidates")
+	}
+}
+
+func TestInstallersClaimsDoNotTakeUnrelatedCustomContent(t *testing.T) {
+	env := testEnv(t)
+	root := filepath.Join(env.home, "Documents/tools")
+	pkg := filepath.Join(root, "setup.pkg")
+	note := filepath.Join(root, "notes.txt")
+	writeFile(t, pkg, 100)
+	writeFile(t, note, 100)
+	env.settings.Custom = []CustomFolder{{Name: "tools", Path: root, Enabled: true}}
+	env.settings.Ignored = []string{"review.installers"}
+	specs, _ := expandItems(&env)
+	for _, spec := range specs {
+		if spec.item.ID == "custom:"+root {
+			if len(spec.cands) != 1 || spec.cands[0].path != resolvePath(note) {
+				t.Fatalf("installer claim leaked or took unrelated content: %+v", spec.cands)
+			}
+			return
+		}
+	}
+	t.Fatal("custom content missing")
 }
 
 // TestPlanItemReadsBackupAndArchiveMetadata checks top-level strings and dates.
@@ -629,7 +833,7 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 					root = env.tmp
 				}
 				path := root
-				if target.Mode == entriesOf {
+				if target.Mode == entriesOf || target.Mode == recursiveFiles {
 					name := "entry.bin"
 					if len(target.Names) > 0 {
 						name = strings.ReplaceAll(target.Names[0], "*", "Fixture")

@@ -596,6 +596,8 @@ export interface SubItem {
   detail: string;
   size: number;
   default: boolean;
+  /** installer age hint; nil when unavailable */
+  ageDays?: number;
 }
 
 /** SystemInfo describes the app and the machine it runs on. */

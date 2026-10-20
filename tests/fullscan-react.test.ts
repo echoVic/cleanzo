@@ -1,4 +1,9 @@
 import { expect, test } from "bun:test";
+import "./setup-dom";
+import { setLang } from "./setup-dom";
+import { errText } from "../src/shared";
+import { t } from "../src/i18n";
+import { pathHintKind } from "../src/react/list/type-hint";
 import type { BigItem } from "../src/mygo";
 import {
   applyRemoval, emptySelection, isGone, pickedPaths,
@@ -7,6 +12,40 @@ import {
 import {
   barWidth, diskPercent, displayPath, human, FULLSCAN_TOP_N, topBySize,
 } from "../src/react/fullscan/format";
+
+test("usage probe failure does not tell users an app is running", () => {
+  for (const lang of ["zh", "en"]) {
+    setLang(lang);
+    expect(errText("usage-unknown")).toBe(t("fs.usageUnknown"));
+    expect(errText("usage-unknown")).not.toBe(errText("in-use"));
+    expect(errText("blocked")).toBe(t("fs.blocked"));
+  }
+  setLang("zh");
+});
+
+test("type hints distinguish data from caches and do not change cleanup eligibility", () => {
+  const cases = [
+    ["/Applications/App.app", true, "app"], ["/Downloads/Setup.DMG", false, "installer"],
+    ["/work/cache", true, "cache"], ["/work/.cache", true, "cache"], ["/work/tmp", true, "temp"],
+    ["/work/backup.zip", false, "archive"], ["/work/config.json", false, "config"],
+    ["/work/data.sqlite", false, "database"], ["/work/cache.sqlite", false, "database"],
+    ["/work/Photos.photoslibrary", true, "library"], ["/work/Machine.pvm", true, "vm"],
+    ["/work/report.pdf", false, "document"], ["/work/hello.go", false, "source"],
+    ["/work/photo.heic", false, "media"], ["/work/server.log", false, "log"],
+    ["/work/unrecognized.bin", false, "unknown"], ["/work/projects", true, "folder"],
+  ] as const;
+  for (const [path, isDir, expected] of cases) {
+    expect(pathHintKind(path, isDir)).toBe(expected);
+    for (const lang of ["zh", "en"]) {
+      setLang(lang);
+      const key = `fs.type.${expected}` as Parameters<typeof t>[0];
+      expect(t(key)).not.toBe(key);
+    }
+  }
+  setLang("zh");
+  expect(t("fs.type.cache")).toContain("可能含离线内容");
+  expect(t("fs.type.database")).toContain("先备份");
+});
 
 function dir(path: string, size: number, trashable = true): BigItem {
   return { path, size, trashable };

@@ -64,6 +64,7 @@ type SubItem struct {
 	Detail  string `json:"detail"`
 	Size    int64  `json:"size"`
 	Default bool   `json:"default"`
+	AgeDays *int64 `json:"ageDays,omitempty"` // installer age hint; nil when unavailable
 }
 
 // ScanSummary closes a junk scan.
@@ -317,6 +318,68 @@ func (env junkEnv) collectDir(dir string, names []string, age time.Duration, cla
 	}
 }
 
+// collectRecursiveFiles walks only ordinary visible directories. Matching regular
+// files and legacy pkg/mpkg bundles are candidates; containers are never candidates,
+// and bundles are not entered to look for embedded installers.
+func (env junkEnv) collectRecursiveFiles(dir string, names []string, age time.Duration, claims claimSet, spec *itemSpec) {
+	if env.toolContext().Err() != nil || env.protected(dir) || claims.claimed(dir) {
+		return
+	}
+	if env.traversalBlocked(dir) {
+		spec.item.Denied = true
+		return
+	}
+	key := canonical(dir)
+	home := canonical(env.home)
+	if !safeResolved(key) && !slices.Contains(protectedHomeDirs, strings.TrimPrefix(key, home)) {
+		return
+	}
+	entries, err := os.ReadDir(dir) // all prefixes were checked above
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			spec.item.Denied = true
+		}
+		return
+	}
+	parent := resolvePath(dir)
+	for _, entry := range entries {
+		if env.toolContext().Err() != nil {
+			return
+		}
+		if strings.HasPrefix(entry.Name(), ".") || entry.Type()&(fs.ModeSymlink|fs.ModeSocket|fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeIrregular) != 0 {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		matches := nameMatches(strings.ToLower(entry.Name()), names)
+		// A nonmatching file cannot become a candidate. Avoid resolving and
+		// guarding every source, dependency and media file in large folders.
+		if !entry.IsDir() && !matches {
+			continue
+		}
+		if entry.IsDir() && (isPackage(entry.Name()) || ext == ".download" || ext == ".crdownload" || ext == ".part") {
+			continue
+		}
+		path := filepath.Join(parent, entry.Name())
+		key := strings.ToLower(path)
+		if !safeResolved(key) || env.protectedKey(key) || claims.claimedKey(key) {
+			continue
+		}
+		if entry.IsDir() {
+			// Legacy installer bundles are moved whole; ordinary dmg/xip-named
+			// folders do not qualify and are not traversed.
+			if matches {
+				if (ext == ".pkg" || ext == ".mpkg") && !claims.insideKey(key) {
+					env.collect(path, age, claims, spec)
+				}
+				continue
+			}
+			env.collectRecursiveFiles(path, names, age, claims, spec)
+		} else if matches && entry.Type().IsRegular() {
+			env.collect(path, age, claims, spec)
+		}
+	}
+}
+
 // running reports whether any owner is running.
 func (env junkEnv) running(owners []string) bool {
 	return slices.ContainsFunc(owners, func(id string) bool { return env.guard.running[strings.ToLower(id)] })
@@ -374,9 +437,12 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 					continue
 				}
 				spec.addRoot(*env, root)
-				if target.Mode == matched {
+				switch target.Mode {
+				case matched:
 					env.collect(root, r.MinAge, claims, &spec)
-				} else {
+				case recursiveFiles:
+					env.collectRecursiveFiles(root, target.Names, r.MinAge, claims, &spec)
+				default:
 					env.collectDir(root, target.Names, r.MinAge, claims, &spec)
 				}
 				// Filtered targets own matching entries, not unrelated files in the directory.
@@ -647,9 +713,13 @@ func itemSubs(ctx context.Context, kind detailKind, entries []cleanEntry) []SubI
 	for _, e := range entries {
 		sub := SubItem{Path: e.path, Name: filepath.Base(e.path), Size: e.size, Default: true}
 		switch kind {
-		case detailFiles:
+		case detailFiles, detailInstallers:
 			if info, err := os.Lstat(e.path); err == nil {
 				sub.Detail = info.ModTime().Format("2006-01-02")
+				if kind == detailInstallers {
+					age := max(int64(0), int64(now().Sub(changedAt(info))/(24*time.Hour)))
+					sub.AgeDays = &age
+				}
 			}
 		case detailBackups, detailArchives:
 			out, err := exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(e.path, "Info.plist")).Output()

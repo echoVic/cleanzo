@@ -10,7 +10,7 @@ import { errText, toast } from "../../shared";
 import {
   applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
-import { ListRows, ListToolbar, type ListRowData } from "../list/ListRows";
+import { ListRows, ListToolbar, PathTypeHint, type ListRowData } from "../list/ListRows";
 import { DiskCard } from "./DiskCard";
 import { fullscanApi } from "./api";
 import { barWidth, displayPath, human, topBySize } from "./format";
@@ -38,8 +38,9 @@ export function FullScanPage() {
   const [busy, setBusy] = React.useState(false);
   const [currentPath, setCurrentPath] = React.useState("");
   const [selection, setSelection] = React.useState<ListSelection>(emptySelection());
-  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number } | null>(null);
+  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number; isDir: boolean } | null>(null);
   const [trashBatchOpen, setTrashBatchOpen] = React.useState(false);
+  const [actionErrors, setActionErrors] = React.useState<string[]>([]);
 
   // 异步循环里读最新值，避免闭包捕获旧 state。
   const runRef = React.useRef(0);
@@ -82,6 +83,7 @@ export function FullScanPage() {
     setItems([]);
     setResult(null);
     setError(null);
+    setActionErrors([]);
     setStopped(false);
     setCurrentPath("");
     setSelection(emptySelection());
@@ -210,9 +212,9 @@ export function FullScanPage() {
     void refreshDisk();
   };
 
-  const onTrashRow = (path: string, size: number) => {
+  const onTrashRow = (path: string, size: number, isDir = false) => {
     if (busy || isGone(selection, path)) return;
-    setTrashTarget({ path, size });
+    setTrashTarget({ path, size, isDir });
   };
 
   const doTrashRow = async () => {
@@ -220,11 +222,13 @@ export function FullScanPage() {
     setTrashTarget(null);
     if (!target) return;
     setBusy(true);
+    setActionErrors([]);
     try {
       const res = await fullscanApi.trashPath(target.path);
       toast(t("fs.trash.ok", { path: displayPath(target.path), size: human(res.freed) }));
       applyItemsRemoval([target.path]);
     } catch (e) {
+      setActionErrors([`${displayPath(target.path)} — ${errText(e)}`]);
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
       setBusy(false);
@@ -242,8 +246,13 @@ export function FullScanPage() {
     const paths = pickedPaths(selection);
     if (paths.length === 0) return;
     setBusy(true);
+    setActionErrors([]);
     try {
       const r = await fullscanApi.cleanPaths(paths);
+      setActionErrors(r.failed.map((failure) => {
+        const split = failure.lastIndexOf(": ");
+        return split < 0 ? errText(failure) : `${displayPath(failure.slice(0, split))} — ${errText(failure.slice(split + 2))}`;
+      }));
       const parts: string[] = [];
       if (r.moved > 0) parts.push(t("fs.trashChecked.ok", { n: r.moved, size: human(r.freed) }));
       if (r.inUse > 0) parts.push(t("fs.trashChecked.inUse", { n: r.inUse }));
@@ -254,6 +263,7 @@ export function FullScanPage() {
       );
       applyItemsRemoval(r.removed);
     } catch (e) {
+      setActionErrors([errText(e)]);
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
       setBusy(false);
@@ -286,6 +296,10 @@ export function FullScanPage() {
       </header>
 
       <DiskCard disk={disk} />
+      {actionErrors.length > 0 && <div role="alert" className="err-inline" style={{ padding: 12, overflowWrap: "anywhere" }}>
+        <strong>{t("fs.actionErrors")}</strong>
+        <ul>{actionErrors.map((message, i) => <li key={i}>{message}</li>)}</ul>
+      </div>}
 
       {scanning && (
         <div className="fs-progress" style={{ display: "flex" }}>
@@ -335,7 +349,9 @@ export function FullScanPage() {
             onToggleAll={onToggleAll}
             onTrashChecked={onTrashChecked}
           />
+          <p className="muted small">{t("fs.typeHint")}</p>
           <ListRows
+            typeHints
             rows={rows}
             selection={selection}
             busy={busy}
@@ -356,13 +372,14 @@ export function FullScanPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
-            <DialogDescription>
+            <DialogDescription style={{ overflowWrap: "anywhere" }}>
               {t("fs.trash.body", {
                 path: trashTarget ? displayPath(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}
             </DialogDescription>
           </DialogHeader>
+          {trashTarget && <PathTypeHint path={trashTarget.path} isDir={trashTarget.isDir} />}
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
             <Button variant="destructive" onClick={() => void doTrashRow()}>{t("fs.trash.confirm")}</Button>
