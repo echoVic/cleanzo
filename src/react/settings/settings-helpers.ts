@@ -1,3 +1,4 @@
+import { baseName } from "../../platform";
 import type { Settings } from "../../mygo";
 
 /** 设置页的 6 个扫描分组，顺序与旧原生页一致。 */
@@ -24,7 +25,7 @@ export function nextDisabledGroups(disabledGroups: string[], group: GroupId, che
 
 /** 目录路径的最后一段（自定义目录空名的回退值）。 */
 export function baseNameOf(p: string): string {
-  return p.split("/").filter(Boolean).pop() ?? p;
+  return baseName(p);
 }
 
 /** 名称 trim 后为空时回退为目录 baseName。 */

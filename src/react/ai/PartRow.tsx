@@ -1,3 +1,4 @@
+import { pathSep } from "../../platform";
 import * as React from "react";
 import { ChevronRight, FolderOpen, Lock } from "lucide-react";
 import type { AIPart, AITool } from "../../mygo";
@@ -203,7 +204,7 @@ function Groups({
       )}
       {part.groups.map((g) => {
         const can = !locked && groupSelectable(part, g, windowDays, now);
-        const label = sessions && g.label.startsWith("/") ? displayPath(g.label) : g.label;
+        const label = sessions && (g.label.startsWith(pathSep()) || /^[A-Za-z]:\\/.test(g.label)) ? displayPath(g.label) : g.label;
         const notes = sessions
           ? [
               t("ai.group.sessions", { n: g.count }),

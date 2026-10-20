@@ -1,3 +1,4 @@
+import { shortHome } from "../../platform";
 /** 与 shared.ts 相同的字节展示。 */
 export function human(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -9,5 +10,5 @@ export function human(n: number): string {
 }
 
 export function displayPath(p: string): string {
-  return p.replace(/^\/Users\/[^/]+\//, "~/");
+  return shortHome(p, true);
 }

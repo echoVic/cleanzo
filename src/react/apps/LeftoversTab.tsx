@@ -1,3 +1,4 @@
+import { shortHome, isWindows } from "../../platform";
 import * as React from "react";
 import type { OrphanItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
@@ -134,7 +135,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     path: o.path,
     name: (
       <>
-        {o.path.replace(/^\/Users\/[^/]+/, "~")}
+        {shortHome(o.path)}
         <span className="tag dim"> {kindLabel(o.kind)}</span>
       </>
     ),
@@ -223,7 +224,9 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     setBusy(true);
     try {
       const res = await appsApi.trashPath(target.path);
-      toast(t("fs.trash.ok", { path: target.path.replace(/^\/Users\/[^/]+/, "~/"), size: human(res.freed) }));
+      const path = shortHome(target.path);
+      // 保留旧 macOS toast 的主目录展示。
+      toast(t("fs.trash.ok", { path: !isWindows() && path !== target.path ? path.replace(/^~/, "~/") : path, size: human(res.freed) }));
       applyItemsRemoval([target.path]);
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
@@ -361,7 +364,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
             <DialogDescription>
               {t("fs.trash.body", {
-                path: trashTarget ? trashTarget.path.replace(/^\/Users\/[^/]+/, "~") : "",
+                path: trashTarget ? shortHome(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}
             </DialogDescription>

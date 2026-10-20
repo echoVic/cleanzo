@@ -1,3 +1,4 @@
+import { shortHome } from "../../platform";
 // 全盘扫描页纯展示 / 过滤逻辑：不依赖 DOM / React，可单测。
 import type { BigItem, DiskStat } from "../../mygo";
 
@@ -12,7 +13,7 @@ export function human(n: number): string {
 }
 
 export function displayPath(p: string): string {
-  return p.replace(/^\/Users\/[^/]+\//, "~/");
+  return shortHome(p, true);
 }
 
 /** 旧页固定取占用最大的前 30 个目录。 */

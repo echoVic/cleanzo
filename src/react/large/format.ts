@@ -1,3 +1,4 @@
+import { shortHome } from "../../platform";
 // 大文件页纯展示 / 过滤逻辑：不依赖 DOM / React，可单测。
 import type { LargeFile } from "../../mygo";
 
@@ -12,7 +13,7 @@ export function human(n: number): string {
 }
 
 export function displayPath(p: string): string {
-  return p.replace(/^\/Users\/[^/]+\//, "~/");
+  return shortHome(p, true);
 }
 
 /** 阈值四档：100MB / 500MB / 1GB / 5GB。 */

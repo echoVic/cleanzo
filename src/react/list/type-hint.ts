@@ -1,9 +1,15 @@
+import { baseName, isWindows } from "../../platform";
 // Name-based hints only: never used to decide whether a path may be removed.
 export type PathHintKind = "app" | "installer" | "archive" | "library" | "vm" | "cache" | "temp" | "log" | "config" | "database" | "source" | "media" | "document" | "folder" | "unknown";
 
 export function pathHintKind(path: string, isDir = false): PathHintKind {
-  const name = path.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+  const name = baseName(path).toLowerCase();
   const ext = name.match(/\.[^.]+$/)?.[0] ?? "";
+  if (isWindows()) {
+    if ([".exe", ".lnk"].includes(ext)) return "app";
+    if ([".msi", ".msix", ".iso"].includes(ext)) return "installer";
+    if (ext === ".vhdx") return "vm";
+  }
   if (ext === ".app") return "app";
   if ([".dmg", ".pkg", ".mpkg", ".xip"].includes(ext)) return "installer";
   if ([".photoslibrary", ".photolibrary", ".musiclibrary", ".imovielibrary", ".fcpbundle"].includes(ext)) return "library";

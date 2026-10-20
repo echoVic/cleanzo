@@ -1,3 +1,4 @@
+import { isWithin } from "../../platform";
 // 纯选择逻辑：不依赖 DOM / React，等价于旧 main.ts 里 fullscan/large/orphans/photos
 // 共用的 ListState/toggleRow/toggleChild/pickedPaths/subtractRemovedFromState。
 // 改为不可变：每次切换返回新状态对象，便于 React useState 直接使用。
@@ -20,7 +21,7 @@ export function emptySelection(): ListSelection {
 
 /** path 是否等于 ancestor 或在其内部。 */
 export function under(path: string, ancestor: string): boolean {
-  return path === ancestor || path.startsWith(ancestor + "/");
+  return isWithin(path, ancestor);
 }
 
 /** 删掉「父子都被选中」时重复的子路径，只留根。 */

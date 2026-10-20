@@ -1,3 +1,4 @@
+import { shortHome, baseName } from "./platform";
 import { t, currentLang } from "./i18n";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -67,9 +68,7 @@ const fmtDate = (sec: number) =>
   });
 
 // 主目录缩写。
-const displayPath = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
-
-const baseName = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
+const displayPath = shortHome;
 
 let toastTimer: number | undefined;
 function toast(text: string, kind: "ok" | "err" = "ok") {
