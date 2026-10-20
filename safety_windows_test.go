@@ -526,3 +526,28 @@ func requireTestRecycleCapacity(t *testing.T, path string, required int64) {
 		t.Skip("Recycle Bin is too small for the test without evicting existing entries")
 	}
 }
+
+// TestWindowsTempFolderWithTrailingSeparator plans stale entries in a profile-contained temp root ending in a separator.
+func TestWindowsTempFolderWithTrailingSeparator(t *testing.T) {
+	env := testEnv(t)
+	entry := filepath.Join(env.tmp, "old.log")
+	writeFile(t, entry, 100)
+	env.tmp += `\`
+	saved := now
+	now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
+	defer func() { now = saved }()
+	specs, _ := expandItems(&env)
+	for _, s := range specs {
+		if s.item.ID == "sys.temp" {
+			plan := planItem(context.Background(), s, env, make(chan struct{}, 4), nil)
+			if s.item.Denied || len(plan.entries) != 1 {
+				t.Fatalf("temp item=%+v entries=%+v", s.item, plan.entries)
+			}
+			if !strings.EqualFold(plan.entries[0].path, resolvePath(entry)) {
+				t.Fatalf("planned=%q want %q", plan.entries[0].path, resolvePath(entry))
+			}
+			return
+		}
+	}
+	t.Fatal("no temp item for a profile-contained root with trailing separator")
+}

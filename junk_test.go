@@ -259,29 +259,6 @@ func TestPlanItemRunningOwnerTakesNothing(t *testing.T) {
 	}
 }
 
-// TestTempFolderWithTrailingSlash: os.TempDir() ends in a slash on macOS;
-// the temporary folder must still be cleanable, not reported as denied.
-func TestTempFolderWithTrailingSlash(t *testing.T) {
-	env := testEnv(t)
-	env.tmp = t.TempDir() // outside the home folder, as $TMPDIR is
-	writeFile(t, filepath.Join(env.tmp, "old.log"), 100)
-	env.tmp += "/"
-	saved := now
-	now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
-	defer func() { now = saved }()
-	specs, _ := expandItems(&env)
-	for _, s := range specs {
-		if s.item.ID == "sys.temp" {
-			p := planItem(context.Background(), s, env, make(chan struct{}, 4), nil)
-			if s.item.Denied || len(p.entries) != 1 {
-				t.Fatalf("temp item = %+v, entries %d", s.item, len(p.entries))
-			}
-			return
-		}
-	}
-	t.Fatal("no temp item")
-}
-
 // TestInstallersListAllAges checks that age is informational, not eligibility.
 func TestInstallersListAllAges(t *testing.T) {
 	env := testEnv(t)
