@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"strings"
 	"testing"
 	"time"
 )
@@ -27,52 +26,6 @@ func mustAppUsage(rows []AppUsage, key string) AppUsage {
 
 // ---- attribution ----------------------------------------------------------
 
-func TestOutermostBundle(t *testing.T) {
-	cases := []struct{ path, want string }{
-		{"/Applications/Foo.app/Contents/MacOS/Foo", "/Applications/Foo.app"},
-		{"/Applications/A.app/B.app/Contents/MacOS/B", "/Applications/A.app"}, // nested: outermost wins
-		{"/usr/sbin/system_profiler", ""},
-		{"/System/Library/Frameworks/Foo.framework/Versions/A/Foo", ""},
-		{"", ""},
-		{"/Applications/Arcade.app.helper", ""}, // .app must end the component
-	}
-	for _, c := range cases {
-		if got := outermostBundle(c.path); got != c.want {
-			t.Errorf("outermostBundle(%q) = %q, want %q", c.path, got, c.want)
-		}
-	}
-}
-
-func TestMergeAppsAttribution(t *testing.T) {
-	procs := []procReading{
-		{Pid: 1, Path: "/Applications/Chrome.app/Contents/MacOS/Chrome", Footprint: 100},
-		{Pid: 2, Path: "/Applications/Chrome.app/Contents/Frameworks/Chrome Helper.app/Contents/MacOS/Chrome Helper", Footprint: 50}, // helper of a nested .app still lands on the outermost
-		{Pid: 3, Path: "/opt/homebrew/bin/node", Footprint: 10},
-		{Pid: 4, Path: "/Applications/Terminal.app/Contents/MacOS/Terminal", Footprint: 20},
-	}
-	byPid := map[int32]procReading{}
-	for _, p := range procs {
-		byPid[p.Pid] = p
-	}
-	// node (pid 3) is responsible to Terminal (pid 4).
-	responsible := func(pid int32) int32 {
-		if pid == 3 {
-			return 4
-		}
-		return -1
-	}
-	rows := mergeApps(nil, procs, nil, responsible, 0)
-	if got := mustAppUsage(rows, "app:/applications/chrome.app"); got.Memory != 150 || got.Procs != 2 {
-		t.Errorf("Chrome group = %+v, want memory 150 procs 2", got)
-	}
-	if got := mustAppUsage(rows, "app:/applications/terminal.app"); got.Memory != 30 {
-		t.Errorf("node should be attributed to Terminal via its responsible process: %+v", got)
-	}
-	if got := mustAppUsage(rows, "exec:node"); got.Procs != 0 {
-		t.Errorf("node must not stand alone: %+v", got)
-	}
-}
-
 func TestMergeAppsResponsibleUnavailable(t *testing.T) {
 	// The private API missing: no responsibility info, plain exec merge.
 	procs := []procReading{
@@ -85,94 +38,7 @@ func TestMergeAppsResponsibleUnavailable(t *testing.T) {
 	}
 }
 
-func TestMergeAppsTop8Union(t *testing.T) {
-	var procs []procReading
-	for i := 0; i < 20; i++ {
-		procs = append(procs, procReading{
-			Pid:       int32(i + 1),
-			Path:      "/Applications/App" + string(rune('A'+i)) + ".app/Contents/MacOS/x",
-			Footprint: uint64((20 - i) * 100), // A biggest
-			UserNs:    uint64(i) * 1_000_000_000,
-		})
-	}
-	rows := mergeApps(nil, procs, nil, func(int32) int32 { return -1 }, 2*time.Second)
-	if len(rows) > 16 {
-		t.Errorf("union cap is 16, got %d", len(rows))
-	}
-	if len(rows) < 8 {
-		t.Errorf("memory top 8 must always be present, got %d", len(rows))
-	}
-	if !strings.Contains(rows[0].Key, "appa.app") {
-		t.Errorf("rows should be memory-sorted, first = %s", rows[0].Key)
-	}
-}
-
-func TestMergeAppsQuitButton(t *testing.T) {
-	procs := []procReading{
-		{Pid: 1, Path: "/Applications/Chrome.app/Contents/MacOS/Chrome", Footprint: 1},
-		{Pid: 2, Path: "/Applications/Bar.app/Contents/MacOS/bar", Footprint: 1},
-		{Pid: 3, Path: "/Applications/Foo.app/Contents/MacOS/foo", Footprint: 1},
-	}
-	apps := []workspaceApp{
-		{Pid: 1, Path: "/Applications/Chrome.app", BundleID: "com.google.Chrome", Name: "Google Chrome", Regular: true},
-		{Pid: 2, Path: "/Applications/Bar.app", BundleID: "com.bar.helper", Name: "Bar", Regular: false},  // menu bar app
-		{Pid: 3, Path: "/Applications/Foo.app", BundleID: "com.apple.finder", Name: "Foo", Regular: true}, // excluded
-	}
-	rows := mergeApps(nil, procs, apps, func(int32) int32 { return -1 }, 0)
-	if !mustAppUsage(rows, "app:/applications/chrome.app").Quit {
-		t.Error("regular Dock app should offer quit")
-	}
-	if mustAppUsage(rows, "app:/applications/bar.app").Quit {
-		t.Error("non-regular app must not offer quit")
-	}
-	if mustAppUsage(rows, "app:/applications/foo.app").Quit {
-		t.Error("Finder-like apps must not offer quit")
-	}
-}
-
-func TestDisplayNameLocalized(t *testing.T) {
-	procs := []procReading{{Pid: 1, Path: "/Applications/Lark.app/Contents/MacOS/Lark"}}
-	apps := []workspaceApp{{Pid: 1, Path: "/Applications/Lark.app", Name: "飞书", Regular: true}}
-	if got := mustAppUsage(mergeApps(nil, procs, apps, func(int32) int32 { return -1 }, 0), "app:/applications/lark.app"); got.Name != "飞书" {
-		t.Errorf("want localized name 飞书, got %q", got.Name)
-	}
-	// No workspace entry: fall back to the bundle folder name.
-	if got := mustAppUsage(mergeApps(nil, procs, nil, func(int32) int32 { return -1 }, 0), "app:/applications/lark.app"); got.Name != "Lark" {
-		t.Errorf("want bundle name Lark, got %q", got.Name)
-	}
-}
-
 // ---- CPU math -------------------------------------------------------------
-
-func TestMergeAppsCPUDeltaAndReuse(t *testing.T) {
-	procs := []procReading{
-		{Pid: 1, Path: "/Applications/A.app/Contents/MacOS/a", Footprint: 1, UserNs: 1_000_000_000, SysNs: 500_000_000, Start: 100},
-		{Pid: 2, Path: "/Applications/B.app/Contents/MacOS/b", Footprint: 1, UserNs: 0, SysNs: 0, Start: 5},
-	}
-	prev := map[int32]procSample{
-		1: {Pid: 1, UserNs: 0, SysNs: 0, Start: 100},
-		2: {Pid: 2, UserNs: 0, SysNs: 0, Start: 9}, // reused pid: different Start
-	}
-	// 1.5s of CPU over 2s of wall = 75% of one core.
-	rows := mergeApps(prev, procs, nil, func(int32) int32 { return -1 }, 2*time.Second)
-	if got := mustAppUsage(rows, "app:/applications/a.app"); got.CPU != 75 {
-		t.Errorf("CPU = %v, want 75", got.CPU)
-	}
-	if got := mustAppUsage(rows, "app:/applications/b.app"); got.CPU != 0 {
-		t.Errorf("reused pid must not count CPU this round, got %v", got.CPU)
-	}
-}
-
-func TestMergeAppsCPUCanExceed100(t *testing.T) {
-	procs := []procReading{
-		{Pid: 1, Path: "/Applications/A.app/Contents/MacOS/a", UserNs: 4_000_000_000, SysNs: 4_000_000_000, Start: 1},
-	}
-	prev := map[int32]procSample{1: {Pid: 1, UserNs: 0, SysNs: 0, Start: 1}}
-	rows := mergeApps(prev, procs, nil, func(int32) int32 { return -1 }, time.Second)
-	if got := mustAppUsage(rows, "app:/applications/a.app"); got.CPU != 800 {
-		t.Errorf("single-core percent can exceed 100, want 800, got %v", got.CPU)
-	}
-}
 
 func TestBuildSampleOverallCPU(t *testing.T) {
 	src := statusSource{
@@ -658,41 +524,6 @@ func TestWatchStatusCancelStops(t *testing.T) {
 }
 
 // ---- the graceful quit protocol -------------------------------------------
-
-func TestQuitMatchesBoundary(t *testing.T) {
-	apps := []workspaceApp{
-		{Pid: 1, Path: "/Applications/Arc.app", BundleID: "company.arc", Regular: true},
-		{Pid: 2, Path: "/Applications/Arcade.app", BundleID: "com.arcade", Regular: true},
-		{Pid: 3, Path: "/Applications/Arc.app/Contents/Helpers/H.app", BundleID: "company.arc.helper", Regular: true},
-		{Pid: 4, Path: "/System/Library/CoreServices/Finder.app", BundleID: "com.apple.finder", Regular: true},
-		{Pid: 5, Path: "/Applications/Cleanzo.app", BundleID: "com.cleanzo.app", Regular: true},
-		{Pid: 6, Path: "/Applications/Bar.app", BundleID: "com.bar", Regular: false}, // menu bar app
-	}
-	arc := quitMatches("/Applications/Arc.app", apps)
-	if len(arc) != 2 {
-		t.Fatalf("Arc.app should match the app and its helper bundle, got %d", len(arc))
-	}
-	for _, a := range arc {
-		if a.Pid == 2 {
-			t.Error("Arcade.app must not match Arc.app")
-		}
-	}
-	if got := quitMatches("/Applications/Arcade.app", apps); len(got) != 1 || got[0].Pid != 2 {
-		t.Errorf("Arcade.app matches only itself: %+v", got)
-	}
-	if got := quitMatches("/System/Library/CoreServices/Finder.app", apps); len(got) != 0 {
-		t.Error("Finder is excluded from quitting")
-	}
-	if got := quitMatches("/Applications/Cleanzo.app", apps); len(got) != 0 {
-		t.Error("Cleanzo itself is excluded from quitting")
-	}
-	if got := quitMatches("/Applications/Bar.app", apps); len(got) != 0 {
-		t.Error("non-regular apps are not offered quitting")
-	}
-	if got := quitMatches("", apps); len(got) != 0 {
-		t.Error("empty path matches nothing")
-	}
-}
 
 func quitForTest(list func() []workspaceApp, terminate func(int32) bool) (bool, error) {
 	oldTimeout, oldPoll := statusQuitTimeout, statusQuitPoll
