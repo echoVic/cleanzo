@@ -593,4 +593,9 @@
 
 ## Probe results
 
-_To be filled in by the reviewer after Run A's first CI run: WebView2 Runtime present on windows-latest (yes/no), CDP on :9222 reachable (yes/no), screenshot notes._
+Recorded from CI runs 39455926127 and 39456996147 (2026-10-20, windows-latest, Windows build 26100):
+
+- **WebView2 Runtime:** present, version 154.0.4258.62. No install step is needed in CI.
+- **CDP on :9222:** unreachable. mygo creates the environment without WebView2Loader.dll, so `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` is not honoured. **Task 22 uses the env-gated `CapturePage` smoke mode, not Playwright.**
+- **Screenshot:** the debug build installs silently with `/S`, launches, and renders the sidebar and System Status page in English. Readings are empty because the status stubs fail closed. The desktop is 1024×768.
+- **macOS job:** hosted runners have no swap, so `TestNativeSysctlRawProbes` is skipped there with `-skip`.
