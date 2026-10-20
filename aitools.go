@@ -218,6 +218,9 @@ func aiCommandRunning(out string, tool aiTool, windows bool) bool {
 		patterns = append(append([]string(nil), patterns...), "/"+tool.ID+".exe", tool.ID+".exe ") // slash-ok: Windows command lines are normalized to forward slashes
 	}
 	for _, line := range strings.Split(out, "\n") {
+		if windows && tool.ID == "claude" && windowsClaudeDesktop(line, os.Getenv("LOCALAPPDATA")) && !strings.Contains(line, "@anthropic-ai/claude-code/") {
+			continue
+		}
 		line += "\n"
 		if slices.ContainsFunc(patterns, func(p string) bool {
 			return strings.Contains(line, p) || strings.HasPrefix(line, strings.TrimLeft(p, "/"))
@@ -886,4 +889,40 @@ func displayHome(p string) string {
 		return p
 	}
 	return shortHome(p)
+}
+
+// windowsClaudeDesktop recognizes the versioned Squirrel install, leaving unknown Claude binaries conservative.
+func windowsClaudeDesktop(command, localAppData string) bool {
+	root := strings.ToLower(strings.ReplaceAll(localAppData, `\`, "/"))
+	if !windowsLocalPath(root) {
+		return false
+	}
+	exe, after, ok := strings.Cut(command, ".exe")
+	if !ok || after != "" && !strings.ContainsAny(after[:1], " \"\t\r\n") {
+		return false
+	}
+	exe = strings.TrimPrefix(strings.TrimSpace(exe), `"`)
+	prefix := strings.TrimRight(root, "/") + "/anthropicclaude/app-"
+	if !strings.HasPrefix(exe, prefix) {
+		return false
+	}
+	version, name, found := strings.Cut(strings.TrimPrefix(exe, prefix), "/")
+	if !found || name != "claude" {
+		return false
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) < 3 || len(parts) > 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, digit := range part {
+			if digit < '0' || digit > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }

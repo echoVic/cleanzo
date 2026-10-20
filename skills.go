@@ -850,7 +850,7 @@ func sqliteTool() string {
 var opencodeQuery = func(ctx context.Context, db, query string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db, query).Output()
+	return quietCommand(exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db, query)).Output()
 }
 
 // opencodeSkillUsage reads OpenCode's database: the skill tool's calls and

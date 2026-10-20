@@ -107,7 +107,7 @@ func init() {
 
 // skillGitCommand runs git; tests replace it.
 var skillGitCommand = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := quietCommand(exec.CommandContext(ctx, "git", args...))
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	return cmd.CombinedOutput()
@@ -140,7 +140,12 @@ func gitTreeHash(dir string, recorded ...map[string]string) (string, error) {
 			modes = recorded[0]
 		}
 	}
-	h, empty, err := gitTreeWithModes(dir, dir, modes, runtime.GOOS == "windows")
+	return skillTreeHashWithModes(dir, modes, runtime.GOOS == "windows")
+}
+
+// skillTreeHashWithModes hashes source-recorded modes independently of the host filesystem.
+func skillTreeHashWithModes(dir string, modes map[string]string, windows bool) (string, error) {
+	h, empty, err := gitTreeWithModes(dir, dir, modes, windows)
 	if err != nil {
 		return "", err
 	}
@@ -310,8 +315,8 @@ func loadSkillLock() map[string]SkillOrigin {
 var ccSwitchQuery = func(ctx context.Context, db string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db,
-		"select directory, repo_owner, repo_name, repo_branch, readme_url from skills where repo_owner != '' and repo_name != ''").Output()
+	return quietCommand(exec.CommandContext(ctx, sqliteTool(), "-readonly", "-json", db,
+		"select directory, repo_owner, repo_name, repo_branch, readme_url from skills where repo_owner != '' and repo_name != ''")).Output()
 }
 
 var readmeURL = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)$`)
@@ -443,6 +448,7 @@ func skillOrigins(ctx context.Context, skills []Skill) map[string]SkillOrigin {
 // githubTree is one repository tree listing, cached for a check.
 type githubTree struct {
 	sha   map[string]string // folder path -> tree hash; "" is the root
+	modes map[string]string // source file path -> recorded Git mode
 	err   error
 	ready chan struct{}
 }
@@ -460,13 +466,31 @@ func (tc *treeCache) get(ctx context.Context, repo, ref string) (map[string]stri
 		t = &githubTree{ready: make(chan struct{})}
 		tc.trees[key] = t
 		tc.mu.Unlock()
-		t.sha, t.err = fetchGitHubTree(ctx, repo, ref)
+		t.sha, t.modes, t.err = fetchGitHubTree(ctx, repo, ref)
 		close(t.ready)
 	} else {
 		tc.mu.Unlock()
 		<-t.ready
 	}
 	return t.sha, t.err
+}
+
+// sourceModes makes skill-relative copies of an already fetched repository's file modes.
+func (tc *treeCache) sourceModes(o SkillOrigin) map[string]string {
+	tc.mu.Lock()
+	source := tc.trees[o.Repo+"@"+o.Ref]
+	tc.mu.Unlock()
+	modes := map[string]string{}
+	prefix := strings.Trim(o.Path, "/")
+	if prefix != "" {
+		prefix += "/"
+	}
+	for name, mode := range source.modes {
+		if strings.HasPrefix(name, prefix) {
+			modes[strings.TrimPrefix(name, prefix)] = mode
+		}
+	}
+	return modes
 }
 
 func githubRequest(ctx context.Context, u string) (*http.Response, error) {
@@ -483,23 +507,23 @@ func githubRequest(ctx context.Context, u string) (*http.Response, error) {
 }
 
 // fetchGitHubTree lists a repository's folders and their tree hashes.
-func fetchGitHubTree(ctx context.Context, repo, ref string) (map[string]string, error) {
+func fetchGitHubTree(ctx context.Context, repo, ref string) (map[string]string, map[string]string, error) {
 	if ref == "" {
 		ref = "HEAD"
 	}
 	u := fmt.Sprintf("%s/repos/%s/git/trees/%s?recursive=1", skillGitHubAPI, repo, url.PathEscape(ref))
 	resp, err := githubRequest(ctx, u)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, errSkillNotFound
+		return nil, nil, errSkillNotFound
 	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
-		return nil, errSkillRate
+		return nil, nil, errSkillRate
 	case resp.StatusCode != http.StatusOK:
-		return nil, fmt.Errorf("github %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("github %d", resp.StatusCode)
 	}
 	var body struct {
 		SHA  string `json:"sha"`
@@ -507,22 +531,26 @@ func fetchGitHubTree(ctx context.Context, repo, ref string) (map[string]string, 
 			Path string `json:"path"`
 			Type string `json:"type"`
 			SHA  string `json:"sha"`
+			Mode string `json:"mode"`
 		} `json:"tree"`
 		Truncated bool `json:"truncated"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&body); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string]string{"": body.SHA}
+	modes := map[string]string{}
 	for _, e := range body.Tree {
 		if e.Type == "tree" {
 			out[e.Path] = e.SHA
+		} else if e.Type == "blob" && (e.Mode == "100644" || e.Mode == "100755") {
+			modes[e.Path] = e.Mode
 		}
 	}
 	if body.Truncated {
 		out["\x00truncated"] = "1"
 	}
-	return out, nil
+	return out, modes, nil
 }
 
 // CheckSkillUpdates compares the skills that have an origin with their
@@ -579,20 +607,67 @@ func checkSkillUpdates(ctx context.Context, skills []Skill, online bool) []Skill
 }
 
 func checkOne(ctx context.Context, folder, name string, o SkillOrigin, cache *treeCache, online bool, now int64) SkillUpdate {
+	return checkOneForPlatform(ctx, folder, name, o, cache, online, now, runtime.GOOS == "windows")
+}
+
+// checkOneForPlatform applies source modes on Windows while preserving Darwin checks.
+func checkOneForPlatform(ctx context.Context, folder, name string, o SkillOrigin, cache *treeCache, online bool, now int64, windows bool) SkillUpdate {
 	u := SkillUpdate{Path: folder, Name: name, Origin: o, Status: "unknown"}
-	var modes []map[string]string
-	if runtime.GOOS == "windows" && o.Kind == originGit {
-		recorded, err := skillIndexModes(ctx, folder)
+	var modes map[string]string
+	var tree map[string]string
+	if windows {
+		modes = loadSkillRecords()[resolvePath(folder)].Modes
+		if o.Kind == originGit {
+			recorded, err := skillIndexModes(ctx, folder)
+			if err != nil {
+				u.Status, u.Error = "error", err.Error()
+				return u
+			}
+			modes = recorded
+		} else if o.Repo != "" && online {
+			var err error
+			tree, err = cache.get(ctx, o.Repo, o.Ref)
+			if err != nil {
+				u.Status, u.Error = "error", err.Error()
+				return u
+			}
+			if tree["\x00truncated"] != "" {
+				u.Status, u.Error = "error", "truncated"
+				return u
+			}
+			sourceModes := cache.sourceModes(o)
+			for name, mode := range modes {
+				sourceModes[name] = mode
+			}
+			modes = sourceModes
+		} else if o.Repo != "" && modes == nil {
+			// Offline origins remain unknown until source modes can be checked.
+			return u
+		}
+	}
+	local, err := skillTreeHashWithModes(folder, modes, windows)
+	if err != nil {
+		u.Status, u.Error = "error", err.Error()
+		return u
+	}
+	// A branch can change modes or remove executable files after installation.
+	// Recheck a mismatching known version against its immutable subtree, not today's modes.
+	if windows && online && o.Repo != "" && o.Kind != originGit && o.Tree != "" && local != o.Tree && loadSkillRecords()[resolvePath(folder)].Modes == nil {
+		installed, sourceErr := cache.get(ctx, o.Repo, o.Tree)
+		if sourceErr != nil {
+			u.Status, u.Error = "error", sourceErr.Error()
+			return u
+		}
+		if installed["\x00truncated"] != "" {
+			u.Status, u.Error = "error", "truncated"
+			return u
+		}
+		modes = cache.sourceModes(SkillOrigin{Repo: o.Repo, Ref: o.Tree})
+		local, err = skillTreeHashWithModes(folder, modes, true)
 		if err != nil {
 			u.Status, u.Error = "error", err.Error()
 			return u
 		}
-		modes = append(modes, recorded)
-	}
-	local, err := gitTreeHash(folder, modes...)
-	if err != nil {
-		u.Status, u.Error = "error", err.Error()
-		return u
 	}
 	u.Local = local
 	if o.Tree != "" {
@@ -608,10 +683,12 @@ func checkOne(ctx context.Context, folder, name string, o SkillOrigin, cache *tr
 	if o.Repo == "" {
 		return u
 	}
-	tree, err := cache.get(ctx, o.Repo, o.Ref)
-	if err != nil {
-		u.Status, u.Error = "error", err.Error()
-		return u
+	if tree == nil {
+		tree, err = cache.get(ctx, o.Repo, o.Ref)
+		if err != nil {
+			u.Status, u.Error = "error", err.Error()
+			return u
+		}
 	}
 	remote, ok := tree[o.Path]
 	if !ok {
@@ -976,6 +1053,9 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 // to folder first, then folder goes to the Trash and the copy takes its
 // name. If the Trash fails, folder stays as it was.
 func swapSkillFolder(folder, src string) error {
+	if runtime.GOOS == "windows" {
+		return swapWindowsSkillFolder(folder, src)
+	}
 	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
 	os.RemoveAll(staging)
 	if err := copyTree(src, staging); err != nil {
@@ -987,6 +1067,51 @@ func swapSkillFolder(folder, src string) error {
 		return err
 	}
 	return os.Rename(staging, folder)
+}
+
+// skillRename permits deterministic Windows sharing failures during transactional replacement.
+var skillRename = os.Rename
+
+// swapWindowsSkillFolder keeps the old copy beside the skill until the replacement is installed.
+func swapWindowsSkillFolder(folder, src string) error {
+	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
+	os.RemoveAll(staging)
+	if err := copyTree(src, staging); err != nil {
+		os.RemoveAll(staging)
+		return err
+	}
+	backupRoot, err := os.MkdirTemp(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-old-")
+	if err != nil {
+		os.RemoveAll(staging)
+		return err
+	}
+	backup := filepath.Join(backupRoot, filepath.Base(folder))
+	if err := skillRename(folder, backup); err != nil {
+		os.RemoveAll(staging)
+		os.Remove(backupRoot)
+		return err
+	}
+	if err := skillRename(staging, folder); err != nil {
+		restoreErr := skillRename(backup, folder)
+		if restoreErr == nil {
+			os.RemoveAll(staging)
+			os.Remove(backupRoot)
+		}
+		return errors.Join(err, restoreErr)
+	}
+	if err := trashItem(backup); err != nil {
+		if rollbackErr := skillRename(folder, staging); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		restoreErr := skillRename(backup, folder)
+		if restoreErr == nil {
+			os.RemoveAll(staging)
+			os.Remove(backupRoot)
+		}
+		return errors.Join(err, restoreErr)
+	}
+	os.Remove(backupRoot)
+	return nil
 }
 
 // copyTree copies a folder, keeping links as links and the executable bit.

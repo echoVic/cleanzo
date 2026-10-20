@@ -37,7 +37,7 @@ func buildAppIndex(dirs []string) *appIndex {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out, err := exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(p, "Contents", "Info.plist")).Output()
+			out, err := quietCommand(exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(p, "Contents", "Info.plist"))).Output()
 			if err == nil {
 				metadata[i] = plistStrings(out)
 			}

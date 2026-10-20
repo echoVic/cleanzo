@@ -4,7 +4,7 @@ import "time"
 
 // windowsJunkRules claims explicit caches before generic Electron app caches.
 var windowsJunkRules = []Rule{
-	{ID: "review.installers", Group: groupReview, Trash: true, Detail: detailInstallers, Targets: windowsInstallerTargets()},
+	{ID: "review.installers", Group: groupReview, Trash: true, Detail: detailInstallers, ExcludeNames: []string{"*unins*"}, Targets: windowsInstallerTargets()},
 	{ID: "review.partial-downloads", Group: groupReview, Trash: true, Detail: detailFiles, MinAge: 24 * time.Hour,
 		Targets: []Target{{Pattern: "~/Downloads", Mode: entriesOf, Names: []string{"*.crdownload", "*.part", "*.partial"}}}},
 	{ID: "browser.chrome", Group: groupBrowsers, Default: true, Owners: []string{"chrome"}, Targets: windowsChromiumCaches("$LOCALAPPDATA/Google/Chrome/User Data/*")},
@@ -40,7 +40,7 @@ var windowsJunkRules = []Rule{
 	{ID: "dev.nuget", Group: groupDev, Default: true, Targets: []Target{{Pattern: "$LOCALAPPDATA/NuGet/v3-cache", Mode: entriesOf}}},
 	{ID: "sys.crashdumps", Group: groupSystem, Default: true, Detail: detailCrashpad, Contents: true, Targets: []Target{
 		{Pattern: "$LOCALAPPDATA/*/Crashpad", Mode: matched}, {Pattern: "$LOCALAPPDATA/*/*/Crashpad", Mode: matched},
-		{Pattern: "$LOCALAPPDATA/*/User Data/Crashpad", Mode: matched}, {Pattern: "$LOCALAPPDATA/*/*/User Data/Crashpad", Mode: matched},
+		{Pattern: "$LOCALAPPDATA/*/*/User Data/Crashpad", Mode: matched},
 		{Pattern: "$APPDATA/*/Crashpad", Mode: matched}}},
 	{ID: "sys.wer", Group: groupSystem, Default: true, Targets: []Target{
 		{Pattern: "$LOCALAPPDATA/Microsoft/Windows/WER/ReportArchive", Mode: entriesOf},

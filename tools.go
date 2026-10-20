@@ -55,7 +55,7 @@ var goModCleanup = toolCommand{
 // windowsPnpmPrune uses native Windows executable and script command names.
 var windowsPnpmPrune = func() toolCommand {
 	c := pnpmPrune
-	c.Busy = []string{"/pnpm.exe", "/pnpm.cmd", "pnpm.cjs", "pnpm.mjs"}
+	c.Busy = []string{"/pnpm.exe", "/pnpm.cmd", "pnpm.cjs", "pnpm.mjs", "corepack/dist/pnpm.js", "/pnpm.js"}
 	return c
 }()
 
@@ -126,7 +126,7 @@ func commandBusy(out string, patterns []string, windows bool) bool {
 func runTool(ctx context.Context, tool string, args []string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, tool, args...)
+	cmd := quietCommand(exec.CommandContext(ctx, tool, args...))
 	cmd.Env = append(os.Environ(), toolPath(tool))
 	if filepath.Base(tool) == "brew" {
 		cmd.Env = append(cmd.Env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1")

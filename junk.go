@@ -507,6 +507,9 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 				}
 			}
 		}
+		if len(r.ExcludeNames) > 0 {
+			spec.cands = slices.DeleteFunc(spec.cands, func(c junkCand) bool { return nameMatches(strings.ToLower(filepath.Base(c.path)), r.ExcludeNames) })
+		}
 		for _, c := range spec.cands {
 			claims.claim(c.path)
 		}
@@ -583,6 +586,14 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 	}
 	if env.windowsLayout {
 		for _, root := range env.globTargets("$APPDATA/*") {
+			marker := filepath.Join(root, "Local State")
+			if env.traversalBlocked(marker) {
+				continue
+			}
+			info, err := env.stat(marker)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
 			for _, dir := range chromiumCacheDirs {
 				addApp(filepath.Base(root), filepath.Join(root, dir), false)
 			}
@@ -814,7 +825,7 @@ func itemSubs(ctx context.Context, kind detailKind, entries []cleanEntry) []SubI
 				}
 			}
 		case detailBackups, detailArchives:
-			out, err := exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(e.path, "Info.plist")).Output()
+			out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(e.path, "Info.plist"))).Output()
 			if err == nil {
 				values := plistValues(out)
 				nameKey, dateKey := "Device Name", "Last Backup Date"
@@ -1263,11 +1274,19 @@ func (env junkEnv) traversalBlocked(path string) bool {
 	root := ""
 	switch {
 	case within(abs, envHome):
-		root, abs = home, filepath.Join(home, strings.TrimPrefix(abs, envHome))
+		suffix := strings.TrimPrefix(abs, envHome)
+		if runtime.GOOS == "windows" {
+			suffix = abs[len(envHome):]
+		}
+		root, abs = home, filepath.Join(home, suffix)
 	case within(abs, home):
 		root = home
 	case within(abs, envTmp):
-		root, abs = tmp, filepath.Join(tmp, strings.TrimPrefix(abs, envTmp))
+		suffix := strings.TrimPrefix(abs, envTmp)
+		if runtime.GOOS == "windows" {
+			suffix = abs[len(envTmp):]
+		}
+		root, abs = tmp, filepath.Join(tmp, suffix)
 	case within(abs, tmp):
 		root = tmp
 	default:

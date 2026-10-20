@@ -60,6 +60,7 @@ type Rule struct {
 	MinAge         time.Duration
 	Detail         detailKind
 	Command        *toolCommand
+	ExcludeNames   []string // case-insensitive filename patterns never offered by this rule
 	Reserve        []string // folders the rule cleans only in part; no other item takes the rest
 	// Contents empties the report queues inside each matched Crashpad folder
 	// and keeps the folders and settings.dat: the app's crash handler keeps

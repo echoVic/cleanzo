@@ -403,7 +403,7 @@ func (Cleaner) OpenFullDiskAccessSettings() error {
 	if runtime.GOOS == "windows" {
 		return errUnsupported
 	}
-	return exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Run()
+	return quietCommand(exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")).Run()
 }
 
 // Info returns basic system information, including the About This Mac
@@ -492,7 +492,7 @@ func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 func readBundleInfo(plistPath string) (name, bid, version string) {
 	// XML rather than JSON: Info.plist files may hold <date> and <data>
 	// values, which JSON cannot represent, and plutil then fails outright.
-	out, err := exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", plistPath).Output()
+	out, err := quietCommand(exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", plistPath)).Output()
 	if err != nil {
 		return "", "", ""
 	}
@@ -547,7 +547,7 @@ func plistValues(data []byte) map[string]string {
 
 // lastOpened returns the last-used unix time from Spotlight metadata.
 func lastOpened(appPath string) int64 {
-	out, err := exec.Command("/usr/bin/mdls", "-name", "kMDItemLastUsedDate", "-raw", appPath).Output()
+	out, err := quietCommand(exec.Command("/usr/bin/mdls", "-name", "kMDItemLastUsedDate", "-raw", appPath)).Output()
 	if err != nil {
 		return 0
 	}
@@ -1053,7 +1053,7 @@ func trashable(path string) bool {
 func duSize(ctx context.Context, path string, timeout time.Duration) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/du", "-skx", path).Output()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/du", "-skx", path)).Output()
 	if err != nil && !partialRun(ctx, err) {
 		return 0, err
 	}
@@ -1211,7 +1211,7 @@ func findLargeFiles(ctx context.Context, root string, threshold int64) ([]LargeF
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	kb := (threshold - 1) / 1024
-	out, err := exec.CommandContext(ctx, "/usr/bin/find", "-x", root, "-type", "f", "-size", fmt.Sprintf("+%dk", kb), "-print0").Output()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/find", "-x", root, "-type", "f", "-size", fmt.Sprintf("+%dk", kb), "-print0")).Output()
 	if err != nil && !partialRun(ctx, err) {
 		return nil, err
 	}
@@ -1536,7 +1536,7 @@ func (Cleaner) RevealInFinder(path string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/open", args...)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("open failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -1579,7 +1579,7 @@ func (Cleaner) PhotoPreview(path string) (string, error) {
 	defer os.Remove(tmp.Name())
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "/usr/bin/sips", "-Z", "1600", "-s", "format", "jpeg", path, "--out", tmp.Name()).CombinedOutput(); err != nil {
+	if out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/sips", "-Z", "1600", "-s", "format", "jpeg", path, "--out", tmp.Name())).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	data, err := os.ReadFile(tmp.Name())
@@ -1692,7 +1692,7 @@ func decodeSmallCopy(ctx context.Context, path string, shrink bool) (image.Image
 	if shrink {
 		args = append([]string{"-Z", strconv.Itoa(photoDecodeEdge)}, args...)
 	}
-	if out, err := exec.CommandContext(ctx, "/usr/bin/sips", args...).CombinedOutput(); err != nil {
+	if out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/sips", args...)).CombinedOutput(); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -1708,7 +1708,7 @@ func decodeSmallCopy(ctx context.Context, path string, shrink bool) (image.Image
 func sipsSize(ctx context.Context, path string) (w, h int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", path).Output()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", path)).Output()
 	if err != nil {
 		return 0, 0, fmt.Errorf("sips: %v", err)
 	}

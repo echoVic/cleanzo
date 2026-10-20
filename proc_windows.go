@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -35,7 +34,7 @@ var psCommands = func() ([]byte, error) {
 	}
 	var lines []string
 	for _, p := range procs {
-		lines = append(lines, p.CmdLine)
+		lines = append(lines, p.Exe+" "+p.CmdLine)
 	}
 	return []byte(strings.Join(lines, "\n")), nil
 }
@@ -72,8 +71,11 @@ func toolPath(tool string) string {
 	if node := findTool("node"); node != "" {
 		dirs = append(dirs, filepath.Dir(node))
 	}
-	root := os.Getenv("SystemRoot")
-	return "PATH=" + strings.Join(append(dirs, filepath.Join(root, "System32"), root), ";")
+	systemDir, err := windows.GetSystemDirectory()
+	if err == nil {
+		dirs = append(dirs, systemDir, filepath.Dir(systemDir))
+	}
+	return "PATH=" + strings.Join(dirs, ";")
 }
 
 // resumeTool opens the suspended primary thread after its process has joined the job.
@@ -112,7 +114,8 @@ func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
 	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		return nil, err
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_SUSPENDED}
+	quietCommand(cmd)
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 	if ext := strings.ToLower(filepath.Ext(cmd.Path)); ext == ".cmd" || ext == ".bat" {
 		// Official arguments are fixed; refuse expansion syntax in batch paths and arguments.
 		if strings.ContainsAny(cmd.Path, "%!\"\r\n") {
@@ -125,7 +128,11 @@ func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
 			}
 			command += ` "` + arg + `"`
 		}
-		cmd.Path = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+		systemDir, err := windows.GetSystemDirectory()
+		if err != nil {
+			return nil, errBlocked
+		}
+		cmd.Path = filepath.Join(systemDir, "cmd.exe")
 		cmd.SysProcAttr.CmdLine = `"` + cmd.Path + `" /d /s /c "` + command + `"`
 	}
 	cmd.Cancel = func() error { mu.Lock(); defer mu.Unlock(); return windows.TerminateJobObject(job, 1) }
