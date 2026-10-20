@@ -1,13 +1,25 @@
 # Cleanzo
 
-一个 **macOS 深度清理工具**：按规则扫描这台 Mac 上的垃圾，逐项查看和选择后清理；还能分析磁盘空间、整理大文件和相似照片、卸载应用及清理残留。
+一个 **macOS / Windows 清理工具**：按规则扫描本机的垃圾，逐项查看和选择后清理；还能分析磁盘空间、整理大文件和相似照片、卸载应用及清理残留。
 原生 Go 桌面应用，单二进制约 8 MB。
 
 ## 下载
 
 在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载已签名、经苹果公证的 dmg，打开后把 Cleanzo 拖进「应用程序」。需要 macOS 12 或更高版本，目前只支持 Apple 芯片（M 系列）的 Mac。
 
+## Windows
+
+支持 Windows 10/11 x64。在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载 `Cleanzo Setup <v> amd64.exe` 并运行，按用户安装到 `%LOCALAPPDATA%\Programs\Cleanzo`。
+
+需要 WebView2 Runtime（Windows 11 内置）；缺少时应用会提示并提供官方下载链接。未签名的构建可能触发 SmartScreen，确认下载来源后选择 **More info → Run anyway**（更多信息 → 仍要运行）。
+
+Windows 版提供系统状态、用户目录空间分析、垃圾清理、AI 工具、技能、大文件、相似照片和已安装应用列表。卸载应用会打开该注册表条目声明的卸载器；Cleanzo 不会删除或回收 InstallLocation，卸载结束后请刷新列表。
+
+首版不支持应用残留清理、Store/MSIX 应用卸载（应用页可打开 Windows 设置）、HEIC、需要管理员权限的系统级清理，以及 arm64 原生构建。ARM 设备可通过 x64 仿真运行。自动更新后，Windows 设置中的应用版本仍可能显示首次安装时的版本。
+
 ## 功能
+
+以下功能说明以 macOS 为准；Windows 的差异见上节。
 
 - 垃圾清理按系统垃圾、应用缓存、浏览器缓存、更新残留、开发工具、需要确认、自定义目录分组；不存在的目标不显示，测量后为零的条目隐藏
 - 应用缓存按应用合并 `~/Library/Caches`、沙盒容器和 Application Support 下的 Electron/Chromium 缓存；优先显示已安装应用的名字，认不出时显示目录名。Spotify、网易云音乐、QQ 音乐的缓存默认不勾选
@@ -43,7 +55,7 @@ bun run dev      # 开发模式，带热更新
 bun run build
 # 产物：
 #   build/darwin-arm64/Cleanzo.app
-#   build/darwin-arm64/Cleanzo 0.1.4.dmg
+#   build/darwin-arm64/Cleanzo <v> arm64.dmg
 ```
 
 `bun run build` 会用 `mygo.config.ts` 里配置的 Developer ID 证书签名，并提交苹果公证，只有存着这张证书的机器能完成（发版步骤见 [docs/RELEASING.md](docs/RELEASING.md)）。没有证书时，构建一个 ad hoc 签名、不公证的版本，只适合在自己的 Mac 上用：
@@ -52,7 +64,7 @@ bun run build
 bun run build -- -sign=- -skip-notarize
 ```
 
-版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo 0.1.4」），同时挂着几个版本也分得清。
+版本号只写在 `mygo.config.ts` 一处：应用运行时从这里读（侧栏和设置页「关于」显示的版本），dmg 挂载后的卷名也带着它（「Cleanzo <v>」），同时挂着几个版本也分得清。
 
 ## 测试
 
@@ -71,7 +83,7 @@ bun run test:web   # 前端单测（bun test，无浏览器的事件夹具）
 - 可再生的缓存、日志、临时文件、更新残留等**直接删除**；自定义目录、备份、归档、安装包、未完成下载、邮件附件，以及大文件、残留、照片和应用卸载都**移到废纸篓**，可以恢复。确认弹窗会分别列出两部分
 - 同时勾选「废纸篓」时会先清空废纸篓，这次移进去的文件仍可恢复
 - 没有「完全磁盘访问权限」时不进入其他应用的沙盒数据；废纸篓、iOS 备份、邮件附件显示需要授权，首页提示还有多少沙盒应用可扫描，设置页可查看权限并打开系统设置
-- 仅支持 macOS
+- 支持 macOS 12+（Apple 芯片）和 Windows 10/11 x64
 - 扫描耗时取决于目录和文件数量；规则先展开显示，目录测量在有上限的并发池内进行
 
 ## 技术要点
@@ -80,7 +92,7 @@ bun run test:web   # 前端单测（bun test，无浏览器的事件夹具）
 - 技能页在 `skills.go`（扫描、调用记录、移除与换成软链）与 `src/react/skills/`
 - 规则表集中在 `rules.go`；`junk.go` 负责认领、展开、测量和清理，`owners.go` 负责应用归属，`tools.go` 负责工具命令
 - 清理边界由规则的目标模式决定：目录内容保留根目录，匹配目标可移除目标本身；自定义目录只把内容移到废纸篓。子项选择必须仍是该条目的当前候选路径
-- `settings.go` 负责设置校验、v1/v2 迁移和原子保存；前端垃圾清理与设置分别在 `src/junk.ts` 和 `src/settings.ts`
+- `settings.go` 负责设置校验、v1/v2 迁移和原子保存；前端垃圾清理与设置分别在 `src/react/clean/` 和 `src/react/settings/`
 
 ## 后续可扩展
 

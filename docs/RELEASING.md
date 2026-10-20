@@ -21,5 +21,24 @@ MYGO_UPDATER_PRIVATE_KEY="$(cat <私钥文件>)" bun run build
 
 ```sh
 spctl -a -vvv -t exec build/darwin-arm64/Cleanzo.app   # source=Notarized Developer ID
-xcrun stapler validate "build/darwin-arm64/Cleanzo 0.1.3.dmg"
+xcrun stapler validate "build/darwin-arm64/Cleanzo <v> arm64.dmg"
 ```
+
+## Windows
+
+在同一台 Mac 上构建 Windows 10/11 x64 安装包。先安装 NSIS，确保 `makensis` 在 PATH 中；再用本地更新签名私钥构建：
+
+```sh
+MYGO_UPDATER_PRIVATE_KEY=… bun run build:windows
+```
+
+构建产物在 `build/windows-amd64/`。将以下文件上传到与 macOS 文件相同的 GitHub release：
+
+- `Cleanzo Setup <v> amd64.exe`
+- `cleanzo-<v>-windows-amd64.tar.gz`
+- 生成的 `.delta` 增量包
+- `update-windows-amd64.json`
+
+更新签名私钥只留在维护者的 Mac，绝不进入 CI。CI 构建仅用于 debug、未签名的冒烟检查，不作为正式发布包。Windows 安装包的代码签名可在 `mygo.config.ts` 的 `windows` 中配置 `certificate` 或 `signCommand`；未签名版本会触发 SmartScreen。
+
+发布前检查 WebView2 缺失提示、按用户安装、已安装应用卸载器启动，以及明暗主题的冒烟截图。自动更新不会改写注册表中的首次安装版本号。
