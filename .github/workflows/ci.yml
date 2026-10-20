@@ -73,9 +73,10 @@ jobs:
           path: ${{ runner.temp }}/scan-report.json
           if-no-files-found: warn
 
-  windows-probe:
+  windows-smoke:
     needs: windows
     runs-on: windows-latest
+    timeout-minutes: 15
     env:
       CGO_ENABLED: '0'
     steps:
@@ -85,6 +86,7 @@ jobs:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - run: bun test tests/smoke
       - run: bun run build -- -platform windows/amd64 -debug
       - name: Install the debug build
         shell: pwsh
@@ -93,63 +95,15 @@ jobs:
           if (!$installer) { throw 'Cleanzo installer not found' }
           $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
-      - name: Probe WebView2 and capture the desktop
+      - name: Tour every view in light and dark (scan only)
         shell: pwsh
-        run: |
-          $client = 'EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-          $versions = @(
-            "HKCU:\Software\Microsoft\$client",
-            "HKLM:\Software\Microsoft\$client",
-            "HKLM:\Software\WOW6432Node\Microsoft\$client"
-          ) | ForEach-Object {
-            if (Test-Path $_) { (Get-ItemProperty $_ -ErrorAction SilentlyContinue).pv }
-          }
-          "## Windows probe" >> $env:GITHUB_STEP_SUMMARY
-          "WebView2 registry versions: $($versions -join ', ') (empty means not detected)." >> $env:GITHUB_STEP_SUMMARY
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
-          $app = $null
-          $cdp = $null
-          try {
-            $app = Start-Process "$env:LOCALAPPDATA\Programs\Cleanzo\Cleanzo.exe" -PassThru
-            $deadline = (Get-Date).AddSeconds(30)
-            do {
-              try {
-                $cdp = Invoke-RestMethod 'http://127.0.0.1:9222/json/version' -TimeoutSec 2
-              } catch {
-                Start-Sleep -Milliseconds 500
-              }
-            } while (!$cdp -and (Get-Date) -lt $deadline)
-          } catch {
-            "Launch/probe error: $($_.Exception.Message)" >> $env:GITHUB_STEP_SUMMARY
-          }
-          if ($cdp) {
-            "CDP reachable: $($cdp | ConvertTo-Json -Compress)" >> $env:GITHUB_STEP_SUMMARY
-          } else {
-            'CDP unreachable; later runs need the CapturePage fallback.' >> $env:GITHUB_STEP_SUMMARY
-          }
-          try {
-            Add-Type -AssemblyName System.Windows.Forms
-            Add-Type -AssemblyName System.Drawing
-            $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
-            $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            try {
-              $graphics.CopyFromScreen($screen.Left, $screen.Top, 0, 0, $bitmap.Size)
-              $bitmap.Save("$env:GITHUB_WORKSPACE\windows-probe.png", [System.Drawing.Imaging.ImageFormat]::Png)
-              'Desktop screenshot captured.' >> $env:GITHUB_STEP_SUMMARY
-            } finally {
-              $graphics.Dispose()
-              $bitmap.Dispose()
-            }
-          } catch {
-            "Screenshot unavailable: $($_.Exception.Message)" >> $env:GITHUB_STEP_SUMMARY
-          } finally {
-            if ($app) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
-            Get-Content $env:GITHUB_STEP_SUMMARY | Write-Host
-          }
+        timeout-minutes: 6
+        run: ./tests/smoke/windows.ps1
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: windows-probe
-          path: windows-probe.png
-          if-no-files-found: warn
+          name: windows-smoke
+          path: |
+            ${{ runner.temp }}/cleanzo-smoke/*.png
+            ${{ runner.temp }}/cleanzo-smoke/errors.json
+          if-no-files-found: error
