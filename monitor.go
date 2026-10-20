@@ -111,6 +111,7 @@ type statusSource struct {
 	battery   func(ctx context.Context) *BatteryStatus
 	disk      func() DiskStat
 	terminate func(pid int32) bool
+	group     func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -652,7 +653,11 @@ type appGroup struct {
 // mergeApps attributes every sampled process to an app row and computes
 // per-app CPU from the previous sample. New or reused pids get no CPU that
 // round. The result holds the memory top 8 union the CPU top 8, deduped.
-func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceApp, responsible func(int32) int32, elapsed time.Duration) []AppUsage {
+func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceApp, responsible func(int32) int32, elapsed time.Duration, groupers ...func(procReading, map[int32]procReading, func(int32) int32) (string, string)) []AppUsage {
+	group := procGroupKey
+	if len(groupers) > 0 && groupers[0] != nil {
+		group = groupers[0]
+	}
 	byPid := make(map[int32]procReading, len(procs))
 	for _, r := range procs {
 		byPid[r.Pid] = r
@@ -663,7 +668,10 @@ func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceA
 		if statusProcessExcluded(r.Pid, r.Path) {
 			continue
 		}
-		key, bundle := procGroupKey(r, byPid, responsible)
+		key, bundle := group(r, byPid, responsible)
+		if key == "" {
+			continue
+		}
 		g := groups[key]
 		if g == nil {
 			g = &appGroup{key: key, bundle: bundle}
@@ -866,7 +874,7 @@ func buildSample(prevProcs, curProcs map[int32]procSample, prevCPU, curCPU cpuTi
 	sample := StatusSample{
 		Memory: src.memory(),
 		Disk:   src.disk(),
-		Apps:   mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed),
+		Apps:   mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed, src.group),
 		Procs:  len(curProcs),
 	}
 	if d := curCPU.Total - prevCPU.Total; d > 0 && prevCPU.Total > 0 {
