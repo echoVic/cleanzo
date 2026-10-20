@@ -20,7 +20,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      # Hosted runners have no swap, which the on-device sysctl probe reads
+      # as a broken vm.swapusage layout; it runs on real Macs.
+      - run: go test -race -count=1 -skip '^TestNativeSysctlRawProbes$' ./...
       - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
       - run: GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go vet ./...
       - run: bun run typecheck
@@ -111,8 +113,9 @@ jobs:
             "Screenshot unavailable: $($_.Exception.Message)" >> $env:GITHUB_STEP_SUMMARY
           } finally {
             if ($app) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
+            Get-Content $env:GITHUB_STEP_SUMMARY | Write-Host
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: windows-probe
