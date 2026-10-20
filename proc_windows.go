@@ -46,7 +46,10 @@ var snapshotProcesses = processSnapshot
 // createProcessSnapshot allows tests to exercise native snapshot failure propagation.
 var createProcessSnapshot = windows.CreateToolhelp32Snapshot
 
-// processSnapshot enumerates processes, retaining partial metadata for unreadable current-session entries.
+// getProcessExitCode allows individual query failures to be tested without weakening snapshot failure handling.
+var getProcessExitCode = windows.GetExitCodeProcess
+
+// processSnapshot enumerates live processes, retaining partial metadata when individual probes fail.
 func processSnapshot() ([]procInfo, error) {
 	var session uint32
 	if err := windows.ProcessIdToSessionId(uint32(os.Getpid()), &session); err != nil {
@@ -69,6 +72,7 @@ func processSnapshot() ([]procInfo, error) {
 		// An unknown session is retained conservatively; a known other session is excluded.
 		if sessionErr != nil || current == session {
 			p := procInfo{Pid: entry.ProcessID, PPid: entry.ParentProcessID, Name: windows.UTF16ToString(entry.ExeFile[:])}
+			hasExited := false
 			h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, p.Pid)
 			if err == nil {
 				buf := make([]uint16, 32768)
@@ -81,10 +85,16 @@ func processSnapshot() ([]procInfo, error) {
 				if windows.GetProcessTimes(h, &created, &exited, &kernel, &user) == nil {
 					p.Created = time.Unix(0, created.Nanoseconds())
 				}
+				// Toolhelp can retain an exited process object while another handle is open.
+				// STILL_ACTIVE is STATUS_PENDING in the Windows SDK's minwinbase.h.
+				var exitCode uint32
+				hasExited = getProcessExitCode(h, &exitCode) == nil && exitCode != uint32(windows.STATUS_PENDING)
 				windows.CloseHandle(h)
 			}
-
-			procs = append(procs, p)
+			// A failed open/query keeps the available identity; it is not a snapshot failure.
+			if !hasExited {
+				procs = append(procs, p)
+			}
 		}
 		err = windows.Process32Next(snapshot, &entry)
 		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {

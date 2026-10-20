@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +107,12 @@ func TestWindowsUsageChildProcess(t *testing.T) {
 	if !found {
 		t.Fatal("child absent from current-session snapshot")
 	}
+	// Keep the process object alive after Wait, as an external observer can do.
+	retained, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(retained)
 	guard := probeUsage()
 	if guard.failed {
 		t.Fatal("snapshot failed")
@@ -130,9 +137,30 @@ func TestWindowsUsageChildProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("child: %v %s", err, stderr.String())
 	}
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(retained, &exitCode); err != nil {
+		t.Fatal(err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("helper exit code=%d after successful Wait", exitCode)
+	}
+	savedSnapshot := snapshotProcesses
+	var after []procInfo
+	var snapshotErr error
+	snapshotProcesses = func() ([]procInfo, error) { after, snapshotErr = savedSnapshot(); return after, snapshotErr }
 	guard = probeUsage()
-	if guard.failed || guard.inUse(resolvePath(cache)) || guard.inUse(resolvePath(parent)) {
-		t.Fatal("exited process still owns user data")
+	snapshotProcesses = savedSnapshot
+	childPresent := false
+	for _, p := range after {
+		if p.Pid == uint32(cmd.Process.Pid) {
+			childPresent = true
+		}
+	}
+	if guard.failed || guard.inUse(resolvePath(cache)) || guard.inUse(resolvePath(parent)) || snapshotErr != nil || childPresent {
+		logWindowsUsageGuard(t, guard, cache, parent)
+		t.Logf("child PID=%d exitCode=%d retainedHandle=%#x snapshotErr=%v childPresent=%t", cmd.Process.Pid, exitCode, retained, snapshotErr, childPresent)
+		logWindowsUsageProcesses(t, guard, after, uint32(cmd.Process.Pid), cache, parent)
+		t.Fatalf("exited process still owns user data: guard.failed=%t childPresent=%t snapshotErr=%v", guard.failed, childPresent, snapshotErr)
 	}
 }
 
@@ -249,5 +277,116 @@ func TestWindowsUsageNamespacePaths(t *testing.T) {
 		if guard := probeUsage(); guard.failed || guard.inUse(filepath.Join(dir, "Cache")) {
 			t.Fatalf("nonlocal argument blocks cleanup: %q %+v", arg, guard)
 		}
+	}
+}
+
+// logWindowsUsageGuard identifies each bidirectional root and app identity behind a failed usage assertion.
+func logWindowsUsageGuard(t *testing.T, guard *usageGuard, paths ...string) {
+	t.Helper()
+	t.Logf("usage guard: failed=%t roots=%d runningIDs=%d", guard.failed, len(guard.roots), len(guard.running))
+	for _, path := range paths {
+		key := strings.ToLower(resolvePath(path))
+		var roots, ids []string
+		for _, root := range guard.roots {
+			if within(key, root) || within(root, key) {
+				roots = append(roots, fmt.Sprintf("%q (pathWithinRoot=%t rootWithinPath=%t)", root, within(key, root), within(root, key)))
+			}
+		}
+		for id := range guard.running {
+			if namedAfterBundle(filepath.Base(key), map[string]bool{id: true}) {
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(roots)
+		sort.Strings(ids)
+		t.Logf("path=%q resolved=%q inUse=%t matchingRoots=%v matchingRunningIDs=%q", path, key, guard.inUse(key), roots, ids)
+	}
+}
+
+// logWindowsUsageProcesses reports relevant process identities and source paths without dumping unrelated command lines.
+func logWindowsUsageProcesses(t *testing.T, guard *usageGuard, procs []procInfo, child uint32, paths ...string) {
+	t.Helper()
+	roots := map[string]bool{}
+	for _, root := range guard.roots {
+		roots[root] = true
+	}
+	for _, p := range procs {
+		relevant := p.Pid == child
+		var sources []string
+		if p.Exe != "" {
+			sources = append(sources, filepath.Dir(p.Exe))
+		}
+		if args, err := windows.DecomposeCommandLine(p.CmdLine); err == nil {
+			sources = append(sources, windowsArgumentPaths(args)...)
+		}
+		var matches []string
+		for _, source := range sources {
+			if local := windowsUsagePath(source); local != "" {
+				key := usagePathKey(local)
+				if !roots[key] {
+					continue
+				}
+				for _, path := range paths {
+					target := usagePathKey(path)
+					if within(key, target) || within(target, key) {
+						matches = append(matches, key)
+						relevant = true
+						break
+					}
+				}
+			}
+		}
+		ids, _ := snapshotApps([]procInfo{p})
+		var matchingIDs []string
+		for id := range ids {
+			if !guard.running[id] {
+				continue
+			}
+			for _, path := range paths {
+				if namedAfterBundle(filepath.Base(path), map[string]bool{id: true}) {
+					matchingIDs = append(matchingIDs, id)
+					relevant = true
+					break
+				}
+			}
+		}
+		if relevant {
+			var exitCode uint32
+			handle, openErr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, p.Pid)
+			var exitErr error
+			if openErr == nil {
+				exitErr = windows.GetExitCodeProcess(handle, &exitCode)
+				windows.CloseHandle(handle)
+			}
+			sort.Strings(matches)
+			sort.Strings(matchingIDs)
+			t.Logf("matching process: PID=%d PPID=%d name=%q exe=%q exitCode=%d openErr=%v exitErr=%v matchingPaths=%q matchingIDs=%q", p.Pid, p.PPid, p.Name, p.Exe, exitCode, openErr, exitErr, matches, matchingIDs)
+		}
+	}
+}
+
+// TestWindowsUsageExitStatusUnreadable retains live metadata when an individual exit-code query fails.
+func TestWindowsUsageExitStatusUnreadable(t *testing.T) {
+	saved := getProcessExitCode
+	getProcessExitCode = func(windows.Handle, *uint32) error { return windows.ERROR_ACCESS_DENIED }
+	t.Cleanup(func() { getProcessExitCode = saved })
+	procs, err := processSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range procs {
+		if p.Pid == uint32(os.Getpid()) {
+			found = true
+			if p.Exe == "" || p.Name == "" {
+				t.Fatalf("unreadable exit status discarded available live metadata: %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("live current process was discarded after exit query failure")
+	}
+	if guard := probeUsage(); guard.failed {
+		t.Fatal("per-process exit query failure closed the entire guard")
 	}
 }
