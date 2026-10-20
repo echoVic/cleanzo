@@ -39,7 +39,39 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test -count=1 ./...
+      - name: Test and report skipped tests
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:RUNNER_TEMP 'cleanzo-tests.jsonl'
+          go test -count=1 -json ./... | Tee-Object -FilePath $testLog
+          $testExit = $LASTEXITCODE
+          $events = Get-Content $testLog | ForEach-Object { $_ | ConvertFrom-Json }
+          $summary = @('## Skipped Windows tests')
+          $skips = @($events | Where-Object { $_.Action -eq 'skip' -and $_.Test })
+          foreach ($skip in $skips) {
+            $messages = @($events | Where-Object {
+              $_.Action -eq 'output' -and $_.Package -eq $skip.Package -and $_.Test -eq $skip.Test -and
+              $_.Output -notmatch '^(===|--- SKIP:)'
+            } | ForEach-Object { $_.Output.Trim() })
+            $summary += "- $($skip.Test): $($messages -join ' ')"
+          }
+          if (!$skips.Count) { $summary += 'No tests skipped.' }
+          $summary | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append | Write-Host
+          exit $testExit
+      - name: Read-only scan of the real Windows profile
+        shell: pwsh
+        env:
+          CLEANZO_REAL_PROFILE_SCAN: '1'
+        run: |
+          $env:CLEANZO_SCAN_REPORT = Join-Path $env:RUNNER_TEMP 'scan-report.json'
+          go test -count=1 -v -run '^TestWindowsJunkScanReport$' .
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-junk-scan
+          path: ${{ runner.temp }}/scan-report.json
+          if-no-files-found: warn
 
   windows-probe:
     needs: windows

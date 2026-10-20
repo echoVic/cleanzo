@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -16,6 +17,16 @@ import (
 // sandboxWindowsTests isolates every Windows test from the real user profile.
 func sandboxWindowsTests() (func(), error) {
 	if runtime.GOOS != "windows" {
+		return func() {}, nil
+	}
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	if os.Getenv("CLEANZO_REAL_PROFILE_SCAN") == "1" {
+		run := flag.Lookup("test.run")
+		if run == nil || run.Value.String() != "^TestWindowsJunkScanReport$" {
+			return nil, fmt.Errorf("CLEANZO_REAL_PROFILE_SCAN=1 requires exactly -run '^TestWindowsJunkScanReport$'")
+		}
 		return func() {}, nil
 	}
 	dir, err := os.MkdirTemp("", "cleanzo-tests-")

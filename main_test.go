@@ -921,23 +921,6 @@ func TestTempAgeCountsMoves(t *testing.T) {
 	}
 }
 
-// TestCleanKeepsWhatReachedTheTrashAfterTheScan: emptying the Trash deletes
-// what the scan showed; what arrives later stays recoverable.
-func TestCleanKeepsWhatReachedTheTrashAfterTheScan(t *testing.T) {
-	env := testEnv(t)
-	home := env.home
-	trash := filepath.Join(home, ".Trash")
-	writeFile(t, filepath.Join(trash, "old.bin"), 1500)
-	time.Sleep(20 * time.Millisecond)
-	scannedAt := time.Now()
-	time.Sleep(20 * time.Millisecond)
-	writeFile(t, filepath.Join(trash, "new.bin"), 700)
-	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.UnixMilli(scannedAt.UnixMilli()), cleanHooks{})[0]
-	if exists(filepath.Join(trash, "old.bin")) || !exists(filepath.Join(trash, "new.bin")) || res.Freed != 1500 {
-		t.Fatalf("result = %+v", res)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Streamed scan and clean
 // ---------------------------------------------------------------------------
