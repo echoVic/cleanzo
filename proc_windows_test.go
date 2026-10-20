@@ -89,10 +89,12 @@ func TestWindowsToolTreeKill(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	timeout := 8 * time.Second
 	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	defer func() { cancel(); <-stopped }()
 	go func() {
+		defer close(stopped)
 		_, err := runTool(ctx, tool, nil, timeout)
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 			time.Sleep(150 * time.Millisecond)

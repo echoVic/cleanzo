@@ -74,15 +74,18 @@ func TestWindowsUsageChildProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	waited := false
+	readerStopped := make(chan struct{})
 	t.Cleanup(func() {
+		cancel()
 		input.Close()
 		if !waited {
 			cmd.Process.Kill()
 			cmd.Wait()
 		}
+		<-readerStopped
 	})
 	ready := make(chan string, 1)
-	go func() { line, _ := bufio.NewReader(output).ReadString('\n'); ready <- line }()
+	go func() { defer close(readerStopped); line, _ := bufio.NewReader(output).ReadString('\n'); ready <- line }()
 	select {
 	case line := <-ready:
 		if line != "ready\n" {

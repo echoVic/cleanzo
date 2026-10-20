@@ -164,7 +164,10 @@ func TestWindowsRecycleMovesToBin(t *testing.T) {
 	before := queryTestRecycleBin(t, path)
 	requireTestRecycleCapacity(t, path, before.size+123)
 	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	defer func() { <-stopped }()
 	go func() {
+		defer close(stopped)
 		err := recycle(path)
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)

@@ -164,6 +164,8 @@ func TestWindowsTrashFolderIsNotBin(t *testing.T) {
 // startWindowsJunkUser keeps a real --user-data-dir process alive during the acceptance clean.
 func startWindowsJunkUser(t *testing.T, ctx context.Context, dir string) {
 	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsUsageHelper$", "-cleanzo-usage-helper", "--user-data-dir="+dir)
 	input, err := cmd.StdinPipe()
 	if err != nil {
@@ -178,9 +180,10 @@ func startWindowsJunkUser(t *testing.T, ctx context.Context, dir string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { input.Close(); cmd.Process.Kill(); cmd.Wait() })
+	readerStopped := make(chan struct{})
+	t.Cleanup(func() { cancel(); input.Close(); cmd.Process.Kill(); cmd.Wait(); <-readerStopped })
 	ready := make(chan string, 1)
-	go func() { line, _ := bufio.NewReader(output).ReadString('\n'); ready <- line }()
+	go func() { defer close(readerStopped); line, _ := bufio.NewReader(output).ReadString('\n'); ready <- line }()
 	select {
 	case line := <-ready:
 		if line != "ready\n" {

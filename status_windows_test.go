@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
@@ -204,5 +207,105 @@ func TestWindowsAppUsageGroupsChildren(t *testing.T) {
 	})
 	if len(rows) != 1 || rows[0].Name != "Example Product" || rows[0].Memory != 50 || rows[0].CPU != 300 || rows[0].Procs != 2 || rows[0].Path != path || !rows[0].Quit {
 		t.Fatalf("usage=%+v", rows)
+	}
+}
+
+// enumerationTestWindow keeps a stable top-level window alive until every visitor has returned.
+func enumerationTestWindow(t *testing.T) windows.HWND {
+	t.Helper()
+	runtime.LockOSThread()
+	t.Cleanup(runtime.UnlockOSThread)
+	class := windows.StringToUTF16Ptr("STATIC")
+	hwnd, _, err := statusUser.NewProc("CreateWindowExW").Call(0, uintptr(unsafe.Pointer(class)), 0, 0x80000000, 0, 0, 16, 16, 0, 0, 0, 0)
+	if hwnd == 0 {
+		t.Fatalf("CreateWindowExW: %v", err)
+	}
+	t.Cleanup(func() { statusUser.NewProc("DestroyWindow").Call(hwnd) })
+	return windows.HWND(hwnd)
+}
+
+// growEnumerationStack moves Go callback stacks while Windows retains only the enumeration handle.
+//
+//go:noinline
+func growEnumerationStack(depth int) uint64 {
+	var words [128]uint64
+	words[depth] = uint64(depth + 1)
+	if depth > 0 {
+		return words[depth] + growEnumerationStack(depth-1)
+	}
+	return words[0]
+}
+
+// TestWindowsConcurrentWindowEnumeration catches visitor mixups across callbacks and moving Go stacks.
+func TestWindowsConcurrentWindowEnumeration(t *testing.T) {
+	fixture := enumerationTestWindow(t)
+	const workers, iterations = 8, 50
+	start := make(chan struct{})
+	results := make(chan error, workers)
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Go(func() {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+			owner := windows.GetCurrentThreadId()
+			seen := map[windows.HWND]int{}
+			callbacks := 0
+			var wrongVisitor atomic.Bool
+			<-start
+			for iteration := range iterations {
+				if !enumTopWindows(func(hwnd windows.HWND, _ uint32) {
+					if hwnd != fixture {
+						return
+					} // other applications may change windows during CI
+					if windows.GetCurrentThreadId() != owner {
+						wrongVisitor.Store(true)
+						return
+					}
+					_ = growEnumerationStack(32)
+					runtime.Gosched()
+					seen[hwnd]++
+					callbacks++
+				}) {
+					results <- fmt.Errorf("worker %d: enumeration %d failed", worker, iteration)
+					return
+				}
+			}
+			if wrongVisitor.Load() || callbacks != iterations || seen[fixture] != iterations || len(seen) != 1 {
+				results <- fmt.Errorf("worker %d: wrong visitor=%t callbacks=%d seen=%v", worker, wrongVisitor.Load(), callbacks, seen)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		t.Error(err)
+	}
+	enumWindowVisitors.RLock()
+	remaining := len(enumWindowVisitors.visitors)
+	enumWindowVisitors.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("enumeration retained %d visitors", remaining)
+	}
+}
+
+// TestWindowsWindowEnumerationReentrant checks that a visitor can enumerate again without blocking other handles.
+func TestWindowsWindowEnumerationReentrant(t *testing.T) {
+	fixture := enumerationTestWindow(t)
+	outer, inner := 0, 0
+	if !enumTopWindows(func(hwnd windows.HWND, _ uint32) {
+		if hwnd != fixture {
+			return
+		}
+		outer++
+		if !enumTopWindows(func(nested windows.HWND, _ uint32) {
+			if nested == fixture {
+				inner++
+			}
+		}) {
+			t.Error("nested enumeration failed")
+		}
+	}) || outer != 1 || inner != 1 {
+		t.Fatalf("callbacks: outer=%d inner=%d", outer, inner)
 	}
 }

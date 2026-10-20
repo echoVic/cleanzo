@@ -457,10 +457,12 @@ func TestWatchStatusFirstSample(t *testing.T) {
 	defer func() { statusFirstDelay, statusFirstBudget, statusInterval = oldDelay, oldBudget, oldInterval }()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	var s StatusSample
 	arrived := make(chan struct{}, 1)
+	stopped := make(chan struct{})
+	defer func() { cancel(); <-stopped }()
 	go func() {
+		defer close(stopped)
 		_ = watchStatusWith(ctx, func(v StatusSample) error {
 			s = v
 			select {
@@ -498,7 +500,10 @@ func TestWatchStatusCancelStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	arrived := make(chan struct{}, 1)
 	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	defer func() { cancel(); <-stopped }()
 	go func() {
+		defer close(stopped)
 		done <- watchStatusWith(ctx, func(StatusSample) error {
 			select {
 			case arrived <- struct{}{}:
