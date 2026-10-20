@@ -1,3 +1,4 @@
+import { isWindows } from "../../platform";
 import type { Skill, SkillCopy, SkillSource } from "../../mygo";
 
 export type SkillFilter = "all" | "idle" | "issues" | "updates" | "unobserved";
@@ -107,6 +108,7 @@ function isDirectPick(skills: Skill[], picked: Set<string>, path: string): boole
  * 不在 ~/.agents 里，也没有别的软链指着它。目标优先用 ~/.agents 里的那份。
  */
 export function linkCandidates(s: Skill): { path: string; target: string }[] {
+  if (isWindows()) return [];
   const folders = s.copies.filter((c) => isFolder(c) && c.kind === "dir" && c.hash);
   const target = folders.find((c) => c.tool === "agents") ?? null;
   if (!target) return [];

@@ -7,7 +7,7 @@
 /* ---- Design Tokens ---- */
 :root {
   color-scheme: light dark;
-  font-family: -apple-system, "SF Pro Text", system-ui, "PingFang SC", "Segoe UI", sans-serif;
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI Variable", "Microsoft YaHei UI", system-ui, "Segoe UI", sans-serif;
 
   --bg: #f4f5f7;
   --bg-subtle: rgba(120, 128, 140, 0.055);

@@ -1,3 +1,4 @@
+import { isWindows } from "../../platform";
 import * as React from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../ui/components/tabs";
 import { useT } from "../../ui/i18n-react";
@@ -15,7 +16,8 @@ interface AppsPageProps {
 
 export function AppsPage({ initialTab, nonce }: AppsPageProps) {
   const t = useT();
-  const [tab, setTab] = React.useState<AppsTab>(initialTab);
+  const requestedTab = isWindows() ? "installed" : initialTab;
+  const [tab, setTab] = React.useState<AppsTab>(requestedTab);
   const [orphanCount, setOrphanCount] = React.useState(0);
   const [installedBusy, setInstalledBusy] = React.useState(false);
   const [orphanBusy, setOrphanBusy] = React.useState(false);
@@ -25,9 +27,9 @@ export function AppsPage({ initialTab, nonce }: AppsPageProps) {
   React.useEffect(() => {
     if (nonce !== firstNonce.current) {
       firstNonce.current = nonce;
-      setTab(initialTab);
+      setTab(requestedTab);
     }
-  }, [nonce, initialTab]);
+  }, [nonce, requestedTab]);
 
   // 应用与残留的后台任务共用导航 busy 提示。
   React.useEffect(() => {
@@ -46,21 +48,21 @@ export function AppsPage({ initialTab, nonce }: AppsPageProps) {
       <Tabs value={tab} onValueChange={(v) => setTab(v as AppsTab)}>
         <TabsList>
           <TabsTrigger value="installed">{t("apps.tab.installed")}</TabsTrigger>
-          <TabsTrigger value="leftovers">
+          {!isWindows() && <TabsTrigger value="leftovers">
             {t("apps.tab.leftoversCount", { n: orphanCount })}
-          </TabsTrigger>
+          </TabsTrigger>}
         </TabsList>
         {/* 两个面板都常驻挂载，切 tab 不卸载、不重扫（与旧显隐行为一致）。 */}
         <TabsContent value="installed" forceMount hidden={tab !== "installed" || undefined}>
           <InstalledTab active={tab === "installed"} onBusyChange={setInstalledBusy} />
         </TabsContent>
-        <TabsContent value="leftovers" forceMount hidden={tab !== "leftovers" || undefined}>
+        {!isWindows() && <TabsContent value="leftovers" forceMount hidden={tab !== "leftovers" || undefined}>
           <LeftoversTab
             active={tab === "leftovers"}
             onCountChange={setOrphanCount}
             onBusyChange={setOrphanBusy}
           />
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
     </div>
   );

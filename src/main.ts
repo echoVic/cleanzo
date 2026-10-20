@@ -97,3 +97,6 @@ Cleaner.info()
 
 void language.initialize()
   .catch(() => toast(t("settings.languageFailed")));
+
+// 只响应 Go 在 smoke 模式下注入的钩子。
+if ("__cleanzoSmoke" in window) window.dispatchEvent(new Event("cleanzo:ready"));

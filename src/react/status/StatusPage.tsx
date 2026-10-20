@@ -1,3 +1,4 @@
+import { isWindows } from "../../platform";
 import * as React from "react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
@@ -49,7 +50,7 @@ const CalloutIcon = () => (
 
 // ---- 指标卡 ----
 
-function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
+export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
   const badge = m.pressure === 2
     ? <em className="mbadge">{t("status.mem.pressureWarn")}</em>
     : m.pressure === 4
@@ -78,13 +79,13 @@ function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
             >
               <i style={{ width: `${pct(m.app)}%`, background: "var(--seg-app)" }} />
               <i style={{ width: `${pct(m.wired)}%`, background: "var(--seg-wired)" }} />
-              <i style={{ width: `${pct(m.compressed)}%`, background: "var(--seg-compressed)" }} />
+              {(!isWindows() || m.compressed > 0) && <i style={{ width: `${pct(m.compressed)}%`, background: "var(--seg-compressed)" }} />}
             </div>
           </div>
           <ul className="mlegend num">
             <li><i className="mdot" style={{ background: "var(--seg-app)" }} /><span>{t("status.mem.appMem")}</span><b>{fmtMem(m.app)}</b></li>
             <li><i className="mdot" style={{ background: "var(--seg-wired)" }} /><span>{t("status.mem.wired")}</span><b>{fmtMem(m.wired)}</b></li>
-            <li><i className="mdot" style={{ background: "var(--seg-compressed)" }} /><span>{t("status.mem.compressed")}</span><b>{fmtMem(m.compressed)}</b></li>
+            {(!isWindows() || m.compressed > 0) && <li><i className="mdot" style={{ background: "var(--seg-compressed)" }} /><span>{t("status.mem.compressed")}</span><b>{fmtMem(m.compressed)}</b></li>}
             <li><span>{t("status.mem.cachedLabel")}</span><b>{fmtMem(m.cached)}</b></li>
           </ul>
         </>
@@ -385,7 +386,7 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
     if (sysInfo.chip) machineParts.push(sysInfo.chip);
     if (sysInfo.memory >= GiB) machineParts.push(t("status.machine.mem", { size: `${Math.round(sysInfo.memory / GiB)} GB` }));
     else if (sysInfo.memory) machineParts.push(t("status.machine.mem", { size: `${Math.round(sysInfo.memory / MiB)} MB` }));
-    if (sysInfo.osVersion) machineParts.push(`macOS ${sysInfo.osVersion}`);
+    if (sysInfo.osVersion) machineParts.push(t("status.osVersion", { version: sysInfo.osVersion }));
     const up = sysInfo.bootTime > 0 ? uptimeParts(sysInfo.bootTime, Date.now() / 1000) : null;
     if (up) {
       machineParts.push(

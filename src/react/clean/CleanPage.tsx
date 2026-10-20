@@ -1,3 +1,4 @@
+import { isWindows } from "../../platform";
 import * as React from "react";
 import type { JunkItem, ScanSummary } from "../../mygo";
 import { ruleDesc, ruleName } from "../../i18n";
@@ -593,6 +594,7 @@ export function CleanPage() {
           <div className="head-actions">
             <Button
               variant="ghost"
+              data-action="scan"
               onClick={() => (phase === "scanning" ? stopScan() : void startScan())}
               disabled={phase === "cleaning" || ignoring}
             >
@@ -651,12 +653,7 @@ export function CleanPage() {
         <div className="junk-list">{Array.from({ length: 5 }, (_, i) => <div className="skeleton card" key={i} />)}</div>
       ) : (
         <div className="junk-list">
-          {summary && !summary.fullDiskAccess && (
-            <div className="junk-banner">
-              <span>{t("junk.access", { n: summary.containers })}</span>
-              <button className="btn small ghost" type="button" onClick={grant}>{t("cat.grant")}</button>
-            </div>
-          )}
+          <FullDiskAccessNotice summary={summary} grant={grant} />
           {stale && phase === "scanned" && (
             <div className="junk-stale">
               <span>{t("junk.stale")}</span>
@@ -712,7 +709,7 @@ export function CleanPage() {
                         {caret}
                       </button>
                     )}
-                    {g === "review" && summary && summary.leftovers > 0 && (
+                    {!isWindows() && g === "review" && summary && summary.leftovers > 0 && (
                       <div className="junk-leftovers">
                         <span>{t("junk.leftovers", { n: summary.leftovers, size: human(summary.leftoversSize) })}</span>
                         <button className="btn small ghost" type="button" onClick={() => showReactApps("leftovers")}>
@@ -754,6 +751,18 @@ export function CleanPage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** macOS 的扫描授权提示。 */
+export function FullDiskAccessNotice({ summary, grant }: { summary: ScanSummary | null; grant: () => void }) {
+  const t = useT();
+  if (isWindows() || !summary || summary.fullDiskAccess) return null;
+  return (
+    <div className="junk-banner">
+      <span>{t("junk.access", { n: summary.containers })}</span>
+      <button className="btn small ghost" type="button" onClick={grant}>{t("cat.grant")}</button>
     </div>
   );
 }

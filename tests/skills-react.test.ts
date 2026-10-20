@@ -110,3 +110,15 @@ test("a cross-name symlink to a different skill moves only the link when its tar
   expect(plan.links).toEqual([]);
   expect(plan.size).toBe(100);
 });
+
+
+test("Windows offers no link-copy candidates for identical skill copies", async () => {
+  const { setPlatformForTest } = await import("../src/platform");
+  const s = skill("x", { copies: [copy(), copy({ tool: "claude", path: "/other/x", real: "/other/x" })] });
+  try {
+    setPlatformForTest("darwin");
+    expect(linkCandidates(s)).toHaveLength(1);
+    setPlatformForTest("win32");
+    expect(linkCandidates(s)).toEqual([]);
+  } finally { setPlatformForTest(undefined); }
+});

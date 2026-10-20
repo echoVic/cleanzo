@@ -89,7 +89,7 @@ export interface PickedAlert {
 export function pickAlerts(s: StatusSample): PickedAlert[] {
   const items: PickedAlert[] = [];
   const p = s.memory.pressure;
-  // 「占磁盘」用 swapTotal（= /System/Volumes/VM 上的交换文件总占用）
+  // 占磁盘用 swapTotal：macOS 交换文件占用 / Windows 页面文件分配量。
   const swapDisk = s.memory.swapTotal;
   const swapBig = swapDisk >= STATUS_ALERT.swapMentionGB * GiB;
   if (p === 2 || p === 4) {

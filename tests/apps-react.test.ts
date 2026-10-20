@@ -101,3 +101,21 @@ test("barWidth is at least 2% of the largest item", () => {
   expect(barWidth(5, 1000)).toBe(2);
   expect(barWidth(500, 1000)).toBe(50);
 });
+
+
+test("Windows Apps cannot mount Leftovers even when requested by an old navigation action", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AppsPage } = await import("../src/react/apps/AppsPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  try {
+    setPlatformForTest("darwin");
+    const mac = renderToStaticMarkup(createElement(AppsPage, { initialTab: "leftovers", nonce: 0 }));
+    expect(mac).toContain('content-leftovers');
+    setPlatformForTest("win32");
+    const win = renderToStaticMarkup(createElement(AppsPage, { initialTab: "leftovers", nonce: 0 }));
+    expect(win).not.toContain('content-leftovers');
+    expect(win).toContain('content-installed');
+  } finally { setPlatformForTest(undefined); }
+});

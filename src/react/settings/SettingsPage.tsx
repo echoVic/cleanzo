@@ -1,3 +1,4 @@
+import { isWindows } from "../../platform";
 import * as React from "react";
 import type { CustomFolder, Settings } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
@@ -348,32 +349,8 @@ export function SettingsPage({ callbacks, session }: Props) {
         </div>
       </section>
 
-      {/* 权限 */}
-      <section className="settings-section">
-        <h3>{t("settings.permissions")}</h3>
-        <div className="setting-block card">
-          <div className="setting-row setting-permission">
-            <div className="settings-permission-info">
-              <span className="setting-label">{t("settings.fullDiskAccess")}</span>
-              <span className={cn("permission-status", access === true && "granted")} role="status">
-                <span className="permission-dot" aria-hidden="true" />
-                {t(permissionKey as DictKey)}
-              </span>
-              <p className="muted small">{t("settings.permissionNote")}</p>
-              {permissionError ? (
-                <p className="err-inline" role="alert">{errText(permissionError)}</p>
-              ) : null}
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { void settingsApi.openFullDiskAccessSettings().catch((e) => setPermissionError(e)); }}
-            >
-              {t("settings.openSystem")}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <PermissionsSection access={access} permissionKey={permissionKey as DictKey} permissionError={permissionError}
+        onOpen={() => { void settingsApi.openFullDiskAccessSettings().catch((e) => setPermissionError(e)); }} />
 
       {/* 关于 */}
       <section className="settings-section">
@@ -402,5 +379,40 @@ export function SettingsPage({ callbacks, session }: Props) {
         </div>
       </section>
     </div>
+  );
+}
+
+/** macOS 的磁盘授权设置。 */
+export function PermissionsSection({ access, permissionKey, permissionError, onOpen }: {
+  access: boolean | null; permissionKey: DictKey; permissionError: unknown; onOpen: () => void;
+}) {
+  const t = useT();
+  if (isWindows()) return null;
+  return (
+    <section className="settings-section">
+      <h3>{t("settings.permissions")}</h3>
+      <div className="setting-block card">
+        <div className="setting-row setting-permission">
+          <div className="settings-permission-info">
+            <span className="setting-label">{t("settings.fullDiskAccess")}</span>
+            <span className={cn("permission-status", access === true && "granted")} role="status">
+              <span className="permission-dot" aria-hidden="true" />
+              {t(permissionKey as DictKey)}
+            </span>
+            <p className="muted small">{t("settings.permissionNote")}</p>
+            {permissionError ? (
+              <p className="err-inline" role="alert">{errText(permissionError)}</p>
+            ) : null}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpen}
+          >
+            {t("settings.openSystem")}
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }

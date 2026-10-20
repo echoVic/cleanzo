@@ -2,7 +2,7 @@ import { beforeEach, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import "./setup-dom";
 import { setLang } from "./setup-dom";
-import type { JunkItem, Settings } from "../src/mygo";
+import type { JunkItem, Settings, ScanSummary } from "../src/mygo";
 import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
 import {
@@ -393,4 +393,19 @@ test("rejected cleanup keeps the failure visible and permits a rescan", () => {
   expect(canStartScan("cleaned", false)).toBe(true);
   // 清理中不允许再发一次扫描。
   expect(canStartScan("cleaning", false)).toBe(false);
+});
+
+
+test("Windows hides the Full Disk Access notice even when the summary denies access", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { FullDiskAccessNotice } = await import("../src/react/clean/CleanPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const props = { summary: { fullDiskAccess: false, containers: 3 } as ScanSummary, grant: () => {} };
+  try {
+    setPlatformForTest("darwin");
+    expect(renderToStaticMarkup(createElement(FullDiskAccessNotice, props))).toContain("junk-banner");
+    setPlatformForTest("win32");
+    expect(renderToStaticMarkup(createElement(FullDiskAccessNotice, props))).toBe("");
+  } finally { setPlatformForTest(undefined); }
 });

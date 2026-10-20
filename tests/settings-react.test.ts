@@ -52,3 +52,20 @@ test("SaveQueue runs jobs serially and isolates failures", async () => {
   // 串行：a 整段跑完才轮到 b，b 失败后 c 仍继续。
   expect(order).toEqual(["a1", "a2", "b1", "c1"]);
 });
+
+
+test("Windows settings omit the permission section; macOS keeps its controls", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { PermissionsSection } = await import("../src/react/settings/SettingsPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const props = { access: false, permissionKey: "settings.notGranted" as const, permissionError: null, onOpen: () => {} };
+  try {
+    setPlatformForTest("darwin");
+    expect(renderToStaticMarkup(createElement(PermissionsSection, props))).toContain("setting-permission");
+    setPlatformForTest("win32");
+    expect(renderToStaticMarkup(createElement(PermissionsSection, props))).toBe("");
+    expect(resolveFolderName("", "C:\\Users\\alice\\Downloads")).toBe("Downloads");
+  } finally { setPlatformForTest(undefined); }
+});

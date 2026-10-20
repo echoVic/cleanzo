@@ -189,3 +189,28 @@ test("English interface renders the paired status strings", () => {
   storage.set("cleanzo.lang", "zh");
   expect(t("status.mem.appMem")).toBe("App 内存");
 });
+
+
+test("Windows memory card hides zero compressed memory and uses page-file terms", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { MemoryCard } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  setPref("en");
+  const m = { ...sample().memory, compressed: 0 };
+  try {
+    setPlatformForTest("win32");
+    const html = renderToStaticMarkup(createElement(MemoryCard, { m, t }));
+    expect(html).toContain("Kernel non-paged");
+    expect(html).toContain("Page file");
+    expect(html).not.toContain("seg-compressed");
+    expect(t("status.osVersion", { version: "Windows 11 24H2 (26100)" })).toBe("Windows 11 24H2 (26100)");
+    setPlatformForTest("darwin");
+    const mac = renderToStaticMarkup(createElement(MemoryCard, { m, t }));
+    expect(mac).toContain("Compressed");
+    expect(mac).toContain("seg-compressed");
+    expect(t("status.osVersion", { version: "26" })).toBe("macOS 26");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
