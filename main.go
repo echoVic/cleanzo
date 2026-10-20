@@ -985,46 +985,6 @@ func (Cleaner) Disk() DiskStat {
 	return diskStat()
 }
 
-// fullScanTargets returns the directories the full scan enumerates:
-// the user's home with ~/Library expanded one level, plus system-level roots.
-func fullScanTargets() []string {
-	h := homeDir()
-	var out []string
-	defer func() { out = slices.DeleteFunc(out, mountPoint) }()
-	entries, err := os.ReadDir(h)
-	if err == nil {
-		for _, e := range entries {
-			name := e.Name()
-			if name == ".Trash" {
-				continue
-			}
-			p := filepath.Join(h, name)
-			if name == "Library" {
-				if lib, err := os.ReadDir(p); err == nil {
-					for _, le := range lib {
-						out = append(out, filepath.Join(p, le.Name()))
-					}
-				}
-				continue
-			}
-			out = append(out, p)
-		}
-	}
-	for _, root := range []string{"/Library", "/usr/local", "/opt", "/private/var/tmp", "/private/var/log"} {
-		subs, err := os.ReadDir(root)
-		if err != nil {
-			continue
-		}
-		for _, e := range subs {
-			if strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			out = append(out, filepath.Join(root, e.Name()))
-		}
-	}
-	return out
-}
-
 // removable reports shallow safety for a Trash row; actions also check nested boundaries.
 func removable(path string) bool {
 	return cleanable(path) && userPickable(path)
@@ -1044,28 +1004,6 @@ func trashable(path string) bool {
 		return false
 	}
 	return strings.HasPrefix(path, h+string(filepath.Separator))
-}
-
-// duSize returns the disk usage of path in bytes using /usr/bin/du, staying
-// on path's volume. du is a C implementation and is several times faster
-// than a Go walker on large trees. A timeout guards against pathological
-// directories.
-func duSize(ctx context.Context, path string, timeout time.Duration) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/du", "-skx", path)).Output()
-	if err != nil && !partialRun(ctx, err) {
-		return 0, err
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("empty du output for %s", path)
-	}
-	kb, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return kb * 1024, nil
 }
 
 // DirItem is a single child entry inside a directory, returned by DirChildren
@@ -1089,46 +1027,7 @@ type DirListing struct {
 // timed-out entries report Size = -1 so the UI can show them as unknown.
 // The items are sorted by size descending and capped at 60 entries.
 func (Cleaner) DirChildren(ctx context.Context, path string) (DirListing, error) {
-	ents, err := os.ReadDir(path)
-	if err != nil {
-		return DirListing{}, err
-	}
-	type job struct {
-		name  string
-		full  string
-		isDir bool
-	}
-	jobs := make([]job, 0, len(ents))
-	for _, e := range ents {
-		full := filepath.Join(path, e.Name())
-		jobs = append(jobs, job{e.Name(), full, e.IsDir()})
-	}
-	var mu sync.Mutex
-	items := make([]DirItem, 0, len(jobs))
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
-	for _, j := range jobs {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			size := int64(-1)
-			if j.isDir {
-				if sz, err := duSize(ctx, j.full, 8*time.Second); err == nil {
-					size = sz
-				}
-			} else if st, err := os.Stat(j.full); err == nil {
-				size = st.Size()
-			}
-			mu.Lock()
-			items = append(items, DirItem{Name: j.name, Path: j.full, Size: size, IsDir: j.isDir, Trashable: removable(j.full)})
-			mu.Unlock()
-		}(j)
-	}
-	wg.Wait()
-	sort.Slice(items, func(i, k int) bool { return items[i].Size > items[k].Size })
-	return DirListing{Items: items[:min(60, len(items))], Total: len(items)}, nil
+	return platformDirChildren(ctx, path)
 }
 
 // collectFullScan measures every full-scan target concurrently with du and
@@ -1202,34 +1101,6 @@ func (Cleaner) FullScan(ctx context.Context, ch *mygo.Channel[FullScanEvent]) er
 func partialRun(ctx context.Context, err error) bool {
 	var exit *exec.ExitError
 	return errors.As(err, &exit) && ctx.Err() == nil
-}
-
-// findLargeFiles lists regular files under root that are larger than
-// threshold, using BSD find (-size supports k/M/G suffixes on macOS) without
-// leaving root's volume.
-func findLargeFiles(ctx context.Context, root string, threshold int64) ([]LargeFile, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	kb := (threshold - 1) / 1024
-	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/find", "-x", root, "-type", "f", "-size", fmt.Sprintf("+%dk", kb), "-print0")).Output()
-	if err != nil && !partialRun(ctx, err) {
-		return nil, err
-	}
-	var files []LargeFile
-	for _, p := range strings.Split(string(out), "\x00") {
-		if p == "" {
-			continue
-		}
-		fi, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		if fi.Size() < threshold {
-			continue
-		}
-		files = append(files, LargeFile{Path: p, Size: fi.Size(), Trashable: removable(p)})
-	}
-	return files, nil
 }
 
 // collectLargeScan scans every full-scan target for large files concurrently
@@ -1530,17 +1401,7 @@ func revealArgs(path string) ([]string, error) {
 // and packages, which opening would launch or mount, are selected in their
 // parent folder. The call returns an error when the path does not exist.
 func (Cleaner) RevealInFinder(path string) error {
-	args, err := revealArgs(path)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/open", args...)).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("open failed: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return platformReveal(path)
 }
 
 // ---------------------------------------------------------------------------
@@ -1558,35 +1419,7 @@ var photoExts = map[string]bool{
 // PhotoPreview returns a JPEG data URL of a photo in the home folder, at most
 // 1600 pixels on its longest side, for a closer look than the thumbnails give.
 func (Cleaner) PhotoPreview(path string) (string, error) {
-	if !within(canonical(path), canonical(homeDir())) || !photoExts[strings.ToLower(filepath.Ext(path))] {
-		return "", errBlocked
-	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errGone
-		}
-		return "", err
-	}
-	if !fi.Mode().IsRegular() {
-		return "", errBlocked
-	}
-	tmp, err := os.CreateTemp("", "cleanzo-preview-*.jpg")
-	if err != nil {
-		return "", err
-	}
-	tmp.Close()
-	defer os.Remove(tmp.Name())
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/sips", "-Z", "1600", "-s", "format", "jpeg", path, "--out", tmp.Name())).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("sips: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	data, err := os.ReadFile(tmp.Name())
-	if err != nil {
-		return "", err
-	}
-	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data), nil
+	return platformPhotoPreview(path)
 }
 
 // similarPhotoCap bounds how many files the discovery step reads, so a huge
@@ -1652,29 +1485,7 @@ const photoDecodeEdge = 1024
 // The returned cleanup removes any temporary file and must be run by the
 // caller.
 func loadPhotoImage(ctx context.Context, path string) (image.Image, image.Config, func(), error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	var cfg image.Config
-	if ext == ".heic" || ext == ".heif" {
-		w, h, err := sipsSize(ctx, path)
-		if err != nil {
-			return nil, image.Config{}, nil, err
-		}
-		cfg = image.Config{Width: w, Height: h}
-	} else {
-		c, err := decodeConfigFile(path)
-		if err != nil {
-			return nil, image.Config{}, nil, err
-		}
-		if c.Width*c.Height <= maxDecodePixels {
-			return decodeImageFile(path)
-		}
-		cfg = c
-	}
-	img, cleanup, err := decodeSmallCopy(ctx, path, cfg.Width*cfg.Height > maxDecodePixels)
-	if err != nil {
-		return nil, image.Config{}, nil, err
-	}
-	return img, cfg, cleanup, nil
+	return platformLoadPhotoImage(ctx, path)
 }
 
 // decodeSmallCopy has sips write path as a JPEG, shrunk to photoDecodeEdge
@@ -1733,7 +1544,7 @@ func sipsSize(ctx context.Context, path string) (w, h int, err error) {
 
 // decodeConfigFile reads the size and format of an image from its header.
 func decodeConfigFile(path string) (image.Config, error) {
-	f, err := os.Open(path)
+	f, err := openPhotoFile(path)
 	if err != nil {
 		return image.Config{}, err
 	}
@@ -1745,7 +1556,7 @@ func decodeConfigFile(path string) (image.Config, error) {
 // decodeImageFile opens a registered-format image (jpeg/png/gif) and decodes
 // both its config and full image, returning a cleanup that closes the handle.
 func decodeImageFile(path string) (image.Image, image.Config, func(), error) {
-	f, err := os.Open(path)
+	f, err := openPhotoFile(path)
 	if err != nil {
 		return nil, image.Config{}, nil, err
 	}
@@ -1754,6 +1565,11 @@ func decodeImageFile(path string) (image.Image, image.Config, func(), error) {
 		f.Close()
 		return nil, image.Config{}, nil, err
 	}
+	if runtime.GOOS == "windows" && !photoDecodeAllowed(cfg) {
+		f.Close()
+		return nil, image.Config{}, nil, errUnsupported
+	}
+
 	if _, err := f.Seek(0, 0); err != nil {
 		f.Close()
 		return nil, image.Config{}, nil, err
@@ -1852,7 +1668,7 @@ func thumbDataURL(img image.Image) string {
 
 // fileSHA1 returns the hex sha1 of a file's contents.
 func fileSHA1(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := openPhotoFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -1900,36 +1716,7 @@ func isPackage(name string) bool {
 // files, stopping once cap files are found. Packages and hidden folders are
 // skipped.
 func collectPhotoFiles(roots []string, cap int) []string {
-	var out []string
-	stop := errors.New("stop")
-	for _, root := range roots {
-		info, err := os.Stat(root)
-		if err != nil || !info.IsDir() {
-			continue
-		}
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d == nil {
-				return nil
-			}
-			if d.IsDir() {
-				if p != root && (strings.HasPrefix(d.Name(), ".") || isPackage(d.Name())) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if photoExts[strings.ToLower(filepath.Ext(p))] {
-				out = append(out, p)
-				if len(out) >= cap {
-					return stop
-				}
-			}
-			return nil
-		})
-		if len(out) >= cap {
-			break
-		}
-	}
-	return out
+	return platformCollectPhotoFiles(context.Background(), roots, cap)
 }
 
 // clusterIdx is an internal list of decoded-photo indices forming one cluster.
@@ -2004,7 +1791,7 @@ func (Cleaner) ScanSimilarPhotos(ctx context.Context, ch *mygo.Channel[SimilarPh
 // onProgress after each file.
 func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(done, total int)) SimilarPhotosResult {
 	start := time.Now()
-	files := collectPhotoFiles(roots, similarPhotoCap)
+	files := platformCollectPhotoFiles(ctx, roots, similarPhotoCap)
 	total := len(files)
 
 	var (
@@ -2155,4 +1942,12 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// photoFileOpen allows tests to observe every photo data stream after platform safety checks.
+var photoFileOpen = os.Open
+
+// photoDecodeAllowed bounds the decoded allocation without overflowing the pixel product.
+func photoDecodeAllowed(cfg image.Config) bool {
+	return cfg.Width > 0 && cfg.Height > 0 && cfg.Width <= maxDecodePixels/cfg.Height
 }
