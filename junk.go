@@ -81,22 +81,50 @@ type ScanSummary struct {
 
 // junkEnv holds the machine state used by a junk pass.
 type junkEnv struct {
-	home, tmp     string
-	ctx           context.Context
-	apps          *appIndex
-	guard         *usageGuard
-	fda           bool
-	settings      Settings
-	findTool      func(string) string
-	refreshGuard  func() *usageGuard
-	commandClaims map[string]claimSet
-	lstat         func(string) (fs.FileInfo, error)
-	observe       bool // scanning only: measure excluded capacity, never create extra deletion entries
+	home, tmp             string
+	localAppData, appData string
+	windowsLayout         bool
+	rules                 []Rule
+	ctx                   context.Context
+	apps                  *appIndex
+	guard                 *usageGuard
+	fda                   bool
+	settings              Settings
+	findTool              func(string) string
+	refreshGuard          func() *usageGuard
+	commandClaims         map[string]claimSet
+	lstat                 func(string) (fs.FileInfo, error)
+	observe               bool // scanning only: measure excluded capacity, never create extra deletion entries
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
 func currentJunkEnv() junkEnv {
-	return junkEnv{home: homeDir(), tmp: filepath.Clean(os.TempDir()), apps: buildAppIndex(appDirs()), guard: probeUsage(), fda: fullDiskAccess(), settings: loadSettings(), findTool: findTool}
+	env := junkEnv{windowsLayout: runtime.GOOS == "windows", home: homeDir(), tmp: filepath.Clean(os.TempDir()), apps: buildAppIndex(appDirs()), guard: probeUsage(), fda: fullDiskAccess(), settings: loadSettings(), findTool: findTool}
+	if runtime.GOOS == "windows" {
+		env.localAppData = env.appDataRoot(os.Getenv("LOCALAPPDATA"))
+		env.appData = env.appDataRoot(os.Getenv("APPDATA"))
+	}
+	return env
+}
+
+// catalog permits portable table tests while production uses the host catalog.
+func (env junkEnv) catalog() []Rule {
+	if env.rules != nil {
+		return env.rules
+	}
+	return junkRules
+}
+
+// appDataRoot accepts only resolved, traversable roots inside the profile.
+func (env junkEnv) appDataRoot(root string) string {
+	if root == "" || !filepath.IsAbs(root) || env.traversalBlocked(root) {
+		return ""
+	}
+	resolved, home := resolvePath(root), resolvePath(env.home)
+	if resolved == "" || home == "" || !within(resolved, home) || canonical(resolved) == canonical(home) {
+		return ""
+	}
+	return resolved
 }
 
 // junkCand is an entry to measure with its minimum age.
@@ -197,11 +225,23 @@ func (env junkEnv) resolve(pattern string) []string {
 // globTargets expands one path component at a time behind the traversal guard.
 func (env junkEnv) globTargets(pattern string) []string {
 	root, relative := env.home, strings.TrimPrefix(strings.TrimPrefix(pattern, "~"), "/")
-	if strings.HasPrefix(pattern, "$TMPDIR") {
+	prefix, suffix, _ := strings.Cut(pattern, "/")
+	switch prefix {
+	case "$TMPDIR":
 		if !allowedTemp(env.home, env.tmp) {
 			return nil
 		}
-		root, relative = env.tmp, strings.TrimPrefix(strings.TrimPrefix(pattern, "$TMPDIR"), "/")
+		root, relative = env.tmp, suffix
+	case "$LOCALAPPDATA", "$APPDATA":
+		root = env.localAppData
+		if prefix == "$APPDATA" {
+			root = env.appData
+		}
+		root = env.appDataRoot(root)
+		if root == "" {
+			return nil
+		}
+		relative = suffix
 	}
 	paths := []string{root}
 	for _, part := range strings.Split(relative, "/") { // slash-ok: rule patterns always use slash-separated components
@@ -308,6 +348,12 @@ func (env junkEnv) collectDir(dir string, names []string, age time.Duration, cla
 		if !nameMatches(e.Name(), names) || e.Type()&(fs.ModeSymlink|fs.ModeSocket|fs.ModeNamedPipe|fs.ModeDevice|fs.ModeCharDevice|fs.ModeIrregular) != 0 {
 			continue
 		}
+		if runtime.GOOS == "windows" {
+			info, err := e.Info()
+			if err != nil || !platformMeasureEntry(filepath.Join(dir, e.Name()), info) {
+				continue
+			}
+		}
 		resolved := filepath.Join(parent, e.Name())
 		key := strings.ToLower(resolved)
 		if env.protectedKey(key) || claims.claimedKey(key) || !safeResolved(key) {
@@ -407,7 +453,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 	}
 	emit := func(spec itemSpec) {
-		if len(spec.cands) == 0 && !spec.item.Denied && !(spec.rule != nil && spec.rule.Command != nil && spec.item.Size == -1) {
+		if len(spec.cands) == 0 && !spec.item.Denied && !(spec.rule != nil && (spec.rule.RecycleBin || spec.rule.Command != nil && spec.item.Size == -1)) {
 			return
 		}
 		if slices.Contains(env.settings.Ignored, spec.item.ID) {
@@ -418,12 +464,17 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			specs = append(specs, spec)
 		}
 	}
-	for i := range junkRules {
-		r := &junkRules[i]
+	rules := env.catalog()
+	for i := range rules {
+		r := &rules[i]
 		if env.toolContext().Err() != nil {
 			break
 		}
 		sum.Checked++
+		if r.RecycleBin {
+			emit(itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group)}})
+			continue
+		}
 		if r.Command != nil {
 			env.commandClaims[r.ID] = claims.clone()
 			emit(expandCommand(*env, r))
@@ -504,7 +555,11 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		if owner.BundleID != "" {
 			id, display = "app:"+strings.ToLower(owner.BundleID), owner.Name
 		}
-		spec := itemSpec{owners: []string{owner.BundleID}, item: JunkItem{ID: id, Group: string(groupApps), Name: display, Size: -1, Default: !unselectedApps[strings.ToLower(owner.BundleID)], Running: env.running([]string{owner.BundleID})}}
+		owners := []string{owner.BundleID}
+		if env.windowsLayout {
+			owners = []string{strings.TrimSuffix(strings.ToLower(name), ".exe")}
+		}
+		spec := itemSpec{owners: owners, item: JunkItem{ID: id, Group: string(groupApps), Name: display, Size: -1, Default: !unselectedApps[strings.ToLower(owner.BundleID)], Running: env.running(owners)}}
 		if whole {
 			env.collect(root, 0, claims, &spec)
 		} else {
@@ -526,26 +581,34 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			appOrder = append(appOrder, id)
 		}
 	}
-	caches, _ := env.readDir(filepath.Join(env.home, "Library/Caches"))
-	for _, e := range caches {
-		if !strings.HasPrefix(e.Name(), "com.apple.") {
-			addApp(e.Name(), filepath.Join(env.home, "Library/Caches", e.Name()), true)
-		}
-	}
-	if env.fda {
-		for _, e := range containers {
-			if e.IsDir() && !strings.HasPrefix(e.Name(), "com.apple.") {
-				addApp(e.Name(), filepath.Join(env.home, "Library/Containers", e.Name(), "Data/Library/Caches"), false)
+	if env.windowsLayout {
+		for _, root := range env.globTargets("$APPDATA/*") {
+			for _, dir := range chromiumCacheDirs {
+				addApp(filepath.Base(root), filepath.Join(root, dir), false)
 			}
 		}
-	}
-	support, _ := env.readDir(filepath.Join(env.home, "Library/Application Support"))
-	for _, e := range support {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), "com.apple.") {
-			continue
+	} else {
+		caches, _ := env.readDir(filepath.Join(env.home, "Library/Caches"))
+		for _, e := range caches {
+			if !strings.HasPrefix(e.Name(), "com.apple.") {
+				addApp(e.Name(), filepath.Join(env.home, "Library/Caches", e.Name()), true)
+			}
 		}
-		for _, name := range chromiumCacheDirs {
-			addApp(e.Name(), filepath.Join(env.home, "Library/Application Support", e.Name(), name), false)
+		if env.fda {
+			for _, e := range containers {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), "com.apple.") {
+					addApp(e.Name(), filepath.Join(env.home, "Library/Containers", e.Name(), "Data/Library/Caches"), false)
+				}
+			}
+		}
+		support, _ := env.readDir(filepath.Join(env.home, "Library/Application Support"))
+		for _, e := range support {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), "com.apple.") {
+				continue
+			}
+			for _, name := range chromiumCacheDirs {
+				addApp(e.Name(), filepath.Join(env.home, "Library/Application Support", e.Name(), name), false)
+			}
 		}
 	}
 	for _, id := range appOrder {
@@ -563,6 +626,12 @@ type itemPlan struct {
 // planItem measures candidates using the shared pool and existing removal guards.
 func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}, measuring func(string)) itemPlan {
 	plan := itemPlan{item: spec.item}
+	if spec.rule != nil && spec.rule.RecycleBin {
+		if env.observe {
+			plan.item = scanNativeBin(env, plan.item)
+		}
+		return plan
+	}
 	if spec.rule != nil && spec.rule.Command != nil {
 		plan.item.Size = 0
 		select {
@@ -944,8 +1013,9 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 		spec, ok := byID[sel.ID]
 		// A selected command still needs a result if its tool or estimate vanished.
 		if !ok {
-			for i := range junkRules {
-				rule := &junkRules[i]
+			rules := env.catalog()
+			for i := range rules {
+				rule := &rules[i]
 				if rule.ID == sel.ID && rule.Command != nil && !slices.Contains(env.settings.Ignored, rule.ID) && !slices.Contains(env.settings.DisabledGroups, string(rule.Group)) {
 					spec = itemSpec{rule: rule, item: JunkItem{ID: rule.ID}}
 					ok = true
@@ -962,6 +1032,12 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 			spec.item.Running = env.running(owners)
 			if spec.item.Running {
 				res.Skipped = "running"
+			} else if spec.rule != nil && spec.rule.RecycleBin {
+				res = cleanNativeBin(ctx, env, sel.Paths)
+				cleaned += res.Freed
+				if hooks.removed != nil && res.Freed > 0 {
+					hooks.removed(sel.ID, "", cleaned)
+				}
 			} else if spec.rule != nil && spec.rule.Command != nil {
 				if len(sel.Paths) > 0 {
 					res.Skipped, res.Failed = "failed", []string{"blocked"}
@@ -1019,7 +1095,10 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 	if plan.item.Denied {
 		res.Failed = append(res.Failed, "blocked")
 	}
-	trash := canonical(userTrashDir())
+	trash := userTrashDir()
+	if trash != "" {
+		trash = canonical(trash)
+	}
 	if plan.item.ReadErrors > 0 {
 		res.Failed = append(res.Failed, "blocked")
 	}
@@ -1067,7 +1146,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			res.InUse++
 			continue
 		}
-		inTrash := within(key, trash)
+		inTrash := runtime.GOOS != "windows" && trash != "" && within(key, trash)
 		if inTrash && !scannedAt.IsZero() && changedAt(info).After(scannedAt) {
 			continue
 		}
@@ -1108,6 +1187,12 @@ func (env junkEnv) removable(path string, trash bool) bool {
 	return !trash && within(canonical(path), canonical(env.tmp)) && canonical(path) != canonical(env.tmp)
 }
 
+// Channel send seams let acceptance tests exercise the bound methods without a WebView.
+var (
+	junkScanSend  = func(ch *mygo.Channel[JunkScanEvent], event JunkScanEvent) error { return ch.Send(event) }
+	junkCleanSend = func(ch *mygo.Channel[JunkCleanEvent], event JunkCleanEvent) error { return ch.Send(event) }
+)
+
 // ScanJunk streams an initial list, measured rows and a final summary.
 func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) error {
 	env := currentJunkEnv()
@@ -1119,18 +1204,18 @@ func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) er
 		initial[i] = specs[i].item
 		initial[i].Size = -1
 	}
-	if err := ch.Send(JunkScanEvent{Kind: "start", Items: initial}); err != nil {
+	if err := junkScanSend(ch, JunkScanEvent{Kind: "start", Items: initial}); err != nil {
 		return err
 	}
 	var last time.Time
 	_, summary = measureJunk(ctx, specs, env, summary, func(path string) {
 		if time.Since(last) >= progressInterval {
 			last = time.Now()
-			_ = ch.Send(JunkScanEvent{Kind: "scanning", Path: path})
+			_ = junkScanSend(ch, JunkScanEvent{Kind: "scanning", Path: path})
 		}
-	}, func(item JunkItem) { _ = ch.Send(JunkScanEvent{Kind: "item", Item: &item}) })
+	}, func(item JunkItem) { _ = junkScanSend(ch, JunkScanEvent{Kind: "item", Item: &item}) })
 	if ctx.Err() == nil {
-		if err := ch.Send(JunkScanEvent{Kind: "done", Summary: &summary}); err != nil {
+		if err := junkScanSend(ch, JunkScanEvent{Kind: "done", Summary: &summary}); err != nil {
 			return err
 		}
 	}
@@ -1150,18 +1235,18 @@ func (Cleaner) CleanJunk(ctx context.Context, selections []JunkSelection, scanne
 	every := func(event JunkCleanEvent) {
 		if time.Since(last) >= progressInterval {
 			last = time.Now()
-			_ = ch.Send(event)
+			_ = junkCleanSend(ch, event)
 		}
 	}
 	cleanJunk(ctx, env, selections, since, cleanHooks{
-		started:  func(id string) { _ = ch.Send(JunkCleanEvent{Kind: "start", ID: id}) },
+		started:  func(id string) { _ = junkCleanSend(ch, JunkCleanEvent{Kind: "start", ID: id}) },
 		checking: func(id, path string) { every(JunkCleanEvent{Kind: "checking", ID: id, Path: path}) },
 		removed: func(id, path string, bytes int64) {
 			cleaned = bytes
 			every(JunkCleanEvent{Kind: "removed", ID: id, Path: path, Bytes: bytes})
 		},
 		finished: func(res CleanResult) {
-			_ = ch.Send(JunkCleanEvent{Kind: "done", ID: res.Name, Bytes: cleaned, Result: &res})
+			_ = junkCleanSend(ch, JunkCleanEvent{Kind: "done", ID: res.Name, Bytes: cleaned, Result: &res})
 		},
 	})
 	return ctx.Err()

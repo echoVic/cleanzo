@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"runtime"
+	"time"
+)
 
 // junkGroup names a junk page group.
 type junkGroup string
@@ -62,11 +65,13 @@ type Rule struct {
 	// and keeps the folders and settings.dat: the app's crash handler keeps
 	// running and writing there.
 	Contents bool
+	// RecycleBin uses the native volume bin instead of filesystem candidates.
+	RecycleBin bool
 }
 
-// junkRules is the rule table, in claim order: a path matched by an earlier
+// darwinJunkRules is the macOS rule table, in claim order: a path matched by an earlier
 // rule is left out of every later rule and of the generic app caches.
-var junkRules = []Rule{
+var darwinJunkRules = []Rule{
 	// review: user data or costly to fetch again; never selected by default
 	{ID: "review.ios-backups", Group: groupReview, Trash: true, Detail: detailBackups,
 		Targets: []Target{{Pattern: "Library/Application Support/MobileSync/Backup", Mode: entriesOf}}},
@@ -225,3 +230,11 @@ var unselectedApps = map[string]bool{"com.spotify.client": true, "com.netease.16
 // chromiumCacheDirs are the cache folders Electron and Chromium apps keep in
 // their Application Support folder.
 var chromiumCacheDirs = []string{"Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "CachedData", "logs"}
+
+// junkRules selects the host catalog without changing the macOS table.
+var junkRules = func() []Rule {
+	if runtime.GOOS == "windows" {
+		return windowsJunkRules
+	}
+	return darwinJunkRules
+}()
