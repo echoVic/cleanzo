@@ -629,7 +629,7 @@ func canQuit(bundle string, apps []workspaceApp) bool {
 		if !a.Regular || a.Path == "" {
 			continue
 		}
-		if a.BundleID == "com.apple.finder" || a.BundleID == "com.cleanzo.app" {
+		if statusAppExcluded(a) {
 			continue
 		}
 		ap := strings.ToLower(a.Path)
@@ -660,6 +660,9 @@ func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceA
 	groups := map[string]*appGroup{}
 	order := []string{}
 	for _, r := range procs {
+		if statusProcessExcluded(r.Pid, r.Path) {
+			continue
+		}
 		key, bundle := procGroupKey(r, byPid, responsible)
 		g := groups[key]
 		if g == nil {
@@ -956,7 +959,7 @@ func quitMatches(path string, apps []workspaceApp) []workspaceApp {
 		if !a.Regular || a.Path == "" {
 			continue
 		}
-		if a.BundleID == "com.apple.finder" || a.BundleID == "com.cleanzo.app" {
+		if statusAppExcluded(a) {
 			continue
 		}
 		ap := strings.ToLower(strings.TrimRight(a.Path, string(filepath.Separator)))

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -73,3 +74,37 @@ func mountPoint(path string) bool {
 	}
 	return st.Dev != parent.Dev
 }
+
+// linkModes preserves Darwin's existing symlink checks exactly.
+const linkModes = fs.ModeSymlink
+
+// resolveFinal retains Darwin's longest-existing-prefix EvalSymlinks behavior.
+func resolveFinal(p string) string {
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
+}
+
+// platformCleanPath adds no extra path restrictions on Darwin.
+func platformCleanPath(string) bool { return true }
+
+// platformRemovalSafe leaves Darwin removal checks unchanged.
+func platformRemovalSafe(string, ...context.Context) bool { return true }
+
+// platformMeasureEntry leaves Darwin measurements unchanged.
+func platformMeasureEntry(string, fs.FileInfo) bool { return true }
+
+// userPickable leaves Darwin user-picked paths unchanged.
+func userPickable(string) bool { return true }
+
+// platformUsage retains the existing Darwin probes.
+func platformUsage() *usageGuard { return probeFileUsage() }

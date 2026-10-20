@@ -200,8 +200,14 @@ func measure(p string) (size, files int64, newest time.Time) {
 }
 
 // measureChecked preserves partial byte counts and reports every traversal failure.
-func measureChecked(p string) (size, files int64, newest time.Time, readErrors int) {
+func measureChecked(p string, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int) {
+	if runtime.GOOS == "windows" && !platformCleanPath(p) {
+		return 0, 0, time.Time{}, 1
+	}
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
+		if runtime.GOOS == "windows" && len(contexts) > 0 && contexts[0] != nil && contexts[0].Err() != nil {
+			return contexts[0].Err()
+		}
 		if err != nil || d == nil {
 			readErrors++
 			return nil
@@ -209,6 +215,12 @@ func measureChecked(p string) (size, files int64, newest time.Time, readErrors i
 		info, ierr := d.Info()
 		if ierr != nil {
 			readErrors++
+			return nil
+		}
+		if !platformMeasureEntry(path, info) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if t := changedAt(info); t.After(newest) {
@@ -233,12 +245,15 @@ func safeToClean(p string) bool {
 	if err != nil {
 		return false
 	}
-	return safeResolved(strings.ToLower(resolvePath(abs)))
+	return platformCleanPath(p) && platformCleanPath(abs) && safeResolved(strings.ToLower(resolvePath(abs)))
 }
 
 // safeResolved is safeToClean for a path already resolved and lower-cased.
 func safeResolved(path string) bool {
 	home := strings.ToLower(resolvePath(homeDir()))
+	if runtime.GOOS == "windows" && (home == "" || path == "") {
+		return false
+	}
 	if within(path, home) {
 		rel := strings.TrimPrefix(path, home)
 		if rel == "" || slices.Contains(protectedHomeDirs, rel) {
@@ -249,12 +264,12 @@ func safeResolved(path string) bool {
 				return false
 			}
 		}
-		if slices.ContainsFunc(strings.Split(rel, string(filepath.Separator)), appLibrary) {
+		if platformProtected(path, home) || slices.ContainsFunc(strings.Split(rel, string(filepath.Separator)), appLibrary) {
 			return false
 		}
 		return true
 	}
-	return within(path, strings.ToLower(resolvePath(os.TempDir())))
+	return allowedTemp(homeDir(), os.TempDir()) && within(path, strings.ToLower(resolvePath(os.TempDir())))
 }
 
 // fileExists reports whether p exists.
@@ -274,20 +289,7 @@ func resolvePath(p string) string {
 }
 
 // resolveUncached is resolvePath without the expansion memo.
-func resolveUncached(p string) string {
-	rest := ""
-	for {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return filepath.Join(r, rest)
-		}
-		parent := filepath.Dir(p)
-		if parent == p {
-			return filepath.Join(p, rest)
-		}
-		rest = filepath.Join(filepath.Base(p), rest)
-		p = parent
-	}
-}
+func resolveUncached(p string) string { return resolveFinal(p) }
 
 // usageGuard tells whether something on disk is in use: it holds a file a
 // process has open, or it is named after an app that is running, such as
@@ -296,12 +298,16 @@ func resolveUncached(p string) string {
 // guard reports everything as in use, so nothing is cleaned blind.
 type usageGuard struct {
 	open    []string        // lower-cased paths of open files, sorted
-	running map[string]bool // lower-cased bundle IDs of running apps
+	running map[string]bool // lower-cased identities of running apps
+	roots   []string        // lower-cased process paths whose contents are in use
 	failed  bool
 }
 
 // probeUsage takes a snapshot of the open files and the running apps.
-func probeUsage() *usageGuard {
+func probeUsage() *usageGuard { return platformUsage() }
+
+// probeFileUsage keeps the Darwin lsof and app probes unchanged.
+func probeFileUsage() *usageGuard {
 	open, err := openFiles()
 	if err != nil {
 		return &usageGuard{failed: true}
@@ -319,6 +325,11 @@ func (g *usageGuard) inUse(path string) bool {
 		return true
 	}
 	p := strings.ToLower(path)
+	for _, root := range g.roots {
+		if within(p, root) || within(root, p) {
+			return true
+		}
+	}
 	if i := sort.SearchStrings(g.open, p); i < len(g.open) && g.open[i] == p {
 		return true
 	}
@@ -386,6 +397,9 @@ type cleanHooks struct {
 // System Settings, where the user can let Cleanzo read protected folders
 // such as the Trash.
 func (Cleaner) OpenFullDiskAccessSettings() error {
+	if runtime.GOOS == "windows" {
+		return errUnsupported
+	}
 	return exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").Run()
 }
 
@@ -431,7 +445,7 @@ func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 			res.Failed = append(res.Failed, p+": "+err.Error())
 			continue
 		}
-		if !removable(abs) {
+		if !removable(abs) || !platformRemovalSafe(abs) {
 			res.Failed = append(res.Failed, abs+": blocked")
 			continue
 		}
@@ -1008,9 +1022,13 @@ func fullScanTargets() []string {
 	return out
 }
 
-// removable reports whether the UI may offer path for the Trash: it is inside
-// the home folder (trashable) and passes the safety gate cleaning uses.
+// removable reports shallow safety for a Trash row; actions also check nested boundaries.
 func removable(path string) bool {
+	return cleanable(path) && userPickable(path)
+}
+
+// cleanable applies shallow rule safety without enabling user-picked AppData rows.
+func cleanable(path string) bool {
 	return trashable(path) && safeToClean(path)
 }
 
@@ -1455,7 +1473,7 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 	if err != nil {
 		return TrashResult{}, err
 	}
-	if !removable(abs) {
+	if !removable(abs) || !platformRemovalSafe(abs) {
 		return TrashResult{}, errBlocked
 	}
 	if _, err := os.Lstat(abs); err != nil {

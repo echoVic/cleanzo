@@ -719,7 +719,7 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 		return errSkillNoOrigin
 	}
 	// The folder must still be a skill folder Cleanzo may move.
-	if err := skillFolderOK(folder); err != nil {
+	if err := skillFolderOK(folder, ctx); err != nil {
 		return err
 	}
 	if skillGuard().inUse(folder) {
@@ -772,7 +772,10 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 
 // skillFolderOK checks that folder is a real folder that is, or is linked
 // from, an entry of a known skills folder, inside the cleanable home.
-func skillFolderOK(folder string) error {
+func skillFolderOK(folder string, contexts ...context.Context) error {
+	if !platformRemovalSafe(folder, contexts...) {
+		return errSkillNotEntry
+	}
 	info, err := os.Lstat(folder)
 	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 		return errSkillNotEntry

@@ -945,6 +945,9 @@ func skillRootOf(path string) (skillRoot, string, bool) {
 // moved: a direct, visible entry, inside the cleanable part of the home
 // folder.
 func skillEntryOK(path string) error {
+	if !platformCleanPath(path) {
+		return errSkillNotEntry
+	}
 	if !filepath.IsAbs(path) {
 		return errSkillNotEntry
 	}
@@ -1019,7 +1022,10 @@ func (Cleaner) TrashSkills(paths []string) SkillTrashResult {
 	for _, p := range ordered {
 		p = filepath.Clean(p)
 		item := SkillTrashItem{Path: p}
-		if err := skillEntryOK(p); err != nil {
+		if err := skillEntryOK(p); err != nil || !platformRemovalSafe(p) {
+			if err == nil {
+				err = errSkillNotEntry
+			}
 			item.Error = err.Error()
 			res.Items = append(res.Items, item)
 			continue
@@ -1074,7 +1080,7 @@ func (Cleaner) LinkSkillCopy(path, target string) error {
 	if err := skillEntryOK(target); err != nil {
 		return err
 	}
-	if isLink(path) || isLink(target) || filepath.Base(path) != filepath.Base(target) {
+	if !platformRemovalSafe(path) || !platformRemovalSafe(target) || isLink(path) || isLink(target) || filepath.Base(path) != filepath.Base(target) {
 		return errSkillNotEntry
 	}
 	pr, _, _ := skillRootOf(path)

@@ -826,7 +826,7 @@ func claudeSessionFolders(group string, targets []string, cutoff time.Time) []st
 func aiRemovable(root string, tool aiTool, target string) bool {
 	real := resolvePath(target)
 	realRoot := resolvePath(root)
-	if (real == realRoot || !within(real, realRoot)) || !safeToClean(target) {
+	if (real == realRoot || !within(real, realRoot)) || !safeToClean(target) || !platformRemovalSafe(target) {
 		return false
 	}
 	info, err := os.Lstat(target)

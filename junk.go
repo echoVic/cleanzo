@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -197,6 +198,9 @@ func (env junkEnv) resolve(pattern string) []string {
 func (env junkEnv) globTargets(pattern string) []string {
 	root, relative := env.home, strings.TrimPrefix(strings.TrimPrefix(pattern, "~"), "/")
 	if strings.HasPrefix(pattern, "$TMPDIR") {
+		if !allowedTemp(env.home, env.tmp) {
+			return nil
+		}
 		root, relative = env.tmp, strings.TrimPrefix(strings.TrimPrefix(pattern, "$TMPDIR"), "/")
 	}
 	paths := []string{root}
@@ -634,7 +638,7 @@ candidates:
 			plan.item.recordDetail(env.displayable(c.path), 0, "read-error")
 			continue
 		}
-		if info.Mode()&fs.ModeSymlink != 0 || removalRefused(c.path, info) {
+		if info.Mode()&linkModes != 0 || removalRefused(c.path, info) {
 			plan.item.recordDetail(env.displayable(c.path), 0, "boundary")
 			continue
 		}
@@ -665,7 +669,7 @@ candidates:
 			if measuring != nil {
 				measuring(c.path)
 			}
-			size, files, changed, failures := measureChecked(c.path)
+			size, files, changed, failures := measureChecked(c.path, ctx)
 			if contents {
 				size, files, changed, failures = measureCrashpad(c.path)
 			}
@@ -1024,7 +1028,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			break
 		}
 		key := canonical(e.path)
-		if !slices.ContainsFunc(spec.roots, func(root string) bool { return within(key, root) }) || !env.removable(e.path, spec.item.Trash) {
+		if !slices.ContainsFunc(spec.roots, func(root string) bool { return within(key, root) }) || !env.removable(e.path, spec.item.Trash) || !platformRemovalSafe(e.path, ctx) {
 			res.Failed = append(res.Failed, "blocked")
 			continue
 		}
@@ -1040,7 +1044,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 		if spec.rule != nil && spec.rule.Contents {
 			// Empty the report queues; the folders and settings.dat stay, and so
 			// does any dump a process has open.
-			if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+			if info.Mode()&linkModes != 0 || !info.IsDir() {
 				res.Failed = append(res.Failed, "blocked")
 				continue
 			}
@@ -1098,7 +1102,7 @@ func (env junkEnv) removable(path string, trash bool) bool {
 	}
 	home := resolvePath(env.home)
 	if within(path, home) {
-		return removable(filepath.Join(env.home, strings.TrimPrefix(path, home)))
+		return cleanable(filepath.Join(env.home, strings.TrimPrefix(path, home)))
 	}
 	// Temporary junk is permanently removed; trashable intentionally only accepts home paths.
 	return !trash && within(canonical(path), canonical(env.tmp)) && canonical(path) != canonical(env.tmp)
@@ -1166,7 +1170,7 @@ func (Cleaner) CleanJunk(ctx context.Context, selections []JunkSelection, scanne
 // traversalBlocked rejects links and checks permissions before inspecting descendants.
 func (env junkEnv) traversalBlocked(path string) bool {
 	abs, err := filepath.Abs(path)
-	if err != nil {
+	if err != nil || !platformCleanPath(path) || !platformCleanPath(abs) {
 		return true
 	}
 	envHome, envTmp := filepath.Clean(env.home), filepath.Clean(env.tmp) // $TMPDIR ends in a slash
@@ -1202,7 +1206,7 @@ func (env junkEnv) traversalBlocked(path string) bool {
 		if err != nil {
 			return !errors.Is(err, fs.ErrNotExist)
 		}
-		if info.Mode()&fs.ModeSymlink != 0 {
+		if info.Mode()&linkModes != 0 {
 			return true
 		}
 	}
@@ -1295,9 +1299,9 @@ func memoResolved(p string) (string, bool) {
 		return r, true
 	}
 	parent := filepath.Dir(p)
-	if parent == p {
+	if runtime.GOOS == "windows" || parent == p {
 		r = resolveUncached(p)
-	} else if info, err := memoLstat(p); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+	} else if info, err := memoLstat(p); err == nil && info.Mode()&linkModes != 0 {
 		r = resolveUncached(p) // a link: resolve it in full
 	} else {
 		r = filepath.Join(resolvePath(parent), filepath.Base(p))

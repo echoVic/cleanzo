@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -211,6 +212,9 @@ func (Cleaner) SaveSettings(s Settings) error {
 
 // fullDiskAccess reports whether a protected folder can be read without a prompt.
 func fullDiskAccess() bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
 	for _, p := range []string{"Library/Safari", "Library/Mail", "Library/Messages", ".Trash"} {
 		if _, err := os.ReadDir(filepath.Join(homeDir(), p)); err == nil {
 			return true
