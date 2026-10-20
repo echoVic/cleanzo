@@ -41,10 +41,21 @@ func TestWindowsJunkScanReport(t *testing.T) {
 	if allowedTemp(env.home, env.tmp) {
 		temp = canonical(env.tmp)
 	}
+	goBuildCandidates := 0
 	for _, spec := range specs {
+		if spec.item.ID == "dev.go-build" {
+			goBuildCandidates += len(spec.cands)
+		}
 		r := row{Item: spec.item}
 		for _, c := range spec.cands {
 			p := canonical(c.path)
+			// Independent lexical checks must not share the production protection helpers.
+			lexical := strings.ToLower(strings.ReplaceAll(filepath.Clean(c.path), "/", `\`))
+			for _, forbidden := range []string{`\appdata\roaming\microsoft\`, `\onedrive`, `\ntuser`, `\appdata\local\packages\`, `\appdata\local\programs\`, `\appdata\local\cleanzo\`} {
+				if strings.Contains(lexical, forbidden) {
+					t.Errorf("deny-listed candidate: %q", c.path)
+				}
+			}
 			if p == "" || !(within(p, home) || temp != "" && within(p, temp)) {
 				t.Errorf("candidate escaped profile: %q", c.path)
 			}
@@ -54,6 +65,9 @@ func TestWindowsJunkScanReport(t *testing.T) {
 			r.Candidates = append(r.Candidates, c.path)
 		}
 		report.Rows = append(report.Rows, r)
+	}
+	if goBuildCandidates == 0 {
+		t.Error("dev.go-build must have candidates after compiling the tests")
 	}
 	items := measureItems(ctx, specs, env, nil, nil)
 	for i := range report.Rows {

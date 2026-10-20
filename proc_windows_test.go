@@ -4,11 +4,59 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+// TestWindowsPsCommandsIncludesExecutable protects launches whose command line uses only the typed name.
+func TestWindowsPsCommandsIncludesExecutable(t *testing.T) {
+	saved := snapshotProcesses
+	snapshotProcesses = func() ([]procInfo, error) {
+		return []procInfo{{Exe: `C:\tools\pnpm.exe`, CmdLine: "pnpm install"}, {CmdLine: "unreadable.exe"}}, nil
+	}
+	t.Cleanup(func() { snapshotProcesses = saved })
+	out, err := psCommands()
+	if err != nil || !strings.Contains(string(out), `C:\tools\pnpm.exe pnpm install`) || !toolBusy(windowsPnpmPrune.Busy) {
+		t.Fatalf("commands=%q error=%v", out, err)
+	}
+}
+
+// TestWindowsQuietCommandAndNativeCmd ignores a spoofed SystemRoot and retains hidden process flags.
+func TestWindowsQuietCommandAndNativeCmd(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "ready.cmd")
+	if err := os.WriteFile(shim, []byte("@echo ready\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SystemRoot", filepath.Join(dir, "spoof"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var cmd *exec.Cmd
+	var out []byte
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		cmd = quietCommand(exec.CommandContext(ctx, shim))
+		out, err = runToolCmd(cmd)
+		if err == nil || ctx.Err() != nil {
+			break
+		}
+		if attempt == 0 {
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+	systemDir, systemErr := windows.GetSystemDirectory()
+	if systemErr != nil || err != nil || strings.TrimSpace(string(out)) != "ready" || !strings.EqualFold(cmd.Path, filepath.Join(systemDir, "cmd.exe")) {
+		t.Fatalf("cmd=%q output=%q err=%v system=%v", cmd.Path, out, err, systemErr)
+	}
+	if !cmd.SysProcAttr.HideWindow || cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatal("command can show a console window")
+	}
+}
 
 // TestWindowsFindToolPATHEXT checks batch discovery and the exact isolated tool PATH.
 func TestWindowsFindToolPATHEXT(t *testing.T) {

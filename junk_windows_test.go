@@ -236,10 +236,22 @@ func TestWindowsJunkSeededClean(t *testing.T) {
 		filepath.Join(userData, "Default", "Cookies"), filepath.Join(userData, "Default", "History"),
 		filepath.Join(env.home, "OneDrive", "keep"), filepath.Join(env.home, "NTUSER.DAT"),
 		filepath.Join(roaming, "Microsoft", "Credentials", "x"), filepath.Join(local, "Cleanzo", "WebView2", "x"),
-		filepath.Join(local, "Packages", "x"), filepath.Join(local, "pip", "Cache", "guarded", "offline.bin"),
+		filepath.Join(local, "Packages", "x"),
+		filepath.Join(roaming, "Microsoft", "Crashpad", "pending", "d.dmp"),
+		filepath.Join(local, "Cleanzo", "EBWebView", "Crashpad", "pending", "d.dmp"),
+		filepath.Join(local, "Packages", "App", "Crashpad", "pending", "d.dmp"),
+		filepath.Join(roaming, "Microsoft", "Local State"),
+		filepath.Join(roaming, "Microsoft", "Cache", "keep"),
+		filepath.Join(roaming, "Microsoft", "ElectronApp", "Local State"),
+		filepath.Join(roaming, "Microsoft", "ElectronApp", "Code Cache", "keep"),
+		filepath.Join(local, "pip", "Cache", "guarded", "offline.bin"),
 	}
 	for _, p := range protected {
-		writeFile(t, p, 123)
+		size := 123
+		if filepath.Ext(p) == ".dmp" {
+			size = 8192
+		}
+		writeFile(t, p, size)
 	}
 	offline := protected[len(protected)-1]
 	if err := windows.SetFileAttributes(windows.StringToUTF16Ptr(offline), windows.FILE_ATTRIBUTE_OFFLINE); err != nil {
@@ -261,6 +273,7 @@ func TestWindowsJunkSeededClean(t *testing.T) {
 	for _, p := range caches {
 		writeFile(t, p, 4096)
 	}
+	writeFile(t, filepath.Join(roaming, "FixtureElectron", "Local State"), 2)
 	binEnabled := false
 	installer := filepath.Join(env.home, "Downloads", "fixture-setup.exe")
 	t.Run("bin", func(t *testing.T) {
@@ -340,6 +353,9 @@ func TestWindowsJunkSeededClean(t *testing.T) {
 	}
 	for _, p := range append(protected, chrome, code) {
 		want := 123
+		if filepath.Ext(p) == ".dmp" {
+			want = 8192
+		}
 		if p == chrome || p == code {
 			want = 4096
 		}

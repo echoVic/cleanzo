@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -72,13 +71,6 @@ func TestWindowsStubsCleanNothing(t *testing.T) {
 	}
 	if _, err := psCommands(); err == nil || !toolBusy(nil) {
 		t.Fatal("toolBusy did not fail closed")
-	}
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	if _, err := runToolCmd(cmd); !errors.Is(err, errUnsupported) || cmd.Process != nil {
-		t.Fatalf("command was started or did not report unsupported: %v", err)
-	}
-	if _, err := runTool(context.Background(), os.Args[0], nil, time.Second); !errors.Is(err, errUnsupported) || findTool("go") != "" {
-		t.Fatalf("tool execution did not fail closed: %v", err)
 	}
 	if _, err := (Cleaner{}).TrashPath(path); !errors.Is(err, errUsageUnknown) {
 		t.Fatalf("TrashPath error=%v", err)

@@ -63,6 +63,7 @@ func TestWindowsRuleExpansion(t *testing.T) {
 	for _, rel := range fixtures {
 		writeFile(t, filepath.Join(env.home, filepath.FromSlash(rel)), 100)
 	}
+	writeFile(t, filepath.Join(env.appData, "Fixture", "Local State"), 2)
 	for _, name := range []string{"Cookies", "History", "Login Data"} {
 		writeFile(t, filepath.Join(env.localAppData, "Google", "Chrome", "User Data", "Default", name), 10)
 	}

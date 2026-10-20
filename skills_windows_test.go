@@ -4,9 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -20,15 +24,10 @@ func TestWindowsSkillsUnsupportedLinks(t *testing.T) {
 	if err := (Cleaner{}).LinkSkillCopy(old, "anything"); !errors.Is(err, errUnsupported) {
 		t.Fatalf("LinkSkillCopy: %v", err)
 	}
-	src := t.TempDir()
-	writeFile(t, filepath.Join(src, "SKILL.md"), 456)
 	// Inject the privilege error rather than assuming the elevated runner lacks privileges.
 	saved := skillSymlink
 	skillSymlink = func(string, string) error { return &os.LinkError{Op: "symlink", Err: windows.ERROR_PRIVILEGE_NOT_HELD} }
 	t.Cleanup(func() { skillSymlink = saved })
-	if err := makeSkillSymlink("target", filepath.Join(src, "link")); !errors.Is(err, errUnsupported) {
-		t.Fatalf("privilege mapping: %v", err)
-	}
 	var archive bytes.Buffer
 	gz := gzip.NewWriter(&archive)
 	tw := tar.NewWriter(gz)
@@ -44,9 +43,30 @@ func TestWindowsSkillsUnsupportedLinks(t *testing.T) {
 	if err := gz.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := untarSafe(bytes.NewReader(archive.Bytes()), filepath.Join(src, "extract")); !errors.Is(err, errUnsupported) {
-		t.Fatalf("archive must fail before swapping old folder: %v", err)
+	noOpenFiles(t)
+	original, err := gitTreeHash(old)
+	if err != nil {
+		t.Fatal(err)
 	}
+	savedHTTP := skillUpdateHTTP
+	skillUpdateHTTP = &http.Client{Transport: skillModesTransport(func(r *http.Request) (*http.Response, error) {
+		body := archive.Bytes()
+		if strings.Contains(r.URL.Path, "/git/trees/") {
+			body = []byte(`{"sha":"root","tree":[{"path":"skills/fixture","type":"tree","sha":"replacement"},{"path":"skills/fixture/SKILL.md","type":"blob","mode":"100644"}]}`)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	t.Cleanup(func() { skillUpdateHTTP = savedHTTP })
+	origins := map[string]SkillOrigin{resolvePath(old): {Kind: originSkillsCLI, Repo: "acme/skills", Path: "skills/fixture", Tree: original}}
+	var result SkillUpgradeResult
+	err = upgradeOne(context.Background(), SkillUpgradeRequest{Path: old}, origins, &treeCache{trees: map[string]*githubTree{}}, map[string]skillArchive{}, &result)
+	if !errors.Is(err, errUnsupported) {
+		t.Fatalf("real upgrade privilege failure: %v", err)
+	}
+	if exists(filepath.Join(filepath.Dir(old), ".fixture.cleanzo-new")) {
+		t.Fatal("failed upgrade leaked a replacement")
+	}
+
 	if info, err := os.Stat(filepath.Join(old, "SKILL.md")); err != nil || info.Size() != 123 {
 		t.Fatal("old copy changed")
 	}

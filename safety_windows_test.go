@@ -477,53 +477,68 @@ func TestWindowsAIToolsAndSkillsRefuseReparsePoints(t *testing.T) {
 	}
 }
 
+// testRecycleValue reads an Explorer setting; missing values retain Windows defaults.
+var testRecycleValue = func(name, value string) (uint64, error) {
+	key, err := registry.OpenKey(registry.CURRENT_USER, name, registry.QUERY_VALUE)
+	if err != nil {
+		return 0, err
+	}
+	defer key.Close()
+	result, _, err := key.GetIntegerValue(value)
+	return result, err
+}
+
 // requireTestRecycleCapacity reads global and source-volume BitBucket settings without changing them.
 func requireTestRecycleCapacity(t *testing.T, path string, required int64) {
 	t.Helper()
+	refuse := func(format string, args ...any) {
+		t.Helper()
+		if strings.EqualFold(os.Getenv("GITHUB_ACTIONS"), "true") {
+			t.Fatalf(format, args...)
+		}
+		t.Skipf(format, args...)
+	}
 	const base = `Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket`
 	root := filepath.VolumeName(path) + `\`
 	buf := make([]uint16, 128)
 	if err := windows.GetVolumeNameForVolumeMountPoint(windows.StringToUTF16Ptr(root), &buf[0], uint32(len(buf))); err != nil {
-		t.Skipf("cannot establish Recycle Bin volume settings: %v", err)
+		refuse("cannot establish Recycle Bin volume settings: %v", err)
 	}
 	guid := strings.TrimSuffix(strings.TrimPrefix(windows.UTF16ToString(buf), `\\?\Volume`), `\`)
-	enabled, capacity := false, uint64(0)
+	var total uint64
+	if err := windows.GetDiskFreeSpaceEx(windows.StringToUTF16Ptr(root), nil, &total, nil); err != nil {
+		refuse("cannot determine default Recycle Bin capacity: %v", err)
+	}
+	// Default Windows bins are enabled. Five percent is a lower bound on the default volume quota.
+	enabled, capacity := true, total/20
 	for _, name := range []string{base, base + `\Volume\` + guid} {
-		key, err := registry.OpenKey(registry.CURRENT_USER, name, registry.QUERY_VALUE)
-		if errors.Is(err, registry.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			t.Skipf("cannot read Recycle Bin settings: %v", err)
-		}
-		nuke, _, nukeErr := key.GetIntegerValue("NukeOnDelete")
-		maximum, _, capacityErr := key.GetIntegerValue("MaxCapacity")
-		key.Close()
+		nuke, nukeErr := testRecycleValue(name, "NukeOnDelete")
+		maximum, capacityErr := testRecycleValue(name, "MaxCapacity")
 		if nukeErr == nil {
 			if nuke != 0 {
-				t.Skip("Recycle Bin is disabled (NukeOnDelete)")
+				refuse("Recycle Bin is disabled (NukeOnDelete)")
 			}
 			enabled = true
 		} else if !errors.Is(nukeErr, registry.ErrNotExist) {
-			t.Skipf("cannot read NukeOnDelete: %v", nukeErr)
+			refuse("cannot read NukeOnDelete: %v", nukeErr)
 		}
 		if capacityErr == nil {
 			if maximum == 0 || maximum > 1<<40 {
-				t.Skip("Recycle Bin capacity is disabled or unknown")
+				refuse("Recycle Bin capacity is disabled or unknown")
 			}
 			bytes := maximum * 1024 * 1024 // Explorer's MaxCapacity setting is in MiB.
 			if capacity == 0 || bytes < capacity {
 				capacity = bytes
 			}
 		} else if !errors.Is(capacityErr, registry.ErrNotExist) {
-			t.Skipf("cannot read MaxCapacity: %v", capacityErr)
+			refuse("cannot read MaxCapacity: %v", capacityErr)
 		}
 	}
 	if !enabled || capacity == 0 {
-		t.Skip("Recycle Bin enabled state/capacity is not explicit; refusing a possible nuke prompt")
+		refuse("Recycle Bin enabled state/capacity is unknown; refusing a possible nuke prompt")
 	}
 	if required < 0 || capacity < uint64(required)+64*1024 {
-		t.Skip("Recycle Bin is too small for the test without evicting existing entries")
+		refuse("Recycle Bin is too small for the test without evicting existing entries")
 	}
 }
 
