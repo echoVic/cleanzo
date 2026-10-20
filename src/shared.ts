@@ -12,6 +12,7 @@ function errText(e: unknown): string {
     "usage-unknown": "fs.usageUnknown",
     blocked: "fs.blocked",
     gone: "fs.gone",
+    unsupported: "fs.unsupported",
     "not-app": "fs.notApp",
   };
   if (plain[raw]) return t(plain[raw] as never);

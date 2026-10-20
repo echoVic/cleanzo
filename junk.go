@@ -200,7 +200,7 @@ func (env junkEnv) globTargets(pattern string) []string {
 		root, relative = env.tmp, strings.TrimPrefix(strings.TrimPrefix(pattern, "$TMPDIR"), "/")
 	}
 	paths := []string{root}
-	for _, part := range strings.Split(relative, "/") {
+	for _, part := range strings.Split(relative, "/") { // slash-ok: rule patterns always use slash-separated components
 		if part == "" {
 			continue
 		}

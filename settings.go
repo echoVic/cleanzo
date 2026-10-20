@@ -154,9 +154,7 @@ func validateSettings(s Settings) (Settings, error) {
 		if p == "" {
 			return Settings{}, codeError{Code: "folder-empty"}
 		}
-		if p == "~" || strings.HasPrefix(p, "~/") {
-			p = filepath.Join(homeDir(), strings.TrimPrefix(p, "~"))
-		}
+		p = expandHome(p)
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			return Settings{}, err

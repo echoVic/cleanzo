@@ -159,8 +159,8 @@ func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress fun
 // crashpadOwner names the app a Crashpad database belongs to, from the
 // folder it sits in: an installed app's name when it is known.
 func crashpadOwner(home, db string, apps *appIndex) string {
-	rel := strings.TrimPrefix(resolvePath(db), resolvePath(filepath.Join(home, "Library/Application Support"))+"/")
-	folder := strings.SplitN(rel, "/", 2)[0]
+	rel := strings.TrimPrefix(resolvePath(db), resolvePath(filepath.Join(home, "Library/Application Support"))+string(filepath.Separator))
+	folder := strings.SplitN(rel, string(filepath.Separator), 2)[0]
 	if crashpadCodex[strings.ToLower(folder)] {
 		return "Codex"
 	}

@@ -177,7 +177,7 @@ func gitTree(dir string) (hash string, empty bool, err error) {
 				continue
 			}
 			b, _ := hex.DecodeString(sub)
-			list = append(list, entry{"40000", name, name + "/", b})
+			list = append(list, entry{"40000", name, name + "/", b}) // slash-ok: Git tree directory sort keys use slashes
 		case info.Mode().IsRegular():
 			data, err := os.ReadFile(p)
 			if err != nil {
@@ -321,9 +321,9 @@ func loadCCSwitch(ctx context.Context) map[string]SkillOrigin {
 		return out
 	}
 	for _, r := range rows {
-		o := SkillOrigin{Kind: originCCSwitch, Repo: r.Owner + "/" + r.Name, Ref: r.Branch}
+		o := SkillOrigin{Kind: originCCSwitch, Repo: r.Owner + "/" + r.Name, Ref: r.Branch} // slash-ok: GitHub owner/repository identifier
 		if m := readmeURL.FindStringSubmatch(r.Readme); m != nil {
-			o.Repo, o.Ref, o.Path = m[1]+"/"+m[2], m[3], skillFolderOf(m[4])
+			o.Repo, o.Ref, o.Path = m[1]+"/"+m[2], m[3], skillFolderOf(m[4]) // slash-ok: GitHub owner/repository identifier
 		}
 		if o.Ref == "HEAD" {
 			o.Ref = ""
@@ -351,7 +351,7 @@ var githubURL = regexp.MustCompile(`^(?:https?://|git@|ssh://git@)github\.com[/:
 
 func githubRepo(u string) string {
 	if m := githubURL.FindStringSubmatch(strings.TrimSpace(u)); m != nil {
-		return m[1] + "/" + m[2]
+		return m[1] + "/" + m[2] // slash-ok: GitHub owner/repository identifier
 	}
 	return ""
 }
@@ -860,7 +860,7 @@ func untarSafe(r io.Reader, dest string) (string, error) {
 		if path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
 			return "", fmt.Errorf("unsafe path %q", h.Name)
 		}
-		first := strings.SplitN(name, "/", 2)[0]
+		first := strings.SplitN(name, "/", 2)[0] // slash-ok: tar entry names always use slash-separated components
 		if top == "" {
 			top = first
 		} else if first != top {

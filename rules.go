@@ -181,7 +181,7 @@ var junkRules = []Rule{
 func chromiumProfileCaches(profiles string) []Target {
 	var ts []Target
 	for _, d := range []string{"Code Cache", "GPUCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "GraphiteDawnCache"} {
-		ts = append(ts, Target{Pattern: profiles + "/" + d, Mode: entriesOf})
+		ts = append(ts, Target{Pattern: profiles + "/" + d, Mode: entriesOf}) // slash-ok: rule patterns always use slash-separated components
 	}
 	return ts
 }

@@ -287,7 +287,7 @@ func scanAITool(ctx context.Context, tool aiTool, running bool) (AITool, error) 
 			continue
 		}
 		for _, p := range paths {
-			claimed[strings.SplitN(strings.TrimPrefix(p, root+"/"), "/", 2)[0]] = true
+			claimed[strings.SplitN(strings.TrimPrefix(p, root+string(filepath.Separator)), string(filepath.Separator), 2)[0]] = true
 		}
 		// A nested known part (plugins/cache) is measured on its own; its
 		// parent (plugins) reports the rest.
@@ -385,7 +385,7 @@ func aiNested(tool aiTool, part aiPart, root string) []string {
 			continue
 		}
 		p := filepath.Join(root, other.Path)
-		if strings.HasPrefix(p, strings.TrimSuffix(base, "/")+"/") {
+		if p != filepath.Clean(base) && within(p, filepath.Clean(base)) {
 			nested = append(nested, filepath.Clean(p))
 		}
 	}
@@ -480,11 +480,11 @@ func codexMonths(ctx context.Context, dir string) []AIGroup {
 		if err != nil || !d.Type().IsRegular() {
 			return nil
 		}
-		parts := strings.Split(strings.TrimPrefix(p, dir+"/"), "/")
+		parts := strings.Split(strings.TrimPrefix(p, dir+string(filepath.Separator)), string(filepath.Separator))
 		if len(parts) < 2 || len(parts[0]) != 4 || len(parts[1]) != 2 {
 			return nil
 		}
-		key := parts[0] + "/" + parts[1]
+		key := parts[0] + "/" + parts[1] // slash-ok: Codex month keys use yyyy/mm independent of filesystem separators
 		g := byMonth[key]
 		if g == nil {
 			g = &AIGroup{Key: key, Label: parts[0] + "-" + parts[1], Path: filepath.Join(dir, parts[0], parts[1])}
@@ -799,8 +799,8 @@ func claudeSessionFolders(group string, targets []string, cutoff time.Time) []st
 	var out []string
 	folders := map[string]bool{}
 	for _, t := range targets {
-		rel := strings.TrimPrefix(t, group+"/")
-		first, rest, nested := strings.Cut(rel, "/")
+		rel := strings.TrimPrefix(t, group+string(filepath.Separator))
+		first, rest, nested := strings.Cut(rel, string(filepath.Separator))
 		if !nested || rest == "" {
 			out = append(out, t)
 			continue
@@ -826,7 +826,7 @@ func claudeSessionFolders(group string, targets []string, cutoff time.Time) []st
 func aiRemovable(root string, tool aiTool, target string) bool {
 	real := resolvePath(target)
 	realRoot := resolvePath(root)
-	if !strings.HasPrefix(real, realRoot+"/") || !safeToClean(target) {
+	if (real == realRoot || !within(real, realRoot)) || !safeToClean(target) {
 		return false
 	}
 	info, err := os.Lstat(target)
@@ -842,10 +842,10 @@ func aiRemovable(root string, tool aiTool, target string) bool {
 			// The target is a protected part, or holds one. Being inside a
 			// protected folder is fine when a known cleanable part lives there
 			// (plugins/cache inside plugins).
-			if real == rp || strings.HasPrefix(rp, real+"/") {
+			if within(rp, real) {
 				return false
 			}
-			if strings.HasPrefix(real, rp+"/") && !aiInsideCleanable(root, tool, real) {
+			if real != rp && within(real, rp) && !aiInsideCleanable(root, tool, real) {
 				return false
 			}
 		}
@@ -860,7 +860,7 @@ func aiInsideCleanable(root string, tool aiTool, path string) bool {
 			continue
 		}
 		p := resolvePath(filepath.Join(root, part.Path))
-		if path == p || strings.HasPrefix(path, p+"/") {
+		if within(path, p) {
 			return true
 		}
 	}
@@ -869,9 +869,8 @@ func aiInsideCleanable(root string, tool aiTool, path string) bool {
 
 // displayHome shortens the home folder to ~ in messages.
 func displayHome(p string) string {
-	h := homeDir()
-	if strings.HasPrefix(p, h+"/") {
-		return "~" + strings.TrimPrefix(p, h)
+	if p == homeDir() {
+		return p
 	}
-	return p
+	return shortHome(p)
 }

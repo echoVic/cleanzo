@@ -813,7 +813,7 @@ func codexSkillUsage(ctx context.Context) (map[string]skillTally, int64, int, er
 			for _, name := range knownSkillRef(args, roots) {
 				key := ""
 				if rec.Payload.CallID != "" {
-					key = rec.Payload.CallID + "/" + name
+					key = rec.Payload.CallID + "/" + name // slash-ok: logical transcript call IDs, not filesystem paths
 				}
 				local = append(local, skillCall{Key: key, Name: name, TS: parseTS(rec.Timestamp)})
 			}
@@ -895,7 +895,7 @@ func opencodeSkillUsage(ctx context.Context) (map[string]skillTally, int64, int,
 		}
 		in, _ := json.Marshal(part.State.Input)
 		for _, name := range knownSkillRef(string(in), roots) {
-			calls = append(calls, skillCall{Key: row.ID + "/" + name, Name: name, TS: ts})
+			calls = append(calls, skillCall{Key: row.ID + "/" + name, Name: name, TS: ts}) // slash-ok: logical transcript call IDs, not filesystem paths
 		}
 	}
 	tally, n := tallyCalls(calls)

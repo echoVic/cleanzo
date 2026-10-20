@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -124,46 +123,6 @@ var (
 	statusQuitPoll     = 100 * time.Millisecond
 )
 
-// realStatusSource wires the loop to the native reads in native.go.
-func realStatusSource() statusSource {
-	return statusSource{
-		procs: nativeProcs,
-		apps:  workspaceList,
-		memory: func() MemoryStatus {
-			return readMemoryStatus()
-		},
-		cpu: func() (uint64, uint64) {
-			t, ok := nativeCPUTicks()
-			if !ok {
-				return 0, 0
-			}
-			busy := uint64(t.Ticks[0]) + uint64(t.Ticks[1]) + uint64(t.Ticks[3]) // user+system+nice
-			total := busy + uint64(t.Ticks[2])
-			return busy, total
-		},
-		battery:   statusBattery,
-		disk:      diskStat,
-		terminate: workspaceTerminate,
-	}
-}
-
-// readMemoryStatus assembles the memory card from one vm read plus the
-// sysctls for size, pressure and swap.
-func readMemoryStatus() MemoryStatus {
-	vm, ok := nativeVMStats()
-	if !ok {
-		return MemoryStatus{}
-	}
-	page := nativeSysctlUint64("hw.pagesize")
-	total := nativeSysctlUint64("hw.memsize")
-	if page == 0 || total == 0 {
-		return MemoryStatus{}
-	}
-	pressure := nativeSysctlUint64("kern.memorystatus_vm_pressure_level")
-	swapUsed, swapTotal := readSwapUsage()
-	return memoryFromVM(total, page, vm, pressure, swapUsed, swapTotal)
-}
-
 // memoryFromVM converts page counts into Activity Monitor's categories:
 // App Memory = internal − purgeable, Wired, Compressed (the pages the
 // compressor holds in physical memory, matching Activity Monitor's
@@ -186,18 +145,6 @@ func memoryFromVM(totalBytes, page uint64, vm vmStats64, pressure, swapUsed, swa
 	mem.Used = mem.App + mem.Wired + mem.Compressed
 	mem.Cached = (uint64(vm.ExternalPages) + uint64(vm.Purgeable)) * page
 	return mem
-}
-
-// statusBattery runs system_profiler, whose JSON is the only source that
-// matches System Settings (it rounds Maximum Capacity itself). Slow, so it
-// lives behind a context deadline and refreshes only once a minute.
-func statusBattery(ctx context.Context) *BatteryStatus {
-	cmd := exec.CommandContext(ctx, "/usr/sbin/system_profiler", "-json", "SPPowerDataType")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-	return parseBatteryJSON(out)
 }
 
 // ---- parsing helpers (pure, table-tested) ---------------------------------
@@ -318,16 +265,6 @@ func parseSwapUsageBytes(b []byte) (swapUsage, bool) {
 		su.Encrypted = int32(binary.LittleEndian.Uint32(b[28:32])) != 0
 	}
 	return su, true
-}
-
-// readSwapUsage is the wiring: vm.swapusage is a struct sysctl, so the
-// binary parse runs first; the text parse only remains as a fallback for
-// the CLI's rendered shape, used when the raw read itself failed.
-func readSwapUsage() (used, total uint64) {
-	if su, ok := parseSwapUsageBytes(nativeSysctlRaw("vm.swapusage")); ok {
-		return su.Used, su.Total
-	}
-	return parseSwapUsage(nativeSysctlString("vm.swapusage"))
 }
 
 // parseLoadAvg reads " 1.92 2.03 1.85 " into the 1/5/15-minute loads.
@@ -628,11 +565,11 @@ func parseBatteryJSON(data []byte) *BatteryStatus {
 // Nested bundles (Foo.app/Bar.app/...) belong to the outer one. The match
 // needs ".app/" so "Arcade.app.helper" does not count.
 func outermostBundle(path string) string {
-	idx := strings.Index(path, ".app/")
+	idx := strings.Index(path, ".app"+string(filepath.Separator))
 	if idx <= 0 {
 		return ""
 	}
-	if !strings.Contains(path[:idx], "/") {
+	if !strings.Contains(path[:idx], string(filepath.Separator)) {
 		return "" // "Foo.app/..." without a directory is not a bundle path
 	}
 	return path[:idx+4]
@@ -696,7 +633,7 @@ func canQuit(bundle string, apps []workspaceApp) bool {
 			continue
 		}
 		ap := strings.ToLower(a.Path)
-		if ap == lower || strings.HasPrefix(ap, lower+"/") {
+		if within(ap, lower) {
 			return true
 		}
 	}
@@ -1013,7 +950,7 @@ func quitMatches(path string, apps []workspaceApp) []workspaceApp {
 	if path == "" {
 		return nil
 	}
-	lower := strings.ToLower(strings.TrimRight(path, "/"))
+	lower := strings.ToLower(strings.TrimRight(path, string(filepath.Separator)))
 	var out []workspaceApp
 	for _, a := range apps {
 		if !a.Regular || a.Path == "" {
@@ -1022,8 +959,8 @@ func quitMatches(path string, apps []workspaceApp) []workspaceApp {
 		if a.BundleID == "com.apple.finder" || a.BundleID == "com.cleanzo.app" {
 			continue
 		}
-		ap := strings.ToLower(strings.TrimRight(a.Path, "/"))
-		if ap == lower || strings.HasPrefix(ap, lower+"/") {
+		ap := strings.ToLower(strings.TrimRight(a.Path, string(filepath.Separator)))
+		if within(ap, lower) {
 			out = append(out, a)
 		}
 	}

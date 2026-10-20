@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -81,24 +80,6 @@ var simctlCleanup = toolCommand{
 	},
 }
 
-// toolDirs lists fixed executable directories for apps started from Finder.
-var toolDirs = func() []string {
-	home := homeDir()
-	dirs := []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"}
-	for _, dir := range []string{".local/bin", ".cargo/bin", ".bun/bin", ".volta/bin", "Library/pnpm"} {
-		dirs = append(dirs, filepath.Join(home, dir))
-	}
-	dirs = append(dirs, "/usr/local/go/bin")
-	nodes, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/*/bin"))
-	slices.SortFunc(nodes, func(a, b string) int {
-		return compareVersions(nodeVersion(a), nodeVersion(b))
-	})
-	if len(nodes) > 0 {
-		dirs = append(dirs, nodes[len(nodes)-1])
-	}
-	return dirs
-}
-
 // nodeVersion reads the numerical parts of an nvm version directory.
 func nodeVersion(bin string) []int {
 	var parts []int
@@ -107,26 +88,6 @@ func nodeVersion(bin string) []int {
 		parts = append(parts, n)
 	}
 	return parts
-}
-
-// psCommands lists process commands with a bounded wait.
-var psCommands = func() ([]byte, error) {
-	out, err := runTool(context.Background(), "/bin/ps", []string{"-axo", "command="}, 5*time.Second)
-	return []byte(out), err
-}
-
-// findTool finds an executable without consulting a shell or inherited PATH.
-func findTool(name string) string {
-	if name == "" || filepath.Base(name) != name {
-		return ""
-	}
-	for _, dir := range toolDirs() {
-		path := filepath.Join(dir, name)
-		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
-			return path
-		}
-	}
-	return ""
 }
 
 // toolBusy fails closed when process commands cannot be inspected.
@@ -143,18 +104,11 @@ func runTool(ctx context.Context, tool string, args []string, timeout time.Durat
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, tool, args...)
-	cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(tool)+":/usr/bin:/bin:/usr/sbin:/sbin")
+	cmd.Env = append(os.Environ(), toolPath(tool))
 	if filepath.Base(tool) == "brew" {
 		cmd.Env = append(cmd.Env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1")
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 100 * time.Millisecond
-	out, err := cmd.CombinedOutput()
-	// A leader can exit while a background child still owns the output pipes.
-	if cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	out, err := runToolCmd(cmd)
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}

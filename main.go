@@ -22,7 +22,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -30,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -156,7 +154,8 @@ func homeDir() string {
 
 // configPath returns where Cleanzo settings are persisted.
 func configPath() string {
-	return filepath.Join(homeDir(), "Library", "Application Support", "Cleanzo", "config.json")
+	dir, _ := os.UserConfigDir()
+	return filepath.Join(dir, "Cleanzo", "config.json")
 }
 
 // canonical returns p absolute, resolved and lower-cased, the form paths are
@@ -164,19 +163,6 @@ func configPath() string {
 func canonical(p string) string {
 	abs, _ := filepath.Abs(p)
 	return strings.ToLower(resolvePath(abs))
-}
-
-// changedAt is when a file last changed: its modification time, or its
-// status change time, which moving, copying and extracting set, while they
-// keep the modification time of the original.
-func changedAt(info fs.FileInfo) time.Time {
-	t := info.ModTime()
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		if c := time.Unix(st.Ctimespec.Unix()); c.After(t) {
-			return c
-		}
-	}
-	return t
 }
 
 // removeAll deletes path like os.RemoveAll, also when folders inside are
@@ -237,28 +223,6 @@ func measureChecked(p string) (size, files int64, newest time.Time, readErrors i
 	return size, files, newest, readErrors
 }
 
-// onDisk is a file's length, or the space its blocks take when that is less.
-func onDisk(info fs.FileInfo) int64 {
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return min(info.Size(), st.Blocks*512)
-	}
-	return info.Size()
-}
-
-// Inside the home folder, cleaning never reaches these folders themselves
-// (their contents are the user's data), nor anything in the subtrees below.
-var (
-	protectedHomeDirs = []string{
-		"/library", "/library/application support", "/library/containers",
-		"/library/group containers", "/library/preferences",
-		"/desktop", "/documents", "/downloads", "/movies", "/music", "/pictures",
-	}
-	protectedHomeTrees = []string{
-		"/library/keychains", "/library/mobile documents", "/library/mail",
-		"/library/messages", "/.ssh", "/.gnupg",
-	}
-)
-
 // safeToClean guards against cleaning system paths and irreplaceable user
 // data. It judges a path by where it really is: links are resolved, and
 // paths are compared in lower case because macOS volumes are
@@ -285,7 +249,7 @@ func safeResolved(path string) bool {
 				return false
 			}
 		}
-		if slices.ContainsFunc(strings.Split(rel, "/"), appLibrary) {
+		if slices.ContainsFunc(strings.Split(rel, string(filepath.Separator)), appLibrary) {
 			return false
 		}
 		return true
@@ -297,11 +261,6 @@ func safeResolved(path string) bool {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
-}
-
-// within reports whether path is dir or inside it.
-func within(path, dir string) bool {
-	return path == dir || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
 }
 
 // resolvePath resolves the links of the longest existing prefix of p, an
@@ -363,7 +322,7 @@ func (g *usageGuard) inUse(path string) bool {
 	if i := sort.SearchStrings(g.open, p); i < len(g.open) && g.open[i] == p {
 		return true
 	}
-	if i := sort.SearchStrings(g.open, p+"/"); i < len(g.open) && strings.HasPrefix(g.open[i], p+"/") {
+	if i := sort.SearchStrings(g.open, p+string(filepath.Separator)); i < len(g.open) && strings.HasPrefix(g.open[i], p+string(filepath.Separator)) {
 		return true
 	}
 	return namedAfterBundle(filepath.Base(p), g.running)
@@ -385,75 +344,6 @@ func namedAfterBundle(name string, ids map[string]bool) bool {
 	}
 }
 
-// openFiles lists the files the user's processes have open, lower-cased and
-// sorted, from lsof.
-func openFiles() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-w", "-Fn")
-	// Apps started from Finder have no LANG, under which lsof escapes the
-	// bytes of non-ASCII names as \xNN.
-	cmd.Env = append(os.Environ(), "LC_ALL=en_US.UTF-8")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parseLsofNames(out), nil
-}
-
-// parseLsofNames extracts the file paths from lsof -Fn output, whose name
-// lines start with "n"; pipes have names that are not paths. Files are
-// listed resolved, but sockets under the path they were bound with, which
-// may go through the /var, /tmp and /etc links into /private.
-func parseLsofNames(out []byte) []string {
-	var paths []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.HasPrefix(line, "n/") {
-			continue
-		}
-		p := filepath.Clean(line[1:])
-		for _, link := range []string{"/var", "/tmp", "/etc"} {
-			if within(p, link) {
-				p = "/private" + p
-			}
-		}
-		paths = append(paths, strings.ToLower(p))
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-// runningApps returns the lower-cased bundle IDs of the running apps, and
-// where their bundles are.
-func runningApps() (ids map[string]bool, apps []string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/lsappinfo", "list").Output()
-	if err != nil {
-		return nil, nil, err
-	}
-	ids, apps = parseRunningApps(out)
-	return ids, apps, nil
-}
-
-var (
-	bundleIDRe   = regexp.MustCompile(`bundleID="([^"]+)"`)
-	bundlePathRe = regexp.MustCompile(`bundle path="([^"]+\.app)"`)
-)
-
-// parseRunningApps extracts the bundle IDs and app bundle paths from
-// lsappinfo list output.
-func parseRunningApps(out []byte) (ids map[string]bool, apps []string) {
-	ids = map[string]bool{}
-	for _, m := range bundleIDRe.FindAllSubmatch(out, -1) {
-		ids[strings.ToLower(string(m[1]))] = true
-	}
-	for _, m := range bundlePathRe.FindAllSubmatch(out, -1) {
-		apps = append(apps, string(m[1]))
-	}
-	return ids, apps
-}
-
 // scanConcurrency bounds how many directory walks run at once during a scan.
 // WalkDir is I/O bound; keeping a small fixed pool avoids thrashing the disk.
 const scanConcurrency = 8
@@ -464,28 +354,6 @@ const tempMinAge = 7 * 24 * time.Hour
 
 // now is the clock entry ages are measured against. Tests move it.
 var now = time.Now
-
-// protectedFlags are the file flags under which macOS refuses to remove an
-// entry: immutable, append-only, and the restricted and no-unlink flags of
-// System Integrity Protection.
-const protectedFlags = 0x2 | 0x4 | 0x20000 | 0x40000 | 0x80000 | 0x100000
-
-// removalRefused reports whether macOS would refuse to remove the entry:
-// its flags forbid it, or, for a folder, privacy protection forbids reading
-// it (EPERM, unlike the EACCES of mere permissions, which removeAll fixes).
-func removalRefused(path string, info fs.FileInfo) bool {
-	if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Flags&protectedFlags != 0 {
-		return true
-	}
-	if info.IsDir() {
-		f, err := os.Open(path)
-		if err != nil {
-			return errors.Is(err, syscall.EPERM)
-		}
-		f.Close()
-	}
-	return false
-}
 
 // cleanEntry is one entry removed by a junk clean.
 type cleanEntry struct {
@@ -1100,17 +968,6 @@ func (Cleaner) Disk() DiskStat {
 	return diskStat()
 }
 
-// diskStat returns the capacity of the boot volume.
-func diskStat() DiskStat {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs("/", &st); err != nil {
-		return DiskStat{}
-	}
-	total := int64(st.Bsize) * int64(st.Blocks)
-	free := int64(st.Bsize) * int64(st.Bavail)
-	return DiskStat{Total: total, Used: total - free, Free: free}
-}
-
 // fullScanTargets returns the directories the full scan enumerates:
 // the user's home with ~/Library expanded one level, plus system-level roots.
 func fullScanTargets() []string {
@@ -1155,17 +1012,6 @@ func fullScanTargets() []string {
 // the home folder (trashable) and passes the safety gate cleaning uses.
 func removable(path string) bool {
 	return trashable(path) && safeToClean(path)
-}
-
-// mountPoint reports whether path is where another volume is mounted, such
-// as a disk image or a VM's share in the home folder: that is another disk,
-// whose usage is not the home folder's.
-func mountPoint(path string) bool {
-	var st, parent syscall.Stat_t
-	if syscall.Lstat(path, &st) != nil || syscall.Lstat(filepath.Dir(path), &parent) != nil {
-		return false
-	}
-	return st.Dev != parent.Dev
 }
 
 // trashable reports whether path may be moved to the Trash: it must be a
@@ -1597,6 +1443,9 @@ var pathUsageProbe = probeUsage
 // errBlocked is the error for a path the safety rules protect.
 var errBlocked = errors.New("blocked")
 
+// errUnsupported reports a platform operation that is not implemented.
+var errUnsupported = errors.New("unsupported")
+
 // errGone is the error for a path that no longer exists.
 var errGone = errors.New("gone")
 
@@ -1638,9 +1487,7 @@ func (Cleaner) TrashPath(path string) (TrashResult, error) {
 // libraries), which open would launch or mount, are revealed (selected) in
 // their parent folder.
 func revealArgs(path string) ([]string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") { // junk rows show paths this way
-		path = filepath.Join(homeDir(), strings.TrimPrefix(path, "~"))
-	}
+	path = expandHome(path)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
