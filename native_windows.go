@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -61,6 +64,7 @@ var (
 	getWindow            = statusUser.NewProc("GetWindow")
 	getWindowLongPtr     = statusUser.NewProc("GetWindowLongPtrW")
 	postMessage          = statusUser.NewProc("PostMessageW")
+	enumWindowsProc      = statusUser.NewProc("EnumWindows")
 )
 
 // statusSnapshotProcesses permits status failures to be tested independently of cleanup's probe.
@@ -137,9 +141,21 @@ func windowsRegistryString(path, name string) string {
 	return value
 }
 
-// enumWindowsCallback is registered once: Windows syscall callbacks cannot be freed.
-var enumWindowsCallback = windows.NewCallback(func(hwnd windows.HWND, param unsafe.Pointer) uintptr {
-	visit := *(*func(windows.HWND, uint32))(param)
+// enumWindowVisitors roots each visitor in Go memory while Windows holds only its integer id.
+var enumWindowVisitors = struct {
+	sync.RWMutex
+	next     atomic.Uintptr
+	visitors map[uintptr]func(windows.HWND, uint32)
+}{visitors: make(map[uintptr]func(windows.HWND, uint32))}
+
+// enumWindowsCallback is registered once and resolves the integer lParam without converting it to a pointer.
+var enumWindowsCallback = windows.NewCallback(func(hwnd windows.HWND, id uintptr) uintptr {
+	enumWindowVisitors.RLock()
+	visit := enumWindowVisitors.visitors[id]
+	enumWindowVisitors.RUnlock()
+	if visit == nil {
+		return 0
+	}
 	var pid uint32
 	if _, err := windows.GetWindowThreadProcessId(hwnd, &pid); err == nil {
 		visit(hwnd, pid)
@@ -147,9 +163,20 @@ var enumWindowsCallback = windows.NewCallback(func(hwnd windows.HWND, param unsa
 	return 1
 })
 
-// enumTopWindows carries a synchronous visitor through EnumWindows without registering more callbacks.
+// enumTopWindows isolates concurrent visitors and removes their handles when the synchronous call returns.
 func enumTopWindows(visit func(windows.HWND, uint32)) bool {
-	return windows.EnumWindows(enumWindowsCallback, unsafe.Pointer(&visit)) == nil
+	id := enumWindowVisitors.next.Add(1)
+	enumWindowVisitors.Lock()
+	enumWindowVisitors.visitors[id] = visit
+	enumWindowVisitors.Unlock()
+	defer func() {
+		enumWindowVisitors.Lock()
+		delete(enumWindowVisitors.visitors, id)
+		enumWindowVisitors.Unlock()
+	}()
+	// The x/sys wrapper takes unsafe.Pointer for lParam; call directly to keep the id an integer.
+	result, _, _ := syscall.SyscallN(enumWindowsProc.Addr(), enumWindowsCallback, id)
+	return result != 0
 }
 
 // regularWindow requires a visible, unowned, non-tool top-level window.
