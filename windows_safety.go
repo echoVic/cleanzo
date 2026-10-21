@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path"
 	"strings"
 	"time"
 )
@@ -10,6 +11,18 @@ type procInfo struct {
 	Pid, PPid                   uint32
 	Exe, Name, Product, CmdLine string
 	Created                     time.Time
+}
+
+// windowsSystemPath identifies protected system executables after resolving both paths.
+func windowsSystemPath(exe, root string, resolve func(string) string) bool {
+	exe, root = resolve(exe), resolve(root)
+	// Unknown identities cannot safely be offered a close request.
+	if exe == "" || root == "" {
+		return true
+	}
+	exe = path.Clean(strings.ReplaceAll(exe, `\`, "/"))
+	root = path.Clean(strings.ReplaceAll(root, `\`, "/"))
+	return strings.EqualFold(exe, root) || strings.HasPrefix(strings.ToLower(exe), strings.ToLower(strings.TrimRight(root, "/"))+"/") // slash-ok: compares normalized Windows paths on every host
 }
 
 // windowsLocalPath accepts only absolute DOS drive paths, with no stream or shell wildcard.

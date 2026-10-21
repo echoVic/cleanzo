@@ -126,10 +126,13 @@ func statusProcessExcluded(pid int32, path string) bool {
 	return own != "" && target != "" && strings.EqualFold(own, target)
 }
 
-// statusAppExcluded preserves Darwin identities and protects Windows Explorer and Cleanzo.
+// statusWindowsRoot is populated from GetWindowsDirectory on Windows, never from the environment.
+var statusWindowsRoot string
+
+// statusAppExcluded preserves Darwin identities and protects Windows system apps and Cleanzo.
 func statusAppExcluded(a workspaceApp) bool {
 	if runtime.GOOS == "windows" {
-		return statusProcessExcluded(a.Pid, a.Path) || strings.EqualFold(filepath.Base(a.Path), "explorer.exe")
+		return statusProcessExcluded(a.Pid, a.Path) || strings.EqualFold(filepath.Base(a.Path), "explorer.exe") || windowsSystemPath(a.Path, statusWindowsRoot, resolvePath)
 	}
 	return a.BundleID == "com.apple.finder" || a.BundleID == "com.cleanzo.app"
 }
