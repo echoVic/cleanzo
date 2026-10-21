@@ -12,6 +12,8 @@ function errText(e: unknown): string {
     "in-use": "fs.inUse",
     "usage-unknown": "fs.usageUnknown",
     blocked: "fs.blocked",
+    "not-recycled": "fs.notRecycled",
+    "connected-files": "fs.connectedFiles",
     gone: "fs.gone",
     unsupported: "fs.unsupported",
     "not-app": "fs.notApp",

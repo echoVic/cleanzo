@@ -49,7 +49,7 @@
 1. **macOS is unchanged.** The darwin suite passes with the same test list, and no darwin assertion changed. *Tasks 1–3.*
 2. **Paths are judged by their final target, and reparse points are never traversed or removed through** (junctions, symlinks, mount points, cloud placeholders). A junction from the profile to `D:\`, and the legacy `Application Data` junction, never lead to a removal. *Test in Task 7.*
 3. **Nothing outside the profile, and nothing protected inside it, is modified.** This covers known-folder roots, `OneDrive*`, the AppData roots, `Roaming\Microsoft`, `Local\{Packages,Programs,Microsoft\WindowsApps,Microsoft\Credentials,Microsoft\Vault,wsl,Docker}`, `NTUSER*`, `.ssh`, `.gnupg`, and Cleanzo's own data. ADS, `\\?\`, `\\.\` and UNC paths are refused. A temp folder outside the profile is unusable. *Tests in Tasks 7, 10 and 12.*
-4. **"Move to Recycle Bin" never silently becomes a permanent delete.** It runs only on fixed drives, and AppData paths cannot be trashed from user-picked rows. *Test in Task 8.*
+4. **"Move to Recycle Bin" fails and keeps the source when recycling is impossible.** Cleanzo checks its safety guards, the resolved fixed drive and connected files before calling mygo 0.6 `Shell.TrashItem`; no permanent-delete dialog appears. Either half of a connected saved page is refused. AppData paths cannot be trashed from user-picked rows. *Test in Task 8, including real NukeOnDelete refusal in Windows CI.*
 5. **An item whose owner runs is left alone, and a failed process snapshot means nothing is cleaned.** This includes Chromium caches opened with share-delete. *Test in Task 9.*
 6. **The Recycle Bin is emptied only when its row is selected, first in the pass, and only if it is unchanged since the scan.** *Test in Task 12.*
 7. **An uninstall launches only the registry-declared uninstaller of the key the user picked; InstallLocation is never trashed.** *Test in Task 23.*
@@ -65,7 +65,7 @@
 | `fs_darwin.go` / `fs_windows.go` (new) | `changedAt`, `onDisk`, `removalRefused`, `mountPoint`, `diskStat`; Windows: final-path resolution, reparse and placeholder checks |
 | `proc_darwin.go` / `proc_windows.go` (new) | Running tool commands with tree kill, tool dirs, `findTool`, `psCommands`; Windows: process snapshot |
 | `usage_darwin.go` / `usage_windows.go` (new) | `openFiles`, `runningApps` (darwin: lsof/lsappinfo, moved); Windows: from the process snapshot |
-| `trash_windows.go` (new) | Recycle Bin move with nuke warning, fixed-drive check; Recycle Bin query/empty for `sys.trash` |
+| `trash_windows.go` / `trash_connected_windows.go` | Guarded mygo 0.6 Recycle Bin move, fixed-drive and connected-files checks; Recycle Bin query/empty for `sys.trash` |
 | `status_darwin.go` / `status_windows.go` (new) | `realStatusSource`, memory, battery; darwin code moved from monitor.go |
 | `native_windows.go` (new) | Win32 reads for the status page and `Info()` |
 | `apps_darwin.go` / `apps_windows.go` (new) | Platform app listing and uninstall behind the existing bound methods |
@@ -221,14 +221,15 @@
   - An ADS path and a UNC path are refused by `safeToClean`.
   - A file with `attrib +O` (offline) is refused by `removalRefused` and survives a clean.
 
-### Task 8: Recycle Bin moves that never nuke silently
+### Task 8: Recycle Bin moves through mygo 0.6 that refuse permanent deletion
 
-**Files:** create `trash_windows.go`; modify `main.go`.
+**Files:** `trash_windows.go`, `trash_connected_windows.go`, `junk.go`, `src/i18n.ts`, `src/shared.ts`, and Windows trash/tests harness files.
 
 - [ ] **`recycle(path string) error` on Windows:**
-  - Call `SHFileOperationW` with `FO_DELETE` and `FOF_ALLOWUNDO|FOF_NOCONFIRMATION|FOF_SILENT|FOF_NOERRORUI|FOF_WANTNUKEWARNING`, using a double-NUL-terminated path.
-  - Return an error when the result is non-zero or `fAnyOperationsAborted` is set.
-  - Refuse paths whose drive is not `DRIVE_FIXED` (`GetDriveTypeW`).
+  - Keep `cleanable` and `platformRemovalSafe`, followed by the resolved-volume `DRIVE_FIXED` check (`GetDriveTypeW`); failures remain `blocked`.
+  - Refuse connected saved-page files and their sibling folders in both directions with `connected-files`. Check HTML-like extensions and the minimal documented `_files`, `.files`, `-files`, ` files` suffix set case-insensitively; refuse unreadable metadata.
+  - Call mygo 0.6 `Shell.TrashItem` through an injectable variable. Its main-thread IFileOperation sink refuses permanent deletion without UI; map any failure to `not-recycled` and preserve the source.
+  - Surface both codes through the existing failure results and zh/en frontend error mapping. Remove SHFileOperationW, its structure/flags and owner helper; retain the native `sys.trash` query/empty operations.
   - `func init() { trashItem = recycle }`. TestMain's stand-in still replaces it in tests.
 - [ ] **Split `removable`:**
   - `cleanable(path) = trashable(path) && safeToClean(path)`, used by `junkEnv.removable`.
@@ -238,7 +239,9 @@
   - `recycle` moves a file from the sandbox to the bin, and the file is gone from disk.
   - `recycle` refuses a path on a non-fixed drive (mock `GetDriveTypeW` through a variable).
   - `userPickable` refuses `AppData\Local\wsl\x\ext4.vhdx`.
-  - Never trigger the nuke dialog in CI.
+  - Inject the shell operation to check guard order, no calls for refusals, exactly one call on success and `not-recycled` for any error.
+  - Real Windows: set the sandbox volume's `BitBucket\Volume\{GUID}\NukeOnDelete` DWORD to 1, call `recycle`, assert `not-recycled` and an intact file, and restore the prior value or delete the new value/key in deferred cleanup. If Windows ignores the setting and recycles the file, fail on GitHub Actions and skip elsewhere.
+  - Real Windows: either `page.htm` or `page_files` is refused with `connected-files`, leaving both intact. Native shell test children run mygo's application loop; obsolete capacity probes and dialog deadlines are removed.
 
 ### Task 9: Windows usage guard
 

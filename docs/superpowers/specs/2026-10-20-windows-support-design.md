@@ -59,9 +59,11 @@ Cleanzo 目前只支持 macOS。Windows 用户同样面临缓存、崩溃转储�
      - AppData\Local 下的：`Packages`、`Programs`、`Microsoft\WindowsApps`、`Microsoft\Credentials`、`Microsoft\Vault`、`wsl`、`Docker`。
      - 用户目录下的：`NTUSER*`、`.ssh`、`.gnupg`。
      - Cleanzo 自身的数据：`%APPDATA%\Cleanzo`，以及 `%LOCALAPPDATA%\Cleanzo`（WebView2 的 profile 在这里）。
-5. **回收站绝不静默永删。** mygo 的 `Shell.TrashItem` 没有设置 `FOF_WANTNUKEWARNING`，放不进回收站的条目会被直接永久删除。因此：
-   - Windows 上重写 `trashItem`（它是一个变量）：直接调用 SHFileOperationW，带上 `FOF_WANTNUKEWARNING`，并检查 `fAnyOperationsAborted`。
-   - 只允许固定盘。
+5. **回收站移动失败时保留文件。** mygo 0.6.2 的 `Shell.TrashItem` 会拒绝永久删除，Cleanzo 在调用前保留自己的安全边界：
+   - Windows 上 `trashItem` 仍由 `recycle` 接管：依次检查 `cleanable`、`platformRemovalSafe`、解析后卷的固定盘类型，以及 connected-files，随后通过可注入的 `shellTrashItem` 调用 mygo 0.6 的 `Shell.TrashItem`。原有安全检查仍返回 `blocked`。
+   - mygo 在主线程以 IFileOperation 移入回收站，进度 sink 拒绝永久删除；无法回收时不弹对话框、保留原文件。所有 Shell 失败统一返回 `not-recycled`，不依赖 mygo 的错误文本。
+   - Windows 可能联动移动网页及同名附属文件夹，因此双向拒绝这类选择，返回 `connected-files`。网页扩展名为 `.htm`、`.html`、`.shtml`、`.shtm`、`.xhtml`、`.mht`、`.mhtml`；连接后缀采用最小英文集合 `_files`、`.files`、`-files`、` files`，均忽略大小写，不猜测本地化后缀。无法检查元数据时拒绝移动。
+   - 两个新错误码沿用垃圾清理、CleanPaths、TrashPath、AI 工具和技能的失败结果，并提供中英文解释。`sys.trash` 的 SHQueryRecycleBinW/SHEmptyRecycleBinW 查询和清空规则保持。
    - AppData 下的路径不能从大文件、全盘扫描、TrashPath 手动移入回收站，只能由规则清理。
 6. **占用保护。** Chromium 以 share-delete 方式打开缓存文件，应用运行中照样删得掉，所以文件锁不能当作保护。改为基于进程快照判断：
    - 快照内容：exe 所在目录、命令行中的绝对路径（`--user-data-dir=` 等）、exe 名、产品名。

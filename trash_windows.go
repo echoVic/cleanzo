@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -9,28 +10,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// shellFileOperation matches SHFILEOPSTRUCTW in Windows SDK shellapi.h.
-type shellFileOperation struct {
-	window    uintptr
-	operation uint32
-	from, to  *uint16
-	flags     uint16
-	aborted   int32
-	mappings  uintptr
-	title     *uint16
-}
-
-// getDriveType lets tests reject drive kinds without opening a shell dialog.
+// getDriveType lets tests reject drive kinds before reaching the shell.
 var getDriveType = windows.GetDriveType
 
-// shellFileOperationW is missing from x/sys/windows; shellapi.h declares this shell32 entry point.
-var shellFileOperationW = windows.NewLazySystemDLL("shell32.dll").NewProc("SHFileOperationW")
+// shellTrashItem uses mygo's main-thread dispatch and refusal of permanent deletion.
+var shellTrashItem = mygo.Shell.TrashItem
 
-// shellRecycle invokes the Unicode shell operation; its return value is an operation error code.
-var shellRecycle = func(op *shellFileOperation) int32 {
-	result, _, _ := shellFileOperationW.Call(uintptr(unsafe.Pointer(op)))
-	return int32(result)
-}
+// errNotRecycled means the shell could not recycle the item and kept it in place.
+var errNotRecycled = errors.New("not-recycled")
 
 // recycle moves only safe fixed-drive entries to the bin, with no silent permanent-delete fallback.
 func recycle(path string) error {
@@ -41,19 +28,14 @@ func recycle(path string) error {
 	if err != nil || getDriveType(root) != windows.DRIVE_FIXED {
 		return errBlocked
 	}
-	from, err := windows.UTF16FromString(path)
-	if err != nil {
+	if err := checkConnectedFiles(resolvePath(path)); err != nil {
+		if errors.Is(err, errConnectedFiles) {
+			return errConnectedFiles
+		}
 		return errBlocked
 	}
-	from = append(from, 0) // SHFileOperationW requires a double NUL terminated list.
-	// FO_DELETE and FOF_* values are defined in Windows SDK shellapi.h.
-	const foDelete = 3
-	const flags = 0x0040 | 0x0010 | 0x0004 | 0x0400 | 0x4000 | 0x2000 // ALLOWUNDO, NOCONFIRMATION, SILENT, NOERRORUI, WANTNUKEWARNING, NO_CONNECTED_ELEMENTS.
-	op := shellFileOperation{window: recycleOwner(), operation: foDelete, from: &from[0], flags: flags}
-	result := shellRecycle(&op)
-	runtime.KeepAlive(from)
-	if result != 0 || op.aborted != 0 {
-		return errBlocked
+	if err := shellTrashItem(path); err != nil {
+		return errNotRecycled
 	}
 	return nil
 }
@@ -104,7 +86,7 @@ func emptyWindowsBin(home string) error {
 		return err
 	}
 	const flags = 0x1 | 0x2 | 0x4
-	result, _, _ := emptyRecycleBinW.Call(recycleOwner(), uintptr(unsafe.Pointer(root)), flags)
+	result, _, _ := emptyRecycleBinW.Call(0, uintptr(unsafe.Pointer(root)), flags)
 	runtime.KeepAlive(root)
 	if int32(result) != 0 {
 		return errBlocked
@@ -114,13 +96,3 @@ func emptyWindowsBin(home string) error {
 
 // init installs the native rule operations without adding platform-dependent bound APIs.
 func init() { queryNativeBin, emptyNativeBin = queryWindowsBin, emptyWindowsBin }
-
-// recycleOwner uses the first live top-level window, which is Cleanzo's main window in creation order.
-var recycleOwner = func() uintptr {
-	for _, window := range mygo.Windows() {
-		if !window.IsDestroyed() && window.Parent() == nil {
-			return window.NativeHandle()
-		}
-	}
-	return 0
-}

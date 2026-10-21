@@ -1168,7 +1168,11 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			err = trashItem(e.path)
 		}
 		if err != nil {
-			res.Failed = append(res.Failed, "blocked")
+			code := "blocked"
+			if runtime.GOOS == "windows" && !permanent {
+				code = err.Error()
+			}
+			res.Failed = append(res.Failed, code)
 			continue
 		}
 		if permanent {
