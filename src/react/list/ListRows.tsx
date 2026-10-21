@@ -1,6 +1,5 @@
 import * as React from "react";
 import { ChevronRight } from "lucide-react";
-import type { DirItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
@@ -8,7 +7,7 @@ import { useT, type DictKey } from "../../ui/i18n-react";
 import { human, displayPath } from "../ai/format";
 import { pathHintKind } from "./type-hint";
 import {
-  isGone, loadedKids, pickedPaths, rowIndeterminate, type ListSelection,
+  isGone, loadedKids, pickedPaths, rowIndeterminate, type ListChildItem, type ListSelection,
 } from "./selection";
 
 /** 一行顶层数据（文件或目录）。 */
@@ -61,7 +60,7 @@ export function PathTypeHint({ path, isDir = false }: { path: string; isDir?: bo
 
 function ChildRow({ parent, item, selection, busy, callbacks }: {
   parent: string;
-  item: DirItem;
+  item: ListChildItem;
   selection: ListSelection;
   busy: boolean;
   callbacks: RowCallbacks;
@@ -81,7 +80,11 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
         {!item.trashable && <span className="tag dim"> {t("fs.locked")}</span>}
         {callbacks.typeHints && <PathTypeHint path={item.path} isDir={item.isDir} />}
       </span>
-      <span className="fs-child-size">{item.size >= 0 ? human(item.size) : "--"}</span>
+      <span className="fs-child-size" title={item.size < 0 && item.sizeError !== undefined
+        ? (item.sizeError ? t("fs.sizeUnavailableError", { msg: item.sizeError }) : t("fs.sizeUnavailable"))
+        : undefined}>
+        {item.size >= 0 ? human(item.size) : item.measuring ? t("fs.measuring") : "--"}
+      </span>
       <RevealButton path={item.path} onReveal={callbacks.onReveal} />
       {item.trashable && (
         <Button

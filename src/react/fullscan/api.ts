@@ -13,6 +13,7 @@ export const fullscanApi = {
   /** 磁盘容量（不依赖目录扫描）。 */
   disk: (): Promise<DiskStat> => Cleaner.disk(),
   dirChildren: (path: string) => Cleaner.dirChildren(path),
+  dirSize: (path: string) => Cleaner.dirSize(path),
   trashPath: (path: string) => Cleaner.trashPath(path),
   cleanPaths: (paths: string[]) => Cleaner.cleanPaths(paths),
   reveal: (path: string) => Cleaner.revealInFinder(path),

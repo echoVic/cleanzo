@@ -2,11 +2,14 @@ import { expect, test } from "bun:test";
 import "./setup-dom";
 import { setLang } from "./setup-dom";
 import { errText } from "../src/shared";
-import { t } from "../src/i18n";
+import { t, setPref } from "../src/i18n";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ListRows, ListToolbar } from "../src/react/list/ListRows";
 import { pathHintKind } from "../src/react/list/type-hint";
 import type { BigItem } from "../src/mygo";
 import {
-  applyRemoval, emptySelection, isGone, pickedPaths,
+  applyRemoval, emptySelection, isGone, knownSizes, pickedPaths, toggleChild,
   type ListSelection,
 } from "../src/react/list/selection";
 import {
@@ -122,4 +125,133 @@ test("Windows Space Analysis subtitle and body measure the user profile in zh/en
       expect(renderToStaticMarkup(createElement(DiskCard, { disk: { total: 0, used: 0, free: 0 } }))).toContain(t("fs.hint"));
     }
   } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+function expansionFixture() {
+  let state: ListSelection = { ...emptySelection(), expanded: new Set(["/docs"]) };
+  const update = (fn: (prev: ListSelection) => ListSelection) => { state = fn(state); };
+  const children = [
+    { name: "small", path: "/docs/small", size: 1024, isDir: false, trashable: true },
+    { name: "slow", path: "/docs/slow", size: -1, isDir: true, trashable: true },
+  ];
+  const callbacks = {
+    onToggleRow() {}, onToggleChild() {}, onExpand() {}, onReveal() {}, onTrashRow() {},
+  };
+  const markup = () => renderToStaticMarkup(createElement(ListRows, {
+    rows: [{ path: "/docs", name: "docs", size: 10000, expandable: true, trashable: true }],
+    selection: state, busy: false, ...callbacks,
+  }));
+  const toolbar = () => renderToStaticMarkup(createElement(ListToolbar, {
+    selectableRows: ["/docs"], selection: state, busy: false,
+    sizeOf: (path: string) => knownSizes(state).get(path),
+    onToggleAll() {}, onTrashChecked() {},
+  }));
+  return { get state() { return state; }, update, children, markup, toolbar };
+}
+
+test("an unknown directory with a measurement in flight renders the measuring label in zh/en", () => {
+  const fixture = expansionFixture();
+  fixture.update((st) => ({ ...st, children: new Map([["/docs", {
+    items: fixture.children.map((it) => ({ ...it, measuring: it.isDir })), total: 2,
+  }]]) }));
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      expect(fixture.markup()).toContain(lang === "zh" ? "计算中…" : "Measuring…");
+    }
+  } finally { setPref("system"); }
+});
+
+test("expansion measures unknown children, re-sorts, and includes the late size in selection totals", async () => {
+  setPref("zh");
+  try {
+    const { loadChildren } = await import("../src/react/fullscan/children");
+    const fixture = expansionFixture();
+    const measured = deferred<number>();
+    const requested: string[] = [];
+    await loadChildren("/docs", {
+      dirChildren: async () => ({ items: fixture.children, total: 2 }),
+      dirSize: (path: string) => { requested.push(path); return measured.promise; },
+    }, fixture.update, () => true);
+    expect(requested).toEqual(["/docs/slow"]);
+    expect(fixture.markup()).toContain("计算中…");
+    fixture.update((st) => toggleChild(st, "/docs", "/docs/slow", true));
+    expect(fixture.toolbar()).toContain("已选 1 项 · 0 B");
+    measured.resolve(8192);
+    await measured.promise;
+    const html = fixture.markup();
+    expect(html).not.toContain("计算中…");
+    expect(html).toContain("8 KB");
+    expect(html.indexOf('title="/docs/slow"')).toBeLessThan(html.indexOf('title="/docs/small"'));
+    expect(fixture.toolbar()).toContain("已选 1 项 · 8 KB");
+  } finally { setPref("system"); }
+});
+
+test("failed measurements render -- with a localized tooltip and translated backend error", async () => {
+  const { loadChildren } = await import("../src/react/fullscan/children");
+  for (const lang of ["zh", "en"] as const) {
+    setPref(lang);
+    try {
+      const fixture = expansionFixture();
+      const measured = deferred<number>();
+      await loadChildren("/docs", {
+        dirChildren: async () => ({ items: fixture.children, total: 2 }),
+        dirSize: () => measured.promise,
+      }, fixture.update, () => true);
+      measured.reject(new Error("blocked"));
+      await measured.promise.catch(() => {});
+      const html = fixture.markup();
+      expect(html).not.toContain(lang === "zh" ? "计算中…" : "Measuring…");
+      expect(html).toContain(lang === "zh" ? "无法统计大小" : "Size unavailable");
+      expect(html).toContain(errText("blocked"));
+      expect(html).toContain('>--</span>');
+    } finally { setPref("system"); }
+  }
+});
+
+test("collapsed, removed, and replaced expansions ignore late measurement results", async () => {
+  const { loadChildren } = await import("../src/react/fullscan/children");
+  for (const mode of ["collapsed", "removed", "child removed", "replaced"] as const) {
+    for (const fails of [false, true]) {
+      const fixture = expansionFixture();
+      const measured = deferred<number>();
+      let current = true;
+      await loadChildren("/docs", {
+        dirChildren: async () => ({ items: fixture.children, total: 2 }),
+        dirSize: () => measured.promise,
+      }, fixture.update, () => current);
+      if (mode === "collapsed") fixture.update((st) => ({ ...st, expanded: new Set(), children: new Map() }));
+      if (mode === "removed") fixture.update((st) => applyRemoval([], st, ["/docs"]).selection);
+      if (mode === "child removed") fixture.update((st) => applyRemoval([], st, ["/docs/slow"]).selection);
+      if (mode === "replaced") current = false;
+      const before = fixture.state;
+      if (fails) measured.reject(new Error("blocked")); else measured.resolve(8192);
+      await measured.promise.catch(() => {});
+      expect(fixture.state).toBe(before);
+    }
+  }
+});
+
+test("a collapsed expansion ignores a late initial child listing", async () => {
+  const { loadChildren } = await import("../src/react/fullscan/children");
+  const fixture = expansionFixture();
+  const listing = deferred<{ items: typeof fixture.children; total: number }>();
+  let measures = 0;
+  const loaded = loadChildren("/docs", {
+    dirChildren: () => listing.promise,
+    dirSize: async () => { measures++; return 8192; },
+  }, fixture.update, () => false);
+  fixture.update((st) => ({ ...st, expanded: new Set(), children: new Map() }));
+  const before = fixture.state;
+  listing.resolve({ items: fixture.children, total: 2 });
+  await loaded;
+  expect(fixture.state).toBe(before);
+  expect(measures).toBe(0);
 });

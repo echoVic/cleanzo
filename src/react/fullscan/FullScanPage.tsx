@@ -13,6 +13,7 @@ import {
 import { ListRows, ListToolbar, PathTypeHint, type ListRowData } from "../list/ListRows";
 import { DiskCard } from "./DiskCard";
 import { fullscanApi } from "./api";
+import { loadChildren } from "./children";
 import { barWidth, displayPath, human, topBySize } from "./format";
 
 /** 展开的子项里某个路径的大小（工具栏勾选合计用）。 */
@@ -48,6 +49,7 @@ export function FullScanPage() {
   const stoppedRef = React.useRef(false);
   const scanningRef = React.useRef(false);
   const diskSeqRef = React.useRef(0);
+  const expansionsRef = React.useRef(new Map<string, symbol>());
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
   scanningRef.current = scanning;
@@ -56,6 +58,7 @@ export function FullScanPage() {
   React.useEffect(() => {
     return () => {
       runRef.current++;
+      expansionsRef.current.clear();
       chanRef.current?.close();
       chanRef.current = null;
     };
@@ -78,6 +81,7 @@ export function FullScanPage() {
 
   const startScan = React.useCallback(async () => {
     const myRun = ++runRef.current;
+    expansionsRef.current.clear();
     stoppedRef.current = false;
     setTried(true);
     setItems([]);
@@ -158,6 +162,9 @@ export function FullScanPage() {
   const onExpand = async (path: string) => {
     if (busy || isGone(selection, path)) return;
     const collapsing = selection.expanded.has(path);
+    const request = Symbol(path);
+    if (collapsing) expansionsRef.current.delete(path);
+    else expansionsRef.current.set(path, request);
     setSelection((prev) => {
       const expanded = new Set(prev.expanded);
       const children = new Map(prev.children);
@@ -170,25 +177,7 @@ export function FullScanPage() {
       return { ...prev, expanded, children };
     });
     if (collapsing) return;
-    try {
-      const r = await fullscanApi.dirChildren(path);
-      setSelection((prev) => {
-        if (isGone(prev, path)) return prev;
-        const children = new Map(prev.children);
-        children.set(path, { items: r.items, total: r.total });
-        // 整行已勾时：新展开的子项一并勾上。
-        let next: ListSelection = { ...prev, children };
-        if (prev.sel.has(path)) next = toggleRow(next, path, true);
-        return next;
-      });
-    } catch (e) {
-      setSelection((prev) => {
-        if (isGone(prev, path)) return prev;
-        const children = new Map(prev.children);
-        children.set(path, { error: errText(e) });
-        return { ...prev, children };
-      });
-    }
+    await loadChildren(path, fullscanApi, setSelection, () => expansionsRef.current.get(path) === request);
   };
 
   const onReveal = (path: string) => {

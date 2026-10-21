@@ -230,7 +230,7 @@ export interface DirItem {
   trashable: boolean;
 }
 
-/** DirListing is the largest children of a folder, and how many it has. */
+/** DirListing includes the largest children and all unknown folders, with the entry count. */
 export interface DirListing {
   items: DirItem[];
   /** more than len(Items) when the list is capped */
@@ -734,10 +734,18 @@ export const Cleaner = {
    * DirChildren lists the direct children of path with sizes: directories are
    * measured with du (8s timeout), files with a quick stat. Unreadable or
    * timed-out entries report Size = -1 so the UI can show them as unknown.
-   * The items are sorted by size descending and capped at 60 entries.
+   * The items are sorted by size descending. All unknown folders are retained;
+   * the largest remaining entries fill the rest of the usual 60 slots.
    */
   dirChildren(path: string): Promise<DirListing> {
     return call("Cleaner.DirChildren", path);
+  },
+  /**
+   * DirSize measures one folder without modifying it. Unlike the short child pass,
+   * it allows large trees to finish and never returns partial bytes as a final size.
+   */
+  dirSize(path: string): Promise<number> {
+    return call("Cleaner.DirSize", path);
   },
   /** Disk returns the boot volume's capacity without scanning files. */
   disk(): Promise<DiskStat> {

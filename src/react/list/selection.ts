@@ -4,8 +4,10 @@ import { isWithin } from "../../platform";
 // 改为不可变：每次切换返回新状态对象，便于 React useState 直接使用。
 import type { DirItem } from "../../mygo";
 
+export type ListChildItem = DirItem & { measuring?: boolean; sizeError?: string };
+
 /** 展开后加载出来的子项：成功列出或失败。 */
-export type ChildList = { items: DirItem[]; total: number } | { error: string };
+export type ChildList = { items: ListChildItem[]; total: number } | { error: string };
 
 /** 一个列表视图的勾选 / 展开 / 已删除状态。视图之间互不影响。 */
 export interface ListSelection {
