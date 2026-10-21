@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.5.0
+	github.com/egoist/mygo v0.6.2
 	github.com/klauspost/compress v1.20.3
 	golang.org/x/sys v0.49.0
 )

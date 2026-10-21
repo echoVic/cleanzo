@@ -17,7 +17,7 @@
     "@radix-ui/react-checkbox": "^1.4.1",
     "@radix-ui/react-dialog": "^1.3.1",
     "@radix-ui/react-tabs": "^1.2.1",
-    "mygo-runtime": "0.5.0",
+    "mygo-runtime": "0.6.2",
     "react": "^19",
     "react-dom": "^19"
   },
@@ -29,7 +29,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.58.0",
-    "mygo-cli": "0.5.0",
+    "mygo-cli": "0.6.2",
     "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4",
     "typescript": "^7",
