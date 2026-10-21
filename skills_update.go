@@ -865,7 +865,7 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 		// lost something (empty folders, export-ignore): don't install it.
 		return errSkillMismatch
 	}
-	if err := swapSkillFolder(folder, src); err != nil {
+	if err := swapSkillFolder(folder, src, ctx); err != nil {
 		return err
 	}
 	// From now on Cleanzo's record is the folder's origin: it knows the
@@ -1052,9 +1052,9 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 // swapSkillFolder replaces folder with a copy of src: the copy is made next
 // to folder first, then folder goes to the Trash and the copy takes its
 // name. If the Trash fails, folder stays as it was.
-func swapSkillFolder(folder, src string) error {
+func swapSkillFolder(folder, src string, contexts ...context.Context) error {
 	if runtime.GOOS == "windows" {
-		return swapWindowsSkillFolder(folder, src)
+		return swapWindowsSkillFolder(folder, src, contexts...)
 	}
 	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
 	os.RemoveAll(staging)
@@ -1073,7 +1073,11 @@ func swapSkillFolder(folder, src string) error {
 var skillRename = os.Rename
 
 // swapWindowsSkillFolder keeps the old copy beside the skill until the replacement is installed.
-func swapWindowsSkillFolder(folder, src string) error {
+func swapWindowsSkillFolder(folder, src string, contexts ...context.Context) error {
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
 	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
 	os.RemoveAll(staging)
 	if err := copyTree(src, staging); err != nil {
@@ -1099,7 +1103,7 @@ func swapWindowsSkillFolder(folder, src string) error {
 		}
 		return errors.Join(err, restoreErr)
 	}
-	if err := trashItem(backup); err != nil {
+	if err := trashWithContext(ctx, backup); err != nil {
 		if rollbackErr := skillRename(folder, staging); rollbackErr != nil {
 			return errors.Join(err, rollbackErr)
 		}

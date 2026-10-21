@@ -49,7 +49,7 @@
 1. **macOS is unchanged.** The darwin suite passes with the same test list, and no darwin assertion changed. *Tasks 1–3.*
 2. **Paths are judged by their final target, and reparse points are never traversed or removed through** (junctions, symlinks, mount points, cloud placeholders). A junction from the profile to `D:\`, and the legacy `Application Data` junction, never lead to a removal. *Test in Task 7.*
 3. **Nothing outside the profile, and nothing protected inside it, is modified.** This covers known-folder roots, `OneDrive*`, the AppData roots, `Roaming\Microsoft`, `Local\{Packages,Programs,Microsoft\WindowsApps,Microsoft\Credentials,Microsoft\Vault,wsl,Docker}`, `NTUSER*`, `.ssh`, `.gnupg`, and Cleanzo's own data. ADS, `\\?\`, `\\.\` and UNC paths are refused. A temp folder outside the profile is unusable. *Tests in Tasks 7, 10 and 12.*
-4. **"Move to Recycle Bin" fails and keeps the source when recycling is impossible.** Cleanzo checks its safety guards, the resolved fixed drive and connected files before calling mygo 0.6 `Shell.TrashItem`; no permanent-delete dialog appears. Either half of a connected saved page is refused. AppData paths cannot be trashed from user-picked rows. *Test in Task 8, including real NukeOnDelete refusal in Windows CI.*
+4. **"Move to Recycle Bin" fails and keeps the source when recycling is impossible.** Keep Cleanzo's safety, fixed-drive and connected-files guards. Read the volume GUID's HKCU BitBucket DWORD settings before calling the shell: refuse `NukeOnDelete=1` or an item size ≥ configured `MaxCapacity` MiB (including zero), with `not-recycled` and zero shell calls. Reuse cheap measurement for folder totals with the shared 300-second `dirSizeTimeout` and any caller context. Read failures refuse the move; a measurement timeout falls through to the shell warning, while caller cancellation stops the move. Unknown settings fall back to `SHFileOperationW` with `FOF_WANTNUKEWARNING`, double-NUL paths and the main-window owner; nonzero results and aborted operations return `not-recycled`. Do not use mygo 0.6.2 `Shell.TrashItem` on Windows: its no-UI IFileOperation sink can allow over-capacity items to be permanently deleted. Either half of a connected saved page is refused. AppData paths cannot be trashed from user-picked rows. *Test in Task 8: portable `recycleFits` boundaries; real Windows registry capacity/nuke refusal with no shell calls and source preservation, deferred setting restoration, and a real SHFileOperationW small-file bin move. macOS stays unchanged.*
 5. **An item whose owner runs is left alone, and a failed process snapshot means nothing is cleaned.** This includes Chromium caches opened with share-delete. *Test in Task 9.*
 6. **The Recycle Bin is emptied only when its row is selected, first in the pass, and only if it is unchanged since the scan.** *Test in Task 12.*
 7. **An uninstall launches only the registry-declared uninstaller of the key the user picked; InstallLocation is never trashed.** *Test in Task 23.*
@@ -65,7 +65,8 @@
 | `fs_darwin.go` / `fs_windows.go` (new) | `changedAt`, `onDisk`, `removalRefused`, `mountPoint`, `diskStat`; Windows: final-path resolution, reparse and placeholder checks |
 | `proc_darwin.go` / `proc_windows.go` (new) | Running tool commands with tree kill, tool dirs, `findTool`, `psCommands`; Windows: process snapshot |
 | `usage_darwin.go` / `usage_windows.go` (new) | `openFiles`, `runningApps` (darwin: lsof/lsappinfo, moved); Windows: from the process snapshot |
-| `trash_windows.go` / `trash_connected_windows.go` | Guarded mygo 0.6 Recycle Bin move, fixed-drive and connected-files checks; Recycle Bin query/empty for `sys.trash` |
+| `trash_windows.go` / `trash_connected_windows.go` | Guarded SHFileOperationW Recycle Bin move with WANTNUKEWARNING, capacity pre-flight, fixed-drive and connected-files checks; Recycle Bin query/empty for `sys.trash` |
+| `recycle_capacity.go` / `recycle_settings_windows.go` | Portable capacity decision and per-volume HKCU BitBucket DWORD reads |
 | `status_darwin.go` / `status_windows.go` (new) | `realStatusSource`, memory, battery; darwin code moved from monitor.go |
 | `native_windows.go` (new) | Win32 reads for the status page and `Info()` |
 | `apps_darwin.go` / `apps_windows.go` (new) | Platform app listing and uninstall behind the existing bound methods |
@@ -221,15 +222,16 @@
   - An ADS path and a UNC path are refused by `safeToClean`.
   - A file with `attrib +O` (offline) is refused by `removalRefused` and survives a clean.
 
-### Task 8: Recycle Bin moves through mygo 0.6 that refuse permanent deletion
+### Task 8: Recycle Bin moves with capacity pre-flight and SHFileOperationW warnings
 
-**Files:** `trash_windows.go`, `trash_connected_windows.go`, `junk.go`, `src/i18n.ts`, `src/shared.ts`, and Windows trash/tests harness files.
+**Files:** `trash_windows.go`, `trash_connected_windows.go`, `recycle_capacity.go`, `recycle_settings_windows.go`, `junk.go`, `src/i18n.ts`, `src/shared.ts`, and trash/tests harness files.
 
 - [ ] **`recycle(path string) error` on Windows:**
   - Keep `cleanable` and `platformRemovalSafe`, followed by the resolved-volume `DRIVE_FIXED` check (`GetDriveTypeW`); failures remain `blocked`.
   - Refuse connected saved-page files and their sibling folders in both directions with `connected-files`. Check HTML-like extensions and the minimal documented `_files`, `.files`, `-files`, ` files` suffix set case-insensitively; refuse unreadable metadata.
-  - Call mygo 0.6 `Shell.TrashItem` through an injectable variable. Its main-thread IFileOperation sink refuses permanent deletion without UI; map any failure to `not-recycled` and preserve the source.
-  - Surface both codes through the existing failure results and zh/en frontend error mapping. Remove SHFileOperationW, its structure/flags and owner helper; retain the native `sys.trash` query/empty operations.
+  - Read the resolved volume GUID's HKCU BitBucket `NukeOnDelete` and `MaxCapacity` DWORD values. Refuse nuke mode or a measured item size ≥ the configured MiB capacity before calling the shell. Reuse cheap checked folder measurement with `dirSizeTimeout` (300 seconds) and any caller context. Refuse read failures and completed measurements that do not fit; let a measurement timeout reach SHFileOperationW with WANTNUKEWARNING. Caller cancellation must stop the move. Test the pure `recycleFits` boundaries on macOS.
+  - Call `SHFileOperationW` through an injectable variable with `FO_DELETE`, the main-window owner, a double-NUL path, and `ALLOWUNDO|NOCONFIRMATION|SILENT|NOERRORUI|WANTNUKEWARNING|NO_CONNECTED_ELEMENTS`. Nonzero results or aborted operations return `not-recycled`. Unknown settings still reach the shell with WANTNUKEWARNING. Do not use mygo 0.6.2 `Shell.TrashItem` on Windows: its no-UI IFileOperation sink can allow over-capacity permanent deletion.
+  - Surface both codes through the existing failure results and zh/en frontend error mapping. Retain the native `sys.trash` query/empty operations unchanged.
   - `func init() { trashItem = recycle }`. TestMain's stand-in still replaces it in tests.
 - [ ] **Split `removable`:**
   - `cleanable(path) = trashable(path) && safeToClean(path)`, used by `junkEnv.removable`.
@@ -239,9 +241,9 @@
   - `recycle` moves a file from the sandbox to the bin, and the file is gone from disk.
   - `recycle` refuses a path on a non-fixed drive (mock `GetDriveTypeW` through a variable).
   - `userPickable` refuses `AppData\Local\wsl\x\ext4.vhdx`.
-  - Inject the shell operation to check guard order, no calls for refusals, exactly one call on success and `not-recycled` for any error.
-  - Real Windows: set the sandbox volume's `BitBucket\Volume\{GUID}\NukeOnDelete` DWORD to 1, call `recycle`, assert `not-recycled` and an intact file, and restore the prior value or delete the new value/key in deferred cleanup. If Windows ignores the setting and recycles the file, fail on GitHub Actions and skip elsewhere.
-  - Real Windows: either `page.htm` or `page_files` is refused with `connected-files`, leaving both intact. Native shell test children run mygo's application loop; obsolete capacity probes and dialog deadlines are removed.
+  - Inject the shell operation to check guard order, exact flags/owner/double NUL, no calls for refusals, exactly one call on success and `not-recycled` for any nonzero result or aborted operation. Inject measurement to verify timeout/fit reach the shell once, read failures/no fit refuse, and caller cancellation prevents the shell. Assert the shared measurement budget, inherited caller deadlines, and SHFILEOPSTRUCTW layout on Windows.
+  - Real Windows: set the sandbox volume's `BitBucket\Volume\{GUID}` settings to `MaxCapacity=1, NukeOnDelete=0` and refuse a 4 MiB file or folder without calling the shell. Also test `NukeOnDelete=1`, an exact capacity boundary, zero capacity, and folder totals exceeding the limit. Assert `not-recycled`, intact sources and zero shell calls on every refusal; fail if pre-flight ignores the setting, including on GitHub Actions. Restore values/types or delete the new values/key in deferred cleanup.
+  - Real Windows: either `page.htm` or `page_files` is refused with `connected-files`, leaving both intact. Native shell test children use SHFileOperationW without mygo's application loop; remove the unused `runPlatformTests` runner.
 
 ### Task 9: Windows usage guard
 

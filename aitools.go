@@ -667,7 +667,7 @@ func (Cleaner) CleanAITools(ctx context.Context, selections []AISelection) (AICl
 		if ctx.Err() != nil {
 			return res, ctx.Err()
 		}
-		r := cleanAIPart(sel, running, guard)
+		r := cleanAIPart(sel, running, guard, ctx)
 		res.Freed += r.Freed
 		res.Parts = append(res.Parts, r)
 	}
@@ -678,7 +678,11 @@ func (Cleaner) CleanAITools(ctx context.Context, selections []AISelection) (AICl
 var errAIRefused = errors.New("blocked")
 
 // cleanAIPart cleans one selection.
-func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard) AIPartResult {
+func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard, contexts ...context.Context) AIPartResult {
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
 	r := AIPartResult{Tool: sel.Tool, Part: sel.Part, Failed: []string{}}
 	tool, part, ok := findAIPart(sel.Tool, sel.Part)
 	switch {
@@ -709,7 +713,7 @@ func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard) AI
 			continue
 		}
 		size, _, _ := measureAI(context.Background(), target, nil)
-		if err := trashItem(target); err != nil {
+		if err := trashWithContext(ctx, target); err != nil {
 			r.Failed = append(r.Failed, displayHome(target)+": "+err.Error())
 			continue
 		}

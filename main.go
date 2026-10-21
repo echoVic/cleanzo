@@ -390,6 +390,9 @@ func userTrashDir() string {
 // picks the Trash of its volume and a free name there. Tests replace it.
 var trashItem = mygo.Shell.TrashItem
 
+// trashWithContext lets Windows cleanup retain cancellation while macOS keeps its existing move.
+var trashWithContext = func(_ context.Context, path string) error { return trashItem(path) }
+
 // cleanHooks report a clean pass's progress. Each may be nil; they are
 // called one at a time.
 type cleanHooks struct {

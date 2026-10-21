@@ -1165,7 +1165,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 		if permanent {
 			err = removeAll(e.path)
 		} else {
-			err = trashItem(e.path)
+			err = trashWithContext(ctx, e.path)
 		}
 		if err != nil {
 			code := "blocked"

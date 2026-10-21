@@ -59,9 +59,11 @@ Cleanzo 目前只支持 macOS。Windows 用户同样面临缓存、崩溃转储�
      - AppData\Local 下的：`Packages`、`Programs`、`Microsoft\WindowsApps`、`Microsoft\Credentials`、`Microsoft\Vault`、`wsl`、`Docker`。
      - 用户目录下的：`NTUSER*`、`.ssh`、`.gnupg`。
      - Cleanzo 自身的数据：`%APPDATA%\Cleanzo`，以及 `%LOCALAPPDATA%\Cleanzo`（WebView2 的 profile 在这里）。
-5. **回收站移动失败时保留文件。** mygo 0.6.2 的 `Shell.TrashItem` 会拒绝永久删除，Cleanzo 在调用前保留自己的安全边界：
-   - Windows 上 `trashItem` 仍由 `recycle` 接管：依次检查 `cleanable`、`platformRemovalSafe`、解析后卷的固定盘类型，以及 connected-files，随后通过可注入的 `shellTrashItem` 调用 mygo 0.6 的 `Shell.TrashItem`。原有安全检查仍返回 `blocked`。
-   - mygo 在主线程以 IFileOperation 移入回收站，进度 sink 拒绝永久删除；无法回收时不弹对话框、保留原文件。所有 Shell 失败统一返回 `not-recycled`，不依赖 mygo 的错误文本。
+5. **回收站移动失败时保留文件。** Windows 恢复使用 `SHFileOperationW`，并在调用前预检卷的回收站容量：
+   - Windows 上 `trashItem` 仍由 `recycle` 接管：依次检查 `cleanable`、`platformRemovalSafe`、解析后卷的固定盘类型，以及 connected-files。原有安全检查仍返回 `blocked`。
+   - 用卷根的 `GetVolumeNameForVolumeMountPoint` 获取 GUID，读取 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{GUID}` 下的 DWORD 设置。`NukeOnDelete=1`，或条目大小 **≥** 已设置的 `MaxCapacity` MiB（包括 0）时，返回 `not-recycled`，不调用 Shell。文件使用文件大小，文件夹复用 `measureChecked` 累加大小，遵守现有属性检查和廉价遍历规则，测量使用共享 `dirSizeTimeout`（300 秒）并继承可用调用方 context；读取失败仍拒绝移动。仅测量预算耗尽时跳过容量判定，由带 `WANTNUKEWARNING` 的 Shell 操作兜底；调用方取消或 deadline 到期则停止移动。纯函数 `recycleFits` 在 Mac 上覆盖容量边界；NukeOnDelete 独立生效，即使容量未设置。
+   - 设置无法读取或容量未设置时，仍交给 `SHFileOperationW`，由 `FOF_WANTNUKEWARNING` 保留 Windows 的永久删除确认作为最后防线。操作使用 `FO_DELETE`、双 NUL 路径、主窗口 owner，以及 `FOF_ALLOWUNDO|FOF_NOCONFIRMATION|FOF_SILENT|FOF_NOERRORUI|FOF_WANTNUKEWARNING|FOF_NO_CONNECTED_ELEMENTS`；非零返回值或 `fAnyOperationsAborted` 均返回 `not-recycled`。
+   - Windows 不使用 mygo 0.6.2 的 `Shell.TrashItem`：其 IFileOperation sink 的 `TSF_DELETE_RECYCLE_IF_POSSIBLE` 检查无法识别稍后才发现的容量超限；禁用 UI 后可能永久删除文件。容量预检避免常见超限进入 Shell；`WANTNUKEWARNING` 保留异常设置、设置变化等情况下的交互保护。Windows CI 用真实注册表验证 1 MiB 容量下的 4 MiB 文件和文件夹、直接删除模式均不调用 Shell 且保留源文件，并用真实 `SHFileOperationW` 验证小文件确实进入回收站。
    - Windows 可能联动移动网页及同名附属文件夹，因此双向拒绝这类选择，返回 `connected-files`。网页扩展名为 `.htm`、`.html`、`.shtml`、`.shtm`、`.xhtml`、`.mht`、`.mhtml`；连接后缀采用最小英文集合 `_files`、`.files`、`-files`、` files`，均忽略大小写，不猜测本地化后缀。无法检查元数据时拒绝移动。
    - 两个新错误码沿用垃圾清理、CleanPaths、TrashPath、AI 工具和技能的失败结果，并提供中英文解释。`sys.trash` 的 SHQueryRecycleBinW/SHEmptyRecycleBinW 查询和清空规则保持。
    - AppData 下的路径不能从大文件、全盘扫描、TrashPath 手动移入回收站，只能由规则清理。
