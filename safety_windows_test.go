@@ -146,7 +146,7 @@ func TestWindowsOfflineFileSurvivesClean(t *testing.T) {
 	}
 }
 
-// TestWindowsRecycleMovesToBin exercises mygo's real fixed-volume Recycle Bin move.
+// TestWindowsRecycleMovesToBin exercises SHFileOperationW's real fixed-volume Recycle Bin move.
 func TestWindowsRecycleMovesToBin(t *testing.T) {
 	if !windowsShellTest(t) {
 		return
@@ -157,12 +157,16 @@ func TestWindowsRecycleMovesToBin(t *testing.T) {
 	if getDriveType(windows.StringToUTF16Ptr(filepath.VolumeName(path)+`\`)) != windows.DRIVE_FIXED {
 		t.Fatal("sandbox must be on a fixed drive")
 	}
+	savedShell := shellRecycle
+	defer func() { shellRecycle = savedShell }()
+	calls := 0
+	shellRecycle = func(op *shellFileOperation) int32 { calls++; return savedShell(op) }
 	before := queryTestRecycleBin(t, path)
 	if err := recycleWindowsFixture(path); err != nil {
 		t.Fatal(err)
 	}
-	if exists(path) {
-		t.Fatal("Recycle Bin move left source on disk")
+	if exists(path) || calls == 0 {
+		t.Fatalf("Recycle Bin move: source exists=%v shell calls=%d", exists(path), calls)
 	}
 	after := queryTestRecycleBin(t, path)
 	if after.items < before.items+1 || after.size < before.size+123 {
@@ -179,9 +183,9 @@ func TestWindowsRecycleRefusesNonFixed(t *testing.T) {
 		t.Fatal("fixture must reach the drive check")
 	}
 	driveCalls := 0
-	savedDrive, savedOp := getDriveType, shellTrashItem
-	t.Cleanup(func() { getDriveType, shellTrashItem = savedDrive, savedOp })
-	shellTrashItem = func(string) error { t.Fatal("shell called for non-fixed drive"); return nil }
+	savedDrive, savedOp := getDriveType, shellRecycle
+	t.Cleanup(func() { getDriveType, shellRecycle = savedDrive, savedOp })
+	shellRecycle = func(*shellFileOperation) int32 { t.Fatal("shell called for non-fixed drive"); return 0 }
 	for _, kind := range []uint32{windows.DRIVE_UNKNOWN, windows.DRIVE_NO_ROOT_DIR, windows.DRIVE_REMOVABLE, windows.DRIVE_REMOTE, windows.DRIVE_CDROM, windows.DRIVE_RAMDISK} {
 		getDriveType = func(*uint16) uint32 { driveCalls++; return kind }
 		if err := recycle(path); err == nil || !exists(path) {

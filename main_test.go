@@ -560,7 +560,8 @@ func TestMain(m *testing.M) {
 		}
 		return os.Rename(p, dst)
 	}
-	code := runPlatformTests(m)
+	trashWithContext = func(_ context.Context, path string) error { return trashItem(path) }
+	code := m.Run()
 	cleanup()
 	os.Exit(code)
 }

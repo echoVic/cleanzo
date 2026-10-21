@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// windowsShellTest runs native shell tests in a child with mygo's application loop.
+// windowsShellTest isolates native shell tests in a child process.
 func windowsShellTest(t *testing.T) bool {
 	t.Helper()
 	if os.Getenv("CLEANZO_SHELL_TEST") == t.Name() {
@@ -42,7 +42,7 @@ func windowsShellTest(t *testing.T) bool {
 }
 
 // recycleWindowsFixture retries a shell refusal once while the seeded source still exists.
-// mygo maps transient sharing failures to not-recycled, so retry only while the source exists.
+// Transient sharing failures map to not-recycled, so retry only while the source exists.
 func recycleWindowsFixture(path string) error {
 	err := recycle(path)
 	if err != nil && exists(path) {
