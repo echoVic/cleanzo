@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -136,7 +135,7 @@ func platformCollectPhotoFiles(ctx context.Context, roots []string, cap int) []s
 // openPhotoFile retains the native Darwin file open behavior.
 func openPhotoFile(path string) (*os.File, error) { return photoFileOpen(path) }
 
-// platformDirChildren retains the Darwin folder listing and sizing behavior.
+// platformDirChildren lists children with a short first pass for folder sizes.
 func platformDirChildren(ctx context.Context, path string) (DirListing, error) {
 	ents, err := os.ReadDir(path)
 	if err != nil {
@@ -164,7 +163,7 @@ func platformDirChildren(ctx context.Context, path string) (DirListing, error) {
 			defer func() { <-sem }()
 			size := int64(-1)
 			if j.isDir {
-				if sz, err := duSize(ctx, j.full, 8*time.Second); err == nil {
+				if sz, err := dirMeasure(ctx, j.full, 8*time.Second); err == nil {
 					size = sz
 				}
 			} else if st, err := os.Stat(j.full); err == nil {
@@ -176,6 +175,5 @@ func platformDirChildren(ctx context.Context, path string) (DirListing, error) {
 		}(j)
 	}
 	wg.Wait()
-	sort.Slice(items, func(i, k int) bool { return items[i].Size > items[k].Size })
-	return DirListing{Items: items[:min(60, len(items))], Total: len(items)}, nil
+	return childDirListing(items), nil
 }

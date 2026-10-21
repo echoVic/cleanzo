@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -147,7 +146,7 @@ func platformDirChildren(ctx context.Context, path string) (DirListing, error) {
 				safe := err == nil && windowsEntrySafe(info)
 				if safe {
 					if entry.IsDir() {
-						if measured, err := duSize(ctx, full, 8*time.Second); err == nil {
+						if measured, err := dirMeasure(ctx, full, 8*time.Second); err == nil {
 							size = measured
 						}
 					} else {
@@ -174,6 +173,5 @@ dispatch:
 	if ctx.Err() != nil {
 		return DirListing{}, ctx.Err()
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Size > items[j].Size })
-	return DirListing{Items: items[:min(60, len(items))], Total: len(items)}, nil
+	return childDirListing(items), nil
 }

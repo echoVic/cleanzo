@@ -972,7 +972,7 @@ type DirItem struct {
 	Trashable bool   `json:"trashable"`
 }
 
-// DirListing is the largest children of a folder, and how many it has.
+// DirListing includes the largest children and all unknown folders, with the entry count.
 type DirListing struct {
 	Items []DirItem `json:"items"`
 	Total int       `json:"total"` // more than len(Items) when the list is capped
@@ -981,7 +981,8 @@ type DirListing struct {
 // DirChildren lists the direct children of path with sizes: directories are
 // measured with du (8s timeout), files with a quick stat. Unreadable or
 // timed-out entries report Size = -1 so the UI can show them as unknown.
-// The items are sorted by size descending and capped at 60 entries.
+// The items are sorted by size descending. All unknown folders are retained;
+// the largest remaining entries fill the rest of the usual 60 slots.
 func (Cleaner) DirChildren(ctx context.Context, path string) (DirListing, error) {
 	return platformDirChildren(ctx, path)
 }
