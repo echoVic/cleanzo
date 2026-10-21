@@ -135,7 +135,7 @@ export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cor
   );
 }
 
-function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onClean: () => void }) {
+export function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onClean: () => void }) {
   const usedPct = d.total ? Math.min(100, Math.round((d.used / d.total) * 100)) : 0;
   const [freeNum, freeUnit] = d.free > 0 ? splitMem(d.free) : ["—", ""];
   return (
@@ -144,7 +144,7 @@ function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onClean: (
       <div className="mhero num"><b>{freeNum}</b><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}</div>
       <div className="mviz"><div className="mbar"><i style={{ width: `${usedPct}%` }} /></div></div>
-      <ul className="mlegend num">
+      <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
         <li><span>{t("status.disk.used")}</span><b>{usedPct}%</b></li>
         <li><span>{t("status.disk.avail")}</span><b>{fmtMem(d.free)}</b></li>
       </ul>

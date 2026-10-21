@@ -1434,7 +1434,7 @@ body {
 .mlegend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
 .mlegend li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mlegend li b { margin-left: auto; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
-/* Windows has three memory entries. Full-width rows keep labels and units intact. */
+/* Windows memory and disk legends use full-width rows to keep labels and units intact. */
 .mlegend.mlegend-win { grid-template-columns: minmax(0, 1fr); }
 .mlegend-win li > span { overflow: visible; text-overflow: clip; flex: none; }
 .mlegend-win li b { flex: none; white-space: nowrap; }

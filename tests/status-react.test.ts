@@ -266,3 +266,23 @@ test("Windows memory legend keeps three full label/value rows in zh/en", async (
     }
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
+
+test("Windows disk legend keeps full labels and 103.3 GB in full-width rows in zh/en", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { DiskCard } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      const d = { total: 460 * GB, used: 356.7 * GB, free: 103.3 * GB };
+      const disk = renderToStaticMarkup(createElement(DiskCard, { d, t, onClean() {} }));
+      expect(disk).toContain('<ul class="mlegend num mlegend-win">');
+      expect(disk).toContain(`<span>${lang === "zh" ? "可用" : "available"}</span><b>`);
+      expect(disk).toContain("<b>103.3 GB</b>");
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
