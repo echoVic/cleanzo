@@ -109,6 +109,32 @@ func TestWindowsTerminateRefusesExplorerAndSelf(t *testing.T) {
 
 }
 
+func TestWindowsSystemAppsStayListedWithoutQuit(t *testing.T) {
+	for _, tt := range []struct {
+		path     string
+		excluded bool
+	}{
+		{`C:\Windows\System32\RuntimeBroker.exe`, true},
+		{`C:\Windows\SystemApps\Terminal\host.exe`, true},
+		{`C:\Program Files\Acme\app.exe`, false},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			path, wantExcluded := tt.path, tt.excluded
+			a := workspaceApp{Pid: 900001, Path: path, Name: "Example", Regular: true}
+			if statusAppExcluded(a) != wantExcluded || canQuit(path, []workspaceApp{a}) == wantExcluded || (len(quitMatches(path, []workspaceApp{a})) == 0) != wantExcluded {
+				t.Fatalf("incorrect quit eligibility for %s", path)
+			}
+			rows := mergeApps(nil, []procReading{{Pid: a.Pid, Path: path, Footprint: 20, Start: 1}}, []workspaceApp{a}, nativeResponsiblePid, time.Second,
+				func(procReading, map[int32]procReading, func(int32) int32) (string, string) {
+					return "app:" + strings.ToLower(path), path
+				})
+			if len(rows) != 1 || rows[0].Quit == wantExcluded {
+				t.Fatalf("system app must remain listed with Quit=false: %+v", rows)
+			}
+		})
+	}
+}
+
 // TestWindowsWindowedAncestors covers nearest parents, PID reuse, unknown dates and cycles.
 func TestWindowsWindowedAncestors(t *testing.T) {
 	base := time.Now().Add(-time.Hour)
@@ -176,12 +202,12 @@ func TestWindowsWindowClassification(t *testing.T) {
 	defer func() { postWindowClose = savedPost }()
 	posted := map[windows.HWND]bool{}
 	postWindowClose = func(hwnd windows.HWND) bool { posted[hwnd] = true; return true }
-	if !closeTopWindows(uint32(os.Getpid())) || !posted[regular] || !posted[hidden] || !posted[tool] || !posted[owned] || posted[child] {
-		t.Fatalf("WM_CLOSE targets=%v", posted)
+	if !closeTopWindows(uint32(os.Getpid())) || !posted[regular] || posted[hidden] || posted[tool] || posted[owned] || posted[child] {
+		t.Fatalf("SC_CLOSE targets=%v", posted)
 	}
 	for hwnd := range posted {
 		if seen[hwnd] != uint32(os.Getpid()) {
-			t.Fatal("WM_CLOSE sent to another process")
+			t.Fatal("SC_CLOSE sent to another process")
 		}
 	}
 	exe, err := os.Executable()
@@ -191,6 +217,12 @@ func TestWindowsWindowClassification(t *testing.T) {
 	apps, ancestors := statusApps([]procInfo{{Pid: uint32(os.Getpid()), Exe: exe}})
 	if len(apps) != 1 || !apps[0].Regular || apps[0].Name == "" || apps[0].Path != exe || apps[0].BundleID != "" || ancestors[uint32(os.Getpid())] != uint32(os.Getpid()) {
 		t.Fatalf("apps=%+v ancestors=%v", apps, ancestors)
+	}
+	// With no user-closeable window left, never fall back to helpers.
+	statusUser.NewProc("ShowWindow").Call(uintptr(regular), 0) // SW_HIDE
+	posted = map[windows.HWND]bool{}
+	if closeTopWindows(uint32(os.Getpid())) || len(posted) != 0 {
+		t.Fatalf("closed helper-only process: %v", posted)
 	}
 
 }

@@ -95,7 +95,7 @@ Cleanzo 目前只支持 macOS。Windows 用户同样面临缓存、崩溃转储�
 - CPU：`GetSystemTimes`。
 - 电池：`GetSystemPowerStatus`；台式机返回 nil。
 - 应用：有可见顶层窗口的进程算作应用；没有窗口的进程沿父进程链归到最近的有窗口祖先，并用创建时间防止 PID 被复用造成误判。应用名取 FileDescription。
-- 退出应用：发送 `WM_CLOSE`；不允许退出 explorer.exe 和 Cleanzo 自身。
+- 退出应用：仅向可见、无 owner、非 `WS_EX_TOOLWINDOW` 且未被 DWM cloaked 的顶层窗口异步发送 `WM_SYSCOMMAND / SC_CLOSE`（与标题栏 X / Alt+F4 一致），保留应用的保存询问流程；DWM 查询失败按未 cloaked 处理。没有合格窗口时不操作并返回 false，不回退到隐藏或内部窗口，绝不强制终止。不允许退出 explorer.exe、Cleanzo 自身和可执行文件解析后位于 `GetWindowsDirectory` 返回目录（同样解析、忽略大小写）内的系统组件；系统组件仍显示在列表中，但无退出按钮。
 - `Info()`：CPU 名称和系统版本读注册表；build ≥ 22000 即为 Windows 11。
 
 **文件类页面**：

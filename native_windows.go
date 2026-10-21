@@ -65,7 +65,12 @@ var (
 	getWindowLongPtr     = statusUser.NewProc("GetWindowLongPtrW")
 	postMessage          = statusUser.NewProc("PostMessageW")
 	enumWindowsProc      = statusUser.NewProc("EnumWindows")
+	dwmWindowAttribute   = windows.NewLazySystemDLL("dwmapi.dll").NewProc("DwmGetWindowAttribute")
 )
+
+func init() {
+	statusWindowsRoot, _ = windows.GetWindowsDirectory()
+}
 
 // statusSnapshotProcesses permits status failures to be tested independently of cleanup's probe.
 var statusSnapshotProcesses = processSnapshot
@@ -179,7 +184,7 @@ func enumTopWindows(visit func(windows.HWND, uint32)) bool {
 	return result != 0
 }
 
-// regularWindow requires a visible, unowned, non-tool top-level window.
+// regularWindow requires a visible, unowned, non-tool, non-cloaked top-level window.
 func regularWindow(hwnd windows.HWND) bool {
 	if !windows.IsWindowVisible(hwnd) {
 		return false
@@ -187,7 +192,18 @@ func regularWindow(hwnd windows.HWND) bool {
 	owner, _, _ := getWindow.Call(uintptr(hwnd), 4) // GW_OWNER
 	// GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80 (winuser.h).
 	style, _, _ := getWindowLongPtr.Call(uintptr(hwnd), ^uintptr(19))
-	return owner == 0 && style&0x80 == 0
+	if owner != 0 || style&0x80 != 0 {
+		return false
+	}
+	// DWMWA_CLOAKED = 14 (dwmapi.h). Failed queries mean "not cloaked".
+	var cloaked uint32
+	if dwmWindowAttribute.Find() == nil {
+		result, _, _ := dwmWindowAttribute.Call(uintptr(hwnd), 14, uintptr(unsafe.Pointer(&cloaked)), unsafe.Sizeof(cloaked))
+		if result == 0 && cloaked != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // statusApps names only windowed applications and shares their identities with ancestry resolution.
@@ -250,7 +266,7 @@ func workspaceList() []workspaceApp {
 	return apps
 }
 
-// workspaceTerminate posts WM_CLOSE to this live process's top-level windows, without force termination.
+// workspaceTerminate asks this live process's user-closeable windows to close, without force termination.
 func workspaceTerminate(pid int32) bool {
 	if pid <= 0 || pid == int32(os.Getpid()) {
 		return false
@@ -299,17 +315,17 @@ func windowsAppGroup(r procReading, byPid map[int32]procReading, ancestors map[u
 	return "", ""
 }
 
-// postWindowClose posts WM_CLOSE from winuser.h without waiting for the app to respond.
+// postWindowClose posts the caption X / Alt+F4 request without waiting for a response.
 var postWindowClose = func(hwnd windows.HWND) bool {
-	ok, _, _ := postMessage.Call(uintptr(hwnd), 0x0010, 0, 0)
+	ok, _, _ := postMessage.Call(uintptr(hwnd), 0x0112, 0xf060, 0) // WM_SYSCOMMAND / SC_CLOSE (winuser.h)
 	return ok != 0
 }
 
-// closeTopWindows posts only to windows belonging to the already-validated process.
+// closeTopWindows never falls back to internal windows if no user-closeable window exists.
 func closeTopWindows(pid uint32) bool {
 	sent := false
 	enumTopWindows(func(hwnd windows.HWND, owner uint32) {
-		if owner == pid && postWindowClose(hwnd) {
+		if owner == pid && regularWindow(hwnd) && postWindowClose(hwnd) {
 			sent = true
 		}
 	})
