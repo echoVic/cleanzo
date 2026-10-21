@@ -131,6 +131,9 @@ var statusWindowsRoot string
 
 // statusAppExcluded preserves Darwin identities and protects Windows system apps and Cleanzo.
 func statusAppExcluded(a workspaceApp) bool {
+	if statusPackageFamilyName != nil && windowsBuiltinPackage(a.Pid, a.Path, statusPackageFamilyName) {
+		return true
+	}
 	if runtime.GOOS == "windows" {
 		return statusProcessExcluded(a.Pid, a.Path) || strings.EqualFold(filepath.Base(a.Path), "explorer.exe") || windowsSystemPath(a.Path, statusWindowsRoot, resolvePath)
 	}

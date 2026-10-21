@@ -54,6 +54,7 @@
 6. **The Recycle Bin is emptied only when its row is selected, first in the pass, and only if it is unchanged since the scan.** *Test in Task 12.*
 7. **An uninstall launches only the registry-declared uninstaller of the key the user picked; InstallLocation is never trashed.** *Test in Task 23.*
 8. **Bound API is identical across platforms.** *Test in Task 5.*
+9. **Status lists protected apps with Quit=false, and termination refuses them.** Protect Cleanzo, explorer.exe, executables under the resolved Windows directory, and Microsoft-published MSIX packages (`8wekyb3d8bbwe` / `cw5n1h2txyewy`, including Windows Terminal). Third-party packaged apps remain quittable.
 
 ---
 

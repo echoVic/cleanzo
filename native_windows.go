@@ -70,6 +70,7 @@ var (
 
 func init() {
 	statusWindowsRoot, _ = windows.GetWindowsDirectory()
+	statusPackageFamilyName = processPackageFamilyName
 }
 
 // statusSnapshotProcesses permits status failures to be tested independently of cleanup's probe.
