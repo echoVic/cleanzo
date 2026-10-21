@@ -10,6 +10,7 @@ const dict = {
   zh: {
     "apps.sub@win": "通过应用自己的卸载器卸载应用。",
     "apps.body@win": "将打开应用自己的卸载器，请按其提示完成卸载。",
+    "apps.confirm@win": "打开卸载程序",
     "apps.analyzingBody@win": "正在读取应用的卸载信息…",
     "apps.moving@win": "正在打开…",
     "apps.launched": "卸载器已打开，请在完成后刷新",
@@ -865,6 +866,7 @@ const dict = {
   en: {
     "apps.sub@win": "Uninstall apps using each app’s own uninstaller.",
     "apps.body@win": "The app’s own uninstaller will open. Follow its prompts to finish uninstalling.",
+    "apps.confirm@win": "Open Uninstaller",
     "apps.analyzingBody@win": "Reading the app’s uninstall information…",
     "apps.moving@win": "Opening…",
     "apps.launched": "Uninstaller opened — refresh when it finishes",

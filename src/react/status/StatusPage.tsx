@@ -82,7 +82,7 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
               {(!isWindows() || m.compressed > 0) && <i style={{ width: `${pct(m.compressed)}%`, background: "var(--seg-compressed)" }} />}
             </div>
           </div>
-          <ul className="mlegend num">
+          <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
             <li><i className="mdot" style={{ background: "var(--seg-app)" }} /><span>{t("status.mem.appMem")}</span><b>{fmtMem(m.app)}</b></li>
             <li><i className="mdot" style={{ background: "var(--seg-wired)" }} /><span>{t("status.mem.wired")}</span><b>{fmtMem(m.wired)}</b></li>
             {(!isWindows() || m.compressed > 0) && <li><i className="mdot" style={{ background: "var(--seg-compressed)" }} /><span>{t("status.mem.compressed")}</span><b>{fmtMem(m.compressed)}</b></li>}

@@ -168,6 +168,11 @@ test("Windows uninstall dialog hides related files and offers refresh after laun
       const render = (stage: "detail" | "launched") => renderToStaticMarkup(createElement(Dialog, { open: true }, createElement(UninstallDialogBody, { ...props, stage })));
       expect(render("detail")).toContain(t("apps.body", { n: 1, size: "4 B" }));
       expect(render("detail")).not.toContain("private-related-file");
+      const confirm = lang === "zh" ? "打开卸载程序" : "Open Uninstaller";
+      expect(render("detail")).toMatch(new RegExp(`<button[^>]*>${confirm}</button>`));
+      for (const stage of ["detail", "launched"] as const) {
+        expect(render(stage)).not.toMatch(/回收站|Recycle Bin/i);
+      }
       expect(render("launched")).toContain(t("apps.launched"));
       expect(render("launched")).toContain(t("apps.refresh"));
       expect(render("launched")).not.toContain(t("apps.confirm"));

@@ -239,3 +239,30 @@ test("Windows CPU hides unsupported load tiles and memory uses the short Kernel 
     }
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
+
+test("Windows memory legend keeps three full label/value rows in zh/en", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { MemoryCard } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  try {
+    setPlatformForTest("win32");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      const m = { ...sample().memory, compressed: 0, cached: 19.9 * GB };
+      const html = renderToStaticMarkup(createElement(MemoryCard, { m, t }));
+      // A Windows-only layout gives each label and value the full card width.
+      const match = html.match(/<ul class="mlegend num mlegend-win">(.*?)<\/ul>/);
+      expect(match).not.toBeNull();
+      const legend = match![1]!;
+      const rows = [...legend.matchAll(/<li>(.*?)<\/li>/g)].map((match) => match[1]!);
+      expect(rows).toHaveLength(3);
+      const labels = lang === "zh" ? ["App 内存", "内核", "已缓存文件"] : ["App Memory", "Kernel", "Cached files"];
+      rows.forEach((row, i) => expect(row).toContain(`<span>${labels[i]}</span><b>`));
+      expect(rows[2]).toContain("<b>19.9 GB</b>");
+      expect(legend).not.toMatch(/…|\.\.\./);
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
