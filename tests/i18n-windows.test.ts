@@ -39,3 +39,21 @@ test("Windows overrides precede the glossary; interpolation does not rewrite pat
   expect(t("status.mem.wired")).toBe("Wired Memory");
   expect(ruleName("sys.trash")).toBe("Trash");
 });
+
+test("Recycle Bin refusal codes explain retained and connected files in both languages", async () => {
+  const previous = globalThis.document;
+  Object.assign(globalThis, { document: previous ?? { querySelectorAll: () => [] } });
+  const { errText } = await import("../src/shared");
+  Object.assign(globalThis, { document: previous });
+  setPlatformForTest("win32");
+  for (const [lang, retained, connected] of [
+    ["zh", "无法移到回收站，已保留原文件（可能超过回收站容量，或该位置没有回收站）", "这个网页文件和同名附属文件夹相连，Windows 会把它们一起移走，请在文件资源管理器中处理"],
+    ["en", "Couldn't move it to the Recycle Bin, so it was kept (it may exceed the Recycle Bin's size, or the location has no Recycle Bin)", "This web page is linked to a folder of the same name, and Windows would move both; handle it in File Explorer"],
+  ] as const) {
+    setPref(lang);
+    expect(errText(new Error("not-recycled"))).toBe(retained);
+    expect(errText("connected-files")).toBe(connected);
+    expect(t("skills.err.not-recycled" as never)).toBe(retained);
+    expect(t("skills.err.connected-files" as never)).toBe(connected);
+  }
+});

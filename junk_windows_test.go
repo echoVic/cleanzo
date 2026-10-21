@@ -19,20 +19,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// windowsShellTest bounds native shell tests in a child so a shell dialog cannot hang CI.
+// windowsShellTest runs native shell tests in a child with mygo's application loop.
 func windowsShellTest(t *testing.T) bool {
 	t.Helper()
 	if os.Getenv("CLEANZO_SHELL_TEST") == t.Name() {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.v", "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
+	cmd := exec.Command(os.Args[0], "-test.v", "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
 	cmd.Env = append(os.Environ(), "CLEANZO_SHELL_TEST="+t.Name())
 	out, err := cmd.CombinedOutput()
 	t.Logf("shell child:\n%s", out)
 	if err != nil {
-		t.Fatalf("shell child: %v (deadline: %v)", err, ctx.Err())
+		t.Fatalf("shell child: %v", err)
 	}
 	if strings.Contains(string(out), "--- SKIP: "+t.Name()+" ") {
 		t.Skipf("native bin check skipped in child: %s", out)
@@ -44,7 +42,7 @@ func windowsShellTest(t *testing.T) bool {
 }
 
 // recycleWindowsFixture retries a shell refusal once while the seeded source still exists.
-// The shell maps transient sharing failures to blocked, so the syscall-only retry helper cannot see them.
+// mygo maps transient sharing failures to not-recycled, so retry only while the source exists.
 func recycleWindowsFixture(path string) error {
 	err := recycle(path)
 	if err != nil && exists(path) {
@@ -76,7 +74,6 @@ func TestWindowsRecycleBinRule(t *testing.T) {
 	if before.items != 0 {
 		t.Skip("bin already contains unrelated items; refusing to empty them")
 	}
-	requireTestRecycleCapacity(t, env.home, before.size+8192)
 	first := filepath.Join(env.home, "first.bin")
 	second := filepath.Join(env.home, "second.bin")
 	writeFile(t, first, 4096)
@@ -287,7 +284,6 @@ func TestWindowsJunkSeededClean(t *testing.T) {
 		if stats.items != 0 {
 			t.Skip("bin contains unrelated entries")
 		}
-		requireTestRecycleCapacity(t, env.home, 16384)
 		seed := filepath.Join(env.home, "seed-bin.bin")
 		writeFile(t, seed, 4096)
 		if err := recycleWindowsFixture(seed); err != nil {

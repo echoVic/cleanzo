@@ -560,7 +560,7 @@ func TestMain(m *testing.M) {
 		}
 		return os.Rename(p, dst)
 	}
-	code := m.Run()
+	code := runPlatformTests(m)
 	cleanup()
 	os.Exit(code)
 }

@@ -14,6 +14,9 @@ import (
 	"testing"
 )
 
+// runPlatformTests keeps the usual runner unless a native Windows Shell child needs an app loop.
+var runPlatformTests = func(m *testing.M) int { return m.Run() }
+
 // sandboxWindowsTests isolates every Windows test from the real user profile.
 func sandboxWindowsTests() (func(), error) {
 	if runtime.GOOS != "windows" {

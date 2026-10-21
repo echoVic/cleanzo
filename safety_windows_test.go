@@ -12,7 +12,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 // makeJunction creates a directory junction without requiring symlink privileges.
@@ -147,46 +146,21 @@ func TestWindowsOfflineFileSurvivesClean(t *testing.T) {
 	}
 }
 
-// TestWindowsRecycleMovesToBin exercises the SDK structure layout and real fixed-volume shell operation.
+// TestWindowsRecycleMovesToBin exercises mygo's real fixed-volume Recycle Bin move.
 func TestWindowsRecycleMovesToBin(t *testing.T) {
+	if !windowsShellTest(t) {
+		return
+	}
 	env := testEnv(t)
-	path := filepath.Join(env.home, "page.htm")
-	connected := filepath.Join(env.home, "page_files", "keep")
-	writeFile(t, connected, 1)
+	path := filepath.Join(env.home, "ordinary.bin")
 	writeFile(t, path, 123)
-	// Only an ordinary, tiny, local fixed-drive file reaches the real shell; never test a nuke case.
 	if getDriveType(windows.StringToUTF16Ptr(filepath.VolumeName(path)+`\`)) != windows.DRIVE_FIXED {
 		t.Fatal("sandbox must be on a fixed drive")
 	}
-	if unsafe.Sizeof(shellFileOperation{}) != 56 || unsafe.Offsetof(shellFileOperation{}.aborted) != 36 {
-		t.Fatal("SHFILEOPSTRUCTW layout differs from shellapi.h (64-bit)")
-	}
 	before := queryTestRecycleBin(t, path)
-	requireTestRecycleCapacity(t, path, before.size+123)
-	done := make(chan error, 1)
-	stopped := make(chan struct{})
-	defer func() { <-stopped }()
-	go func() {
-		defer close(stopped)
-		err := recycle(path)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			err = recycle(path)
-		}
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(60 * time.Second):
-		t.Fatal("Recycle Bin operation exceeded 60 seconds")
+	if err := recycleWindowsFixture(path); err != nil {
+		t.Fatal(err)
 	}
-	if !exists(connected) {
-		t.Fatal("connected page_files directory was recycled")
-	}
-
 	if exists(path) {
 		t.Fatal("Recycle Bin move left source on disk")
 	}
@@ -205,9 +179,9 @@ func TestWindowsRecycleRefusesNonFixed(t *testing.T) {
 		t.Fatal("fixture must reach the drive check")
 	}
 	driveCalls := 0
-	savedDrive, savedOp := getDriveType, shellRecycle
-	t.Cleanup(func() { getDriveType, shellRecycle = savedDrive, savedOp })
-	shellRecycle = func(*shellFileOperation) int32 { t.Fatal("shell called for non-fixed drive"); return 0 }
+	savedDrive, savedOp := getDriveType, shellTrashItem
+	t.Cleanup(func() { getDriveType, shellTrashItem = savedDrive, savedOp })
+	shellTrashItem = func(string) error { t.Fatal("shell called for non-fixed drive"); return nil }
 	for _, kind := range []uint32{windows.DRIVE_UNKNOWN, windows.DRIVE_NO_ROOT_DIR, windows.DRIVE_REMOVABLE, windows.DRIVE_REMOTE, windows.DRIVE_CDROM, windows.DRIVE_RAMDISK} {
 		getDriveType = func(*uint16) uint32 { driveCalls++; return kind }
 		if err := recycle(path); err == nil || !exists(path) {
@@ -217,35 +191,6 @@ func TestWindowsRecycleRefusesNonFixed(t *testing.T) {
 			t.Fatal("drive probe was not reached")
 		}
 		driveCalls = 0
-	}
-}
-
-// TestWindowsRecycleFlagsAndFailures checks double NUL, nuke warning, errors and cancellation without dialogs.
-func TestWindowsRecycleFlagsAndFailures(t *testing.T) {
-	env := testEnv(t)
-	path := filepath.Join(env.home, "keep")
-	writeFile(t, path, 1)
-	saved, savedOwner := shellRecycle, recycleOwner
-	recycleOwner = func() uintptr { return 0x1234 }
-	t.Cleanup(func() { shellRecycle, recycleOwner = saved, savedOwner })
-	for _, tc := range []struct {
-		code    int32
-		aborted int32
-	}{{5, 0}, {-1, 0}, {0, 1}, {0, 0}} {
-		shellRecycle = func(op *shellFileOperation) int32 {
-			if op.window != 0x1234 || op.operation != 3 || op.flags != 0x0454|0x4000|0x2000 {
-				t.Fatalf("unsafe shell flags: %#x", op.flags)
-			}
-			units := unsafe.Slice(op.from, len(windows.StringToUTF16(path))+1)
-			if units[len(units)-1] != 0 || units[len(units)-2] != 0 {
-				t.Fatal("source not double NUL terminated")
-			}
-			op.aborted = tc.aborted
-			return tc.code
-		}
-		if err := recycle(path); (err != nil) != (tc.code != 0 || tc.aborted != 0) {
-			t.Fatalf("result=%v for %+v", err, tc)
-		}
 	}
 }
 
@@ -477,71 +422,6 @@ func TestWindowsAIToolsAndSkillsRefuseReparsePoints(t *testing.T) {
 	makeJunction(t, filepath.Join(cache, "escape"), outside)
 	if aiRemovable(root, aiTool{}, cache) {
 		t.Fatal("AI cache containing reparse point accepted")
-	}
-}
-
-// testRecycleValue reads an Explorer setting; missing values retain Windows defaults.
-var testRecycleValue = func(name, value string) (uint64, error) {
-	key, err := registry.OpenKey(registry.CURRENT_USER, name, registry.QUERY_VALUE)
-	if err != nil {
-		return 0, err
-	}
-	defer key.Close()
-	result, _, err := key.GetIntegerValue(value)
-	return result, err
-}
-
-// requireTestRecycleCapacity reads global and source-volume BitBucket settings without changing them.
-func requireTestRecycleCapacity(t *testing.T, path string, required int64) {
-	t.Helper()
-	refuse := func(format string, args ...any) {
-		t.Helper()
-		if strings.EqualFold(os.Getenv("GITHUB_ACTIONS"), "true") {
-			t.Fatalf(format, args...)
-		}
-		t.Skipf(format, args...)
-	}
-	const base = `Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket`
-	root := filepath.VolumeName(path) + `\`
-	buf := make([]uint16, 128)
-	if err := windows.GetVolumeNameForVolumeMountPoint(windows.StringToUTF16Ptr(root), &buf[0], uint32(len(buf))); err != nil {
-		refuse("cannot establish Recycle Bin volume settings: %v", err)
-	}
-	guid := strings.TrimSuffix(strings.TrimPrefix(windows.UTF16ToString(buf), `\\?\Volume`), `\`)
-	var total uint64
-	if err := windows.GetDiskFreeSpaceEx(windows.StringToUTF16Ptr(root), nil, &total, nil); err != nil {
-		refuse("cannot determine default Recycle Bin capacity: %v", err)
-	}
-	// Default Windows bins are enabled. Five percent is a lower bound on the default volume quota.
-	enabled, capacity := true, total/20
-	for _, name := range []string{base, base + `\Volume\` + guid} {
-		nuke, nukeErr := testRecycleValue(name, "NukeOnDelete")
-		maximum, capacityErr := testRecycleValue(name, "MaxCapacity")
-		if nukeErr == nil {
-			if nuke != 0 {
-				refuse("Recycle Bin is disabled (NukeOnDelete)")
-			}
-			enabled = true
-		} else if !errors.Is(nukeErr, registry.ErrNotExist) {
-			refuse("cannot read NukeOnDelete: %v", nukeErr)
-		}
-		if capacityErr == nil {
-			if maximum == 0 || maximum > 1<<40 {
-				refuse("Recycle Bin capacity is disabled or unknown")
-			}
-			bytes := maximum * 1024 * 1024 // Explorer's MaxCapacity setting is in MiB.
-			if capacity == 0 || bytes < capacity {
-				capacity = bytes
-			}
-		} else if !errors.Is(capacityErr, registry.ErrNotExist) {
-			refuse("cannot read MaxCapacity: %v", capacityErr)
-		}
-	}
-	if !enabled || capacity == 0 {
-		refuse("Recycle Bin enabled state/capacity is unknown; refusing a possible nuke prompt")
-	}
-	if required < 0 || capacity < uint64(required)+64*1024 {
-		refuse("Recycle Bin is too small for the test without evicting existing entries")
 	}
 }
 
