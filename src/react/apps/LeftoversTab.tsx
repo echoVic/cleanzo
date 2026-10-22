@@ -67,6 +67,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
       runRef.current++;
       chanRef.current?.close();
       chanRef.current = null;
+      // 开发模式 StrictMode 卸载重挂：刚关掉的自动扫描要重新开始。
+      autoStartedRef.current = false;
     };
   }, []);
 

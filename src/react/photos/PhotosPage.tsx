@@ -40,6 +40,7 @@ export function PhotosPage() {
   const chanRef = React.useRef<{ close(): void } | null>(null);
   const stoppedRef = React.useRef(false);
   const scanningRef = React.useRef(false);
+  const autoStartedRef = React.useRef(false);
   const clustersRef = React.useRef(clusters);
   clustersRef.current = clusters;
   scanningRef.current = scanning;
@@ -50,6 +51,8 @@ export function PhotosPage() {
       runRef.current++;
       chanRef.current?.close();
       chanRef.current = null;
+      // 开发模式 StrictMode 卸载重挂：刚关掉的自动扫描要重新开始。
+      autoStartedRef.current = false;
     };
   }, []);
 
@@ -99,7 +102,6 @@ export function PhotosPage() {
   }, [t]);
 
   // 首次进入视图自动开始一次扫描（root 复用；之后切语言重渲染不再重扫）。
-  const autoStartedRef = React.useRef(false);
   React.useEffect(() => {
     if (autoStartedRef.current) return;
     autoStartedRef.current = true;
