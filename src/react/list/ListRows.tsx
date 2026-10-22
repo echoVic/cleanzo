@@ -4,6 +4,9 @@ import { Button } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
+import { Collapse } from "../../ui/motion/Collapse";
+import { useFlip } from "../../ui/motion/flip";
+import { useLeaveAnimation, usePresence } from "../../ui/motion/presence";
 import { human, displayPath } from "../ai/format";
 import { pathHintKind } from "./type-hint";
 import {
@@ -58,17 +61,23 @@ export function PathTypeHint({ path, isDir = false }: { path: string; isDir?: bo
   return <span className="muted small" style={{ display: "block", whiteSpace: "normal", overflowWrap: "anywhere" }}>{t(`fs.type.${pathHintKind(path, isDir)}` as DictKey)}</span>;
 }
 
-function ChildRow({ parent, item, selection, busy, callbacks }: {
+function ChildRow({ parent, item, selection, busy, callbacks, leaving, index }: {
   parent: string;
   item: ListChildItem;
   selection: ListSelection;
   busy: boolean;
   callbacks: RowCallbacks;
+  leaving: boolean;
+  index: number;
 }) {
   const t = useT();
-  if (isGone(selection, item.path)) return null;
+  const ref = React.useRef<HTMLDivElement>(null);
+  useLeaveAnimation(ref, leaving);
+  const sizeKey = item.size >= 0 ? "size" : item.measuring ? "measuring" : "none";
+  if (!leaving && isGone(selection, item.path)) return null;
   return (
-    <div className="fs-child">
+    <div className="fs-child cz-enter" ref={ref} aria-hidden={leaving || undefined} inert={leaving || undefined}
+      style={{ "--cz-i": Math.min(index, 6), "--cz-step": "24ms" } as React.CSSProperties}>
       <Checkbox
         checked={selection.sel.has(item.path)}
         disabled={busy || !item.trashable}
@@ -83,7 +92,7 @@ function ChildRow({ parent, item, selection, busy, callbacks }: {
       <span className="fs-child-size" title={item.size < 0 && item.sizeError !== undefined
         ? (item.sizeError ? t("fs.sizeUnavailableError", { msg: item.sizeError }) : t("fs.sizeUnavailable"))
         : undefined}>
-        {item.size >= 0 ? human(item.size) : item.measuring ? t("fs.measuring") : "--"}
+        <span key={sizeKey} className="cz-fade-in">{item.size >= 0 ? human(item.size) : item.measuring ? t("fs.measuring") : "--"}</span>
       </span>
       <RevealButton path={item.path} onReveal={callbacks.onReveal} />
       {item.trashable && (
@@ -105,19 +114,33 @@ interface RowProps extends RowCallbacks {
   row: ListRowData;
   selection: ListSelection;
   busy: boolean;
+  leaving?: boolean;
 }
 
-function ListRow({ row, selection, busy, ...cb }: RowProps) {
+function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
   const t = useT();
-  if (isGone(selection, row.path)) return null;
-  const open = selection.expanded.has(row.path);
+  const ref = React.useRef<HTMLDivElement>(null);
+  useLeaveAnimation(ref, !!leaving);
+  const prevRank = React.useRef<string | undefined>(undefined);
+  const rankChanged = prevRank.current !== undefined && prevRank.current !== row.rank;
+  React.useEffect(() => { prevRank.current = row.rank; });
+  const expanded = selection.expanded.has(row.path);
+  // 关闭或整行离场期间沿用展开内容，业务状态仍照常清空。
+  const lastOpen = React.useRef(selection);
+  React.useLayoutEffect(() => { if (expanded && !leaving) lastOpen.current = selection; }, [selection, expanded, leaving]);
+  const shownSelection = expanded && !leaving ? selection : lastOpen.current;
+  const open = leaving ? shownSelection.expanded.has(row.path) : expanded;
   const checked = selection.sel.has(row.path);
   const indeterminate = rowIndeterminate(selection, row.path);
-  const kids = loadedKids(selection, row.path);
-  const childList = selection.children.get(row.path);
+  const kids = loadedKids(shownSelection, row.path);
+  const childList = shownSelection.children.get(row.path);
+  // 删除会从 children 移除记录，presence 必须保留整项快照。
+  const childItems = childList && "items" in childList ? childList.items.filter((it) => kids.includes(it.path)) : [];
+  const kidsP = usePresence(childItems, (it) => it.path, open);
+  if (!leaving && isGone(selection, row.path)) return null;
 
   return (
-    <div className="fs-row-wrap">
+    <div className="fs-row-wrap cz-enter" data-key={row.path} ref={ref} aria-hidden={leaving || undefined} inert={leaving || undefined}>
       <div className={cn("fs-row", open && "open")}>
         <Checkbox
           checked={checked ? true : indeterminate ? "indeterminate" : false}
@@ -125,7 +148,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
           onCheckedChange={(v) => cb.onToggleRow(row.path, v === true)}
           className="box-content p-1"
         />
-        {row.rank && <div className="fs-rank">{row.rank}</div>}
+        {row.rank && <div className="fs-rank"><span key={row.rank} className={rankChanged ? "cz-roll" : undefined}>{row.rank}</span></div>}
         <div className="fs-main">
           <div className="fs-path" title={row.path}>
             {row.name}
@@ -160,7 +183,7 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
           </Button>
         )}
       </div>
-      {open && (
+      <Collapse open={open} animateResize>
         <div className="fs-children">
           {!childList && <span className="muted small">{t("fs.children")}</span>}
           {childList && "error" in childList && (
@@ -169,19 +192,16 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
           {childList && "items" in childList && kids.length === 0 && (
             <div className="fs-child muted small">{t("fs.childrenEmpty")}</div>
           )}
-          {childList && "items" in childList && kids.map((p) => {
-            const it = childList.items.find((i) => i.path === p)!;
-            return (
-              <ChildRow key={p} parent={row.path} item={it} selection={selection} busy={busy} callbacks={cb} />
-            );
-          })}
+          {kidsP.map(({ item: it, key, leaving }, index) => (
+            <ChildRow key={key} parent={row.path} item={it} selection={selection} busy={busy} callbacks={cb} leaving={leaving} index={index} />
+          ))}
           {childList && "items" in childList && childList.total > kids.length && (
             <div className="fs-child muted small">
               {t("fs.childrenMore", { n: kids.length, total: childList.total })}
             </div>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -189,9 +209,21 @@ function ListRow({ row, selection, busy, ...cb }: RowProps) {
 /** 行列表容器：直接复用 fs-list 的视觉。 */
 export function ListRows(props: Omit<RowProps, "row"> & { rows: ListRowData[] }) {
   const { rows, ...rest } = props;
+  const box = React.useRef<HTMLDivElement>(null);
+  // 重扫由调用方的扫描 key 重挂；删掉最后一行仍要收起。
+  // 整行移除时保留选择/展开快照，避免收起前子项先消失。
+  const shown = usePresence(rows.map((row) => ({ row, selection: rest.selection })), (r) => r.row.path);
+  const keys = rows.map((r) => r.path);
+  const prevKeys = React.useRef(keys);
+  const removing = prevKeys.current.some((key) => !keys.includes(key));
+  React.useLayoutEffect(() => { prevKeys.current = keys; });
+  // presence 补回离场行的这次提交由收起补位，避免 FLIP 先移动一次。
+  useFlip(box, keys, !removing);
   return (
-    <div className="fs-list">
-      {rows.map((row) => <ListRow key={row.path} row={row} {...rest} />)}
+    <div className="fs-list" ref={box}>
+      {shown.map(({ item, key, leaving }) => (
+        <ListRow key={key} row={item.row} {...rest} selection={leaving ? item.selection : rest.selection} leaving={leaving} />
+      ))}
     </div>
   );
 }
@@ -218,6 +250,9 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
   }, 0);
   const some = selectableRows.some((p) => selection.sel.has(p));
   const all = selectableRows.length > 0 && selectableRows.every((p) => selection.sel.has(p));
+  const label = picked.length > 0
+    ? t("fs.checkedSize", { n: picked.length, size: human(size) })
+    : t("fs.nothing");
   return (
     <div className="fs-toolbar">
       <Checkbox
@@ -226,11 +261,7 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
         onCheckedChange={(v) => onToggleAll(v === true)}
         className="box-content p-1"
       />
-      <span className="fs-toolbar-count">
-        {picked.length > 0
-          ? t("fs.checkedSize", { n: picked.length, size: human(size) })
-          : t("fs.nothing")}
-      </span>
+      <span className="fs-toolbar-count"><span key={label} className="cz-fade-in">{label}</span></span>
       <Button
         variant="destructive"
         size="sm"

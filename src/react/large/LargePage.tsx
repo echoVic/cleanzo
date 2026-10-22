@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
+import { Collapse } from "../../ui/motion/Collapse";
 import { errText, toast } from "../../shared";
 import {
   applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow,
@@ -290,7 +291,7 @@ export function LargePage() {
         <span>{t("large.thresholdAfter")}</span>
       </label>
 
-      {scanning && (
+      <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
@@ -298,7 +299,7 @@ export function LargePage() {
             <div className="muted small">{t("large.count", { n: visible.length.toLocaleString() })}</div>
           </div>
         </div>
-      )}
+      </Collapse>
 
       {showIdle && (
         <EmptyGuide
@@ -339,30 +340,32 @@ export function LargePage() {
             onToggleAll={onToggleAll}
             onTrashChecked={onTrashChecked}
           />
-          <ListRows
-            rows={rows}
-            selection={selection}
-            busy={busy}
-            onToggleRow={onToggleRow}
-            onToggleChild={onToggleChild}
-            onExpand={onExpand}
-            onReveal={onReveal}
-            onTrashRow={onTrashRow}
-          />
-          {scanning && <div className="fs-foot muted small">{t("large.live")}</div>}
-          {!scanning && stopped && sorted.length > 0 && (
-            <div className="fs-foot muted small">{t("scan.stopped")}</div>
-          )}
-          {!scanning && !stopped && result && (
-            <div className="fs-foot muted small">
-              {t("large.foot", {
-                n: result.scanned.toLocaleString(),
-                t: (result.elapsedMs / 1000).toFixed(1),
-                s: result.skipped.toLocaleString(),
-              })}
-            </div>
-          )}
         </>
+      )}
+
+      <ListRows
+        key={runRef.current}
+        rows={rows}
+        selection={selection}
+        busy={busy}
+        onToggleRow={onToggleRow}
+        onToggleChild={onToggleChild}
+        onExpand={onExpand}
+        onReveal={onReveal}
+        onTrashRow={onTrashRow}
+      />
+      {scanning && <div className="fs-foot muted small">{t("large.live")}</div>}
+      {!scanning && stopped && sorted.length > 0 && (
+        <div className="fs-foot muted small">{t("scan.stopped")}</div>
+      )}
+      {sorted.length > 0 && !scanning && !stopped && result && (
+        <div className="fs-foot muted small">
+          {t("large.foot", {
+            n: result.scanned.toLocaleString(),
+            t: (result.elapsedMs / 1000).toFixed(1),
+            s: result.skipped.toLocaleString(),
+          })}
+        </div>
       )}
 
       <Dialog open={trashTarget !== null} onOpenChange={(v) => { if (!v) setTrashTarget(null); }}>

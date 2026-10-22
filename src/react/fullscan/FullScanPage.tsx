@@ -6,6 +6,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
+import { Collapse } from "../../ui/motion/Collapse";
 import { errText, toast } from "../../shared";
 import {
   applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
@@ -290,7 +291,7 @@ export function FullScanPage() {
         <ul>{actionErrors.map((message, i) => <li key={i}>{message}</li>)}</ul>
       </div>}
 
-      {scanning && (
+      <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
@@ -298,7 +299,7 @@ export function FullScanPage() {
             <div className="muted small">{t("fs.count", { n: items.length.toLocaleString() })}</div>
           </div>
         </div>
-      )}
+      </Collapse>
 
       {showIdle && (
         <EmptyGuide
@@ -339,22 +340,24 @@ export function FullScanPage() {
             onTrashChecked={onTrashChecked}
           />
           <p className="muted small">{t("fs.typeHint")}</p>
-          <ListRows
-            typeHints
-            rows={rows}
-            selection={selection}
-            busy={busy}
-            onToggleRow={onToggleRow}
-            onToggleChild={onToggleChild}
-            onExpand={(p) => void onExpand(p)}
-            onReveal={onReveal}
-            onTrashRow={onTrashRow}
-          />
-          {scanning && <div className="fs-foot muted small">{t("fs.live")}</div>}
-          {!scanning && stopped && sorted.length > 0 && (
-            <div className="fs-foot muted small">{t("scan.stopped")}</div>
-          )}
         </>
+      )}
+
+      <ListRows
+        key={runRef.current}
+        typeHints
+        rows={rows}
+        selection={selection}
+        busy={busy}
+        onToggleRow={onToggleRow}
+        onToggleChild={onToggleChild}
+        onExpand={(p) => void onExpand(p)}
+        onReveal={onReveal}
+        onTrashRow={onTrashRow}
+      />
+      {sorted.length > 0 && scanning && <div className="fs-foot muted small">{t("fs.live")}</div>}
+      {!scanning && stopped && sorted.length > 0 && (
+        <div className="fs-foot muted small">{t("scan.stopped")}</div>
       )}
 
       <Dialog open={trashTarget !== null} onOpenChange={(v) => { if (!v) setTrashTarget(null); }}>

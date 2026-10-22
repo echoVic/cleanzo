@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
+import { Collapse } from "../../ui/motion/Collapse";
 import { kindLabel } from "../../i18n";
 import { errText, toast } from "../../shared";
 import { human } from "../ai/format";
@@ -289,7 +290,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
         </Button>
       </div>
 
-      {scanning && (
+      <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
@@ -300,7 +301,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
             </div>
           </div>
         </div>
-      )}
+      </Collapse>
 
       {summary && !scanning && (
         <div className="orphan-summary">
@@ -347,18 +348,20 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
             onToggleAll={onToggleAll}
             onTrashChecked={onTrashChecked}
           />
-          <ListRows
-            rows={rows}
-            selection={selection}
-            busy={busy}
-            onToggleRow={onToggleRow}
-            onToggleChild={onToggleChild}
-            onExpand={(p) => void onExpand(p)}
-            onReveal={onReveal}
-            onTrashRow={onTrashRow}
-          />
         </>
       )}
+
+      <ListRows
+        key={runRef.current}
+        rows={rows}
+        selection={selection}
+        busy={busy}
+        onToggleRow={onToggleRow}
+        onToggleChild={onToggleChild}
+        onExpand={(p) => void onExpand(p)}
+        onReveal={onReveal}
+        onTrashRow={onTrashRow}
+      />
 
       <Dialog open={trashTarget !== null} onOpenChange={(v) => { if (!v) setTrashTarget(null); }}>
         <DialogContent>
