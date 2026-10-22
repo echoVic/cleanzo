@@ -260,7 +260,7 @@ body {
   justify-content: center;
   gap: 6px;
   white-space: nowrap;
-  transition: background 0.13s ease, color 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease, opacity 0.13s ease, border-color 0.13s ease;
+  transition: background var(--t-fade) ease, color var(--t-fade) ease, box-shadow var(--t-fade) ease, transform var(--t-press) ease, opacity var(--t-fade) ease, border-color var(--t-fade) ease;
 }
 .btn:hover:not(:disabled) { background: var(--hover); }
 .btn:active:not(:disabled) { transform: scale(0.97); }
@@ -349,7 +349,7 @@ body {
   width: 0;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 0.3s ease;
+  transition: width var(--t-layout) var(--e-out);
 }
 .banner-actions { position: relative; z-index: 1; flex-shrink: 0; }
 .hero-spark {
@@ -632,7 +632,7 @@ body {
   width: 0;
   border-radius: 999px;
   background: var(--accent);
-  transition: width 0.4s ease;
+  transition: width var(--t-move) var(--e-out);
 }
 
 /* ---- 扫描进度 ---- */
@@ -814,7 +814,7 @@ body {
   .fs-track { max-width: 380px; }
   .fs-row { padding: 12px 20px; }
 }
-.fs-fill { height: 100%; border-radius: 999px; background: var(--accent); opacity: 0.85; }
+.fs-fill { height: 100%; border-radius: 999px; background: var(--accent); opacity: 0.85; transition: width var(--t-move) var(--e-out); }
 .fs-size {
   font-weight: 720;
   font-size: 13.5px;
@@ -1032,7 +1032,7 @@ body {
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.22s ease, transform 0.22s ease;
+  transition: opacity var(--t-state) linear, transform var(--t-state) var(--e-in);
   max-width: 70vw;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1041,7 +1041,7 @@ body {
 @media (prefers-color-scheme: dark) {
   .toast { color: #1a1c20; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); transition: opacity var(--t-state) linear, transform var(--t-layout) var(--e-out); }
 .toast.err { background: var(--danger); color: #fff; }
 
 /* ---- 杂项 ---- */
@@ -1080,14 +1080,6 @@ body {
   .hero-num { font-size: 38px; }
   .banner-title { font-size: 17px; }
   .empty-guide .eg-icon { width: 104px; height: 104px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 
 /* ---- Similar photo clusters ---- */
@@ -1334,7 +1326,6 @@ body {
 /* 版本号与「检查更新」并排 */
 .setting-version { display: inline-flex; align-items: center; gap: 10px; }
 
-
 /* ============================================================
    系统状态页 · 0.1.8 视觉修订
    类名统一带 st- 前缀；卡片五槽位骨架 mcard（head/hero/caption/viz/legend/foot）。
@@ -1422,7 +1413,7 @@ body {
 
 /* 内存三段堆叠条 + 2×2 图例（第 4 格无色点） */
 .mstack { width: 100%; height: 10px; border-radius: 5px; background: var(--bg-subtle); display: flex; overflow: hidden; }
-.mstack i { height: 100%; }
+.mstack i { height: 100%; transition: width var(--t-move) var(--e-out); }
 .mlegend {
   list-style: none;
   margin: 12px 0 0;
@@ -1448,7 +1439,7 @@ body {
 
 /* 磁盘 / 电池用量条 */
 .mbar { width: 100%; height: 10px; border-radius: 5px; background: var(--bg-subtle); overflow: hidden; }
-.mbar > i { display: block; height: 100%; background: var(--accent); }
+.mbar > i { display: block; height: 100%; background: var(--accent); transition: width var(--t-move) var(--e-out); }
 .mbar.low > i { background: var(--warn); }
 
 /* footer 钉底 */
@@ -1610,12 +1601,6 @@ body {
   .st-cols { font-size: 11px; }
 }
 
-/* reduce-motion：关 shimmer 与行透明度过渡 */
-@media (prefers-reduced-motion: reduce) {
-  .st-skel .sk-line, .st-skel-row .sk-line { animation: none; }
-  .st-row { transition: none; }
-}
-
 /* ============================================================
    垃圾清理首页 · 中轴组合块（闲置态）
    ============================================================ */
@@ -1716,4 +1701,73 @@ body {
   .ai-part .junk-row { grid-template-columns: 16px minmax(0, 1fr) 64px; padding: 10px 12px; }
   .ai-part .cat-note { grid-column: 2; text-align: left; }
   .ai-groups { padding-left: 16px; }
+}
+
+/* ============================================================
+   动效（设计：docs/superpowers/specs/2026-10-22-motion-design.md 第四节）
+   时长按变化大小分档，曲线按出现 / 移动 / 离场选；减弱动态效果只保留淡入淡出。
+   ============================================================ */
+:root {
+  --t-press: 90ms;
+  --t-fade: 120ms;
+  --t-state: 180ms;
+  --t-layout: 240ms;
+  --t-move: 360ms;
+  --e-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --e-move: cubic-bezier(0.2, 0, 0, 1);
+  --e-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --sweep: rgba(31, 163, 85, 0.16);
+  --sweep-hi: rgba(255, 255, 255, 0.78);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --sweep: rgba(48, 209, 88, 0.2); --sweep-hi: rgba(255, 255, 255, 0.2); }
+}
+
+@keyframes cz-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes cz-fade-in { from { opacity: 0; } }
+@keyframes cz-fade-out { to { opacity: 0; } }
+@keyframes cz-roll { from { opacity: 0; transform: translateY(70%); } }
+@keyframes cz-pop-in { from { opacity: 0; transform: scale(0.96); } }
+@keyframes cz-pop-out { to { opacity: 0; transform: scale(0.98); } }
+@keyframes cz-view-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes cz-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+@keyframes cz-dialog-out { to { opacity: 0; transform: scale(0.98); } }
+@keyframes cz-draw { from { stroke-dashoffset: 16; } }
+@keyframes cz-hl { 0%, 35% { box-shadow: 0 0 0 2px var(--accent-ring); } 100% { box-shadow: 0 0 0 2px transparent; } }
+
+/* 进场：--cz-i 是序号（调用方已封顶），--cz-step 是间隔 */
+.cz-enter { animation: cz-enter var(--t-layout) var(--e-out) both; animation-delay: calc(var(--cz-i, 0) * var(--cz-step, 40ms)); }
+.cz-fade-in { animation: cz-fade-in var(--t-fade) linear both; }
+.cz-roll { display: inline-block; animation: cz-roll var(--t-state) var(--e-out) both; }
+/* 视图从隐藏变为显示时动画会重新开始：新视图淡入上移，旧视图直接隐藏 */
+.view:not(.hidden) { animation: cz-view-in var(--t-state) var(--e-out) both; }
+
+/* 展开收起：过渡期间（data-moving）和收起时才裁剪溢出 */
+.cz-collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--t-layout) var(--e-move); }
+.cz-collapse > .cz-collapse-in { min-height: 0; transition: opacity var(--t-fade) linear 60ms; }
+.cz-collapse[data-state="closed"] { grid-template-rows: 0fr; }
+.cz-collapse[data-state="closed"] > .cz-collapse-in { opacity: 0; visibility: hidden; transition: opacity var(--t-fade) linear, visibility 0s linear var(--t-layout); }
+.cz-collapse[data-moving] > .cz-collapse-in,
+.cz-collapse[data-state="closed"] > .cz-collapse-in { overflow: hidden; }
+
+/* 共享元素替身（挂在 body 上，盖过弹窗和查看器） */
+.cz-fly { position: fixed; z-index: 70; margin: 0; pointer-events: none; transform-origin: 50% 50%; white-space: nowrap; display: flex; align-items: center; font-variant-numeric: tabular-nums; }
+.cz-fly-img { position: fixed; z-index: 70; object-fit: cover; pointer-events: none; display: block; }
+
+/* 一笔画出的对勾 */
+.cz-check { width: 12px; height: 12px; flex: none; vertical-align: -1px; overflow: visible; }
+.cz-check path { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; animation: cz-draw var(--t-state) var(--e-out) 30ms both; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-press: 0ms; --t-state: 0ms; --t-layout: 0ms; --t-move: 0ms; }
+  /* 位移类进场换成淡入 */
+  .cz-enter, .cz-roll, .view:not(.hidden) { animation-name: cz-fade-in; animation-duration: var(--t-fade); animation-delay: 0ms; }
+  .cz-collapse > .cz-collapse-in { transition-delay: 0ms; }
+  /* 展开直接到位、内容淡入；收起时内容先淡出，再一次收起高度 */
+  .cz-collapse { transition: none; }
+  .cz-collapse[data-state="closed"] { transition: grid-template-rows 0s linear var(--t-fade); }
+  .cz-collapse[data-state="closed"] > .cz-collapse-in { transition: opacity var(--t-fade) linear, visibility 0s linear var(--t-fade); }
+  /* toast 只淡入淡出（--t-state 在这里为 0，改用 --t-fade） */
+  .toast, .toast.show { transform: translate(-50%, 0); transition: opacity var(--t-fade) linear; }
+  .skeleton, .st-skel .sk-line, .st-skel-row .sk-line { animation: none; }
 }
