@@ -12,7 +12,7 @@ import { cn } from "../cn";
  */
 const buttonVariants = cva(
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] border border-transparent bg-btn-bg text-[13px] font-[590] text-foreground " +
-    "transition-[background-color,color,box-shadow,transform,opacity,border-color] duration-[130ms] " +
+    "cz-btn " +
     "hover:bg-hover active:scale-[0.97] disabled:cursor-default disabled:opacity-45 disabled:active:scale-100 " +
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] [&_svg]:shrink-0",
   {

@@ -1,5 +1,6 @@
 import { shortHome, baseName } from "./platform";
 import { t, currentLang } from "./i18n";
+import { play, dur } from "./ui/motion/motion";
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
 
@@ -80,7 +81,16 @@ function toast(text: string, kind: "ok" | "err" = "ok") {
     el.id = "toast";
     document.body.appendChild(el);
   }
-  el.textContent = text;
+  const showing = typeof el.className === "string" && el.className.split(" ").includes("show");
+  if (typeof el.replaceChildren === "function") {
+    const span = document.createElement("span");
+    span.textContent = text;
+    el.replaceChildren(span);
+    // 已在显示：只换文字并淡入，不重新弹出（设计第五节）。
+    if (showing) void play(span, [{ opacity: 0 }, { opacity: 1 }], dur("fade"), "linear");
+  } else {
+    el.textContent = text;
+  }
   el.className = `toast show ${kind}`;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => el.classList.remove("show"), 3200);

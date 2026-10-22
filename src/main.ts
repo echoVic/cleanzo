@@ -17,6 +17,28 @@ import { connectLanguage } from "./language";
 
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 
+// ---- 侧栏选中底色（设计 6.1）：切换时滑到新项；AI 入口显隐导致位置变化时直接跟上 ----
+const navPill = document.querySelector<HTMLElement>(".nav-pill");
+let pillReady = false;
+let pillTop = -1;
+function placePill(animate: boolean) {
+  const active = navItems.find((b) => b.classList.contains("active"));
+  if (!navPill || !active || active.offsetParent === null) return;
+  if (!animate) navPill.style.transition = "none";
+  pillTop = active.offsetTop;
+  navPill.style.height = `${active.offsetHeight}px`;
+  navPill.style.transform = `translateY(${pillTop}px)`;
+  navPill.classList.add("placed");
+  if (!animate) { void navPill.offsetHeight; navPill.style.transition = ""; }
+}
+const navEl = document.querySelector<HTMLElement>(".nav");
+if (navEl && typeof MutationObserver !== "undefined") {
+  new MutationObserver(() => {
+    const active = navItems.find((b) => b.classList.contains("active"));
+    if (active && active.offsetTop !== pillTop) placePill(false);
+  }).observe(navEl, { subtree: true, attributes: true, attributeFilter: ["class"] });
+}
+
 // ---- i18n ----
 
 function applyStaticI18n() {
@@ -64,6 +86,7 @@ setSettingsLangHandler(changeLanguage);
 function switchView(v: View, tool?: string) {
   // AI 工具的几个侧栏项共用一个视图，按 data-tool 区分高亮。
   navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool)));
+  placePill(pillReady); pillReady = true;
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
   if (v === "status") showReactStatus(true);
   else showReactStatus(false);

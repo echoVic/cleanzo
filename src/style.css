@@ -1758,8 +1758,42 @@ body {
 .cz-check { width: 12px; height: 12px; flex: none; vertical-align: -1px; overflow: visible; }
 .cz-check path { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; animation: cz-draw var(--t-state) var(--e-out) 30ms both; }
 
+/* 侧栏选中底色：一个底色滑到新项（设计 6.1） */
+.nav { position: relative; }
+.nav-pill { position: absolute; left: 0; right: 0; top: 0; height: 0; border-radius: 8px; background: var(--accent-soft); pointer-events: none; opacity: 0; transition: transform var(--t-layout) var(--e-move), height var(--t-layout) var(--e-move); }
+.nav-pill.placed { opacity: 1; }
+.nav-item { position: relative; }
+.nav-item.active, .nav-item.active:hover { background: transparent; }
+
+.cz-btn { transition: background-color var(--t-fade) linear, color var(--t-fade) linear, box-shadow var(--t-fade) linear, opacity var(--t-fade) linear, border-color var(--t-fade) linear, transform var(--t-press) ease; }
+
+/* 弹窗（设计第五节）：遮罩淡入 180ms；面板淡入并从 97% 放大、上移 8px；关闭 150ms，加速离开 */
+.cz-dialog-overlay[data-state="open"] { animation: cz-fade-in 180ms linear both; }
+.cz-dialog-overlay[data-state="closed"] { animation: cz-fade-out 150ms linear both; }
+.cz-dialog[data-state="open"] { animation: cz-dialog-in var(--t-layout) var(--e-out) both; }
+.cz-dialog[data-state="closed"] { animation: cz-dialog-out 150ms var(--e-in) both; }
+@media (prefers-reduced-motion: reduce) {
+  .cz-dialog[data-state="open"] { animation: cz-fade-in var(--t-fade) linear both; }
+  .cz-dialog[data-state="closed"] { animation: cz-fade-out var(--t-fade) linear both; }
+}
+
+/* Radix 复选框：先填色，再一笔画出对勾；半选是横线从中间展开 */
+.cz-cbx-root { transition: background-color var(--t-fade) linear, border-color var(--t-fade) linear; }
+.cz-cbx path { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.cz-cbx-check { stroke-dasharray: 12; stroke-dashoffset: 12; transition: stroke-dashoffset var(--t-state) var(--e-out); }
+.cz-cbx[data-state="checked"] .cz-cbx-check { stroke-dashoffset: 0; transition-delay: 40ms; }
+.cz-cbx-minus { transform-box: fill-box; transform-origin: center; transform: scaleX(0); transition: transform var(--t-state) var(--e-out); }
+.cz-cbx[data-state="indeterminate"] .cz-cbx-minus { transform: scaleX(1); }
+
+.cz-tab-ind { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
+.cz-tabpanel:not([hidden]) { animation: cz-view-in var(--t-state) var(--e-out) both; }
+@media (prefers-reduced-motion: reduce) { .cz-tabpanel:not([hidden]) { animation-name: cz-fade-in; animation-duration: var(--t-fade); } }
+
 @media (prefers-reduced-motion: reduce) {
   :root { --t-press: 0ms; --t-state: 0ms; --t-layout: 0ms; --t-move: 0ms; }
+  /* 按下不缩放；时长归零本身不会清掉按下态的缩放。 */
+  .cz-btn:active { scale: 1; }
+  .btn:active:not(:disabled), .ha-cta:active { transform: none; }
   /* 位移类进场换成淡入 */
   .cz-enter, .cz-roll, .view:not(.hidden) { animation-name: cz-fade-in; animation-duration: var(--t-fade); animation-delay: 0ms; }
   .cz-collapse > .cz-collapse-in { transition-delay: 0ms; }
