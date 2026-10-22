@@ -1200,6 +1200,7 @@ body {
   background: var(--bg-subtle);
 }
 #pv-image { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.pv-ghost { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .photo-viewer-loading {
   position: absolute;
   display: flex;

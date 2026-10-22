@@ -6,6 +6,8 @@ import { useT } from "../../ui/i18n-react";
 import { baseName, errText } from "../../shared";
 import { human } from "../ai/format";
 import { cachedPreview, loadPhotoPreview } from "./api";
+import { containRect, flyImage } from "../../ui/motion/fly";
+import { DUR, EASE, dur, motionLevel, play } from "../../ui/motion/motion";
 
 interface PhotoViewerProps {
   /** 当前簇内未删除的项。 */
@@ -33,6 +35,11 @@ export function PhotoViewer({
   const index = items.findIndex((i) => i.path === it.path);
 
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  const stageRef = React.useRef<HTMLDivElement>(null);
+  const imgRef = React.useRef<HTMLImageElement>(null);
+  const itRef = React.useRef(it);
+  itRef.current = it;
   const closeRef = React.useRef<HTMLButtonElement>(null);
   // 异步加载回包 / 导航动作经 refs 转发，键盘监听只绑一次。
   const onCloseRef = React.useRef(onClose);
@@ -44,9 +51,75 @@ export function PhotoViewer({
   const [loading, setLoading] = React.useState(() => !cachedPreview(it.path));
   const [error, setError] = React.useState<string | null>(null);
   const seqRef = React.useRef(0);
+  const prevIndex = React.useRef(index);
+  const navDir = React.useRef(0);
+  if (prevIndex.current !== index) { navDir.current = index > prevIndex.current ? 1 : -1; prevIndex.current = index; }
+
+  const closing = React.useRef(false);
+  const flightRef = React.useRef<Element | null>(null);
+  const flightEpoch = React.useRef(0);
+  const cancelFlight = React.useCallback(() => {
+    flightEpoch.current++;
+    const ghost = flightRef.current;
+    flightRef.current = null;
+    ghost?.getAnimations().forEach((a) => a.cancel());
+    ghost?.remove();
+    if (imgRef.current) imgRef.current.style.visibility = "";
+  }, []);
+  // flyImage 同步把替身挂到 body；只记录本查看器创建的节点。
+  const startFlight = React.useCallback((...args: Parameters<typeof flyImage>) => {
+    const flight = flyImage(...args);
+    const ghost = document.body.lastElementChild;
+    flightRef.current = ghost?.classList.contains("cz-fly-img") ? ghost : null;
+    return flight;
+  }, []);
+  const requestClose = React.useCallback(async () => {
+    if (closing.current) return;
+    closing.current = true;
+    cancelFlight();
+    // 关闭动画期间不再响应点击（上一张、下一张会打断缩回）。
+    if (rootRef.current) rootRef.current.style.pointerEvents = "none";
+    const level = motionLevel();
+    const current = itRef.current;
+    const thumb = document.querySelector<HTMLImageElement>(`[data-photo="${CSS.escape(current.path)}"] .photo-thumb`);
+    const view = document.querySelector(".content")?.getBoundingClientRect();
+    const tr = thumb?.getBoundingClientRect();
+    const visible = !!(tr && view && tr.width > 0 && tr.bottom > view.top && tr.top < view.bottom);
+    const img = imgRef.current;
+    const stage = stageRef.current;
+    if (level === "full" && visible && img && stage && tr) {
+      const from = containRect(stage.getBoundingClientRect(), current.width, current.height);
+      img.style.visibility = "hidden";
+      void play(rootRef.current, [{ opacity: 1 }, { opacity: 0 }], 200, "linear", { fill: "forwards" });
+      await startFlight(img.currentSrc || img.src, from, tr, 240, [6, 10]);
+    } else if (level !== "none") {
+      if (level === "full") void play(panelRef.current, [{ transform: "none" }, { transform: "scale(0.98)" }], 150, EASE.in, { fill: "forwards" });
+      await play(rootRef.current, [{ opacity: 1 }, { opacity: 0 }], level === "full" ? 150 : dur("fade"), level === "full" ? EASE.in : "linear", { fill: "forwards" });
+    }
+    onCloseRef.current();
+  }, []);
 
   // 切换查看项：先落缩略图，再异步拉大图；过期回包丢弃。
   React.useEffect(() => {
+    const dir = navDir.current;
+    const level = motionLevel();
+    if (dir !== 0) cancelFlight();
+    if (dir !== 0 && imgRef.current && stageRef.current && level !== "none") {
+      const img = imgRef.current;
+      const ghost = img.cloneNode() as HTMLImageElement;
+      ghost.removeAttribute("id");
+      ghost.className = "pv-ghost";
+      ghost.setAttribute("aria-hidden", "true");
+      stageRef.current.appendChild(ghost);
+      void play(ghost, level === "full"
+        ? [{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${-dir * 16}px)` }]
+        : [{ opacity: 1 }, { opacity: 0 }], DUR.fade, level === "full" ? EASE.in : "linear", { fill: "forwards" })
+        .then(() => ghost.remove());
+      void play(img, level === "full"
+        ? [{ opacity: 0, transform: `translateX(${dir * 16}px)` }, { opacity: 1, transform: "none" }]
+        : [{ opacity: 0 }, { opacity: 1 }], level === "full" ? 200 : dur("fade"), level === "full" ? EASE.out : "linear", { delay: level === "full" ? 40 : 0 });
+    }
+    navDir.current = 0;
     const target = it;
     const seq = ++seqRef.current;
     const cached = cachedPreview(target.path);
@@ -73,8 +146,28 @@ export function PhotoViewer({
   React.useEffect(() => {
     const app = document.querySelector(".app") as HTMLElement | null;
     if (app) app.inert = true;
+    const level = motionLevel();
+    if (level !== "none") {
+      void play(rootRef.current, [{ opacity: 0 }, { opacity: 1 }], level === "full" ? 180 : dur("fade"), "linear");
+      rootRef.current?.querySelectorAll<HTMLElement>(".photo-viewer-head, .photo-viewer-info, .photo-viewer-controls")
+        .forEach((el) => void play(el, [{ opacity: 0 }, { opacity: 1 }], level === "full" ? DUR.state : dur("fade"), "linear", { delay: level === "full" ? 120 : 0 }));
+      const thumb = document.querySelector<HTMLImageElement>(`[data-photo="${CSS.escape(it.path)}"] .photo-thumb`);
+      const img = imgRef.current;
+      const stage = stageRef.current;
+      if (level === "full" && thumb && img && stage) {
+        img.style.visibility = "hidden";
+        const epoch = ++flightEpoch.current;
+        void startFlight(thumb.currentSrc || thumb.src, thumb.getBoundingClientRect(), containRect(stage.getBoundingClientRect(), it.width, it.height), dur("move"), [10, 6])
+          .then(() => {
+            if (epoch !== flightEpoch.current || closing.current) return;
+            flightRef.current = null;
+            img.style.visibility = "";
+          });
+      }
+    }
     closeRef.current?.focus();
     return () => {
+      cancelFlight();
       if (app) app.inert = false;
       const targetPath = it.path;
       if (opener && opener.isConnected) {
@@ -93,9 +186,10 @@ export function PhotoViewer({
   // 键盘：Esc 关闭、←/→ 切换、Tab 在面板内循环。
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (closing.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
-        onCloseRef.current();
+        void requestClose();
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         const idx = items.findIndex((i) => i.path === it.path);
@@ -131,9 +225,9 @@ export function PhotoViewer({
       id="photo-viewer"
       className="overlay"
       ref={rootRef}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (e.target === e.currentTarget) void requestClose(); }}
     >
-      <div className="photo-viewer-panel" role="dialog" aria-modal="true" aria-labelledby="pv-name" aria-describedby="pv-meta">
+      <div className="photo-viewer-panel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="pv-name" aria-describedby="pv-meta">
         <header className="photo-viewer-head">
           <h2 id="pv-name" title={it.path}>{baseName(it.path)}</h2>
           <button
@@ -143,13 +237,13 @@ export function PhotoViewer({
             type="button"
             title={t("photos.close")}
             aria-label={t("photos.close")}
-            onClick={onClose}
+            onClick={() => void requestClose()}
           >
             <X width={18} height={18} />
           </button>
         </header>
-        <div className="photo-viewer-stage">
-          {!error && <img id="pv-image" src={imgSrc} alt={baseName(it.path)} />}
+        <div className="photo-viewer-stage" ref={stageRef}>
+          {!error && <img id="pv-image" ref={imgRef} src={imgSrc} alt={baseName(it.path)} />}
           {loading && (
             <div id="pv-loading" className="photo-viewer-loading" role="status">
               <span className="spin" />

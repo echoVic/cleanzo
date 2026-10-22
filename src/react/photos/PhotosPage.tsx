@@ -1,12 +1,11 @@
 import * as React from "react";
-import { FolderSearch } from "lucide-react";
 import type { PhotoCluster } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
-import { baseName, errText, toast } from "../../shared";
+import { errText, toast } from "../../shared";
 import { human } from "../ai/format";
 import {
   effectiveRemoved, emptySelection, isGone, subtractRemoved, toggleRow, type ListSelection,
@@ -17,6 +16,9 @@ import {
   visibleClusters, visibleItems, visibleSelectablePaths,
 } from "./helpers";
 import { PhotoViewer } from "./PhotoViewer";
+import { PhotoClusterCard } from "./PhotoClusterCard";
+import { Collapse } from "../../ui/motion/Collapse";
+import { usePresence } from "../../ui/motion/presence";
 
 export function PhotosPage() {
   const t = useT();
@@ -116,6 +118,8 @@ export function PhotosPage() {
 
   // ---- 派生视图 ----
   const visible = visibleClusters(clusters, selection);
+  // 重扫直接重置；删掉最后一簇仍保留收起动画。
+  const clustersP = usePresence(visible, (cl) => String(cl.id), !scanning);
   const selectable = visibleSelectablePaths(visible, selection);
   const picked = liveSel(selection);
   const selSize = React.useMemo(() => {
@@ -208,8 +212,8 @@ export function PhotosPage() {
     : (error || stopped || tried)
       ? t("fs.rescan")
       : t("photos.scanBtn");
-  const showStoppedEmpty = !scanning && stopped && visible.length === 0;
-  const showEmptyScanned = !scanning && !error && !stopped && visible.length === 0 && tried;
+  const showStoppedEmpty = !scanning && stopped && clustersP.length === 0;
+  const showEmptyScanned = !scanning && !error && !stopped && clustersP.length === 0 && tried;
 
   return (
     <div className="cz-react">
@@ -230,7 +234,7 @@ export function PhotosPage() {
         </div>
       </header>
 
-      {scanning && (
+      <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
@@ -245,7 +249,7 @@ export function PhotosPage() {
             <div className="hero-progress"><div className="hero-bar" style={{ width: `${pct}%` }} /></div>
           </div>
         </div>
-      )}
+      </Collapse>
 
       {!scanning && error && (
         <div className="empty err">
@@ -260,7 +264,7 @@ export function PhotosPage() {
       {showStoppedEmpty && <div className="empty">{t("scan.stopped")}</div>}
       {showEmptyScanned && <div className="empty">{t("photos.empty")}</div>}
 
-      {selectable.length > 0 && (
+      {(selectable.length > 0 || clustersP.some((cl) => cl.leaving)) && (
         <div className="fs-toolbar">
           <label className="fs-check">
             <input
@@ -289,86 +293,21 @@ export function PhotosPage() {
       )}
 
       <section className="fs-list photo-clusters" aria-live="polite">
-        {visible.map((cl) => {
-          const items = visibleItems(cl, selection);
-          return (
-            <div className="photo-cluster card" key={cl.id} data-cluster={cl.id}>
-              <div className="photo-cluster-head">
-                <span className="photo-cluster-title">
-                  {t("photos.cluster", { id: cl.id })}
-                  <span className={`photo-badge ${cl.kind === "exact" ? "exact" : "similar"}`}>
-                    {cl.kind === "exact" ? t("photos.kindExact") : t("photos.kindSimilar")}
-                  </span>
-                </span>
-                <span className="photo-cluster-meta muted">
-                  {t("photos.photoCount", { n: items.length })} · {t("photos.waste", { size: human(cl.waste) })}
-                </span>
-                <button
-                  className="btn small ghost"
-                  type="button"
-                  disabled={busy}
-                  onClick={() => keepOnly(cl.id)}
-                >
-                  {t("photos.keepOnly")}
-                </button>
-              </div>
-              <div className="photo-grid">
-                {items.map((it) => (
-                  <figure className={`photo-cell${it.keep ? " keep" : ""}`} key={it.path}>
-                    <div className="photo-thumb-wrap">
-                      <label className="fs-check" title={it.path}>
-                        <input
-                          type="checkbox"
-                          checked={selection.sel.has(it.path)}
-                          disabled={busy}
-                          onChange={(e) => togglePath(it.path, e.target.checked)}
-                        />
-                      </label>
-                      {it.keep && <span className="photo-keep-tag">{t("photos.keep")}</span>}
-                      <img
-                        className="photo-thumb"
-                        src={it.thumb}
-                        alt=""
-                        loading="lazy"
-                        onClick={() => togglePath(it.path, !selection.sel.has(it.path))}
-                      />
-                    </div>
-                    <figcaption className="photo-meta" title={it.path}>
-                      <div className="photo-name">{baseName(it.path)}</div>
-                      <div className="photo-sub muted small">
-                        {t("photos.sizeDim", { w: it.width, h: it.height })} · {human(it.size)}
-                      </div>
-                    </figcaption>
-                    <div className="photo-actions">
-                      <button
-                        className="btn small ghost icon"
-                        type="button"
-                        title={t("photos.viewLarger")}
-                        aria-label={t("photos.viewLarger")}
-                        data-preview={it.path}
-                        onClick={() => openViewer(it.path)}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                          <circle cx="10" cy="10" r="6.5" />
-                          <path d="m15 15 6 6M7 10h6M10 7v6" />
-                        </svg>
-                      </button>
-                      <button
-                        className="btn small ghost icon"
-                        type="button"
-                        title={t("fs.reveal")}
-                        aria-label={t("fs.reveal")}
-                        onClick={() => reveal(it.path)}
-                      >
-                        <FolderSearch className="h-[15px] w-[15px]" />
-                      </button>
-                    </div>
-                  </figure>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        {clustersP.map(({ item: cl, key, leaving }, i) => (
+          <PhotoClusterCard
+            key={key}
+            cluster={cl}
+            items={leaving ? cl.items : visibleItems(cl, selection)}
+            leaving={leaving}
+            index={i}
+            selection={selection}
+            busy={busy}
+            onToggle={togglePath}
+            onKeepOnly={keepOnly}
+            onOpen={openViewer}
+            onReveal={reveal}
+          />
+        ))}
         {!scanning && visible.length > 0 && (
           <div className="fs-foot muted small">
             {t("photos.count", { n: scanned.toLocaleString(), c: visible.length })}
