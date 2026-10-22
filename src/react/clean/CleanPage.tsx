@@ -542,7 +542,7 @@ export function CleanPage() {
             </div>
             <div className="cat-desc muted">{rowDesc(it)}</div>
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
-            {!it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
+            {it.size >= 0 && !it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
           </div>
           <div className="cat-note"><span key={noteKey} className="cz-fade-in">{rowNote(it, row)}</span></div>
