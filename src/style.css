@@ -1789,6 +1789,24 @@ body {
 .cz-tabpanel:not([hidden]) { animation: cz-view-in var(--t-state) var(--e-out) both; }
 @media (prefers-reduced-motion: reduce) { .cz-tabpanel:not([hidden]) { animation-name: cz-fade-in; animation-duration: var(--t-fade); } }
 
+/* 垃圾清理（设计 6.2） */
+.hero-sweep { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+.hero-sweep > i { position: absolute; top: -40%; bottom: -40%; left: 0; width: 220px; opacity: 0; background: linear-gradient(90deg, transparent 0%, var(--sweep) 32%, var(--sweep-hi) 50%, var(--sweep) 68%, transparent 100%); }
+.hero-num { display: inline-block; transform-origin: 0 70%; }
+.hero-spark svg { transform-origin: 50% 50%; }
+.hero-prog-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; max-width: 520px; }
+.hero-prog-row .hero-progress { margin-top: 0; flex: 1; width: auto; }
+.hero-prog-count { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.junk-row { transition: opacity var(--t-state) linear; }
+.junk-fold svg, .junk-expand svg { transition: transform var(--t-layout) var(--e-move); }
+.cat-note-text.ok { display: inline-flex; align-items: center; gap: 4px; }
+.junk-menu { animation: cz-pop-in 140ms var(--e-out) both; transform-origin: 100% 0; }
+.junk-menu[data-leaving] { animation: cz-pop-out 100ms var(--e-in) forwards; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .junk-menu { animation: cz-fade-in var(--t-fade) linear both; }
+  .junk-menu[data-leaving] { animation: cz-fade-out var(--t-fade) linear forwards; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root { --t-press: 0ms; --t-state: 0ms; --t-layout: 0ms; --t-move: 0ms; }
   /* 按下不缩放；时长归零本身不会清掉按下态的缩放。 */

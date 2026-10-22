@@ -5,6 +5,17 @@ import type { CleanResult, JunkItem, JunkSelection, ScanSummary, Settings, SubIt
 
 export const GROUPS = ["system", "apps", "browsers", "updates", "dev", "review", "custom"] as const;
 
+/** 扫描进度：已测完（离开 pending）的规则数 / 规则总数；start 事件已经给出全部规则。 */
+export function scanProgress(st: ScanState): { done: number; total: number } {
+  const total = st.items.length;
+  return { done: total - st.pending.size, total };
+}
+
+/** 扫描阶段：按 GROUPS 顺序第一个还有未测完规则的分组。后端并发测量，这样文案只会往前走。 */
+export function scanPhase(st: ScanState): (typeof GROUPS)[number] | null {
+  return GROUPS.find((g) => st.items.some((it) => it.group === g && st.pending.has(it.id))) ?? null;
+}
+
 /** app:/custom: 前缀的项名称来自后端 name，其余规则名来自 i18n。 */
 export function isDynamicId(id: string): boolean {
   return id.startsWith("app:") || id.startsWith("custom:");

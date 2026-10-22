@@ -7,17 +7,24 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose,
 } from "../../ui/components/dialog";
 import { IdleHero } from "../../ui/components/idle-hero";
+import { Collapse } from "../../ui/motion/Collapse";
+import { NumberTicker } from "../../ui/motion/NumberTicker";
+import { usePresence, Leave } from "../../ui/motion/presence";
+import { useFlip } from "../../ui/motion/flip";
+import { flyText, type Box } from "../../ui/motion/fly";
+import { dur, play } from "../../ui/motion/motion";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { baseName, displayPath, errText, human, setNavBusy, toast } from "../../shared";
 import { showReactApps } from "../apps/entry";
 import { setCleanStaleHandler, takeStalePending } from "./entry";
 import { cleanApi } from "./api";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
+import { playCleanFocal, shouldPlayFocal } from "./focal";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
   isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible,
-  removeFromSel, rowStateNote, scanItem, scanStart, splitApps, subsOf, toggleGroup, toggleRow,
+  removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
   type CleanPlan, type RowState, type ScanState, emptySel,
 } from "./helpers";
@@ -90,6 +97,12 @@ export function CleanPage() {
   const [progress, setProgress] = React.useState({ total: 0, bytes: 0, id: "", path: "", stopped: false, error: "" });
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [plan, setPlan] = React.useState<CleanPlan | null>(null);
+  const [barHold, setBarHold] = React.useState(false);
+  const heroRef = React.useRef<HTMLDivElement>(null);
+  const heroNumRef = React.useRef<HTMLSpanElement>(null);
+  const appsRowsRef = React.useRef<HTMLDivElement>(null);
+  const morphFrom = React.useRef<{ rect: Box; fontSize: number; color: string } | null>(null);
+  const barHoldTimer = React.useRef<number | undefined>(undefined);
 
   // 异步循环里读最新值，避免闭包捕获旧 state。
   const runRef = React.useRef(0);
@@ -112,6 +125,7 @@ export function CleanPage() {
       runRef.current++;
       chanRef.current?.close();
       chanRef.current = null;
+      window.clearTimeout(barHoldTimer.current);
     };
   }, []);
 
@@ -129,15 +143,32 @@ export function CleanPage() {
     setNavBusy("clean", phase === "scanning" || phase === "cleaning");
   }, [phase]);
 
+  // 开始扫描：中央「--」移到横幅数字的位置（设计 6.2）
+  React.useLayoutEffect(() => {
+    const from = morphFrom.current;
+    if (phase !== "scanning" || !from || !heroNumRef.current) return;
+    morphFrom.current = null;
+    void flyText(from, heroNumRef.current);
+  }, [phase]);
+  // 清理完成的招牌时刻：只在进入「完成」时判断一次
+  React.useEffect(() => {
+    if (phase !== "cleaned") return;
+    const totals = cleanTotals(rowStates);
+    if (shouldPlayFocal({ stopped: progress.stopped, failed: totals.failedNames.length, error: progress.error !== "", bytes: progress.bytes })) {
+      playCleanFocal(heroRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // 行菜单：开关、失焦、Escape、方向键导航（行为对齐旧 document 级监听）。
   React.useEffect(() => {
     if (menuID === null) return;
-    const menu = document.querySelector<HTMLElement>(".junk-menu");
+    const menu = document.querySelector<HTMLElement>(".junk-menu:not([data-leaving])");
     menu?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { setMenuID(null); return; }
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      const buttons = [...document.querySelectorAll<HTMLButtonElement>(".junk-menu button:not(:disabled)")];
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>(".junk-menu:not([data-leaving]) button:not(:disabled)")];
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
       buttons[(index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
       e.preventDefault();
@@ -157,6 +188,28 @@ export function CleanPage() {
 
   const startScan = React.useCallback(async () => {
     if (!canStartScan(phaseRef.current, ignoringRef.current)) return;
+    if (phaseRef.current === "idle") {
+      const b = document.querySelector<HTMLElement>("#clean-react-root .ha-avail b");
+      if (b && typeof b.getBoundingClientRect === "function") {
+        const cs = getComputedStyle(b);
+        morphFrom.current = { rect: b.getBoundingClientRect(), fontSize: parseFloat(cs.fontSize), color: cs.color };
+      }
+    } else if (dur("fade") > 0) {
+      // 旧列表留一份只读替身淡出，新扫描的状态和流式消费立即开始。
+      const list = document.querySelector<HTMLElement>("#clean-react-root .junk-list");
+      if (list && typeof list.cloneNode === "function") {
+        const rect = list.getBoundingClientRect();
+        const ghost = list.cloneNode(true) as HTMLElement;
+        ghost.inert = true;
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.querySelectorAll<HTMLElement>("*").forEach((el) => { el.style.animation = "none"; el.style.transition = "none"; });
+        Object.assign(ghost.style, { position: "fixed", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, margin: "0", pointerEvents: "none", zIndex: "2" });
+        list.parentElement?.appendChild(ghost);
+        void play(ghost, [{ opacity: 1 }, { opacity: 0 }], dur("fade"), "linear").then(() => ghost.remove());
+      }
+    }
+    window.clearTimeout(barHoldTimer.current);
+    setBarHold(false);
     const myRun = ++runRef.current;
     stoppedScanRef.current = false;
     setPhase("scanning");
@@ -174,6 +227,7 @@ export function CleanPage() {
     scannedAtRef.current = Date.now();
     const { ch, done } = cleanApi.startScan();
     chanRef.current = ch;
+    let failed = false;
     try {
       // 先挂拒绝处理，流消费期间不会留下未处理的 Promise rejection。
       const completion = done.then(() => null, (e: unknown) => e);
@@ -194,6 +248,7 @@ export function CleanPage() {
       if (error !== null) throw error;
     } catch (e) {
       if (!stoppedScanRef.current) {
+        failed = true;
         setScanFailed(e);
         setSt((prev) => ({ items: [], pending: new Set(), sel: emptySel() }));
         toast(t("scan.error", { msg: errText(e) }), "err");
@@ -201,11 +256,16 @@ export function CleanPage() {
     } finally {
       if (runRef.current !== myRun) return;
       chanRef.current = null;
-      setScanStopped(stoppedScanRef.current);
+      const stopped = stoppedScanRef.current;
+      setScanStopped(stopped);
       stoppedScanRef.current = false;
       // 停止后只留下已测量的行；buffered/unmeasured 行被丢掉。
       setSt((prev) => finalizeScan(prev));
       setPhase("scanned");
+      if (!stopped && !failed) {
+        setBarHold(true);
+        barHoldTimer.current = window.setTimeout(() => setBarHold(false), 450);
+      }
     }
   }, [t]);
 
@@ -330,32 +390,32 @@ export function CleanPage() {
   const eligible = st.items.filter(isSelectable);
   const totals = heroTotals(st.items, st.sel);
   const { foundBytes, reviewBytes, selectedBytes } = totals;
+  const prog = scanProgress(st);
+  const phaseGroup = scanPhase(st);
 
   let heroPrefix = t("hero.ready");
-  let heroTotal = "--";
+  let heroValue: number | null = null;
+  let heroText = "--";
   let heroSub = t("clean.idleSub");
   let heroBarWidth = 0;
-  let heroProgressShown = false;
   let cleanBtnLabel = t("clean.now");
   let cleanBtnDisabled = true;
   let cleanBtnVariant: "destructive" | "ghost" | "default" = "default";
 
   if (scanFailed !== null) {
     heroPrefix = t("hero.ready");
-    heroTotal = t("scan.failed");
+    heroText = t("scan.failed");
     heroSub = t("scan.retryHint");
     cleanBtnDisabled = true;
   } else if (phase === "idle") {
     heroPrefix = t("hero.ready");
-    heroTotal = "--";
+    heroText = "--";
     heroSub = t("clean.idleSub");
   } else if (phase === "scanning" || phase === "scanned") {
     heroPrefix = t(phase === "scanning" ? "scan.found" : "clean.foundPrefix");
-    heroTotal = phase === "scanning" && st.items.length > 0 && st.items.every((it) => st.pending.has(it.id))
-      ? "--"
-      : human(foundBytes);
+    heroValue = phase === "scanning" && st.items.every((it) => st.pending.has(it.id)) ? null : foundBytes;
     const text = phase === "scanning"
-      ? (scanningPath ? t("scan.at", { path: displayPath(scanningPath) }) : t("scan.hero"))
+      ? (phaseGroup ? t(`scan.phase.${phaseGroup}` as DictKey) : t("scan.hero"))
       : t("clean.selected", { size: human(selectedBytes) });
     heroSub = [
       text,
@@ -370,11 +430,10 @@ export function CleanPage() {
     const cur = st.items.find((it) => it.id === progress.id);
     const where = cur ? itemTitle(cur, ruleName) + (progress.path ? ` · ${baseName(progress.path)}` : "") : "";
     heroPrefix = t("clean.progress.prefix");
-    heroTotal = human(progress.bytes);
+    heroValue = progress.bytes;
     heroSub = where
       ? t("clean.progress.sub", { total: human(progress.total), where })
       : t("clean.progress.preparing", { total: human(progress.total) });
-    heroProgressShown = true;
     cleanBtnLabel = t("clean.stop");
     cleanBtnDisabled = progress.stopped;
     cleanBtnVariant = "ghost";
@@ -390,19 +449,26 @@ export function CleanPage() {
       return it ? itemTitle(it, ruleName) : id;
     });
     heroPrefix = t(progress.stopped ? "clean.stoppedPrefix" : "clean.donePrefix");
-    heroTotal = human(progress.bytes);
+    heroValue = progress.bytes;
     heroSub = [
       parts.join(t("phrase.sep")) || t("clean.nothing"),
       progress.stopped ? t("clean.stoppedSub") : "",
       failedNames.length ? t("junk.partial", { names: failedNames.join(t("list.sep")) }) : "",
       progress.error,
     ].filter(Boolean).join(t("phrase.sep"));
-    heroProgressShown = true;
     heroBarWidth = cleanBarWidth(progress.bytes, progress.total, progress.stopped, failedNames.length > 0, progress.error !== "");
     cleanBtnLabel = t("fs.rescan");
     cleanBtnDisabled = false;
     cleanBtnVariant = "default";
   }
+
+  const barShown = (phase === "scanning" && prog.total > 0) || (phase === "scanned" && barHold) || phase === "cleaning" || phase === "cleaned";
+  const barWidth = phase === "scanning" || (phase === "scanned" && barHold)
+    ? (prog.total > 0 ? (prog.done / prog.total) * 100 : 0)
+    : phase === "cleaning"
+      ? (progress.total > 0 ? Math.min(100, (progress.bytes / progress.total) * 100) : 0)
+      : heroBarWidth;
+  const barCount = phase === "scanning" || (phase === "scanned" && barHold) ? t("scan.progressCount", { done: prog.done, total: prog.total }) : "";
 
   // ---- 列表派生 ----
 
@@ -416,7 +482,7 @@ export function CleanPage() {
       const skipTag = note.skipWarn ? <Tag text={note.skipWarn} kind="warn" /> : null;
       const failedTag = note.failedCount ? <Tag text={t("cat.failedN", { n: note.failedCount })} kind="warn" /> : null;
       return (
-        <span className="cat-note-text ok">✓ {note.text} {skipTag} {failedTag}</span>
+        <span className="cat-note-text ok"><svg className="cz-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.8 8.9 9.8 3.4" /></svg>{note.text} {skipTag} {failedTag}</span>
       );
     }
     if (st.pending.has(it.id)) return <span className="spin" aria-label={t("cat.scanning")} />;
@@ -453,8 +519,9 @@ export function CleanPage() {
     const dimmed = (phase === "cleaning" || phase === "cleaned") && !row;
     const expandable = hasSubs(it) || (it.details?.length ?? 0) > 0 || (it.top?.length ?? 0) > 0;
     const open = expanded.has(it.id);
+    const noteKey = row ? `row:${row.state}` : st.pending.has(it.id) ? "pending" : "size";
     return (
-      <div className={`junk-item${dimmed ? " is-dim" : ""}`} key={it.id}>
+      <div className={`junk-item${dimmed ? " is-dim" : ""}`} key={it.id} data-key={it.id}>
         <div className="cat-row junk-row">
           <label className="cat-check">
             <TriCheck
@@ -478,7 +545,7 @@ export function CleanPage() {
             {!it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
           </div>
-          <div className="cat-note">{rowNote(it, row)}</div>
+          <div className="cat-note"><span key={noteKey} className="cz-fade-in">{rowNote(it, row)}</span></div>
           <div className="junk-row-actions">
             <button
               className="junk-icon-btn"
@@ -511,8 +578,8 @@ export function CleanPage() {
               </button>
             ) : <span className="junk-action-space" />}
           </div>
-          {menuID === it.id && (
-            <div className="junk-menu" role="menu">
+          {menuP.filter((m) => m.item === it.id).map((m) => (
+            <div key="menu" className="junk-menu" role="menu" data-leaving={m.leaving ? "" : undefined}>
               <button type="button" role="menuitem" disabled={!it.paths?.length} onClick={() => reveal(it)}>
                 {t("junk.reveal")}
               </button>
@@ -520,9 +587,9 @@ export function CleanPage() {
                 {t("junk.ignore")}
               </button>
             </div>
-          )}
+          ))}
         </div>
-        {open && (
+        <Collapse open={open}>
           <div className="junk-details">
             {hasSubs(it) ? subsOf(it).map((s) => (
               <div className="junk-sub-row" key={s.path}>
@@ -559,17 +626,24 @@ export function CleanPage() {
             ))}
             {(it.detailsDropped ?? 0) > 0 ? <div className="muted small">{t("junk.detailsDropped", { n: it.detailsDropped! })}</div> : null}
           </div>
-        )}
+        </Collapse>
       </div>
     );
   };
 
   const shown = st.items.filter(isVisible);
-  const groups = GROUPS.map((g) => {
-    let members = shown.filter((it) => it.group === g);
-    if (g === "apps") members = [...members].sort((a, b) => b.size - a.size);
+  // 列表整体重置（重新扫描、失败）时直接替换，不逐行收起
+  const resetting = st.items.length === 0;
+  const shownP = usePresence(st.items.filter(isVisible), (it) => it.id, !resetting);
+  const groupList = GROUPS.map((g) => {
+    let members = shownP.filter((p) => p.item.group === g);
+    if (g === "apps") members = [...members].sort((a, b) => b.item.size - a.item.size);
     return { g, members };
   }).filter(({ g, members }) => members.length > 0 || (g === "review" && (summary?.leftovers ?? 0) > 0));
+  const groupsP = usePresence(groupList, (x) => x.g, !resetting);
+  const appsKeys = (groupList.find((x) => x.g === "apps")?.members ?? []).filter((p) => !p.leaving).map((p) => p.key);
+  useFlip(appsRowsRef, appsKeys);
+  const menuP = usePresence(menuID ? [menuID] : [], (id) => id);
 
   // ---- 确认弹层文案 ----
 
@@ -606,16 +680,24 @@ export function CleanPage() {
       </header>
 
       {phase !== "idle" && (
-        <div className="hero">
+        <div className="hero cz-enter" ref={heroRef}>
+          <div className="hero-sweep" aria-hidden="true"><i /></div>
           <div className="hero-left">
             <div className="banner-title">
               <span>{heroPrefix}</span>
-              <span className="hero-num">{heroTotal}</span>
+              <span className="hero-num" ref={heroNumRef}>
+                {heroValue === null ? heroText : (
+                  <NumberTicker key={phase === "cleaning" || phase === "cleaned" ? "clean" : "scan"} value={heroValue} from={0} format={human} />
+                )}
+              </span>
             </div>
-            <div className="hero-sub">{heroSub}</div>
-            {heroProgressShown && (
-              <div className="hero-progress"><div className="hero-bar" style={{ width: `${heroBarWidth}%` }} /></div>
-            )}
+            <div className="hero-sub" title={phase === "scanning" && scanningPath ? displayPath(scanningPath) : undefined}>{heroSub}</div>
+            <Collapse open={barShown}>
+              <div className="hero-prog-row">
+                <div className="hero-progress"><div className="hero-bar" style={{ width: `${barWidth}%` }} /></div>
+                {barCount && <span className="hero-prog-count">{barCount}</span>}
+              </div>
+            </Collapse>
           </div>
           <div className="banner-actions">
             <Button variant={cleanBtnVariant} size="lg" disabled={cleanBtnDisabled} onClick={onCleanButton}>
@@ -650,27 +732,33 @@ export function CleanPage() {
           <button className="btn ghost" type="button" onClick={() => void startScan()}>{t("btn.retry")}</button>
         </div>
       ) : phase === "scanning" && st.items.length === 0 ? (
-        <div className="junk-list">{Array.from({ length: 5 }, (_, i) => <div className="skeleton card" key={i} />)}</div>
+        <div className="junk-list">{Array.from({ length: 5 }, (_, i) => <div className="skeleton card cz-enter" key={i} style={{ "--cz-i": i, "--cz-step": "30ms" } as React.CSSProperties} />)}</div>
       ) : (
         <div className="junk-list">
           <FullDiskAccessNotice summary={summary} grant={grant} />
-          {stale && phase === "scanned" && (
+          <Collapse open={stale && phase === "scanned"}>
             <div className="junk-stale">
               <span>{t("junk.stale")}</span>
               <button className="btn small ghost" type="button" onClick={() => void startScan()}>{t("fs.rescan")}</button>
             </div>
-          )}
-          {groups.map(({ g, members }) => {
-            const eligibleM = members.filter(isSelectable);
+          </Collapse>
+          {groupsP.map(({ key, leaving, item: { g, members } }, index) => {
+            const items = members.map((p) => p.item);
+            const eligibleM = items.filter(isSelectable);
             const gState = groupCheckState(g, st.items, st.sel);
             const folded = collapsed.has(g);
-            const scanningGroup = members.some((it) => st.pending.has(it.id));
-            const gTotals = heroTotals(members, st.sel);
+            const scanningGroup = items.some((it) => st.pending.has(it.id));
+            // 一项都还没测完时只写「扫描中…」，不显示「发现 0 B」；只有残留的空分组照常显示小计
+            const measuredSome = !scanningGroup || items.some((it) => !st.pending.has(it.id));
+            const gTotals = heroTotals(items, st.sel);
             const gTotal = gTotals.foundBytes;
             const gChosen = gTotals.selectedBytes;
-            const appsSplit = g === "apps" ? splitApps(members, showAllApps) : { shown: members, rest: [] };
+            const split = g === "apps" ? splitApps(members.map((p) => p.item), showAllApps) : null;
+            const shownMembers = split ? members.slice(0, split.shown.length) : members;
+            const rest = split?.rest ?? [];
             return (
-              <section className="junk-group" key={g}>
+              <Leave key={key} leaving={leaving}>
+              <section className="junk-group cz-enter" style={{ "--cz-i": Math.min(index, 6) } as React.CSSProperties}>
                 <div className="junk-group-head">
                   <TriCheck
                     checked={gState === "checked"}
@@ -691,20 +779,24 @@ export function CleanPage() {
                   >
                     <span className="group-name">{t(`junk.group.${g}` as DictKey)}</span>
                     <span className="group-sel">
-                      {scanningGroup ? t("cat.scanning") : t("junk.groupSummary", { total: human(gTotal), sel: human(gChosen) })}
+                      {scanningGroup ? (measuredSome ? `${t("cat.scanning")} · ` : t("cat.scanning")) : ""}
+                      {measuredSome && t("junk.groupSummary").split(/(\{total\}|\{sel\})/).map((part, i) => (
+                        part === "{total}" ? <NumberTicker key={i} value={gTotal} format={human} />
+                          : part === "{sel}" ? <NumberTicker key={i} value={gChosen} format={human} /> : part
+                      ))}
                       {!scanningGroup && gTotals.runningBytes > 0 ? ` · ${t("junk.runningTotal", { size: human(gTotals.runningBytes) })}` : ""}
                     </span>
                     <span className={`junk-fold${folded ? "" : " open"}`}>{caret}</span>
                   </button>
                 </div>
-                {!folded && (
-                  <div className="group-rows">
-                    {appsSplit.shown.map(renderRow)}
-                    {appsSplit.rest.length > 0 && (
+                <Collapse open={!folded}>
+                  <div className="group-rows" ref={g === "apps" ? appsRowsRef : undefined}>
+                    {shownMembers.map((p) => <Leave key={p.key} leaving={p.leaving}>{renderRow(p.item)}</Leave>)}
+                    {rest.length > 0 && (
                       <button className="junk-more" type="button" onClick={() => setShowAllApps(true)}>
                         {t("junk.moreApps", {
-                          n: appsSplit.rest.length,
-                          size: human(appsSplit.rest.reduce((n, it) => n + discoveredSize(it), 0)),
+                          n: rest.length,
+                          size: human(rest.reduce((n, it) => n + discoveredSize(it), 0)),
                         })}
                         {caret}
                       </button>
@@ -718,8 +810,9 @@ export function CleanPage() {
                       </div>
                     )}
                   </div>
-                )}
+                </Collapse>
               </section>
+              </Leave>
             );
           })}
           {shown.length === 0 && !(summary?.leftovers) && (

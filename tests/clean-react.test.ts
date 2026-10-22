@@ -9,7 +9,7 @@ import {
   applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeCleanRows, finalizeScan, createCleanRowTracker, groupCheckState, groupToggleOn, isSelectable, isVisible, itemTitle,
   keepLatestVisible, removeFromSel,
-  rowStateNote, scanItem, scanStart, splitApps, toggleGroup, toggleRow, toggleSub,
+  rowStateNote, scanItem, scanStart, scanPhase, scanProgress, splitApps, toggleGroup, toggleRow, toggleSub,
   withIgnored, withIgnoredSummary, emptySel, heroTotals,
   type RowState,
 } from "../src/react/clean/helpers";
@@ -408,4 +408,37 @@ test("Windows hides the Full Disk Access notice even when the summary denies acc
     setPlatformForTest("win32");
     expect(renderToStaticMarkup(createElement(FullDiskAccessNotice, props))).toBe("");
   } finally { setPlatformForTest(undefined); }
+});
+
+test("scan progress counts measured rules and the phase is the first group still pending", () => {
+  let st = scanStart([item("sys.logs", "system", -1), item("browser.chrome", "browsers", -1), item("dev.npm", "dev", -1)]);
+  expect(scanProgress(st)).toEqual({ done: 0, total: 3 });
+  expect(scanPhase(st)).toBe("system");
+  st = scanItem(st, item("browser.chrome", "browsers", 5));
+  expect(scanProgress(st)).toEqual({ done: 1, total: 3 });
+  expect(scanPhase(st)).toBe("system");
+  st = scanItem(st, item("sys.logs", "system", 5));
+  expect(scanPhase(st)).toBe("dev");
+  st = scanItem(st, item("dev.npm", "dev", 0));
+  expect(scanProgress(st)).toEqual({ done: 3, total: 3 });
+  expect(scanPhase(st)).toBeNull();
+});
+
+test("scan phase labels exist in both languages", () => {
+  for (const lang of ["zh", "en"] as const) {
+    setLang(lang);
+    for (const g of ["system", "apps", "browsers", "updates", "dev", "review", "custom"]) {
+      expect(t(`scan.phase.${g}` as never)).not.toBe(`scan.phase.${g}`);
+    }
+    expect(t("scan.progressCount", { done: 3, total: 56 })).toBe(lang === "zh" ? "已检查 3 / 56 项" : "Checked 3 of 56");
+  }
+});
+
+test("the clean-complete moment plays only for a full, error-free clean that freed space", async () => {
+  const { shouldPlayFocal } = await import("../src/react/clean/focal");
+  expect(shouldPlayFocal({ stopped: false, failed: 0, error: false, bytes: 1 })).toBe(true);
+  expect(shouldPlayFocal({ stopped: true, failed: 0, error: false, bytes: 1 })).toBe(false);
+  expect(shouldPlayFocal({ stopped: false, failed: 1, error: false, bytes: 1 })).toBe(false);
+  expect(shouldPlayFocal({ stopped: false, failed: 0, error: true, bytes: 1 })).toBe(false);
+  expect(shouldPlayFocal({ stopped: false, failed: 0, error: false, bytes: 0 })).toBe(false);
 });
