@@ -441,7 +441,7 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
   const prevRowKeys = React.useRef(rowKeys);
   const removing = prevRowKeys.current.some((key) => !rowKeys.includes(key));
   React.useLayoutEffect(() => { prevRowKeys.current = rowKeys; });
-  // 离场交给收起补位，避免 presence 补回行时重复移动。
+  // 有行离场的这次更新不换位，补位交给收起。
   useFlip(listRef, rowKeys, !removing);
 
   return (

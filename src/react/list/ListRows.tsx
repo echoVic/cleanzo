@@ -217,7 +217,7 @@ export function ListRows(props: Omit<RowProps, "row"> & { rows: ListRowData[] })
   const prevKeys = React.useRef(keys);
   const removing = prevKeys.current.some((key) => !keys.includes(key));
   React.useLayoutEffect(() => { prevKeys.current = keys; });
-  // presence 补回离场行的这次提交由收起补位，避免 FLIP 先移动一次。
+  // 有行离场的这次更新不换位，补位交给收起。
   useFlip(box, keys, !removing);
   return (
     <div className="fs-list" ref={box}>

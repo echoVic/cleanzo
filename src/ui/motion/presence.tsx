@@ -31,6 +31,9 @@ export function usePresence<T>(items: readonly T[], keyOf: (item: T) => string, 
   const prev = React.useRef<readonly T[]>(items);
   const timers = React.useRef<number[]>([]);
   React.useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
+  // 渲染时就算出离场项：消失的那次提交里它仍在原位。等提交后再补回会先卸载再重挂，
+  // 进场动画重播、闪一帧，也会让换位按缺了这一项的位置先移动一次。
+  const gone = goneSince(prev.current, items, keyOf, enabled);
   React.useLayoutEffect(() => {
     const before = prev.current;
     prev.current = items;
@@ -43,12 +46,6 @@ export function usePresence<T>(items: readonly T[], keyOf: (item: T) => string, 
       now.forEach((k) => next.delete(k));
       return next;
     });
-    if (!enabled || motionLevel() === "none") return;
-    const gone: [string, { item: T; index: number }][] = [];
-    before.forEach((item, index) => {
-      const key = keyOf(item);
-      if (!now.has(key)) gone.push([key, { item, index }]);
-    });
     if (gone.length === 0) return;
     setLeaving((m) => new Map([...m, ...gone]));
     const keys = gone.map(([k]) => k);
@@ -60,7 +57,19 @@ export function usePresence<T>(items: readonly T[], keyOf: (item: T) => string, 
       });
     }, Math.max(dur("layout"), dur("fade")) + 40));
   });
-  return mergePresence(items, keyOf, leaving);
+  return mergePresence(items, keyOf, gone.length > 0 ? new Map([...leaving, ...gone]) : leaving);
+}
+
+/** 上次提交里有、这次没有的项及其原位置；不需要离场动画时为空。 */
+function goneSince<T>(before: readonly T[], items: readonly T[], keyOf: (item: T) => string, enabled: boolean): [string, { item: T; index: number }][] {
+  if (before === items || !enabled || motionLevel() === "none") return [];
+  const now = new Set(items.map(keyOf));
+  const gone: [string, { item: T; index: number }][] = [];
+  before.forEach((item, index) => {
+    const key = keyOf(item);
+    if (!now.has(key)) gone.push([key, { item, index }]);
+  });
+  return gone;
 }
 
 /** 行收起：高度、内边距、边框归零并淡出；父容器有 gap 时用负外边距抵掉，移除时不再跳一下。 */

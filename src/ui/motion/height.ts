@@ -12,12 +12,13 @@ export function useAnimatedHeight(outer: React.RefObject<HTMLElement | null>, in
     const body = inner.current;
     if (!enabled || !box || !body || typeof ResizeObserver === "undefined") return;
     // 外框比内容多出的高度（内边距、边框），静止时量一次。
-    const chrome = box.getBoundingClientRect().height - body.getBoundingClientRect().height;
-    let last = box.getBoundingClientRect().height;
+    // 量布局高度：弹窗进场带 scale，getBoundingClientRect 会偏小，长高前先缩一下。
+    const chrome = box.offsetHeight - body.offsetHeight;
+    let last = box.offsetHeight;
     let running: Animation | null = null;
     const ro = new ResizeObserver(() => {
-      const next = body.getBoundingClientRect().height + chrome;
-      const from = running ? box.getBoundingClientRect().height : last;
+      const next = body.offsetHeight + chrome;
+      const from = running ? box.offsetHeight : last;
       last = next;
       if (Math.abs(next - from) < 1 || !(dur("layout") > 0) || typeof box.animate !== "function") return;
       running?.cancel();
