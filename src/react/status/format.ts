@@ -116,6 +116,11 @@ export function trimSpark(hist: readonly number[], v: number): number[] {
   return next;
 }
 
+/** 新采样是否只是把曲线左移一格（两段都满 30 点，新的前 29 点等于旧的后 29 点）。 */
+export function isSparkShift(prev: readonly number[], next: readonly number[]): boolean {
+  return prev.length === SPARK_POINTS && next.length === SPARK_POINTS && prev !== next && prev.slice(1).every((v, i) => v === next[i]);
+}
+
 // ---- 退出应用（设计稿 §11） ----
 
 /** QuitApp 的结构化错误：{"code":"not-running"} / {"code":"cannot-quit"} */

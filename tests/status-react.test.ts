@@ -172,6 +172,14 @@ test("spark history caps at 30 points and drops the oldest", () => {
   expect(h[h.length - 1]).toBe(34);
 });
 
+test("a new CPU sample that only moves the window along is a shift", async () => {
+  const { isSparkShift, SPARK_POINTS, trimSpark } = await import("../src/react/status/format");
+  const full = Array.from({ length: SPARK_POINTS }, (_, i) => i);
+  expect(isSparkShift(full, trimSpark(full, 99))).toBe(true);
+  expect(isSparkShift(full.slice(1), trimSpark(full.slice(1), 99))).toBe(false); // 还没满 30 点
+  expect(isSparkShift(full, full)).toBe(false);
+});
+
 test("iconColor is stable per name and stays in the palette", () => {
   expect(iconColor("Google Chrome")).toBe(iconColor("Google Chrome"));
   expect(["#0c9d66", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#14b8a6", "#6366f1", "#ec4899"])

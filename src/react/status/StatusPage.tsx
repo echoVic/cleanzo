@@ -8,14 +8,20 @@ import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
+import { Collapse } from "../../ui/motion/Collapse";
+import { NumberTicker } from "../../ui/motion/NumberTicker";
+import { useFlip } from "../../ui/motion/flip";
+import { useIndicator } from "../../ui/motion/indicator";
+import { dur, EASE, play, scrollBehavior } from "../../ui/motion/motion";
+import { Leave, usePresence } from "../../ui/motion/presence";
 import { errText, toast } from "../../shared";
 import { statusApi } from "./api";
 import { crashDumps, oversized } from "../list/crash-dumps";
 import type { CrashDumpSummary } from "../../mygo";
 import {
-  GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, pickAlerts, quitErrCode,
+  GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, isSparkShift, pickAlerts, quitErrCode,
   refreshFrozenRows, sortApps, splitMem, syncQuitRows, trimSpark, uptimeParts,
-  type PickedAlert, type QuitState, type SortBy,
+  type QuitState, type SortBy,
 } from "./format";
 
 type T = ReturnType<typeof useT>;
@@ -56,15 +62,15 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
     : m.pressure === 4
       ? <em className="mbadge crit">{t("status.mem.pressureCrit")}</em>
       : null;
-  const [usedNum, usedUnit] = splitMem(m.used);
+  const usedUnit = splitMem(m.used)[1];
   const pct = (n: number) => (m.used > 0 ? Math.max(0, Math.round((n / m.used) * 100)) : 0);
   return (
-    <article className="mcard">
+    <article className="mcard cz-fade-in">
       <div className="mhead"><MemoryIcon /><span>{t("status.card.memory")}</span>{badge}</div>
       {m.total
         ? (
           <div className="mhero num">
-            <b>{usedNum}</b><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
+            <NumberTicker as="b" value={m.used} format={(v) => splitMem(v)[0]} /><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
           </div>
         )
         : <div className="mhero num"><b className="ph">—</b></div>}
@@ -97,19 +103,36 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
   );
 }
 
+const SPARK_STEP = 120 / (SPARK_POINTS - 1);
 /** 30 点 0–100% 面积曲线；重开采样时缓冲清空，不足 2 点不画。 */
 function SparkSvg({ hist }: { hist: number[] }) {
-  if (hist.length < 2) return null;
-  const step = 120 / (SPARK_POINTS - 1);
+  const group = React.useRef<SVGGElement>(null);
+  const prev = React.useRef<number[]>(hist);
+  const ms = dur("spark");
+  // 同一次采样保留同一组点，悬停等重渲染不打断平移。
+  const { shift, pts } = React.useMemo(() => {
+    const shift = ms > 0 && isSparkShift(prev.current, hist);
+    // 平移：多画最左边那个旧点，整组左移一格后正好接上（设计 6.3）
+    return { shift, pts: shift ? [prev.current[0]!, ...hist] : hist };
+  }, [hist, ms]);
+  React.useLayoutEffect(() => {
+    prev.current = hist;
+    const g = group.current;
+    if (!g) return;
+    g.getAnimations().forEach((a) => a.cancel());
+    if (shift) void play(g, [{ transform: "translateX(0px)" }, { transform: `translateX(${-SPARK_STEP}px)` }], dur("spark"), EASE.out, { fill: "forwards" });
+  }, [hist, shift]);
+  if (pts.length < 2) return null;
   const y = (v: number) => (28 - (Math.max(0, Math.min(100, v)) / 100) * 26).toFixed(1);
-  const pts = hist.map((v, i) => `${(i * step).toFixed(1)},${y(v)}`);
-  const line = `M${pts.join(" L")}`;
-  const area = `${line} L${((hist.length - 1) * step).toFixed(1)},28 L0,28 Z`;
+  const line = `M${pts.map((v, i) => `${(i * SPARK_STEP).toFixed(1)},${y(v)}`).join(" L")}`;
+  const area = `${line} L${((pts.length - 1) * SPARK_STEP).toFixed(1)},28 L0,28 Z`;
   return (
     <div className="st-spark" aria-hidden="true">
       <svg viewBox="0 0 120 28" preserveAspectRatio="none">
-        <path fill="var(--accent-soft)" d={area} />
-        <path fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinejoin="round" d={line} />
+        <g ref={group}>
+          <path fill="var(--accent-soft)" d={area} />
+          <path fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinejoin="round" d={line} />
+        </g>
       </svg>
     </div>
   );
@@ -122,9 +145,9 @@ export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cor
     [t("status.cpu.load15"), cpu.load15.toFixed(1)],
   ];
   return (
-    <article className="mcard">
+    <article className="mcard cz-fade-in">
       <div className="mhead"><CpuIcon /><span>{t("status.card.cpu")}</span></div>
-      <div className="mhero num"><b>{Math.round(cpu.usage)}</b><i>%</i></div>
+      <div className="mhero num"><NumberTicker as="b" value={cpu.usage} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{t("status.cpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} /></div>
       {!isWindows() && <div className="mloads num">
@@ -137,11 +160,11 @@ export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cor
 
 export function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onClean: () => void }) {
   const usedPct = d.total ? Math.min(100, Math.round((d.used / d.total) * 100)) : 0;
-  const [freeNum, freeUnit] = d.free > 0 ? splitMem(d.free) : ["—", ""];
+  const freeUnit = d.free > 0 ? splitMem(d.free)[1] : "";
   return (
-    <article className="mcard">
+    <article className="mcard cz-fade-in">
       <div className="mhead"><DiskIcon /><span>{t("status.card.disk")}</span></div>
-      <div className="mhero num"><b>{freeNum}</b><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
+      <div className="mhero num"><NumberTicker as="b" value={d.free} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}</div>
       <div className="mviz"><div className="mbar"><i style={{ width: `${usedPct}%` }} /></div></div>
       <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
@@ -176,9 +199,9 @@ function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
       ? t("status.battery.conditionOk")
       : b.condition.trim();
   return (
-    <article className="mcard">
+    <article className="mcard cz-fade-in">
       <div className="mhead"><BatteryIcon /><span>{t("status.card.battery")}</span>{badge}</div>
-      <div className="mhero num"><b>{b.percent}</b><i>%</i></div>
+      <div className="mhero num"><NumberTicker as="b" value={b.percent} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{state}</div>
       <div className="mviz">
         <div className={`mbar${healthPct > 0 && healthPct < 80 ? " low" : ""}`}><i style={{ width: `${healthPct}%` }} /></div>
@@ -206,9 +229,8 @@ const SkRow = () => (
 );
 
 const segTrigger =
-  "cursor-pointer rounded-[6px] px-3 py-1 text-xs leading-[18px] text-[var(--muted)] transition-colors " +
-  "data-[state=active]:bg-[var(--card)] data-[state=active]:font-semibold data-[state=active]:text-[var(--fg)] " +
-  "data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.1)] " +
+  "relative z-[1] cursor-pointer rounded-[6px] px-3 py-1 text-xs leading-[18px] text-[var(--muted)] transition-colors " +
+  "data-[state=active]:font-semibold data-[state=active]:text-[var(--fg)] " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]";
 
 export interface StatusPageProps {
@@ -252,6 +274,9 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
   /** 冻结期间的行集合与顺序（只更新数字）；重开采样时清空。 */
   const frozenRowsRef = React.useRef<AppUsage[]>([]);
   const listHeadRef = React.useRef<HTMLDivElement | null>(null);
+  const listRef = React.useRef<HTMLElement>(null);
+  const segRef = React.useRef<HTMLDivElement>(null);
+  const segStyle = useIndicator(segRef, '[data-state="active"]');
   const hlTimerRef = React.useRef<number | null>(null);
 
   // ---- 生命周期：进入视图开采样，离开 / 窗口隐藏关 Channel，回来重开 ----
@@ -335,14 +360,14 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
     setQuit((prev) => syncQuitRows(prev, present));
   }, [sample]);
 
-  // ---- 「查看占内存的应用」联动：切按内存 + 滚动到列表 + 高亮 1s ----
+  // ---- 「查看占内存的应用」联动：切按内存 + 滚动到列表 + 高亮 900ms ----
 
   const viewApps = React.useCallback(() => {
     setSortBy("mem");
-    listHeadRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+    listHeadRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
     setHl(true);
     if (hlTimerRef.current) window.clearTimeout(hlTimerRef.current);
-    hlTimerRef.current = window.setTimeout(() => setHl(false), 1000);
+    hlTimerRef.current = window.setTimeout(() => setHl(false), 900);
   }, []);
 
   // ---- 退出应用（设计稿 §11：四结果 toast 映射） ----
@@ -409,6 +434,15 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
 
   const alerts = error || !sample ? [] : pickAlerts(sample);
   const bigDumps = oversized(crashSum);
+  const alertItems = [...alerts.map((a) => ({ key: a.kind, a })), ...(bigDumps[0] ? [{ key: "crashDumps", a: null }] : [])];
+  const alertsP = usePresence(alertItems, (x) => x.key);
+  const rowsP = usePresence(rows, (r) => r.key, !!sample && !error);
+  const rowKeys = rows.map((r) => r.key);
+  const prevRowKeys = React.useRef(rowKeys);
+  const removing = prevRowKeys.current.some((key) => !rowKeys.includes(key));
+  React.useLayoutEffect(() => { prevRowKeys.current = rowKeys; });
+  // 离场交给收起补位，避免 presence 补回行时重复移动。
+  useFlip(listRef, rowKeys, !removing);
 
   return (
     <div className="cz-react">
@@ -422,40 +456,39 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
 
       {/* 与原生 #st-alerts 一致：告警始终占一个区块位（为空时也保留节奏），多条告警紧贴排列。 */}
       <div className="st-alerts">
-        {alerts.map((a: PickedAlert) => (
-          <div key={a.kind} className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
-            <CalloutIcon />
-            <div className="st-callout-body">
-              {a.kind === "memWarn" && t("status.alert.memWarn")}
-              {a.kind === "memCrit" && t("status.alert.memCrit")}
-              {a.kind === "swapOnly" && t("status.alert.swapOnly", { size: fmtMem(a.swapDisk ?? 0) })}
-              {a.kind === "diskLow" && t("status.alert.diskLow", { size: fmtMem(a.free ?? 0) })}
-              {a.swapDisk != null && (a.kind === "memWarn" || a.kind === "memCrit") && (
-                <span className="st-extra num">{t("status.alert.swapLine", { size: fmtMem(a.swapDisk) })}</span>
+        {alertsP.map(({ item: { a }, key, leaving }) => (
+          <Collapse key={key} open={!leaving} appear>
+            {a ? <div className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
+              <CalloutIcon />
+              <div className="st-callout-body">
+                {a.kind === "memWarn" && t("status.alert.memWarn")}
+                {a.kind === "memCrit" && t("status.alert.memCrit")}
+                {a.kind === "swapOnly" && t("status.alert.swapOnly", { size: fmtMem(a.swapDisk ?? 0) })}
+                {a.kind === "diskLow" && t("status.alert.diskLow", { size: fmtMem(a.free ?? 0) })}
+                {a.swapDisk != null && (a.kind === "memWarn" || a.kind === "memCrit") && (
+                  <span className="st-extra num">{t("status.alert.swapLine", { size: fmtMem(a.swapDisk) })}</span>
+                )}
+              </div>
+              {a.action && (
+                <button
+                  className="btn ghost small"
+                  type="button"
+                  onClick={() => (a.action === "apps" ? viewApps() : goCleanRef.current())}
+                >
+                  {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
+                </button>
               )}
-            </div>
-            {a.action && (
-              <button
-                className="btn ghost small"
-                type="button"
-                onClick={() => (a.action === "apps" ? viewApps() : goCleanRef.current())}
-              >
-                {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
+            </div> : bigDumps[0] && <div className="st-callout warn" role="status">
+              <CalloutIcon />
+              <div className="st-callout-body">
+                {t("status.alert.crashDumps", { app: bigDumps[0].app, size: fmtMem(bigDumps[0].size) })}
+              </div>
+              <button className="btn ghost small" type="button" onClick={() => goCleanRef.current()}>
+                {t("status.disk.clean")}
               </button>
-            )}
-          </div>
+            </div>}
+          </Collapse>
         ))}
-        {bigDumps[0] && (
-          <div key="crashDumps" className="st-callout warn" role="status">
-            <CalloutIcon />
-            <div className="st-callout-body">
-              {t("status.alert.crashDumps", { app: bigDumps[0].app, size: fmtMem(bigDumps[0].size) })}
-            </div>
-            <button className="btn ghost small" type="button" onClick={() => goCleanRef.current()}>
-              {t("status.disk.clean")}
-            </button>
-          </div>
-        )}
       </div>
 
       {error ? (
@@ -490,9 +523,11 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
           <h3>{t("status.apps.title")}</h3>
           <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
             <TabsList
+              ref={segRef}
               aria-label="排序方式"
-              className="ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
+              className="relative ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
             >
+              <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
               <TabsTrigger value="mem" className={segTrigger}>{t("status.apps.byMemory")}</TabsTrigger>
               <TabsTrigger value="cpu" className={segTrigger}>{t("status.apps.byCpu")}</TabsTrigger>
             </TabsList>
@@ -505,6 +540,7 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
           <span className="c-act" />
         </div>
         <section
+          ref={listRef}
           className="st-list"
           aria-live="polite"
           onMouseEnter={() => setHover(true)}
@@ -514,28 +550,31 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
         >
           {error ? null : !sample ? (
             Array.from({ length: 3 }, (_, i) => <SkRow key={i} />)
-          ) : sample.apps.length === 0 ? (
+          ) : rowsP.length === 0 ? (
             <div className="st-empty">{t("status.apps.empty")}</div>
           ) : (
-            rows.map((r) => {
-              const quitted = quit.done.has(r.key) && !quit.gone.has(r.key);
+            rowsP.map(({ item: r, key, leaving }) => {
+              const quitted = leaving || (quit.done.has(r.key) && !quit.gone.has(r.key));
+              const busy = quit.busy.has(r.path);
               return (
-                <div key={r.key} className={`st-row${quitted ? " quitted" : ""}`}>
-                  <div className="st-app">
-                    <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
-                    <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
-                    <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>
+                <Leave key={key} leaving={leaving}>
+                  <div className={`st-row cz-fade-in${quitted ? " quitted" : ""}`} data-key={key}>
+                    <div className="st-app">
+                      <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
+                      <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
+                      <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>
+                    </div>
+                    <span className="st-col st-mem num">{fmtMem(r.memory)}</span>
+                    <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
+                    <span className="st-act">
+                      {r.quit && !leaving && !quit.done.has(r.key) && (
+                        <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)}>
+                          {busy ? t("status.apps.quitting") : t("status.apps.quit")}
+                        </button>
+                      )}
+                    </span>
                   </div>
-                  <span className="st-col st-mem num">{fmtMem(r.memory)}</span>
-                  <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
-                  <span className="st-act">
-                    {r.quit && !quit.done.has(r.key) && (
-                      quit.busy.has(r.path)
-                        ? <button className="st-quit" disabled type="button">{t("status.apps.quitting")}</button>
-                        : <button className="st-quit" type="button" onClick={() => setQuitTarget(r)}>{t("status.apps.quit")}</button>
-                    )}
-                  </span>
-                </div>
+                </Leave>
               );
             })
           )}
