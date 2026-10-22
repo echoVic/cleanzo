@@ -22,8 +22,9 @@ export function Collapse({ open, children, className, appear = false, animateRes
   const [expanded, setExpanded] = React.useState(open && (!appear || motionLevel() === "none"));
   const [moving, setMoving] = React.useState(false);
   const outer = React.useRef<HTMLDivElement>(null);
-  const inner = React.useRef<HTMLDivElement>(null);
-  useAnimatedHeight(outer, inner, animateResize && expanded && !moving);
+  // 观察内容本身的高度：.cz-collapse-in 是 1fr 的 grid 子项，高度跟着外框的动画变
+  const body = React.useRef<HTMLDivElement>(null);
+  useAnimatedHeight(outer, body, animateResize && expanded && !moving);
 
   React.useLayoutEffect(() => {
     const ms = Math.max(dur("layout"), dur("fade"));
@@ -49,7 +50,7 @@ export function Collapse({ open, children, className, appear = false, animateRes
   if (!mounted && !open) return null;
   return (
     <div ref={outer} className={cn("cz-collapse", className)} data-state={expanded ? "open" : "closed"} data-moving={moving ? "" : undefined}>
-      <div ref={inner} className="cz-collapse-in">{children}</div>
+      <div className="cz-collapse-in">{animateResize ? <div ref={body}>{children}</div> : children}</div>
     </div>
   );
 }
