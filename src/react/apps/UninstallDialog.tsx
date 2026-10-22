@@ -30,8 +30,10 @@ export function UninstallDialog({
 }: UninstallDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <UninstallDialogBody stage={stage} detail={detail} failMsg={failMsg} onConfirm={onConfirm} onRefresh={onRefresh} />
+      <DialogContent animateHeight>
+        <div key={stage} className="cz-fade-in">
+          <UninstallDialogBody stage={stage} detail={detail} failMsg={failMsg} onConfirm={onConfirm} onRefresh={onRefresh} />
+        </div>
       </DialogContent>
     </Dialog>
   );
