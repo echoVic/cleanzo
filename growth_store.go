@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,16 +19,54 @@ func growthDir() string { return filepath.Join(filepath.Dir(configPath()), "grow
 // growthKeep is how long records are kept (spec §四).
 const growthKeep = 90 * 24 * time.Hour
 
-// writeGrowthFile replaces path only after a complete copy is written.
+// growthRecordAt is the one definition of a record: a regular file named
+// <digits>.json whose number is a positive unix time. It returns that time.
+// Any other file in records/, such as a hand-copied backup, is neither loaded
+// nor pruned.
+func growthRecordAt(e fs.DirEntry) (int64, bool) {
+	digits, ok := strings.CutSuffix(e.Name(), ".json")
+	if !ok || !e.Type().IsRegular() {
+		return 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	at, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || at <= 0 {
+		return 0, false
+	}
+	return at, true
+}
+
+// writeGrowthFile replaces path only after a complete copy is written. The copy
+// goes to a temporary file of its own, so two writers never share one, and
+// that file is removed if anything fails. The file keeps mode 0o644.
 func writeGrowthFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	err = f.Chmod(0o644) // CreateTemp makes the file 0o600
+	if err == nil {
+		_, err = f.Write(data)
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp) // the function's own temporary file
+	}
+	return err
 }
 
 // saveGrowthSnapshot writes one record as records/<At>.json. It then
@@ -43,8 +82,7 @@ func saveGrowthSnapshot(dir string, s growthSnapshot, now time.Time) error {
 	}
 	entries, _ := os.ReadDir(records)
 	for _, e := range entries {
-		at, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".json"), 10, 64)
-		if err == nil && strings.HasSuffix(e.Name(), ".json") && now.Sub(time.Unix(at, 0)) > growthKeep {
+		if at, ok := growthRecordAt(e); ok && now.Sub(time.Unix(at, 0)) > growthKeep {
 			_ = os.Remove(filepath.Join(records, e.Name()))
 		}
 	}
@@ -52,13 +90,13 @@ func saveGrowthSnapshot(dir string, s growthSnapshot, now time.Time) error {
 }
 
 // loadGrowthSnapshots reads every record, oldest first, skipping files that
-// do not parse.
+// are not records (growthRecordAt) and files that do not parse.
 func loadGrowthSnapshots(dir string) []growthSnapshot {
 	records := filepath.Join(dir, "records")
 	entries, _ := os.ReadDir(records)
 	var out []growthSnapshot
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
+		if _, ok := growthRecordAt(e); !ok {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(records, e.Name()))
@@ -75,12 +113,12 @@ func loadGrowthSnapshots(dir string) []growthSnapshot {
 }
 
 // lastGrowthAt is when the newest record was taken, read from file names
-// only; zero without records.
+// only (growthRecordAt); zero without records.
 func lastGrowthAt(dir string) time.Time {
 	entries, _ := os.ReadDir(filepath.Join(dir, "records"))
 	var last int64
 	for _, e := range entries {
-		if at, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".json"), 10, 64); err == nil && strings.HasSuffix(e.Name(), ".json") {
+		if at, ok := growthRecordAt(e); ok {
 			last = max(last, at)
 		}
 	}
