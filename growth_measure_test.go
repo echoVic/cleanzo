@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -85,5 +87,99 @@ func TestTakeGrowthSnapshot(t *testing.T) {
 	t.Cleanup(func() { growthRunLimit = limit })
 	if cut := takeGrowthSnapshot(context.Background(), ts, nil, true, time.Unix(1000, 0)); !cut.Cut || len(cut.Entries) != 0 {
 		t.Fatalf("a run out of time must be cut and keep nothing unstarted: %+v", cut)
+	}
+}
+
+// hookContext stands in for the context of a walk and counts its Err calls,
+// which measureGrowthEntry makes once at the start of each step. On call at
+// it runs hook once. From call stop on, Err reports context.Canceled; before
+// that it reports nil.
+type hookContext struct {
+	context.Context
+	calls, at, stop int
+	hook            func()
+}
+
+func (c *hookContext) Err() error {
+	c.calls++
+	if c.calls == c.at && c.hook != nil {
+		c.hook()
+	}
+	if c.stop > 0 && c.calls >= c.stop {
+		return context.Canceled
+	}
+	return nil
+}
+
+// A file removed after the listing is gone, not unreadable: the walk goes on
+// and the entry stays complete.
+func TestMeasureGrowthEntrySkipsFileRemovedMidWalk(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a"), 10)
+	writeFile(t, filepath.Join(root, "b"), 20)
+	writeFile(t, filepath.Join(root, "c"), 40)
+	ctx := &hookContext{Context: context.Background(), at: 3, hook: func() {
+		if err := os.Remove(filepath.Join(root, "b")); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	want := int64(50) // a and c: b was removed before its Lstat
+	if runtime.GOOS == "windows" {
+		want = 70 // Windows answers Info from the listing, so b still counts there
+	}
+	if e := measureGrowthEntry(ctx, growthTarget{path: root, kind: growthHome}); e.Denied || !e.Complete || e.Size != want {
+		t.Fatalf("entry = %+v, want size %d, complete and not denied", e, want)
+	}
+}
+
+// A folder removed after the listing is skipped the same way: the walk goes
+// on, and the entry stays complete.
+func TestMeasureGrowthEntrySkipsFolderRemovedMidWalk(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	writeFile(t, filepath.Join(sub, "x"), 100)
+	writeFile(t, filepath.Join(root, "y"), 20)
+	ctx := &hookContext{Context: context.Background(), at: 2, hook: func() {
+		if err := os.RemoveAll(sub); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if e := measureGrowthEntry(ctx, growthTarget{path: root, kind: growthHome}); e.Denied || !e.Complete || e.Size != 20 {
+		t.Fatalf("entry = %+v, want size 20, complete and not denied", e)
+	}
+}
+
+// A walk stopped midway keeps what it counted before the stop, incomplete.
+func TestMeasureGrowthEntryStopsMidWalkWithLowerBound(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a"), 10)
+	writeFile(t, filepath.Join(root, "b"), 20)
+	ctx := &hookContext{Context: context.Background(), stop: 3}
+	if e := measureGrowthEntry(ctx, growthTarget{path: root, kind: growthHome}); e.Complete || e.Denied || e.Size != 10 {
+		t.Fatalf("entry = %+v, want size 10 and incomplete", e)
+	}
+}
+
+// growthEntryLimit bounds each entry of a run: an entry that runs out of time
+// is kept incomplete, and the run is not cut, since nothing stayed unstarted.
+func TestTakeGrowthSnapshotHonorsEntryLimit(t *testing.T) {
+	limit := growthEntryLimit
+	growthEntryLimit = time.Nanosecond
+	t.Cleanup(func() { growthEntryLimit = limit })
+	dir := t.TempDir()
+	var ts []growthTarget
+	for _, n := range []string{"a", "b", "c"} {
+		p := filepath.Join(dir, n)
+		writeFile(t, filepath.Join(p, "f"), 10)
+		ts = append(ts, growthTarget{path: p, kind: growthHome})
+	}
+	s := takeGrowthSnapshot(context.Background(), ts, nil, true, time.Unix(1000, 0))
+	if s.Cut || len(s.Entries) != 3 {
+		t.Fatalf("snapshot = %+v", s)
+	}
+	for _, e := range s.Entries {
+		if e.Complete {
+			t.Fatalf("entry measured past its limit: %+v", e)
+		}
 	}
 }

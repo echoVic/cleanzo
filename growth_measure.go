@@ -39,6 +39,7 @@ var errGrowthStop = errors.New("growth: time limit")
 //   - When ctx ends first, the sum so far comes back with Complete false:
 //     a lower bound.
 //   - Folders that cannot be read set Denied, and the walk goes on.
+//   - An item removed since it was listed is skipped without setting Denied.
 //   - An entry that vanished since it was listed measures as an empty,
 //     complete one.
 func measureGrowthEntry(ctx context.Context, t growthTarget) growthEntry {
@@ -59,7 +60,10 @@ func measureGrowthEntry(ctx context.Context, t growthTarget) growthEntry {
 			return errGrowthStop
 		}
 		if err != nil {
-			e.Denied = true
+			// Removed since it was listed: gone, not unreadable.
+			if !errors.Is(err, fs.ErrNotExist) {
+				e.Denied = true
+			}
 			return nil
 		}
 		if p == t.path {
@@ -67,7 +71,10 @@ func measureGrowthEntry(ctx context.Context, t growthTarget) growthEntry {
 		}
 		info, ierr := d.Info()
 		if ierr != nil {
-			e.Denied = true
+			// Removed since it was listed: gone, not unreadable.
+			if !errors.Is(ierr, fs.ErrNotExist) {
+				e.Denied = true
+			}
 			return nil
 		}
 		if d.IsDir() {
@@ -133,7 +140,7 @@ func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, prev *growt
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			backgroundThread() // never unlocked: Go retires the thread with its QoS
+			backgroundThread() // lowest CPU priority and throttled disk I/O; never unlocked, so Go retires the thread with them
 			for t := range jobs {
 				ectx, ecancel := context.WithTimeout(run, growthEntryLimit)
 				results <- measureGrowthEntry(ectx, t)

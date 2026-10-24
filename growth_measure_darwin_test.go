@@ -4,7 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
+
+	"github.com/ebitengine/purego"
 )
 
 func TestMeasureGrowthEntryNeverFollowsLinks(t *testing.T) {
@@ -41,4 +45,54 @@ func TestBackgroundThreadReturns(t *testing.T) {
 		close(done)
 	}()
 	<-done
+}
+
+// Arguments of getiopolicy_np, from <sys/resource.h>.
+const (
+	ioTypeDisk    = 0 // IOPOL_TYPE_DISK
+	ioScopeThread = 1 // IOPOL_SCOPE_THREAD
+)
+
+// TestBackgroundThreadLowersPriority reads the state back on the thread that
+// backgroundThread set: getpriority(PRIO_DARWIN_THREAD) must report it there,
+// and a plain thread must not. getiopolicy_np probes the disk I/O policy of
+// both threads; it is logged, and the probe is test-only.
+func TestBackgroundThreadLowersPriority(t *testing.T) {
+	lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var getIOPolicy func(iotype, scope int32) int32
+	purego.RegisterLibFunc(&getIOPolicy, lib, "getiopolicy_np")
+	read := func(background bool) (prio int, policy int32, err error) {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if background {
+				backgroundThread()
+			} else {
+				runtime.LockOSThread()
+			}
+			prio, err = syscall.Getpriority(prioDarwinThread, 0)
+			policy = getIOPolicy(ioTypeDisk, ioScopeThread)
+		}()
+		<-done
+		return prio, policy, err
+	}
+	bgPrio, bgPolicy, err := read(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainPrio, plainPolicy, err := read(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("getpriority(PRIO_DARWIN_THREAD): background %d, plain %d", bgPrio, plainPrio)
+	t.Logf("getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD): background %d, plain %d", bgPolicy, plainPolicy)
+	if bgPrio == 0 {
+		t.Error("the background thread does not report the background state")
+	}
+	if plainPrio != 0 {
+		t.Error("a plain thread reports the background state")
+	}
 }

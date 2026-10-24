@@ -1,45 +1,30 @@
 package main
 
 import (
+	"log"
 	"runtime"
-	"sync"
-
-	"github.com/ebitengine/purego"
+	"syscall"
 )
 
+// Darwin's setpriority(2) targets, from <sys/resource.h>. With PRIO_DARWIN_THREAD
+// and who 0 the call names the calling thread, and PRIO_DARWIN_BG puts that
+// thread in the background state.
 const (
-	qosClassBackground = 0x09 // QOS_CLASS_BACKGROUND, <sys/qos.h>
-	iopolTypeDisk      = 0    // IOPOL_TYPE_DISK, <sys/resource.h>
-	iopolScopeThread   = 1    // IOPOL_SCOPE_THREAD
-	iopolThrottle      = 3    // IOPOL_THROTTLE
+	prioDarwinThread = 3      // PRIO_DARWIN_THREAD
+	prioDarwinBG     = 0x1000 // PRIO_DARWIN_BG
 )
 
-var (
-	qosOnce     sync.Once
-	setQoS      func(class uint32, relpri int32) int32
-	setIOPolicy func(iotype, scope, policy int32) int32
-)
-
-// backgroundThread pins the calling goroutine to its OS thread. It lowers
-// that thread to background QoS with throttled disk I/O, so measuring yields
-// to everything the user does (spec §四).
+// backgroundThread pins the calling goroutine to its OS thread and puts that
+// thread in Darwin's background state with one setpriority(2) call. The
+// kernel then runs the thread at the lowest CPU priority and throttles its
+// disk I/O, so measuring yields to everything the user does (spec §四). If the
+// kernel refuses, the thread keeps its normal priority and measuring goes on.
 //
 // The goroutine must return without unlocking. Go then retires the thread
-// and its policy instead of reusing it.
+// and its state instead of reusing it.
 func backgroundThread() {
 	runtime.LockOSThread()
-	qosOnce.Do(func() {
-		lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
-		if err != nil {
-			return
-		}
-		purego.RegisterLibFunc(&setQoS, lib, "pthread_set_qos_class_self_np")
-		purego.RegisterLibFunc(&setIOPolicy, lib, "setiopolicy_np")
-	})
-	if setQoS != nil {
-		setQoS(qosClassBackground, 0)
-	}
-	if setIOPolicy != nil {
-		setIOPolicy(iopolTypeDisk, iopolScopeThread, iopolThrottle)
+	if err := syscall.Setpriority(prioDarwinThread, 0, prioDarwinBG); err != nil {
+		log.Printf("growth: measuring at normal priority: %v", err)
 	}
 }
