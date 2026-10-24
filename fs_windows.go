@@ -29,6 +29,9 @@ func changedAt(info fs.FileInfo) time.Time {
 // onDisk conservatively reports the logical file size.
 func onDisk(info fs.FileInfo) int64 { return info.Size() }
 
+// deviceOf is constant on Windows, where the growth monitor does not run.
+func deviceOf(fs.FileInfo) uint64 { return 0 }
+
 // removalRefused blocks reparse points, cloud placeholders and unreadable folders.
 func removalRefused(path string, info fs.FileInfo) bool {
 	st, ok := info.Sys().(*syscall.Win32FileAttributeData)

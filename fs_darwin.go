@@ -31,6 +31,14 @@ func onDisk(info fs.FileInfo) int64 {
 	return info.Size()
 }
 
+// deviceOf names the volume an entry lives on, to keep walks on one volume.
+func deviceOf(info fs.FileInfo) uint64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return uint64(st.Dev)
+	}
+	return 0
+}
+
 // protectedFlags are the file flags under which macOS refuses to remove an
 // entry: immutable, append-only, and the restricted and no-unlink flags of
 // System Integrity Protection.
