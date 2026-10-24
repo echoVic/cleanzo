@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGrowthRootsCoverSpec(t *testing.T) {
@@ -71,4 +73,54 @@ func TestGrowthTargets(t *testing.T) {
 	if got := paths(growthTargets(roots, true, self)); !slices.Contains(got, filepath.Join(home, "Library", "Containers", "com.x")) {
 		t.Fatalf("with FDA, Containers missing: %q", got)
 	}
+}
+
+// TestGrowthKeys: the apps in the given folders are known by bundle ID and by
+// name. Which apps run is up to the machine, so that part is not asserted.
+func TestGrowthKeys(t *testing.T) {
+	dir := t.TempDir()
+	makeApp(t, dir, "Foo.app", "com.example.foo", "Foo")
+	keys := growthKeys([]string{dir})
+	for _, name := range []string{"com.example.foo", "Foo"} {
+		if !keys.owns(name) {
+			t.Errorf("growthKeys does not know %q", name)
+		}
+	}
+}
+
+// TestGrowthBatteryEndsWithItsContext: the power source is read on mygo's main
+// thread, which the test binary never runs, so that read never returns. The
+// answer must still come when the context ends, and it must be plugged in and
+// full, which never holds measuring back.
+func TestGrowthBatteryEndsWithItsContext(t *testing.T) {
+	type answer struct {
+		onBattery bool
+		percent   int
+	}
+	checkPlugged := func(t *testing.T, ctx context.Context) {
+		t.Helper()
+		got := make(chan answer, 1)
+		go func() {
+			on, pct := growthBattery(ctx)
+			got <- answer{on, pct}
+		}()
+		select {
+		case a := <-got:
+			if want := (answer{false, 100}); a != want {
+				t.Fatalf("growthBattery = %+v, want %+v", a, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("growthBattery still waits a second after its context ended")
+		}
+	}
+	t.Run("cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		checkPlugged(t, ctx)
+	})
+	t.Run("deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		checkPlugged(t, ctx)
+	})
 }

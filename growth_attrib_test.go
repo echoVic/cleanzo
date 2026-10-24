@@ -47,10 +47,19 @@ func TestGrowthOwner(t *testing.T) {
 		{filepath.Join(lib, "Group Containers", "group.com.apple.notes"), growthHome, "macos:com.apple.notes", "com.apple.notes", "macos", false, ""},
 		{filepath.Join(lib, "Caches", "com.apple.geod"), growthHome, "macos:com.apple.geod", "com.apple.geod", "macos", false, ""},
 		{filepath.Join(lib, "Caches", "Google", "Chrome"), growthHome, "app:com.google.chrome", "Google Chrome", "app", false, ""},
-		{filepath.Join(lib, "Caches", "Google", "DriveFS"), growthHome, dir(filepath.Join(lib, "Caches", "Google", "DriveFS")), filepath.Join("Google", "DriveFS"), "unknown", true, ""},
+		// a vendor's child sits one level below the folders the leftovers tab scans: unknown, but not a leftover
+		{filepath.Join(lib, "Caches", "Google", "DriveFS"), growthHome, dir(filepath.Join(lib, "Caches", "Google", "DriveFS")), filepath.Join("Google", "DriveFS"), "unknown", false, ""},
 		{filepath.Join(lib, "Application Support", "Trae CN"), growthHome, "app:com.trae.cn", "Trae CN", "app", false, ""},
 		{filepath.Join("/h", ".npm"), growthDot, dir(filepath.Join("/h", ".npm")), ".npm", "dot", false, ""},
 		{filepath.Join(lib, "Application Support", "GoneApp"), growthHome, dir(filepath.Join(lib, "Application Support", "GoneApp")), "GoneApp", "unknown", true, ""},
+		// the leftovers tab skips tool caches, Apple's own data and hidden items
+		{filepath.Join(lib, "Caches", "Homebrew"), growthHome, dir(filepath.Join(lib, "Caches", "Homebrew")), "Homebrew", "unknown", false, ""},
+		{filepath.Join(lib, "Application Support", "AddressBook"), growthHome, dir(filepath.Join(lib, "Application Support", "AddressBook")), "AddressBook", "unknown", false, ""},
+		{filepath.Join(lib, "Application Support", ".tool"), growthHome, dir(filepath.Join(lib, "Application Support", ".tool")), ".tool", "unknown", false, ""},
+		// and it scans neither Developer nor Group Containers, nor a Caches folder outside ~/Library
+		{filepath.Join(lib, "Developer", "CoreSimulator"), growthHome, dir(filepath.Join(lib, "Developer", "CoreSimulator")), "CoreSimulator", "unknown", false, ""},
+		{filepath.Join(lib, "Group Containers", "ABCDE12345.com.gone.app"), growthHome, dir(filepath.Join(lib, "Group Containers", "ABCDE12345.com.gone.app")), "ABCDE12345.com.gone.app", "unknown", false, ""},
+		{filepath.Join("/h", "Caches", "GoneApp"), growthHome, dir(filepath.Join("/h", "Caches", "GoneApp")), "GoneApp", "unknown", false, ""},
 		// an installed app claims it loosely (contains "wechat"): unknown, but not a leftover
 		{filepath.Join(lib, "Application Support", "WeChatFiles"), growthHome, dir(filepath.Join(lib, "Application Support", "WeChatFiles")), "WeChatFiles", "unknown", false, ""},
 		// /Library is never a leftover: Cleanzo does not clean there
@@ -61,6 +70,20 @@ func TestGrowthOwner(t *testing.T) {
 		want := growthOwner{key: c.key, name: c.name, kind: c.okind, orphan: c.orphan, appPath: c.appPath}
 		if got != want {
 			t.Errorf("%s: got %+v, want %+v", c.path, got, want)
+		}
+	}
+}
+
+// TestGrowthOwnerLeftoverCandidate: the leftovers tab skips com.apple. folders
+// too. owner() sends those to macOS before it asks, so this asks directly.
+func TestGrowthOwnerLeftoverCandidate(t *testing.T) {
+	lib := filepath.Join("/h", "Library")
+	for path, want := range map[string]bool{
+		filepath.Join(lib, "Caches", "GoneApp"):        true,
+		filepath.Join(lib, "Caches", "com.apple.geod"): false,
+	} {
+		if got := growthLeftoverCandidate(path); got != want {
+			t.Errorf("growthLeftoverCandidate(%q) = %v, want %v", path, got, want)
 		}
 	}
 }

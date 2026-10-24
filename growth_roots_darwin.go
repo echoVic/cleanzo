@@ -31,11 +31,23 @@ func growthRoots(home, system string) []growthRoot {
 // growthSupported tells whether this platform has the growth monitor.
 func growthSupported() bool { return true }
 
-// growthBattery reports whether the Mac runs on battery and its charge. A
-// desktop Mac, or a battery that cannot be read, counts as plugged in.
+// growthBattery reports whether the Mac runs on battery and its charge.
+// Whatever it cannot learn counts as plugged in or full: a Mac without a
+// battery, a charge that cannot be read, and a power source that has not
+// answered when ctx ends, since asking waits for the app's main thread.
 func growthBattery(ctx context.Context) (onBattery bool, percent int) {
-	if !mygo.Power.IsOnBattery() {
+	if ctx.Err() != nil {
 		return false, 100
+	}
+	asked := make(chan bool, 1) // buffered, so the goroutine can end after ctx did
+	go func() { asked <- mygo.Power.IsOnBattery() }()
+	select {
+	case <-ctx.Done():
+		return false, 100
+	case on := <-asked:
+		if !on {
+			return false, 100
+		}
 	}
 	if b := statusBattery(ctx); b != nil {
 		return true, b.Percent

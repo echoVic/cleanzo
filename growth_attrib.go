@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ type growthOwner struct {
 	key     string // "app:<bundle id>", "macos:<bundle id>" or "dir:<path>", lower-cased
 	name    string
 	kind    string // "app", "macos", "dot" or "unknown"
-	orphan  bool   // unknown, in ~/Library, and no installed app claims it: probably a leftover
+	orphan  bool   // unknown, no installed app claims it, and the leftovers tab would list it: probably a leftover
 	appPath string // the installed app, for Uninstall; "" when it is not in an app folder
 }
 
@@ -35,7 +36,8 @@ type growthAttributor struct {
 }
 
 // growthAttributors caches the installed apps for a minute. The page and the
-// menu ask often, and reading every Info.plist takes about a second.
+// menu ask often, and reading every Info.plist takes a few seconds on a Mac
+// with many apps.
 var growthAttributors struct {
 	sync.Mutex
 	at time.Time
@@ -48,14 +50,55 @@ func currentGrowthAttributor() growthAttributor {
 	defer growthAttributors.Unlock()
 	if growthAttributors.a.idx == nil || time.Since(growthAttributors.at) > time.Minute {
 		dirs := appDirs()
-		growthAttributors.a = growthAttributor{idx: buildAppIndex(dirs), keys: installedKeys(), paths: growthAppPaths(dirs)}
+		growthAttributors.a = growthAttributor{idx: buildAppIndex(dirs), keys: growthKeys(dirs), paths: growthAppPaths(dirs)}
 		growthAttributors.at = time.Now()
 	}
 	return growthAttributors.a
 }
 
+// growthKeys collects the names, bundle IDs and bundle ID words of the apps in
+// dirs, and the bundle IDs of the running apps. Unlike installedKeys it never
+// opens the bundle of a running app: one started from Downloads, the Desktop
+// or a volume would make macOS ask about that folder, and the monitor runs
+// unattended.
+func growthKeys(dirs []string) appKeys {
+	var apps []string
+	for _, dir := range dirs {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".app") {
+				apps = append(apps, filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	k := newAppKeys()
+	running, _, _ := runningApps() // the bundle paths it also returns are left alone
+	for bid := range running {
+		k.addBundleID(bid)
+	}
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, 16)
+	)
+	for _, app := range apps {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			id := readAppIdentity(app)
+			mu.Lock()
+			defer mu.Unlock()
+			k.add(id)
+		}()
+	}
+	wg.Wait()
+	return k
+}
+
 // growthAppPaths finds the bundle of every app in dirs by bundle ID; the
-// first folder wins, like the app index.
+// first folder in dirs wins.
 func growthAppPaths(dirs []string) map[string]string {
 	out := map[string]string{}
 	for _, dir := range dirs {
@@ -73,6 +116,18 @@ func growthAppPaths(dirs []string) map[string]string {
 		}
 	}
 	return out
+}
+
+// growthLeftoverCandidate reports whether collectOrphans (main.go), which fills
+// the leftovers tab, looks at the entry at path: it sits directly in one of
+// the ~/Library folders that tab scans, and is not a tool cache, a hidden
+// item or Apple's own data. Only such an entry can be called a leftover on the
+// page, because only on that tab can the user clean it.
+func growthLeftoverCandidate(path string) bool {
+	base, parent := filepath.Base(path), filepath.Dir(path)
+	return slices.Contains(libraryRoots, filepath.Base(parent)) && filepath.Base(filepath.Dir(parent)) == "Library" &&
+		!toolCacheNames[base] && !strings.HasPrefix(base, ".") &&
+		!strings.HasPrefix(base, "com.apple.") && !appleDataNames[normalized(base)]
 }
 
 // owner names what an entry counts under. It never guesses: what the app
@@ -98,6 +153,6 @@ func (a growthAttributor) owner(e growthEntry) growthOwner {
 	}
 	return growthOwner{
 		key: "dir:" + strings.ToLower(e.Path), name: name, kind: "unknown",
-		orphan: e.Kind == growthHome && !a.keys.owns(base),
+		orphan: e.Kind == growthHome && growthLeftoverCandidate(e.Path) && !a.keys.owns(base),
 	}
 }
