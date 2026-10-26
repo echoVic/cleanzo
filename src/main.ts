@@ -8,7 +8,7 @@ import { showReactGrowth, focusReactGrowth, setGrowthHandlers } from "./react/gr
 import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
 import { showReactClean } from "./react/clean/entry";
-import { setGoCleanHandler, showReactStatus } from "./react/status/entry";
+import { setGoCleanHandler, setGoGrowthHandler, showReactStatus } from "./react/status/entry";
 import { setCrashGoClean } from "./react/list/crash-dumps";
 import { bumpLang } from "./ui/i18n-react";
 import { $, toast, VIEWS, type View } from "./shared";
@@ -111,6 +111,7 @@ applyStaticI18n();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
 // 默认落在「系统状态」（HTML 初始高亮已同步），switchView("status") 即开采样。
 void initReactAITools().then(initReactSkills);
+setGoGrowthHandler(() => switchView("growth"));
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
 setCrashGoClean(() => switchView("clean"));

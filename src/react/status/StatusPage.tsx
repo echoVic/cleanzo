@@ -2,7 +2,7 @@ import { isWindows } from "../../platform";
 import * as React from "react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { AppUsage, BatteryStatus, StatusSample, SystemInfo } from "../../mygo";
+import type { AppUsage, BatteryStatus, GrowthState, StatusSample, SystemInfo } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -14,9 +14,11 @@ import { useFlip } from "../../ui/motion/flip";
 import { useIndicator } from "../../ui/motion/indicator";
 import { dur, EASE, play, scrollBehavior } from "../../ui/motion/motion";
 import { Leave, usePresence } from "../../ui/motion/presence";
-import { errText, toast } from "../../shared";
+import { errText, human, toast } from "../../shared";
 import { statusApi } from "./api";
 import { crashDumps, oversized } from "../list/crash-dumps";
+import { growthApi } from "../growth/api";
+import { growthHint } from "../growth/hint";
 import type { CrashDumpSummary } from "../../mygo";
 import {
   GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, isSparkShift, pickAlerts, quitErrCode,
@@ -238,9 +240,11 @@ export interface StatusPageProps {
   active: boolean;
   /** 告警 / 磁盘卡的「去清理」：与点侧栏「垃圾清理」同一条路径（main.ts 注入）。 */
   goClean: () => void;
+  /** 增长提示的「查看」：切到占用增长页（main.ts 注入）。 */
+  goGrowth: () => void;
 }
 
-export function StatusPage({ active, goClean }: StatusPageProps) {
+export function StatusPage({ active, goClean, goGrowth }: StatusPageProps) {
   const t = useT();
   const [sample, setSample] = React.useState<StatusSample | null>(null);
   const [sysInfo, setSysInfo] = React.useState<SystemInfo | null>(null);
@@ -258,6 +262,17 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
     if (!active) return;
     let live = true;
     void crashDumps().then((s) => { if (live) setCrashSum(s); });
+    return () => { live = false; };
+  }, [active]);
+
+  // 每次进入读最近的增长提醒；读取失败不显示。
+  const [growthState, setGrowthState] = React.useState<GrowthState | null>(null);
+  React.useEffect(() => {
+    if (!active) return;
+    let live = true;
+    void growthApi.state().then((s) => { if (live) setGrowthState(s); }).catch(() => {
+      if (live) setGrowthState(null);
+    });
     return () => { live = false; };
   }, [active]);
 
@@ -434,7 +449,9 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
 
   const alerts = error || !sample ? [] : pickAlerts(sample);
   const bigDumps = oversized(crashSum);
-  const alertItems = [...alerts.map((a) => ({ key: a.kind, a })), ...(bigDumps[0] ? [{ key: "crashDumps", a: null }] : [])];
+  const growthTop = growthHint(growthState, bigDumps.map((d) => d.app));
+  const alertItems = [...alerts.map((a) => ({ key: a.kind, a })),
+    ...(bigDumps[0] ? [{ key: "crashDumps", a: null }] : []), ...(growthTop ? [{ key: "growth", a: null }] : [])];
   const alertsP = usePresence(alertItems, (x) => x.key);
   const rowsP = usePresence(rows, (r) => r.key, !!sample && !error);
   const rowKeys = rows.map((r) => r.key);
@@ -478,13 +495,24 @@ export function StatusPage({ active, goClean }: StatusPageProps) {
                   {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
                 </button>
               )}
-            </div> : bigDumps[0] && <div className="st-callout warn" role="status">
+            </div> : key === "crashDumps" && bigDumps[0] ? <div className="st-callout warn" role="status">
               <CalloutIcon />
               <div className="st-callout-body">
                 {t("status.alert.crashDumps", { app: bigDumps[0].app, size: fmtMem(bigDumps[0].size) })}
               </div>
               <button className="btn ghost small" type="button" onClick={() => goCleanRef.current()}>
                 {t("status.disk.clean")}
+              </button>
+            </div> : key === "growth" && growthTop && <div className="st-callout warn" role="status">
+              <CalloutIcon />
+              <div className="st-callout-body">
+                {t(growthTop.window === "day" ? "status.alert.growthDay" : "status.alert.growthWeek", {
+                  app: growthTop.name, days: growthTop.days,
+                  size: growthTop.atLeast ? t("growth.atLeast", { size: human(growthTop.bytes) }) : human(growthTop.bytes),
+                })}
+              </div>
+              <button className="btn ghost small" type="button" onClick={goGrowth}>
+                {t("status.alert.viewGrowth")}
               </button>
             </div>}
           </Collapse>

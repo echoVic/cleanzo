@@ -1,11 +1,11 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { CustomFolder, Settings } from "../../mygo";
+import type { CustomFolder, GrowthConfig, Settings } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey, type LangPref } from "../../ui/i18n-react";
-import { errText, displayPath } from "../../shared";
+import { errText, displayPath, toast } from "../../shared";
 import { ruleName, getPref } from "../../i18n";
 import { markCleanStale } from "../clean/entry";
 import { settingsApi } from "./api";
@@ -53,6 +53,11 @@ export function SettingsPage({ callbacks, session }: Props) {
   const [locked, setLocked] = React.useState(false);
   const [picking, setPicking] = React.useState(false);
   const [langChanging, setLangChanging] = React.useState(false);
+  const [growth, setGrowth] = React.useState<GrowthConfig | null>(null);
+  const [growthBusy, setGrowthBusy] = React.useState(false);
+  const growthSeqRef = React.useRef(0);
+  const growthLoadingRef = React.useRef(false);
+  const growthSavingRef = React.useRef(false);
 
   const loadSeqRef = React.useRef(0);
   const permSeqRef = React.useRef(0);
@@ -119,6 +124,51 @@ export function SettingsPage({ callbacks, session }: Props) {
   }, [checkPermission]);
 
   React.useEffect(() => { void load(); }, [session, load]);
+
+  /** 每次进入重新读增长配置；保存期间由保存后的回读更新。 */
+  const loadGrowth = React.useCallback(async () => {
+    if (growthSavingRef.current) return;
+    const seq = ++growthSeqRef.current;
+    if (isWindows()) {
+      setGrowth(null);
+      growthLoadingRef.current = false;
+      setGrowthBusy(false);
+      return;
+    }
+    growthLoadingRef.current = true;
+    setGrowthBusy(true);
+    try {
+      const s = await settingsApi.growthState();
+      if (seq === growthSeqRef.current) setGrowth(s.supported ? s.config : null);
+    } catch {
+      if (seq === growthSeqRef.current) setGrowth(null);
+    } finally {
+      if (seq === growthSeqRef.current) {
+        growthLoadingRef.current = false;
+        setGrowthBusy(false);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => { void loadGrowth(); }, [session, loadGrowth]);
+
+  /** 保存成功后回读后端值，失败保留原值；序号防止旧读取覆盖新配置。 */
+  const saveGrowth = async (patch: Partial<GrowthConfig>) => {
+    if (!growth || growthLoadingRef.current || growthSavingRef.current) return;
+    growthSavingRef.current = true;
+    const seq = ++growthSeqRef.current;
+    setGrowthBusy(true);
+    try {
+      await settingsApi.saveGrowthConfig({ ...growth, ...patch });
+      const s = await settingsApi.growthState();
+      if (seq === growthSeqRef.current) setGrowth(s.supported ? s.config : null);
+    } catch (e) {
+      toast(errText(e), "err");
+    } finally {
+      growthSavingRef.current = false;
+      setGrowthBusy(false);
+    }
+  };
 
   // 窗口重新聚焦时重新检查权限（仅本页可见时）。
   React.useEffect(() => {
@@ -348,6 +398,39 @@ export function SettingsPage({ callbacks, session }: Props) {
           </div>
         </div>
       </section>
+
+      {growth && !isWindows() && (
+        <section className="settings-section">
+          <h3>{t("settings.growth")}</h3>
+          <div className="setting-block card">
+            <div className="setting-row setting-stack">
+              <label className="check">
+                <Checkbox checked={growth.enabled} disabled={growthBusy} onCheckedChange={(v) => void saveGrowth({ enabled: v === true, asked: true })} />
+                <span>{t("settings.growth.enable")}</span>
+              </label>
+              <p className="muted small">{t("settings.growth.enableNote")}</p>
+              <label className="check">
+                <Checkbox checked={growth.openAtLogin} disabled={growthBusy || !growth.enabled} onCheckedChange={(v) => void saveGrowth({ openAtLogin: v === true })} />
+                <span>{t("settings.growth.login")}</span>
+              </label>
+            </div>
+            <div className="setting-row">
+              <label className="setting-label" htmlFor="growth-daily">{t("settings.growth.daily")}</label>
+              <select id="growth-daily" className="select" value={growth.dailyGB} disabled={growthBusy}
+                onChange={(e) => void saveGrowth({ dailyGB: Number(e.target.value) })}>
+                {[1, 2, 5, 10].map((n) => <option key={n} value={n}>{n} GB</option>)}
+              </select>
+            </div>
+            <div className="setting-row">
+              <label className="setting-label" htmlFor="growth-weekly">{t("settings.growth.weekly")}</label>
+              <select id="growth-weekly" className="select" value={growth.weeklyGB} disabled={growthBusy}
+                onChange={(e) => void saveGrowth({ weeklyGB: Number(e.target.value) })}>
+                {[5, 10, 20, 50].map((n) => <option key={n} value={n}>{n} GB</option>)}
+              </select>
+            </div>
+          </div>
+        </section>
+      )}
 
       <PermissionsSection access={access} permissionKey={permissionKey as DictKey} permissionError={permissionError}
         onOpen={() => { void settingsApi.openFullDiskAccessSettings().catch((e) => setPermissionError(e)); }} />

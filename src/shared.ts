@@ -35,6 +35,8 @@ function errText(e: unknown): string {
         "folder-dup": "settings.folderDup",
         "folder-missing": "settings.folderMissing",
         "group-unknown": "settings.groupUnknown",
+        "growth-login": "settings.growth.loginFail",
+        "growth-threshold": "settings.growth.thresholdBad",
       };
       const entry = key[parsed.code];
       if (entry) {

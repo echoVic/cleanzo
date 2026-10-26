@@ -260,3 +260,248 @@ test("状态更新重新取卸载差额，过期请求不会盖掉新明细", as
     expect(page.text()).toContain("卸载能移走 5.0 GB；另有 26.0 GB");
   } finally { page.close(); }
 });
+
+import { growthHint } from "../src/react/growth/hint";
+
+test("状态页提示：监控开着时取最大的一条；崩溃转储提示已覆盖的同一 App 不重复", () => {
+  const alert = (name: string, bytes: number, folder: string) =>
+    ({ key: "app:" + name, name, window: "day", days: 1, bytes, atLeast: false, folder, total: bytes, at: 1 });
+  const on = { ...state({}).config, enabled: true };
+  const s = state({ config: on, alerts: [alert("ToDesk", 5 * GB, "/Library/Application Support/ToDesk/dumps"),
+    alert("Codex", 40 * GB, "/Users/u/Library/Application Support/Codex/Crashpad")] });
+  expect(growthHint(s, [])?.name).toBe("Codex");
+  expect(growthHint(s, ["Codex"])?.name).toBe("ToDesk");
+  expect(growthHint(state({ alerts: s.alerts }), [])).toBeNull(); // 监控关着
+  expect(growthHint(null, [])).toBeNull();
+});
+
+test("状态页提示：最大的提醒已被忽略时返回下一条，全部忽略时不提示", () => {
+  const alerts = [
+    { key: "app:codex", name: "Codex", window: "day", days: 1, bytes: 40 * GB, atLeast: false, folder: "/Codex/cache", total: 40 * GB, at: 1 },
+    { key: "app:todesk", name: "ToDesk", window: "week", days: 5, bytes: 5 * GB, atLeast: true, folder: "/ToDesk/dumps", total: 10 * GB, at: 1 },
+  ];
+  const config = { ...state({}).config, enabled: true, ignored: ["app:codex"] };
+  const s = state({ config, alerts });
+  expect(growthHint(s, [])).toBe(alerts[1]);
+  expect(growthHint(state({ config: { ...config, ignored: ["app:codex", "app:todesk"] }, alerts }), [])).toBeNull();
+  expect(s.alerts).toEqual(alerts); // 不改后端返回的提醒顺序。
+});
+
+test("状态页提示：不支持时不显示，Crashpad 去重忽略大小写并识别路径边界", () => {
+  const alert = { key: "app:codex", name: "Codex", window: "day", days: 1, bytes: GB, atLeast: false,
+    folder: "C:\\Codex\\crashpad\\reports", total: GB, at: 1 };
+  const config = { ...state({}).config, enabled: true };
+  expect(growthHint(state({ supported: false, config, alerts: [alert] }), [])).toBeNull();
+  expect(growthHint(state({ config, alerts: [alert] }), ["CODEX"])).toBeNull();
+  expect(growthHint(state({ config, alerts: [{ ...alert, folder: "/Codex/CrashpadBackup" }] }), ["Codex"])?.name).toBe("Codex");
+  expect(growthHint(state({ config }), [])).toBeNull();
+});
+
+test("增长设置错误码：开机启动错误带名称，阈值错误有中英文文案", async () => {
+  const { errText } = await import("../src/shared");
+  try {
+    for (const [lang, login, threshold] of [
+      ["zh", "无法设置开机启动：系统拒绝", "提醒阈值无效"],
+      ["en", "Couldn't set Open at Login: 系统拒绝", "Invalid alert threshold"],
+    ] as const) {
+      storage.set("cleanzo.lang", lang);
+      expect(errText(new Error(JSON.stringify({ code: "growth-login", args: ["系统拒绝"] })))).toBe(login);
+      expect(errText(JSON.stringify({ code: "growth-threshold" }))).toBe(threshold);
+    }
+  } finally { storage.set("cleanzo.lang", "zh"); }
+});
+
+// 执行设置页实际的 effect 和保存回调，验证后端回读、禁用状态及失败回退。
+async function growthSettingsHarness(snapshot: GrowthState) {
+  const React = await import("react");
+  const { SettingsPage } = await import("../src/react/settings/SettingsPage");
+  const { settingsApi } = await import("../src/react/settings/api");
+  const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
+  const pending: (() => void)[] = [];
+  const saved: GrowthState["config"][] = [];
+  let cursor = 0;
+  let dirty = true;
+  let session = 1;
+  let reads = 0;
+  let tree: React.ReactNode;
+  let saveError: Error | null = null;
+  let readError = false;
+  let gate: ReturnType<typeof deferred<void>> | null = null;
+  const toast = { textContent: "", className: "", classList: { remove() {} } };
+  const previous = { document: globalThis.document, window: globalThis.window };
+  const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
+    !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
+  const spies = [
+    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+      const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial };
+      return [slot.value, (value: unknown) => {
+        const next = typeof value === "function" ? value(slot.value) : value;
+        if (!Object.is(next, slot.value)) { slot.value = next; dirty = true; }
+      }] as never;
+    }),
+    spyOn(React, "useRef").mockImplementation((initial: unknown) => {
+      const slot = slots[cursor++] ??= { value: { current: initial } };
+      return slot.value as never;
+    }),
+    spyOn(React, "useCallback").mockImplementation((fn: unknown, deps: readonly unknown[]) => {
+      const slot = slots[cursor++] ??= {};
+      if (changed(slot.deps, deps)) { slot.value = fn; slot.deps = deps; }
+      return slot.value as never;
+    }),
+    spyOn(React, "useEffect").mockImplementation((effect, deps) => {
+      const slot = slots[cursor++] ??= {};
+      if (changed(slot.deps, deps)) {
+        slot.deps = deps;
+        pending.push(() => { slot.cleanup?.(); slot.cleanup = effect() || undefined; });
+      }
+    }),
+    spyOn(React, "useSyncExternalStore").mockImplementation((_subscribe, get) => get()),
+    spyOn(settingsApi, "getSettings").mockResolvedValue({ disabledGroups: [], ignored: [], custom: [] }),
+    spyOn(settingsApi, "info").mockResolvedValue({ version: "test" } as never),
+    spyOn(settingsApi, "fullDiskAccess").mockResolvedValue(true),
+    spyOn(settingsApi, "growthState").mockImplementation(async () => {
+      reads++;
+      if (readError) throw new Error("read failed");
+      return snapshot;
+    }),
+    spyOn(settingsApi, "saveGrowthConfig").mockImplementation(async (config) => {
+      saved.push(config);
+      if (gate) await gate.promise;
+      if (saveError) throw saveError;
+      snapshot = { ...snapshot, config: { ...config, openAtLogin: config.enabled && config.openAtLogin } };
+    }),
+  ];
+  Object.assign(globalThis, {
+    document: { querySelectorAll: () => [], querySelector: (selector: string) => selector === "#toast" ? toast : null },
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout: () => 0 },
+  });
+  function nodes(node: React.ReactNode): React.ReactElement<Record<string, any>>[] {
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    if (!React.isValidElement<Record<string, any>>(node)) return [];
+    return [node, ...nodes(node.props.children)];
+  }
+  return {
+    saved, toast,
+    get reads() { return reads; },
+    checkbox(label: string) {
+      const row = nodes(tree).find((el) => el.type === "label" && nodes(el).some((child) => child.type === "span" && child.props.children === label));
+      return row ? nodes(row).find((el) => "onCheckedChange" in el.props)?.props : undefined;
+    },
+    select(id: string) { return nodes(tree).find((el) => el.type === "select" && el.props.id === id)?.props; },
+    headings() { return nodes(tree).filter((el) => el.type === "h3").map((el) => el.props.children); },
+    holdSave() { gate = deferred<void>(); return gate; },
+    failSave(error: Error) { saveError = error; },
+    failRead() { readError = true; },
+    reenter(next: GrowthState) { snapshot = next; session++; dirty = true; },
+    async settle() {
+      for (let i = 0; i < 12; i++) {
+        if (dirty) {
+          dirty = false; cursor = 0;
+          tree = SettingsPage({ callbacks: { changeLanguage: async () => {} }, session });
+          for (const effect of pending.splice(0)) effect();
+        }
+        await Promise.resolve();
+      }
+    },
+    close() {
+      for (const slot of slots) slot.cleanup?.();
+      for (const spy of spies) spy.mockRestore();
+      Object.assign(globalThis, previous);
+    },
+  };
+}
+
+test("增长设置：关监控后回读后端的开机启动值，保存期间锁住控件", async () => {
+  const config = { ...state({}).config, enabled: true, openAtLogin: true, ignored: ["app:codex"] };
+  const page = await growthSettingsHarness(state({ config }));
+  try {
+    await page.settle();
+    expect(page.headings().slice(0, 3)).toEqual([t("settings.general"), t("nav.clean"), t("settings.growth")]);
+    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(false);
+    expect(page.select("growth-daily")?.children.map((option: any) => option.props.value)).toEqual([1, 2, 5, 10]);
+    expect(page.select("growth-weekly")?.children.map((option: any) => option.props.value)).toEqual([5, 10, 20, 50]);
+    const gate = page.holdSave();
+    page.checkbox(t("settings.growth.enable"))!.onCheckedChange(false);
+    await page.settle();
+    expect(page.saved).toEqual([{ ...config, enabled: false, asked: true }]);
+    expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);
+    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+    expect(page.select("growth-daily")?.disabled).toBe(true);
+    gate.resolve();
+    await page.settle();
+    expect(page.reads).toBe(2);
+    expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(false);
+    expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(false);
+    expect(page.checkbox(t("settings.growth.login"))?.checked).toBe(false);
+    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+  } finally { page.close(); }
+});
+
+test("增长设置：保存失败保留原值并通过 errText 显示错误 toast", async () => {
+  for (const code of ["growth-login", "growth-threshold"]) {
+    const page = await growthSettingsHarness(state({ config: { ...state({}).config, enabled: true } }));
+    try {
+      await page.settle();
+      page.failSave(new Error(JSON.stringify({ code, args: ["拒绝"] })));
+      if (code === "growth-login") page.checkbox(t("settings.growth.login"))!.onCheckedChange(true);
+      else page.select("growth-daily")!.onChange({ target: { value: "5" } });
+      await page.settle();
+      expect(page.checkbox(t("settings.growth.login"))?.checked).toBe(false);
+      expect(page.select("growth-daily")?.value).toBe(2);
+      expect(page.select("growth-daily")?.disabled).toBe(false);
+      expect(page.toast.textContent).toBe(code === "growth-login" ? "无法设置开机启动：拒绝" : "提醒阈值无效");
+      expect(page.toast.className).toBe("toast show err");
+      expect(page.reads).toBe(1);
+    } finally { page.close(); }
+  }
+});
+
+test("增长设置：每次进入重新读取，不支持、Windows 或读取失败时隐藏", async () => {
+  const { setPlatformForTest } = await import("../src/platform");
+  const page = await growthSettingsHarness(state({}));
+  try {
+    await page.settle();
+    expect(page.headings()).toContain(t("settings.growth"));
+    page.reenter(state({ supported: false }));
+    await page.settle();
+    expect(page.headings()).not.toContain(t("settings.growth"));
+    setPlatformForTest("win32");
+    page.reenter(state({}));
+    await page.settle();
+    expect(page.headings()).not.toContain(t("settings.growth"));
+    expect(page.reads).toBe(2);
+    setPlatformForTest("darwin");
+    page.failRead();
+    page.reenter(state({}));
+    await page.settle();
+    expect(page.headings()).not.toContain(t("settings.growth"));
+  } finally { page.close(); setPlatformForTest(undefined); }
+});
+
+test("增长设置：重新进入时等待配置刷新，改阈值不会覆盖刚忽略的 App", async () => {
+  const config = { ...state({}).config, enabled: true };
+  const fresh = { ...config, ignored: ["app:codex"] };
+  const page = await growthSettingsHarness(state({ config }));
+  try {
+    await page.settle();
+    const { settingsApi } = await import("../src/react/settings/api");
+    const pending = deferred<GrowthState>();
+    spyOn(settingsApi, "growthState").mockImplementationOnce(() => pending.promise);
+    page.reenter(state({ config: fresh }));
+    await page.settle();
+    expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);
+    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+    expect(page.select("growth-daily")?.disabled).toBe(true);
+    expect(page.select("growth-weekly")?.disabled).toBe(true);
+    page.select("growth-daily")!.onChange({ target: { value: "5" } });
+    await page.settle();
+    expect(page.saved).toEqual([]);
+    pending.resolve(state({ config: fresh }));
+    await page.settle();
+    expect(page.select("growth-daily")?.disabled).toBe(false);
+    page.select("growth-daily")!.onChange({ target: { value: "5" } });
+    await page.settle();
+    expect(page.saved).toEqual([{ ...fresh, dailyGB: 5 }]);
+    expect(page.select("growth-daily")?.value).toBe(5);
+  } finally { page.close(); }
+});
