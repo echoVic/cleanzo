@@ -34,12 +34,28 @@ var GrowthUpdated = mygo.NewEvent[GrowthStatus]("growth:updated")
 // menu item was clicked.
 var GrowthFocus = mygo.NewEvent[string]("growth:focus")
 
+// growthLoginItem tells whether the system has Cleanzo as a login item, and
+// whether it can say so at all: it cannot before the app runs, as in a test.
+// Tests replace it.
+var growthLoginItem = func() (on, known bool) {
+	if !mygo.App.IsReady() {
+		return false, false
+	}
+	return mygo.App.OpenAtLogin(), true
+}
+
 // GrowthState returns everything the growth page shows.
 func (Cleaner) GrowthState() GrowthState {
 	dir := growthDir()
 	st := GrowthState{Supported: growthSupported(), Config: loadGrowthConfig(dir), Status: growth.status(), Apps: []GrowthApp{}, Alerts: []GrowthAlert{}}
 	if !st.Supported {
 		return st
+	}
+	// The login item is the system's: the user can remove or disable it in
+	// System Settings, so the switch shows what the system has, not what was
+	// saved (spec §七.6).
+	if on, known := growthLoginItem(); known {
+		st.Config.OpenAtLogin = on
 	}
 	history := loadGrowthSnapshots(dir)
 	st.Records = len(history)
@@ -78,9 +94,9 @@ func (Cleaner) SaveGrowthConfig(c GrowthConfig) error {
 	if err := saveGrowthConfig(dir, clean); err != nil {
 		return err
 	}
-	if err := applyGrowthLifecycle(clean); err != nil {
-		return err
-	}
+	// A login item that cannot be changed does not undo the rest: the settings
+	// are saved, so the monitor follows them, and the page hears the error last.
+	applyErr := growthApply(clean)
 	if clean.Enabled && !was {
 		go growth.tick(true)
 	}
@@ -88,5 +104,5 @@ func (Cleaner) SaveGrowthConfig(c GrowthConfig) error {
 		growth.setNext(time.Time{}) // nothing is planned while monitoring is off
 	}
 	growth.changed()
-	return nil
+	return applyErr
 }
