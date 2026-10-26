@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import type { GrowthApp, GrowthState, UninstallDetail } from "../src/mygo";
+import type { GrowthApp, GrowthConfig, GrowthConfigPatch, GrowthState, UninstallDetail } from "../src/mygo";
 import { t } from "../src/i18n";
 
 const storage = new Map([["cleanzo.lang", "zh"]]);
@@ -94,6 +94,7 @@ async function pageHarness(focusKey: string | null = null) {
   const timers = new Map<number, () => void>();
   const requests: ReturnType<typeof deferred<GrowthState>>[] = [];
   const details: ReturnType<typeof deferred<UninstallDetail>>[] = [];
+  const saves: GrowthConfigPatch[] = [];
   let updated = () => {};
   let cursor = 0;
   let dirty = true;
@@ -137,6 +138,7 @@ async function pageHarness(focusKey: string | null = null) {
       updated = () => fn({ running: false, lastAt: 0, nextAt: 0, fda: true, notifications: "allowed" });
       return () => {};
     }),
+    spyOn(growthApi, "saveConfig").mockImplementation(async (patch) => { saves.push(patch); }),
   ];
   const previous = {
     document: globalThis.document, window: globalThis.window,
@@ -155,8 +157,10 @@ async function pageHarness(focusKey: string | null = null) {
     cancelAnimationFrame: (id: number) => frames.delete(id), CSS: { escape: (key: string) => key },
   });
   return {
-    requests, details, timers,
+    requests, details, timers, saves,
     updated: () => updated(),
+    /** 点文字为 label 的按钮。 */
+    click(label: string) { nodes(tree).find((el) => el.props.children === label && el.props.onClick)!.props.onClick(); },
     get scrolled() { return scrolled; },
     async settle() {
       for (let i = 0; i < 10; i++) {
@@ -312,20 +316,34 @@ test("增长设置错误码：开机启动错误带名称，阈值错误有中�
 });
 
 // 执行设置页实际的 effect 和保存回调，验证后端回读、禁用状态及失败回退。
+// 后端合并补丁的方式（与 Go 的 GrowthConfigPatch.apply 一致）。
+function mergePatch(c: GrowthConfig, p: GrowthConfigPatch): GrowthConfig {
+  const key = (k: string | undefined) => (k ?? "").trim().toLowerCase();
+  let ignored = c.ignored;
+  if (key(p.ignore) && !ignored.includes(key(p.ignore))) ignored = [...ignored, key(p.ignore)];
+  ignored = ignored.filter((k) => k !== key(p.unignore));
+  const enabled = p.enabled ?? c.enabled;
+  return { enabled, openAtLogin: enabled && (p.openAtLogin ?? c.openAtLogin), asked: p.asked ?? c.asked,
+    dailyGB: p.dailyGB ?? c.dailyGB, weeklyGB: p.weeklyGB ?? c.weeklyGB, ignored };
+}
+
 async function growthSettingsHarness(snapshot: GrowthState) {
   const React = await import("react");
   const { SettingsPage } = await import("../src/react/settings/SettingsPage");
   const { settingsApi } = await import("../src/react/settings/api");
+  const { growthApi } = await import("../src/react/growth/api");
   const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
   const pending: (() => void)[] = [];
-  const saved: GrowthState["config"][] = [];
+  const saved: GrowthConfigPatch[] = [];
   let cursor = 0;
   let dirty = true;
   let session = 1;
   let reads = 0;
   let tree: React.ReactNode;
   let saveError: Error | null = null;
+  let saveApplied = false;
   let readError = false;
+  let updated = () => {};
   let gate: ReturnType<typeof deferred<void>> | null = null;
   const toast = { textContent: "", className: "", classList: { remove() {} } };
   const previous = { document: globalThis.document, window: globalThis.window };
@@ -364,11 +382,16 @@ async function growthSettingsHarness(snapshot: GrowthState) {
       if (readError) throw new Error("read failed");
       return snapshot;
     }),
-    spyOn(settingsApi, "saveGrowthConfig").mockImplementation(async (config) => {
-      saved.push(config);
+    spyOn(settingsApi, "saveGrowthConfig").mockImplementation(async (patch) => {
+      saved.push(patch);
       if (gate) await gate.promise;
-      if (saveError) throw saveError;
-      snapshot = { ...snapshot, config: { ...config, openAtLogin: config.enabled && config.openAtLogin } };
+      if (saveError && !saveApplied) throw saveError;
+      snapshot = { ...snapshot, config: mergePatch(snapshot.config, patch) };
+      if (saveError) throw saveError; // 开机启动出错：设置已保存并生效，错误最后返回
+    }),
+    spyOn(growthApi, "onUpdated").mockImplementation((fn) => {
+      updated = () => fn(snapshot.status);
+      return () => { updated = () => {}; };
     }),
   ];
   Object.assign(globalThis, {
@@ -390,9 +413,14 @@ async function growthSettingsHarness(snapshot: GrowthState) {
     select(id: string) { return nodes(tree).find((el) => el.type === "select" && el.props.id === id)?.props; },
     headings() { return nodes(tree).filter((el) => el.type === "h3").map((el) => el.props.children); },
     holdSave() { gate = deferred<void>(); return gate; },
-    failSave(error: Error) { saveError = error; },
+    /** applied：像开机启动出错那样，设置已保存并生效后才返回错误。 */
+    failSave(error: Error, applied = false) { saveError = error; saveApplied = applied; },
     failRead() { readError = true; },
     reenter(next: GrowthState) { snapshot = next; session++; dirty = true; },
+    /** 别处（菜单栏、增长页）改了后端配置。 */
+    backend(change: (s: GrowthState) => GrowthState) { snapshot = change(snapshot); },
+    /** Go 广播 growthUpdated。 */
+    updated: () => updated(),
     async settle() {
       for (let i = 0; i < 12; i++) {
         if (dirty) {
@@ -423,7 +451,7 @@ test("增长设置：关监控后回读后端的开机启动值，保存期间�
     const gate = page.holdSave();
     page.checkbox(t("settings.growth.enable"))!.onCheckedChange(false);
     await page.settle();
-    expect(page.saved).toEqual([{ ...config, enabled: false, asked: true }]);
+    expect(page.saved).toEqual([{ enabled: false, asked: true }]);
     expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);
     expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
     expect(page.select("growth-daily")?.disabled).toBe(true);
@@ -451,7 +479,7 @@ test("增长设置：保存失败保留原值并通过 errText 显示错误 toas
       expect(page.select("growth-daily")?.disabled).toBe(false);
       expect(page.toast.textContent).toBe(code === "growth-login" ? "无法设置开机启动：拒绝" : "提醒阈值无效");
       expect(page.toast.className).toBe("toast show err");
-      expect(page.reads).toBe(1);
+      expect(page.reads).toBe(2); // 失败也回读一次
     } finally { page.close(); }
   }
 });
@@ -501,7 +529,100 @@ test("增长设置：重新进入时等待配置刷新，改阈值不会覆盖�
     expect(page.select("growth-daily")?.disabled).toBe(false);
     page.select("growth-daily")!.onChange({ target: { value: "5" } });
     await page.settle();
-    expect(page.saved).toEqual([{ ...fresh, dailyGB: 5 }]);
+    expect(page.saved).toEqual([{ dailyGB: 5 }]);
     expect(page.select("growth-daily")?.value).toBe(5);
+  } finally { page.close(); }
+});
+
+test("增长设置：每个控件只发自己改的字段，不带整份旧配置", async () => {
+  const page = await growthSettingsHarness(state({ config: { ...state({}).config, enabled: true, ignored: ["app:codex"] } }));
+  try {
+    await page.settle();
+    page.select("growth-daily")!.onChange({ target: { value: "5" } });
+    await page.settle();
+    page.select("growth-weekly")!.onChange({ target: { value: "20" } });
+    await page.settle();
+    page.checkbox(t("settings.growth.login"))!.onCheckedChange(true);
+    await page.settle();
+    page.checkbox(t("settings.growth.enable"))!.onCheckedChange(false);
+    await page.settle();
+    // 开关同时记下「问过了」，与增长页的打开按钮一致。
+    expect(page.saved).toEqual([{ dailyGB: 5 }, { weeklyGB: 20 }, { openAtLogin: true }, { enabled: false, asked: true }]);
+  } finally { page.close(); }
+});
+
+test("增长设置：后端广播时重读，保存期间到达的广播在保存后补读", async () => {
+  const page = await growthSettingsHarness(state({ config: { ...state({}).config, enabled: true } }));
+  const off = (s: GrowthState) => ({ ...s, config: { ...s.config, enabled: false, openAtLogin: false } });
+  try {
+    await page.settle();
+    expect(page.reads).toBe(1);
+    // 空闲时：菜单栏关掉监控，本页马上跟上。
+    page.backend(off);
+    page.updated();
+    await page.settle();
+    expect(page.reads).toBe(2);
+    expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(false);
+    // 保存进行中：广播先排队，保存和回读结束后再补读一次。
+    page.backend((s) => ({ ...s, config: { ...s.config, enabled: true } }));
+    page.updated();
+    await page.settle();
+    const gate = page.holdSave();
+    page.select("growth-daily")!.onChange({ target: { value: "5" } });
+    await page.settle();
+    page.backend(off);
+    page.updated();
+    await page.settle();
+    expect(page.reads).toBe(3);
+    gate.resolve();
+    await page.settle();
+    expect(page.reads).toBe(5);
+    expect(page.saved).toEqual([{ dailyGB: 5 }]);
+    expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(false);
+    expect(page.select("growth-daily")?.value).toBe(5);
+    expect(page.select("growth-daily")?.disabled).toBe(false);
+  } finally { page.close(); }
+});
+
+test("增长设置：开机启动出错时设置已保存并生效，回读后显示后端的值", async () => {
+  const page = await growthSettingsHarness(state({}));
+  try {
+    await page.settle();
+    page.failSave(new Error(JSON.stringify({ code: "growth-login", args: ["拒绝"] })), true);
+    page.checkbox(t("settings.growth.enable"))!.onCheckedChange(true);
+    await page.settle();
+    expect(page.saved).toEqual([{ enabled: true, asked: true }]);
+    expect(page.toast.textContent).toBe("无法设置开机启动：拒绝");
+    expect(page.reads).toBe(2);
+    expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(true);
+    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(false);
+  } finally { page.close(); }
+});
+
+test("增长页只发改动的字段：打开、先不用、关着时打开、忽略与取消忽略", async () => {
+  const page = await pageHarness();
+  const latest = (s: GrowthState) => page.requests[page.requests.length - 1]!.resolve(s);
+  const off = { ...state({}).config, asked: true };
+  try {
+    await page.settle();
+    latest(state({ records: 2, apps: [app({})] }));
+    await page.settle();
+    page.click(t("growth.optin.enable"));
+    await page.settle();
+    page.click(t("growth.optin.later"));
+    await page.settle();
+    latest(state({ records: 2, apps: [app({})], config: off }));
+    await page.settle();
+    page.click(t("growth.off.enable"));
+    await page.settle();
+    page.openRow();
+    await page.settle();
+    page.click(t("growth.ignore"));
+    await page.settle();
+    latest(state({ records: 2, apps: [app({ ignored: true })], config: { ...off, ignored: ["app:x"] } }));
+    await page.settle();
+    page.click(t("growth.unignore"));
+    await page.settle();
+    expect(page.saves).toEqual([{ enabled: true, asked: true }, { asked: true }, { enabled: true }, { ignore: "app:x" }, { unignore: "app:x" }]);
   } finally { page.close(); }
 });

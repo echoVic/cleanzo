@@ -310,8 +310,7 @@ func TestSaveGrowthConfigGoesOnAfterALoginError(t *testing.T) {
 		// A low battery holds the baseline back, so the tick is seen and nothing measures.
 		growthPower = func(context.Context) (bool, int) { asked <- struct{}{}; return true, 19 }
 
-		on := defaultGrowthConfig()
-		on.Enabled, on.OpenAtLogin = true, true
+		on := GrowthConfigPatch{Enabled: new(true), OpenAtLogin: new(true)}
 		if err := (Cleaner{}).SaveGrowthConfig(on); !errors.Is(err, loginErr) {
 			t.Fatalf("SaveGrowthConfig returned %v, want the login error", err)
 		}
@@ -351,7 +350,7 @@ func TestSaveGrowthConfigGoesOnAfterALoginError(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := (Cleaner{}).SaveGrowthConfig(defaultGrowthConfig()); !errors.Is(err, loginErr) {
+		if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(false)}); !errors.Is(err, loginErr) {
 			t.Fatalf("SaveGrowthConfig returned %v, want the login error", err)
 		}
 		if loadGrowthConfig(growthDir()).Enabled {

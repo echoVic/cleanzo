@@ -1,6 +1,6 @@
 import * as React from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
-import type { GrowthApp, GrowthConfig, GrowthState, UninstallDetail } from "../../mygo";
+import type { GrowthApp, GrowthConfigPatch, GrowthState, UninstallDetail } from "../../mygo";
 import { Badge } from "../../ui/components/badge";
 import { Button } from "../../ui/components/button";
 import { EmptyGuide } from "../../ui/components/empty-guide";
@@ -77,9 +77,8 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
     return () => { current = false; };
   }, [open, state, details]);
 
-  const save = async (patch: Partial<GrowthConfig>) => {
-    if (!state) return;
-    try { await growthApi.saveConfig({ ...state.config, ...patch }); await load(); }
+  const save = async (patch: GrowthConfigPatch) => {
+    try { await growthApi.saveConfig(patch); await load(); }
     catch (e) { toast(errText(e), "err"); }
   };
   const measure = async () => {
@@ -87,11 +86,7 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
     catch (e) { toast(errText(e), "err"); }
   };
   const reveal = (path: string) => growthApi.reveal(path).catch((e) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
-  const toggleIgnore = (a: GrowthApp) => {
-    if (!state) return;
-    const ignored = a.ignored ? state.config.ignored.filter((k) => k !== a.key) : [...state.config.ignored, a.key];
-    void save({ ignored });
-  };
+  const toggleIgnore = (a: GrowthApp) => void save(a.ignored ? { unignore: a.key } : { ignore: a.key });
 
   const view = growthView(state);
   if (!state || view === "unsupported") return <div className="cz-react" />;

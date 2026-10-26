@@ -249,7 +249,18 @@ function createRuntime(): Runtime {
         folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
     }),
     "Cleaner.GrowthMeasureNow": async () => {},
-    "Cleaner.SaveGrowthConfig": async (c) => { growthConfig = structuredClone(c); },
+    // 和 Go 一样把补丁合并进当前配置：只改给了的字段，忽略项按小写增删。
+    "Cleaner.SaveGrowthConfig": async (p) => {
+      const key = (k: string | undefined) => (k ?? "").trim().toLowerCase();
+      let ignored = growthConfig.ignored;
+      if (key(p.ignore) && !ignored.includes(key(p.ignore))) ignored = [...ignored, key(p.ignore)];
+      ignored = ignored.filter((k) => k !== key(p.unignore));
+      const enabled = p.enabled ?? growthConfig.enabled;
+      growthConfig = {
+        enabled, openAtLogin: enabled && (p.openAtLogin ?? growthConfig.openAtLogin), asked: p.asked ?? growthConfig.asked,
+        dailyGB: p.dailyGB ?? growthConfig.dailyGB, weeklyGB: p.weeklyGB ?? growthConfig.weeklyGB, ignored,
+      };
+    },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
       await emit(sample());
       for (;;) { await wait(2000); await emit(sample()); }

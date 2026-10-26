@@ -323,6 +323,24 @@ export interface GrowthConfig {
   asked: boolean;
 }
 
+/**
+ * GrowthConfigPatch is a change to the monitor's settings: only the fields
+ * that are set change. A page sends what the user changed and nothing else,
+ * so a copy of the settings it loaded earlier can never undo a change made
+ * since, such as the menu bar turning monitoring off.
+ */
+export interface GrowthConfigPatch {
+  enabled?: boolean;
+  openAtLogin?: boolean;
+  dailyGB?: number;
+  weeklyGB?: number;
+  asked?: boolean;
+  /** an owner key to ignore */
+  ignore?: string;
+  /** an owner key to stop ignoring */
+  unignore?: string;
+}
+
 /** GrowthDelta is growth over a window, a lower bound when AtLeast. */
 export interface GrowthDelta {
   bytes: number;
@@ -968,12 +986,13 @@ export const Cleaner = {
     return call("Cleaner.RevealInFinder", path);
   },
   /**
-   * SaveGrowthConfig validates and saves the monitor's settings, then applies
-   * them: the menu bar icon, staying open without windows, the login item.
-   * Turning monitoring on takes a baseline record at once.
+   * SaveGrowthConfig changes the monitor's settings as p asks, validates and
+   * saves them, then applies them: the menu bar icon, staying open without
+   * windows, the login item. Turning monitoring on takes a baseline record at
+   * once.
    */
-  saveGrowthConfig(c: GrowthConfig): Promise<void> {
-    return call("Cleaner.SaveGrowthConfig", c);
+  saveGrowthConfig(p: GrowthConfigPatch): Promise<void> {
+    return call("Cleaner.SaveGrowthConfig", p);
   },
   /** SaveSettings validates and persists the settings. */
   saveSettings(s: Settings): Promise<void> {

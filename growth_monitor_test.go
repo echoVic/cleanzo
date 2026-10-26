@@ -242,8 +242,7 @@ func TestSaveGrowthConfigWaitsForTheConfigLock(t *testing.T) {
 	now, size := t0, 10*gb
 	var sent []GrowthAlert
 	stubGrowth(t, &now, &size, &sent)
-	c := defaultGrowthConfig() // monitoring stays off, so nothing measures
-	c.DailyGB = 5
+	c := GrowthConfigPatch{DailyGB: new(5.0)} // monitoring stays off, so nothing measures
 	growthConfigMu.Lock()
 	finished := make(chan error, 1)
 	go func() { finished <- Cleaner{}.SaveGrowthConfig(c) }()
@@ -571,13 +570,13 @@ func TestSaveGrowthConfigClearsThePlanWhenOff(t *testing.T) {
 	if err := saveGrowthConfig(growthDir(), on); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Cleaner{}).SaveGrowthConfig(on); err != nil {
+	if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(true)}); err != nil {
 		t.Fatal(err)
 	}
 	if got := growth.status().NextAt; got != planned.Unix() {
 		t.Errorf("a save that keeps monitoring on moved the plan to %d", got)
 	}
-	if err := (Cleaner{}).SaveGrowthConfig(defaultGrowthConfig()); err != nil {
+	if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(false)}); err != nil {
 		t.Fatal(err)
 	}
 	if got := growth.status().NextAt; got != 0 {
@@ -594,7 +593,7 @@ func TestGrowthSettingsAreRefusedWhereUnsupported(t *testing.T) {
 		t.Skip("this platform has the growth monitor")
 	}
 	setHome(t, t.TempDir())
-	if err := (Cleaner{}).SaveGrowthConfig(defaultGrowthConfig()); err == nil {
+	if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(true)}); err == nil {
 		t.Error("SaveGrowthConfig must refuse")
 	}
 	if _, err := os.Stat(growthDir()); !errors.Is(err, fs.ErrNotExist) {

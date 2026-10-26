@@ -1,6 +1,6 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { CustomFolder, GrowthConfig, Settings } from "../../mygo";
+import type { CustomFolder, GrowthConfig, GrowthConfigPatch, Settings } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
@@ -8,6 +8,7 @@ import { useT, type DictKey, type LangPref } from "../../ui/i18n-react";
 import { errText, displayPath, toast } from "../../shared";
 import { ruleName, getPref } from "../../i18n";
 import { markCleanStale } from "../clean/entry";
+import { growthApi } from "../growth/api";
 import { settingsApi } from "./api";
 import {
   GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue,
@@ -58,6 +59,8 @@ export function SettingsPage({ callbacks, session }: Props) {
   const growthSeqRef = React.useRef(0);
   const growthLoadingRef = React.useRef(false);
   const growthSavingRef = React.useRef(false);
+  /** 保存期间来的重读（重进页面、后端广播）：保存结束后补读一次。 */
+  const growthReloadRef = React.useRef(false);
 
   const loadSeqRef = React.useRef(0);
   const permSeqRef = React.useRef(0);
@@ -125,9 +128,9 @@ export function SettingsPage({ callbacks, session }: Props) {
 
   React.useEffect(() => { void load(); }, [session, load]);
 
-  /** 每次进入重新读增长配置；保存期间由保存后的回读更新。 */
+  /** 每次进入、后端广播变化时重新读增长配置；保存期间的重读排队，保存结束后补上。 */
   const loadGrowth = React.useCallback(async () => {
-    if (growthSavingRef.current) return;
+    if (growthSavingRef.current) { growthReloadRef.current = true; return; }
     const seq = ++growthSeqRef.current;
     if (isWindows()) {
       setGrowth(null);
@@ -151,23 +154,31 @@ export function SettingsPage({ callbacks, session }: Props) {
   }, []);
 
   React.useEffect(() => { void loadGrowth(); }, [session, loadGrowth]);
+  // 菜单栏关掉监控、增长页改了设置都会广播：重读，免得本页拿着旧值显示。
+  React.useEffect(() => growthApi.onUpdated(() => { void loadGrowth(); }), [loadGrowth]);
 
-  /** 保存成功后回读后端值，失败保留原值；序号防止旧读取覆盖新配置。 */
-  const saveGrowth = async (patch: Partial<GrowthConfig>) => {
+  /**
+   * 只发这个控件改的字段；保存后回读后端值，失败也回读（开机启动出错时其余设置已保存并生效）。
+   * 读不到时保留原值；序号防止旧读取覆盖新配置。
+   */
+  const saveGrowth = async (patch: GrowthConfigPatch) => {
     if (!growth || growthLoadingRef.current || growthSavingRef.current) return;
     growthSavingRef.current = true;
     const seq = ++growthSeqRef.current;
     setGrowthBusy(true);
+    let failed = false;
+    let error: unknown;
+    try { await settingsApi.saveGrowthConfig(patch); } catch (e) { failed = true; error = e; }
     try {
-      await settingsApi.saveGrowthConfig({ ...growth, ...patch });
       const s = await settingsApi.growthState();
       if (seq === growthSeqRef.current) setGrowth(s.supported ? s.config : null);
     } catch (e) {
-      toast(errText(e), "err");
-    } finally {
-      growthSavingRef.current = false;
-      setGrowthBusy(false);
+      if (!failed) { failed = true; error = e; }
     }
+    if (failed) toast(errText(error), "err");
+    growthSavingRef.current = false;
+    setGrowthBusy(false);
+    if (growthReloadRef.current) { growthReloadRef.current = false; void loadGrowth(); }
   };
 
   // 窗口重新聚焦时重新检查权限（仅本页可见时）。
