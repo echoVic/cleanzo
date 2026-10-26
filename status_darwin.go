@@ -13,19 +13,22 @@ func realStatusSource() statusSource {
 		memory: func() MemoryStatus {
 			return readMemoryStatus()
 		},
-		cpu: func() (uint64, uint64) {
-			t, ok := nativeCPUTicks()
-			if !ok {
-				return 0, 0
-			}
-			busy := uint64(t.Ticks[0]) + uint64(t.Ticks[1]) + uint64(t.Ticks[3]) // user+system+nice
-			total := busy + uint64(t.Ticks[2])
-			return busy, total
-		},
+		cpu:       cpuBusyTotal,
 		battery:   statusBattery,
 		disk:      diskStat,
 		terminate: workspaceTerminate,
 	}
+}
+
+// cpuBusyTotal is the whole CPU's cumulative busy (user+system+nice) and
+// total ticks, or zeros when they cannot be read.
+func cpuBusyTotal() (uint64, uint64) {
+	t, ok := nativeCPUTicks()
+	if !ok {
+		return 0, 0
+	}
+	busy := uint64(t.Ticks[0]) + uint64(t.Ticks[1]) + uint64(t.Ticks[3]) // user+system+nice
+	return busy, busy + uint64(t.Ticks[2])
 }
 
 // readMemoryStatus assembles the memory card from one vm read plus the

@@ -299,6 +299,10 @@ func workspaceTerminate(pid int32) bool {
 	return closeTopWindows(uint32(pid))
 }
 
+// workspaceForceTerminate is never used on Windows: the process page is
+// macOS only in this version.
+func workspaceForceTerminate(pid int32) bool { return false }
+
 // nativeSysctlString reports an unavailable Darwin sysctl.
 func nativeSysctlString(name string) string { return "" }
 

@@ -363,7 +363,17 @@ func workspaceList() []workspaceApp {
 // workspaceTerminate asks one application to terminate, exactly like
 // choosing Quit in the Dock. It never force-kills; an app that refuses (or
 // has unsaved work) simply stays, and monitor.go decides the verdict.
-func workspaceTerminate(pid int32) bool {
+func workspaceTerminate(pid int32) bool { return workspaceSend(pid, "terminate") }
+
+// workspaceForceTerminate force-terminates one application, like Force Quit
+// in the Dock menu: unsaved work is lost. Only ForceQuitApp calls it, after
+// the user confirmed on the process page.
+func workspaceForceTerminate(pid int32) bool { return workspaceSend(pid, "forceTerminate") }
+
+// workspaceSend sends terminate or forceTerminate to the running
+// application with pid, on the main thread. False when it is not running
+// or refuses.
+func workspaceSend(pid int32, selector string) bool {
 	ok := false
 	runOnMain(func() {
 		if !appKitInit() {
@@ -378,7 +388,7 @@ func workspaceTerminate(pid int32) bool {
 				if int32(objc.Send[uint64](app, nsSel("processIdentifier"))) != pid {
 					continue
 				}
-				ok = byte(app.Send(nsSel("terminate"))) != 0
+				ok = byte(app.Send(nsSel(selector))) != 0
 				return
 			}
 		})

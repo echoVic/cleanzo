@@ -41,8 +41,9 @@ func nativeMachineInfo() (string, uint64, uint64, string, int64) {
 }
 
 // Workspace and sysctl reads only exist on macOS.
-func workspaceList() []workspaceApp         { return nil }
-func workspaceTerminate(pid int32) bool     { return false }
-func nativeSysctlString(name string) string { return "" }
-func nativeSysctlUint64(name string) uint64 { return 0 }
-func nativeSysctlRaw(name string) []byte    { return nil }
+func workspaceList() []workspaceApp          { return nil }
+func workspaceTerminate(pid int32) bool      { return false }
+func workspaceForceTerminate(pid int32) bool { return false }
+func nativeSysctlString(name string) string  { return "" }
+func nativeSysctlUint64(name string) uint64  { return 0 }
+func nativeSysctlRaw(name string) []byte     { return nil }

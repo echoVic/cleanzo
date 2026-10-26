@@ -549,6 +549,56 @@ export interface PhotoItem {
   keep: boolean;
 }
 
+/** ProcessChild is one name inside a row: its processes summed up. */
+export interface ProcessChild {
+  name: string;
+  count: number;
+  cpu: number;
+  memory: number;
+  estimated: boolean;
+}
+
+/**
+ * ProcessRow is one line of the process page's CPU and memory tabs: an
+ * app's processes, a command-line program's processes or a system
+ * program's processes, summed up. CPU is a single-core percentage like
+ * Activity Monitor's, so it can exceed 100.
+ */
+export interface ProcessRow {
+  /** "app:<bundle path>" lower-cased, "cli:<name>" or "sys:<name>" */
+  key: string;
+  name: string;
+  /** "app", "cli" or "system" */
+  kind: string;
+  /** the .app; "" for cli and system rows */
+  path: string;
+  /** lower-cased; "" when unknown */
+  bundleId: string;
+  cpu: number;
+  memory: number;
+  procs: number;
+  /** some process was read through ps */
+  estimated: boolean;
+  /** a Dock app of this user that may be quit */
+  quit: boolean;
+  /** by name, same-name processes merged */
+  children: ProcessChild[];
+}
+
+/** ProcessSample is one reading of the process page. */
+export interface ProcessSample {
+  /** ordered by key; the page sorts */
+  rows: ProcessRow[];
+  /** the whole machine, 0–100 */
+  cpu: number;
+  /** kern.memorystatus_vm_pressure_level: 1 normal, 2 warning, 4 critical, 0 unknown */
+  pressure: number;
+  /** this user's processes, read exactly */
+  own: number;
+  /** other accounts' processes, estimated from ps */
+  others: number;
+}
+
 /** ScanSummary closes a junk scan. */
 export interface ScanSummary {
   fullDiskAccess: boolean;
@@ -885,6 +935,15 @@ export const Cleaner = {
   disk(): Promise<DiskStat> {
     return call("Cleaner.Disk");
   },
+  /**
+   * ForceQuitApp force-terminates the Dock apps at path, like Force Quit in
+   * the Dock menu: unsaved work is lost. The process page offers it only
+   * after QuitApp left the app running and the user confirmed. Matching,
+   * exclusions (Finder, Cleanzo) and results are QuitApp's.
+   */
+  forceQuitApp(path: string): Promise<boolean> {
+    return call("Cleaner.ForceQuitApp", path);
+  },
   /** FullDiskAccess reports whether macOS allows reading protected folders. */
   fullDiskAccess(): Promise<boolean> {
     return call("Cleaner.FullDiskAccess");
@@ -1075,6 +1134,17 @@ export const Cleaner = {
    */
   upgradeSkills(reqs: SkillUpgradeRequest[]): Promise<SkillUpgradeResult[]> {
     return call("Cleaner.UpgradeSkills", reqs);
+  },
+  /**
+   * WatchProcesses streams one ProcessSample every two seconds while the
+   * process page shows its CPU or memory tab and is not paused; the page
+   * closes the channel otherwise. The first sample comes after about a
+   * second, so CPU is measured over a real interval. Other accounts'
+   * processes are read through ps about every six seconds, and nothing is
+   * read after the channel closes. Off macOS it fails with "unsupported".
+   */
+  watchProcesses(ch: Channel<ProcessSample>): Promise<void> {
+    return call("Cleaner.WatchProcesses", ch);
   },
   /**
    * WatchStatus streams one StatusSample every two seconds while the status
