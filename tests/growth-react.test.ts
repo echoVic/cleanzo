@@ -377,7 +377,7 @@ async function growthSettingsHarness(snapshot: GrowthState) {
     spyOn(settingsApi, "getSettings").mockResolvedValue({ disabledGroups: [], ignored: [], custom: [] }),
     spyOn(settingsApi, "info").mockResolvedValue({ version: "test" } as never),
     spyOn(settingsApi, "fullDiskAccess").mockResolvedValue(true),
-    spyOn(settingsApi, "growthState").mockImplementation(async () => {
+    spyOn(settingsApi, "growthSummary").mockImplementation(async () => {
       reads++;
       if (readError) throw new Error("read failed");
       return snapshot;
@@ -514,7 +514,7 @@ test("增长设置：重新进入时等待配置刷新，改阈值不会覆盖�
     await page.settle();
     const { settingsApi } = await import("../src/react/settings/api");
     const pending = deferred<GrowthState>();
-    spyOn(settingsApi, "growthState").mockImplementationOnce(() => pending.promise);
+    spyOn(settingsApi, "growthSummary").mockImplementationOnce(() => pending.promise);
     page.reenter(state({ config: fresh }));
     await page.settle();
     expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);

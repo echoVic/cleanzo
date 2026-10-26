@@ -2,7 +2,7 @@ import { isWindows } from "../../platform";
 import * as React from "react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { AppUsage, BatteryStatus, GrowthState, StatusSample, SystemInfo } from "../../mygo";
+import type { AppUsage, BatteryStatus, GrowthSummary, StatusSample, SystemInfo } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -266,11 +266,11 @@ export function StatusPage({ active, goClean, goGrowth }: StatusPageProps) {
   }, [active]);
 
   // 每次进入读最近的增长提醒；读取失败不显示。
-  const [growthState, setGrowthState] = React.useState<GrowthState | null>(null);
+  const [growthState, setGrowthState] = React.useState<GrowthSummary | null>(null);
   React.useEffect(() => {
     if (!active) return;
     let live = true;
-    void growthApi.state().then((s) => { if (live) setGrowthState(s); }).catch(() => {
+    void growthApi.summary().then((s) => { if (live) setGrowthState(s); }).catch(() => {
       if (live) setGrowthState(null);
     });
     return () => { live = false; };

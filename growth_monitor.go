@@ -29,8 +29,13 @@ var (
 	// growthChanged tells the pages and the menu that something moved. Its
 	// default is set in init.
 	growthChanged func(GrowthStatus)
-	growthOwnerOf = func() func(growthEntry) growthOwner { return currentGrowthAttributor().owner }
-	growthPower   = growthBattery
+	// growthOwnerOf tells which owner an entry counts under, and since when it
+	// has told so: rows built before that time are built again.
+	growthOwnerOf = func() (func(growthEntry) growthOwner, time.Time) {
+		a, at := currentGrowthAttributor()
+		return a.owner, at
+	}
+	growthPower = growthBattery
 )
 
 // init sets the default of growthChanged. It cannot be the initializer of its
@@ -103,7 +108,8 @@ func growthNextRun(last, launched, now time.Time, justEnabled bool) time.Time {
 	return last.Add(24 * time.Hour)
 }
 
-// growthDeferral tells how long a due measurement waits (spec §四):
+// growthDeferral tells whether a due measurement waits, and about how long
+// (spec §四); tick asks again at its next 15-minute check either way:
 //   - on battery below 20%, half an hour;
 //   - during a user scan, ten minutes;
 //   - otherwise 0.
@@ -152,15 +158,23 @@ func (m *growthMonitor) tick(justEnabled bool) {
 		return
 	}
 	now := growthNow()
-	if due := m.nextRun(now, justEnabled); now.Before(due) {
+	due := m.nextRun(now, justEnabled)
+	if now.Before(due) {
 		m.setNext(due)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	onBattery, percent := growthPower(ctx)
 	cancel()
-	if wait := growthDeferral(onBattery, percent, userScans.Load()); wait > 0 {
-		m.setNext(now.Add(wait))
+	if growthDeferral(onBattery, percent, userScans.Load()) > 0 {
+		// The next tick asks again. A plan that is already due keeps its time,
+		// so ticks that keep waiting move nothing and tell nobody.
+		m.mu.Lock()
+		waiting := !m.nextAt.IsZero() && !m.nextAt.After(now)
+		m.mu.Unlock()
+		if !waiting {
+			m.setNext(due)
+		}
 		return
 	}
 	m.run(false)
@@ -238,7 +252,7 @@ func (m *growthMonitor) run(manual bool) bool {
 // first.
 func (m *growthMonitor) measureOnce(ctx context.Context) {
 	dir := growthDir()
-	history := loadGrowthSnapshots(dir)
+	history := growthHistory(dir, growthNow())
 	var prev *growthSnapshot
 	if len(history) > 0 {
 		prev = &history[len(history)-1]
@@ -252,7 +266,8 @@ func (m *growthMonitor) measureOnce(ctx context.Context) {
 		return
 	}
 	cfg := loadGrowthConfig(dir)
-	alerts := evaluateGrowth(history, snap, cfg, growthOwnerOf())
+	owner, _ := growthOwnerOf()
+	alerts := evaluateGrowth(history, snap, cfg, owner)
 	n := loadGrowthNotified(dir)
 	n.remember(alerts, now)
 	var picks []GrowthAlert

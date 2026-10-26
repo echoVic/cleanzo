@@ -36,87 +36,94 @@ type growthAttributor struct {
 }
 
 // growthAttributors caches the installed apps for a minute. The page and the
-// menu ask often, and reading every Info.plist takes a few seconds on a Mac
-// with many apps.
+// menu ask often, and reading every Info.plist takes a moment on a Mac with
+// many apps.
 var growthAttributors struct {
 	sync.Mutex
 	at time.Time
 	a  growthAttributor
 }
 
-// currentGrowthAttributor returns the cached attributor, rebuilding it when stale.
-func currentGrowthAttributor() growthAttributor {
+// currentGrowthAttributor returns the cached attributor and when it was built,
+// building it again when it is more than a minute old.
+func currentGrowthAttributor() (growthAttributor, time.Time) {
 	growthAttributors.Lock()
 	defer growthAttributors.Unlock()
 	if growthAttributors.a.idx == nil || time.Since(growthAttributors.at) > time.Minute {
 		dirs := appDirs()
-		growthAttributors.a = growthAttributor{idx: buildAppIndex(dirs), keys: growthKeys(dirs), paths: growthAppPaths(dirs)}
+		bundles := readGrowthBundles(dirs)
+		growthAttributors.a = growthAttributor{idx: buildAppIndex(dirs), keys: growthKeys(bundles), paths: growthAppPaths(bundles)}
 		growthAttributors.at = time.Now()
 	}
-	return growthAttributors.a
+	return growthAttributors.a, growthAttributors.at
 }
 
-// growthKeys collects the names, bundle IDs and bundle ID words of the apps in
-// dirs, and the bundle IDs of the running apps. Unlike installedKeys it never
-// opens the bundle of a running app: one started from Downloads, the Desktop
-// or a volume would make macOS ask about that folder, and the monitor runs
-// unattended.
-func growthKeys(dirs []string) appKeys {
-	var apps []string
+// growthBundle is an app bundle in one of the app folders, and what names it.
+type growthBundle struct {
+	path string
+	id   appIdentity
+}
+
+// readGrowthBundles lists the app bundles in dirs, folder by folder, and reads
+// each one's Info.plist once, 16 at a time. A folder listed twice adds nothing
+// the second time. growthKeys and growthAppPaths both work from this pass.
+func readGrowthBundles(dirs []string) []growthBundle {
+	var out []growthBundle
+	seen := map[string]bool{}
 	for _, dir := range dirs {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".app") {
-				apps = append(apps, filepath.Join(dir, e.Name()))
+			p := filepath.Join(dir, e.Name())
+			if strings.HasSuffix(e.Name(), ".app") && !seen[p] {
+				seen[p] = true
+				out = append(out, growthBundle{path: p})
 			}
 		}
 	}
-	k := newAppKeys()
-	running, _, _ := runningApps() // the bundle paths it also returns are left alone
-	for bid := range running {
-		k.addBundleID(bid)
-	}
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, 16)
-	)
-	for _, app := range apps {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+	for i := range out {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			id := readAppIdentity(app)
-			mu.Lock()
-			defer mu.Unlock()
-			k.add(id)
+			out[i].id = readAppIdentity(out[i].path) // each goroutine fills its own bundle
 		}()
 	}
 	wg.Wait()
+	return out
+}
+
+// growthKeys collects the names, bundle IDs and bundle ID words of bundles,
+// and the bundle IDs of the running apps. Unlike installedKeys it never opens
+// the bundle of a running app: one started from Downloads, the Desktop or a
+// volume would make macOS ask about that folder, and the monitor runs
+// unattended.
+func growthKeys(bundles []growthBundle) appKeys {
+	k := newAppKeys()
+	running, _, _ := runningApps() // the bundle paths it also returns are left alone
+	for bid := range running {
+		k.addBundleID(bid)
+	}
+	for _, b := range bundles {
+		k.add(b.id)
+	}
 	return k
 }
 
-// growthAppPaths finds by bundle ID the apps in dirs that Uninstall takes: a
-// bundle directly in /Applications or ~/Applications (installedApp). Apps in
-// suite folders, Utilities, /System or input method folders get none, so
-// their rows offer no Uninstall, which would refuse them. The first folder in
-// dirs wins.
-func growthAppPaths(dirs []string) map[string]string {
+// growthAppPaths finds by bundle ID the bundles that Uninstall takes: one
+// directly in /Applications or ~/Applications (installedApp). Apps in suite
+// folders, Utilities, /System or input method folders get none, so their rows
+// offer no Uninstall, which would refuse them. The first bundle wins.
+func growthAppPaths(bundles []growthBundle) map[string]string {
 	out := map[string]string{}
-	for _, dir := range dirs {
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			p := filepath.Join(dir, e.Name())
-			if !strings.HasSuffix(e.Name(), ".app") || !installedApp(p) {
-				continue
-			}
-			if bid := strings.ToLower(readAppIdentity(p).bid); bid != "" {
-				if _, ok := out[bid]; !ok {
-					out[bid] = p
-				}
-			}
+	for _, b := range bundles {
+		bid := strings.ToLower(b.id.bid)
+		if _, ok := out[bid]; ok || bid == "" || !installedApp(b.path) {
+			continue
 		}
+		out[bid] = b.path
 	}
 	return out
 }

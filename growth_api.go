@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -25,6 +26,15 @@ type GrowthState struct {
 	Status    GrowthStatus  `json:"status"`
 	Records   int           `json:"records"`
 	Apps      []GrowthApp   `json:"apps"`   // largest first
+	Alerts    []GrowthAlert `json:"alerts"` // raised in the last seven days, newest first
+}
+
+// GrowthSummary is what the status page and Settings show of the monitor:
+// the growth page's state without the records and their rows.
+type GrowthSummary struct {
+	Supported bool          `json:"supported"` // false on Windows
+	Config    GrowthConfig  `json:"config"`
+	Status    GrowthStatus  `json:"status"`
 	Alerts    []GrowthAlert `json:"alerts"` // raised in the last seven days, newest first
 }
 
@@ -57,19 +67,68 @@ func withSystemLoginItem(c GrowthConfig) GrowthConfig {
 	return c
 }
 
+// GrowthSummary returns the monitor's settings, its status and the recent
+// alerts. It reads no records and asks nothing about the installed apps, so it
+// stays quick for pages that show no rows.
+func (Cleaner) GrowthSummary() GrowthSummary {
+	dir := growthDir()
+	s := GrowthSummary{Supported: growthSupported(), Config: loadGrowthConfig(dir), Status: growth.status(), Alerts: []GrowthAlert{}}
+	if !s.Supported {
+		return s
+	}
+	s.Config = withSystemLoginItem(s.Config)
+	s.Alerts = loadGrowthNotified(dir).recent(growthNow())
+	return s
+}
+
 // GrowthState returns everything the growth page shows.
 func (Cleaner) GrowthState() GrowthState {
-	dir := growthDir()
-	st := GrowthState{Supported: growthSupported(), Config: loadGrowthConfig(dir), Status: growth.status(), Apps: []GrowthApp{}, Alerts: []GrowthAlert{}}
+	sum := Cleaner{}.GrowthSummary()
+	st := GrowthState{Supported: sum.Supported, Config: sum.Config, Status: sum.Status, Apps: []GrowthApp{}, Alerts: sum.Alerts}
 	if !st.Supported {
 		return st
 	}
-	st.Config = withSystemLoginItem(st.Config)
-	history := loadGrowthSnapshots(dir)
+	dir := growthDir()
+	history := growthHistory(dir, growthNow())
 	st.Records = len(history)
-	st.Apps = buildGrowthApps(history, st.Config, growthOwnerOf(), homeDir(), time.Local)
-	st.Alerts = loadGrowthNotified(dir).recent(growthNow())
+	if len(history) > 0 { // only rows need the attributor, which reads every app's Info.plist
+		st.Apps = growthRows(dir, history, st.Config)
+	}
 	return st
+}
+
+// growthRowCache keeps the rows GrowthState built last. Building them asks
+// for the owner of every entry of every record, and the page and the menu bar
+// ask again at every update.
+var growthRowCache struct {
+	sync.Mutex
+	key  growthRowKey
+	apps []GrowthApp
+}
+
+// growthRowKey is what the rows are built from: the records, the owners that
+// are ignored and the attributor.
+type growthRowKey struct {
+	dir     string
+	newest  int64     // At of the newest record
+	records int       // how many records there are
+	ignored string    // the ignored owner keys, joined
+	builtAt time.Time // when the attributor was built: the same value until it is built again
+}
+
+// growthRows returns the page's rows for history, which is not empty. They
+// are built again only when something they are built from changed.
+func growthRows(dir string, history []growthSnapshot, cfg GrowthConfig) []GrowthApp {
+	owner, builtAt := growthOwnerOf()
+	key := growthRowKey{dir: dir, newest: history[len(history)-1].At, records: len(history),
+		ignored: strings.Join(cfg.Ignored, "\x00"), builtAt: builtAt}
+	growthRowCache.Lock()
+	defer growthRowCache.Unlock()
+	if growthRowCache.apps == nil || growthRowCache.key != key {
+		growthRowCache.apps = buildGrowthApps(history, cfg, owner, homeDir(), time.Local)
+		growthRowCache.key = key
+	}
+	return slices.Clone(growthRowCache.apps)
 }
 
 // GrowthMeasureNow starts a measurement unless one is running. It works

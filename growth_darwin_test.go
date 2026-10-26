@@ -112,7 +112,7 @@ func TestGrowthAppPathsKeepsOnlyInstalledApps(t *testing.T) {
 	suite := filepath.Join(apps, "Suite")
 	foo := makeApp(t, apps, "Foo.app", "com.example.Foo", "Foo")
 	makeApp(t, suite, "Bar.app", "com.example.bar", "Bar")
-	got := growthAppPaths([]string{apps, suite})
+	got := growthAppPaths(readGrowthBundles([]string{apps, suite}))
 	if want := map[string]string{"com.example.foo": foo}; !maps.Equal(got, want) {
 		t.Fatalf("growthAppPaths = %v, want %v", got, want)
 	}
@@ -123,11 +123,24 @@ func TestGrowthAppPathsKeepsOnlyInstalledApps(t *testing.T) {
 func TestGrowthKeys(t *testing.T) {
 	dir := t.TempDir()
 	makeApp(t, dir, "Foo.app", "com.example.foo", "Foo")
-	keys := growthKeys([]string{dir})
+	keys := growthKeys(readGrowthBundles([]string{dir}))
 	for _, name := range []string{"com.example.foo", "Foo"} {
 		if !keys.owns(name) {
 			t.Errorf("growthKeys does not know %q", name)
 		}
+	}
+}
+
+// readGrowthBundles reads each bundle once, also from a folder listed twice
+// (appDirs lists Utilities as a suite too), and keeps the folders' order.
+func TestReadGrowthBundlesReadsEachBundleOnce(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	makeApp(t, a, "Foo.app", "com.example.foo", "Foo")
+	makeApp(t, b, "Bar.app", "com.example.bar", "Bar")
+	got := readGrowthBundles([]string{a, b, a})
+	if len(got) != 2 || got[0].path != filepath.Join(a, "Foo.app") || got[0].id.bid != "com.example.foo" ||
+		got[1].path != filepath.Join(b, "Bar.app") || got[1].id.name != "Bar" {
+		t.Fatalf("bundles = %+v", got)
 	}
 }
 

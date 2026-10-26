@@ -141,7 +141,7 @@ export function SettingsPage({ callbacks, session }: Props) {
     growthLoadingRef.current = true;
     setGrowthBusy(true);
     try {
-      const s = await settingsApi.growthState();
+      const s = await settingsApi.growthSummary();
       if (seq === growthSeqRef.current) setGrowth(s.supported ? s.config : null);
     } catch {
       if (seq === growthSeqRef.current) setGrowth(null);
@@ -170,7 +170,7 @@ export function SettingsPage({ callbacks, session }: Props) {
     let error: unknown;
     try { await settingsApi.saveGrowthConfig(patch); } catch (e) { failed = true; error = e; }
     try {
-      const s = await settingsApi.growthState();
+      const s = await settingsApi.growthSummary();
       if (seq === growthSeqRef.current) setGrowth(s.supported ? s.config : null);
     } catch (e) {
       if (!failed) { failed = true; error = e; }

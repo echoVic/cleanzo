@@ -260,3 +260,23 @@ func TestGrowthLastRecordIgnoresRecordsFromTheFuture(t *testing.T) {
 		t.Fatalf("only a record from the future: last = %v", last)
 	}
 }
+
+// growthHistory is the records up to now, oldest first: one dated after now,
+// which a clock set back leaves behind, is left out.
+func TestGrowthHistoryLeavesOutRecordsFromTheFuture(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(200*86400, 0)
+	ats := []int64{now.Add(48 * time.Hour).Unix(), now.Add(-24 * time.Hour).Unix(), now.Add(time.Second).Unix(), now.Unix()}
+	for _, at := range ats {
+		if err := saveGrowthSnapshot(dir, growthSnapshot{At: at, Entries: []growthEntry{}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []int64
+	for _, s := range growthHistory(dir, now) {
+		got = append(got, s.At)
+	}
+	if want := []int64{now.Add(-24 * time.Hour).Unix(), now.Unix()}; !slices.Equal(got, want) {
+		t.Fatalf("history %v, want %v", got, want)
+	}
+}

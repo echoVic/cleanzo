@@ -385,6 +385,19 @@ export interface GrowthStatus {
   notifications: string;
 }
 
+/**
+ * GrowthSummary is what the status page and Settings show of the monitor:
+ * the growth page's state without the records and their rows.
+ */
+export interface GrowthSummary {
+  /** false on Windows */
+  supported: boolean;
+  config: GrowthConfig;
+  status: GrowthStatus;
+  /** raised in the last seven days, newest first */
+  alerts: GrowthAlert[];
+}
+
 /** JunkCleanEvent reports a streamed junk clean. */
 export interface JunkCleanEvent {
   kind: string;
@@ -897,6 +910,14 @@ export const Cleaner = {
   /** GrowthState returns everything the growth page shows. */
   growthState(): Promise<GrowthState> {
     return call("Cleaner.GrowthState");
+  },
+  /**
+   * GrowthSummary returns the monitor's settings, its status and the recent
+   * alerts. It reads no records and asks nothing about the installed apps, so it
+   * stays quick for pages that show no rows.
+   */
+  growthSummary(): Promise<GrowthSummary> {
+    return call("Cleaner.GrowthSummary");
   },
   /**
    * Info returns basic system information, including the About This Mac

@@ -112,6 +112,13 @@ func loadGrowthSnapshots(dir string) []growthSnapshot {
 	return out
 }
 
+// growthHistory is the records taken up to now, oldest first. A record dated
+// after now, which a clock set back leaves behind, is left out: it would stand
+// as the newest record for as long, with the page's rows built from it.
+func growthHistory(dir string, now time.Time) []growthSnapshot {
+	return slices.DeleteFunc(loadGrowthSnapshots(dir), func(s growthSnapshot) bool { return s.At > now.Unix() })
+}
+
 // lastGrowthAt is when the newest record was taken, read from file names
 // only (growthRecordAt); zero without records. A record dated after now, which
 // a clock set back leaves behind, does not count: it would stay the newest

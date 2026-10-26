@@ -2,7 +2,7 @@ import type { Runtime, Channel } from "mygo-runtime";
 import type {
   Cleaner, LanguageSettings, AppInfo, AppUsage, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
-  StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig,
+  StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -81,6 +81,12 @@ function createRuntime(): Runtime {
       spark: Array.from({ length: 30 }, (_, i) => 26 * GB + i * 0.06 * GB),
       folders: [{ path: "/Users/mock/Library/Application Support/LarkShell", size: 25.1 * GB, complete: true, denied: false, outside: false, week: { bytes: GB, atLeast: false, days: 7 } }] },
   ];
+  const growthSummary = (): GrowthSummary => ({
+    supported: true, config: growthConfig,
+    status: { running: false, lastAt: nowSec() - 3600, nextAt: nowSec() + 82800, fda: true, notifications: "allowed" },
+    alerts: [{ key: "app:com.youqu.todesk.mac", name: "ToDesk", window: "day", days: 1, bytes: 5.6 * GB, atLeast: false,
+      folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
+  });
   const info: SystemInfo = {
     version: "0.2.4", os: "darwin", arch: "arm64", goVersion: "go1.27.1",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
@@ -242,12 +248,8 @@ function createRuntime(): Runtime {
     & { "LanguageSettings.SetLanguage": typeof LanguageSettings.setLanguage };
   const handlers = {
     "Cleaner.Info": async () => info,
-    "Cleaner.GrowthState": async () => ({
-      supported: true, config: growthConfig, records: 5, apps: growthApps(),
-      status: { running: false, lastAt: nowSec() - 3600, nextAt: nowSec() + 82800, fda: true, notifications: "allowed" },
-      alerts: [{ key: "app:com.youqu.todesk.mac", name: "ToDesk", window: "day", days: 1, bytes: 5.6 * GB, atLeast: false,
-        folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
-    }),
+    "Cleaner.GrowthSummary": async () => growthSummary(),
+    "Cleaner.GrowthState": async () => ({ ...growthSummary(), records: 5, apps: growthApps() }),
     "Cleaner.GrowthMeasureNow": async () => {},
     // 和 Go 一样把补丁合并进当前配置：只改给了的字段，忽略项按小写增删。
     "Cleaner.SaveGrowthConfig": async (p) => {

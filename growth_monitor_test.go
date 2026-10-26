@@ -73,7 +73,7 @@ func stubGrowth(t *testing.T, now *time.Time, size *int64, sent *[]GrowthAlert) 
 	}
 	growthNotify = func(a GrowthAlert) error { *sent = append(*sent, a); return nil }
 	growthChanged = func(GrowthStatus) {}
-	growthOwnerOf = func() func(growthEntry) growthOwner { return byBase }
+	growthOwnerOf = func() (func(growthEntry) growthOwner, time.Time) { return byBase, time.Time{} }
 	growthPower = func(context.Context) (bool, int) { return false, 100 }
 }
 
@@ -216,16 +216,24 @@ func TestGrowthDeferralHoldsATick(t *testing.T) {
 	if !hasDeadline || left > 30*time.Second || left < 10*time.Second {
 		t.Errorf("the battery is asked with a 30 second deadline: set %v, left %v", hasDeadline, left)
 	}
-	if got, want := m.status().NextAt, now.Add(30*time.Minute).Unix(); got != want {
-		t.Errorf("on 19%% battery: next %d, want %d", got, want)
+	// A measurement held back stays due: the plan keeps the time it fell due.
+	if got, want := m.status().NextAt, now.Unix(); got != want {
+		t.Errorf("on 19%% battery: next %d, want the time it fell due, %d", got, want)
 	}
 
+	// The ticks that follow ask again. While they keep waiting, for the battery
+	// or for a user scan, the plan does not move and nobody is told.
+	var told int
+	growthChanged = func(GrowthStatus) { told++ }
+	now = now.Add(15 * time.Minute)
+	m.tick(false)
 	growthPower = func(context.Context) (bool, int) { return false, 100 }
 	release := userScan()
-	m.tick(true)
+	now = now.Add(15 * time.Minute)
+	m.tick(false)
 	release()
-	if got, want := m.status().NextAt, now.Add(10*time.Minute).Unix(); got != want {
-		t.Errorf("during a user scan: next %d, want %d", got, want)
+	if got, want := m.status().NextAt, t0.Unix(); got != want || told != 0 {
+		t.Errorf("ticks that keep waiting: next %d, want %d; the page was told %d times", got, want, told)
 	}
 	if m.status().Running || len(loadGrowthSnapshots(growthDir())) != 0 {
 		t.Errorf("a deferred tick must measure nothing: %+v", m.status())
@@ -633,4 +641,28 @@ func TestGrowthNextRunKeepsAttemptsAnHourApart(t *testing.T) {
 	check("an attempt 2 hours ago: due now", false, now)
 	m.lastAttempt = now.Add(time.Hour)
 	check("an attempt dated in the future (a clock set back) holds nothing", false, now)
+}
+
+// A record dated after now, which a clock set back leaves behind, is not the
+// last record a run starts from.
+func TestMeasureOnceLeavesOutRecordsFromTheFuture(t *testing.T) {
+	now, size := t0, 14*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	for _, s := range []growthSnapshot{at(-24*time.Hour, true, done(todesk, 10*gb)), at(5*time.Hour, true, done(todesk, 99*gb))} {
+		if err := saveGrowthSnapshot(growthDir(), s, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var prevAt int64
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+		if prev != nil {
+			prevAt = prev.At
+		}
+		return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, size)}}
+	}
+	(&growthMonitor{launched: t0, notifs: "unknown"}).measureOnce(context.Background())
+	if want := t0.Add(-24 * time.Hour).Unix(); prevAt != want {
+		t.Fatalf("the run started from the record at %d, want yesterday's, %d", prevAt, want)
+	}
 }

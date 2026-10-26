@@ -330,8 +330,8 @@ func TestSaveGrowthConfigGoesOnAfterALoginError(t *testing.T) {
 				t.Fatal("the page was not told")
 			}
 		}
-		if got, want := growth.status().NextAt, now.Add(30*time.Minute).Unix(); got != want {
-			t.Errorf("next measurement %d, want %d, half an hour on", got, want)
+		if got, want := growth.status().NextAt, now.Unix(); got != want {
+			t.Errorf("next measurement %d, want %d, the time it fell due", got, want)
 		}
 	})
 	t.Run("turning monitoring off clears the plan", func(t *testing.T) {
