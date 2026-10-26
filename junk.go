@@ -1210,6 +1210,7 @@ var (
 
 // ScanJunk streams an initial list, measured rows and a final summary.
 func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) error {
+	defer userScan()()
 	env := currentJunkEnv()
 	env.ctx = ctx
 	env.observe = true
@@ -1239,6 +1240,7 @@ func (Cleaner) ScanJunk(ctx context.Context, ch *mygo.Channel[JunkScanEvent]) er
 
 // CleanJunk streams progress, refreshing file usage before each selected item.
 func (Cleaner) CleanJunk(ctx context.Context, selections []JunkSelection, scannedAt int64, ch *mygo.Channel[JunkCleanEvent]) error {
+	defer userScan()()
 	env := currentJunkEnv()
 	env.refreshGuard = probeUsage
 	var last time.Time

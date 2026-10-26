@@ -3,12 +3,40 @@
     "webview.title": "Cleanzo",
     "webview.message": "Cleanzo 需要 Microsoft Edge WebView2 Runtime。是否打开下载页面？",
     "webview.download": "下载",
-    "webview.exit": "退出"
+    "webview.exit": "退出",
+    "growth.notify.day": "{name} 一天涨了 {size}",
+    "growth.notify.dayAtLeast": "{name} 一天至少涨了 {size}",
+    "growth.notify.week": "{name} {days} 天涨了 {size}",
+    "growth.notify.weekAtLeast": "{name} {days} 天至少涨了 {size}",
+    "growth.notify.body": "主要在 {folder}，现在一共 {total}",
+    "growth.tray.tip": "Cleanzo · 占用增长",
+    "growth.tray.item": "{name}  +{size}",
+    "growth.tray.itemAtLeast": "{name}  ≥ {size}",
+    "growth.tray.none": "近 7 天没有明显增长",
+    "growth.tray.open": "打开 Cleanzo",
+    "growth.tray.measure": "现在量一次",
+    "growth.tray.measuring": "正在量…",
+    "growth.tray.off": "关闭后台监控",
+    "growth.tray.quit": "退出 Cleanzo"
   },
   "en": {
     "webview.title": "Cleanzo",
     "webview.message": "Cleanzo requires Microsoft Edge WebView2 Runtime. Open the download page?",
     "webview.download": "Download",
-    "webview.exit": "Exit"
+    "webview.exit": "Exit",
+    "growth.notify.day": "{name} grew {size} in a day",
+    "growth.notify.dayAtLeast": "{name} grew at least {size} in a day",
+    "growth.notify.week": "{name} grew {size} in {days} days",
+    "growth.notify.weekAtLeast": "{name} grew at least {size} in {days} days",
+    "growth.notify.body": "Mostly in {folder}; {total} in all now",
+    "growth.tray.tip": "Cleanzo · Storage Growth",
+    "growth.tray.item": "{name}  +{size}",
+    "growth.tray.itemAtLeast": "{name}  ≥ {size}",
+    "growth.tray.none": "No notable growth in 7 days",
+    "growth.tray.open": "Open Cleanzo",
+    "growth.tray.measure": "Measure Now",
+    "growth.tray.measuring": "Measuring…",
+    "growth.tray.off": "Turn Off Background Monitoring",
+    "growth.tray.quit": "Quit Cleanzo"
   }
 }

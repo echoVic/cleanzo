@@ -1040,6 +1040,7 @@ func collectFullScan(ctx context.Context, onItem func(path string, size int64, t
 // FullScan streams per-directory results and the final summary of a full scan.
 // ctx is canceled when the page goes away, which stops the scan.
 func (Cleaner) FullScan(ctx context.Context, ch *mygo.Channel[FullScanEvent]) error {
+	defer userScan()()
 	start := time.Now()
 	items, scanned, skipped := collectFullScan(ctx, func(path string, size int64, trashable bool) {
 		_ = ch.Send(FullScanEvent{Kind: "item", Path: path, Size: size, Trashable: trashable})
@@ -1125,6 +1126,7 @@ func largeScan(ctx context.Context, minSize int64, onItem func(LargeFile)) Large
 // LargeScan streams per-file results and the final summary of a large-file
 // scan across the same targets as the full scan.
 func (Cleaner) LargeScan(ctx context.Context, minSize int64, ch *mygo.Channel[LargeScanEvent]) error {
+	defer userScan()()
 	res := largeScan(ctx, minSize, func(f LargeFile) {
 		_ = ch.Send(LargeScanEvent{Kind: "item", Path: f.Path, Size: f.Size, Trashable: f.Trashable})
 	})
