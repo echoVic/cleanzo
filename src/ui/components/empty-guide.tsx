@@ -11,11 +11,13 @@ export interface EmptyGuideProps {
   desc: string;
   ctaText: string;
   onCta: () => void;
+  /** CTA 正在进行：按钮转圈、不能再点。 */
+  busy?: boolean;
   /** SVG <g> 内的主题线稿元素。 */
   children: React.ReactNode;
 }
 
-export function EmptyGuide({ gradId, title, desc, ctaText, onCta, children }: EmptyGuideProps) {
+export function EmptyGuide({ gradId, title, desc, ctaText, onCta, busy, children }: EmptyGuideProps) {
   return (
     <div className="empty-guide">
       <svg className="eg-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -32,7 +34,10 @@ export function EmptyGuide({ gradId, title, desc, ctaText, onCta, children }: Em
       </svg>
       <h3>{title}</h3>
       <p>{desc}</p>
-      <button className="btn primary big" type="button" onClick={onCta}>{ctaText}</button>
+      <button className="btn primary big" type="button" onClick={onCta} disabled={busy}>
+        {busy && <span className="spin" />}
+        {ctaText}
+      </button>
     </div>
   );
 }

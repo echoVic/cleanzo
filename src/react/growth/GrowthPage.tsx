@@ -113,10 +113,13 @@ export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, g
           <h2>{t("nav.growth")}</h2>
           <p className="muted">{t("growth.sub")}</p>
         </div>
-        <Button onClick={() => void measure()} disabled={state.status.running}>
-          <RefreshCw size={14} className={state.status.running ? "animate-spin" : undefined} />
-          {state.status.running ? t("growth.measuring") : t("growth.measureNow")}
-        </Button>
+        {/* 还没有记录时，入口是空状态里的大按钮，这里不再放一个。 */}
+        {view !== "empty" && (
+          <Button onClick={() => void measure()} disabled={state.status.running}>
+            <RefreshCw size={14} className={state.status.running ? "animate-spin" : undefined} />
+            {state.status.running ? t("growth.measuring") : t("growth.measureNow")}
+          </Button>
+        )}
       </header>
 
       {banner === "optin" && (
@@ -145,7 +148,8 @@ export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, g
 
       {view === "empty" && (
         <EmptyGuide gradId="growth-empty" title={t("growth.empty.title")} desc={t("growth.empty.desc")}
-          ctaText={t("growth.measureNow")} onCta={() => void measure()}>
+          ctaText={state.status.running ? t("growth.measuring") : t("growth.measureNow")}
+          onCta={() => void measure()} busy={state.status.running}>
           <path d="M6 6v12h12M9 14l3-4 3 2 3-5" />
         </EmptyGuide>
       )}

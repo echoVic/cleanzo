@@ -164,6 +164,11 @@ async function pageHarness(focusKey: string | null = null) {
     icons() { return nodes(tree).filter((el) => el.props.className === "cz-growth-icon").map((el) => el.props.children); },
     /** 「现在量一次」的图标是否在转。 */
     spinning() { return nodes(tree).some((el) => el.props.className === "animate-spin"); },
+    /** 空状态引导的按钮：文字和是否在转；没有空状态时为 null。 */
+    guide() {
+      const el = nodes(tree).find((node) => "ctaText" in node.props);
+      return el ? { ctaText: el.props.ctaText, busy: !!el.props.busy } : null;
+    },
     /** main.ts 切换视图：进入本视图时 visit 递增。 */
     show(active: boolean) { if (active) shown.visit++; shown.active = active; dirty = true; },
     /** 点文字为 label 的按钮。 */
@@ -677,6 +682,27 @@ test("隐藏时不跟着 growthUpdated 刷新，再显示时重新读", async ()
     page.updated();
     await page.settle();
     expect(page.requests.length).toBe(3);
+  } finally { page.close(); }
+});
+
+test("没有记录时「现在量一次」只在空状态里，量的时候转圈、不能再点；有了记录回到顶部", async () => {
+  const page = await pageHarness();
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(state({ records: 0 }));
+    await page.settle();
+    expect(page.text()).not.toContain(t("growth.measureNow"));
+    expect(page.guide()).toEqual({ ctaText: t("growth.measureNow"), busy: false });
+    page.updated();
+    page.requests[1]!.resolve(state({ records: 0, status: { ...state({}).status, running: true } }));
+    await page.settle();
+    expect(page.text()).not.toContain(t("growth.measuring"));
+    expect(page.guide()).toEqual({ ctaText: t("growth.measuring"), busy: true });
+    page.updated();
+    page.requests[2]!.resolve(state({ records: 1, apps: [app({})] }));
+    await page.settle();
+    expect(page.guide()).toBeNull();
+    expect(page.text()).toContain(t("growth.measureNow"));
   } finally { page.close(); }
 });
 
