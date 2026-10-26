@@ -101,6 +101,7 @@ async function pageHarness(focusKey: string | null = null) {
   let tree: React.ReactNode;
   let scrolled = 0;
   let nextId = 0;
+  const shown = { active: true, visit: 1 };
   const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
     !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
   const spies = [
@@ -136,7 +137,7 @@ async function pageHarness(focusKey: string | null = null) {
     }),
     spyOn(growthApi, "onUpdated").mockImplementation((fn) => {
       updated = () => fn({ running: false, lastAt: 0, nextAt: 0, fda: true, notifications: "allowed" });
-      return () => {};
+      return () => { updated = () => {}; };
     }),
     spyOn(growthApi, "saveConfig").mockImplementation(async (patch) => { saves.push(patch); }),
   ];
@@ -159,6 +160,12 @@ async function pageHarness(focusKey: string | null = null) {
   return {
     requests, details, timers, saves,
     updated: () => updated(),
+    /** 各行字母头像上的字。 */
+    icons() { return nodes(tree).filter((el) => el.props.className === "cz-growth-icon").map((el) => el.props.children); },
+    /** 「现在量一次」的图标是否在转。 */
+    spinning() { return nodes(tree).some((el) => el.props.className === "animate-spin"); },
+    /** main.ts 切换视图：进入本视图时 visit 递增。 */
+    show(active: boolean) { if (active) shown.visit++; shown.active = active; dirty = true; },
     /** 点文字为 label 的按钮。 */
     click(label: string) { nodes(tree).find((el) => el.props.children === label && el.props.onClick)!.props.onClick(); },
     get scrolled() { return scrolled; },
@@ -166,7 +173,7 @@ async function pageHarness(focusKey: string | null = null) {
       for (let i = 0; i < 10; i++) {
         if (dirty) {
           dirty = false; cursor = 0;
-          tree = GrowthPage({ visit: 1, focusKey, focusNonce: 1, goLeftovers() {}, goUninstall() {} });
+          tree = GrowthPage({ ...shown, focusKey, focusNonce: 1, goLeftovers() {}, goUninstall() {} });
           for (const effect of pending.splice(0)) effect();
         }
         await Promise.resolve();
@@ -624,5 +631,63 @@ test("增长页只发改动的字段：打开、先不用、关着时打开、�
     page.click(t("growth.unignore"));
     await page.settle();
     expect(page.saves).toEqual([{ enabled: true, asked: true }, { asked: true }, { enabled: true }, { ignore: "app:x" }, { unignore: "app:x" }]);
+  } finally { page.close(); }
+});
+
+test("刷新但没有新记录时保留卸载明细，有新记录才重新核对", async () => {
+  const page = await pageHarness();
+  const snapshot = (size: number, lastAt: number, records = 3) => state({ records, apps: [app({ size, appPath: "/A.app" })],
+    status: { ...state({}).status, lastAt } });
+  const detail: UninstallDetail = { app: {} as UninstallDetail["app"], totalSize: 3 * GB,
+    items: [{ path: "/A.app", kind: "app", size: GB }, { path: "/c", kind: "cache", size: 2 * GB }] };
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(snapshot(10 * GB, 1));
+    await page.settle();
+    page.openRow();
+    await page.settle();
+    page.details[0]!.resolve(detail);
+    await page.settle();
+    page.updated(); // 比如开始量了：状态变了，记录没变
+    page.requests[1]!.resolve({ ...snapshot(10 * GB, 1), status: { ...snapshot(10 * GB, 1).status, running: true } });
+    await page.settle();
+    expect(page.details.length).toBe(1);
+    expect(page.text()).toContain("卸载能移走 3.0 GB；另有 8.0 GB");
+    page.updated(); // 记录条数变了（旧记录过期删掉）也算新的一批
+    page.requests[2]!.resolve(snapshot(10 * GB, 1, 2));
+    await page.settle();
+    expect(page.details.length).toBe(2);
+  } finally { page.close(); }
+});
+
+test("隐藏时不跟着 growthUpdated 刷新，再显示时重新读", async () => {
+  const page = await pageHarness();
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(state({ records: 2, apps: [app({})] }));
+    await page.settle();
+    page.show(false);
+    await page.settle();
+    page.updated();
+    await page.settle();
+    expect(page.requests.length).toBe(1);
+    page.show(true);
+    await page.settle();
+    expect(page.requests.length).toBe(2);
+    page.updated();
+    await page.settle();
+    expect(page.requests.length).toBe(3);
+  } finally { page.close(); }
+});
+
+test("行首有字母头像（点目录跳过开头的点），测量中图标用 animate-spin", async () => {
+  const page = await pageHarness();
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(state({ records: 2, apps: [app({ name: "ToDesk", size: 2 * GB }), app({ key: "dir:/h/.npm", name: ".npm", kind: "dot", size: GB })],
+      status: { ...state({}).status, running: true } }));
+    await page.settle();
+    expect(page.icons()).toEqual(["T", "N"]);
+    expect(page.spinning()).toBe(true);
   } finally { page.close(); }
 });

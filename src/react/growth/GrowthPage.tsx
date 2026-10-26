@@ -9,6 +9,7 @@ import { useT } from "../../ui/i18n-react";
 import { errText, human, toast } from "../../shared";
 import { shortHome } from "../../platform";
 import { t as translate } from "../../i18n";
+import { iconColor } from "../status/format";
 import { growthApi } from "./api";
 import { fmtDelta, growthBanner, growthView, sortApps, sparkPath, uninstallGap, type GrowthSort } from "./format";
 
@@ -18,8 +19,10 @@ export interface GrowthHandlers {
   goUninstall: (appPath: string) => void;
 }
 
-/** 占用增长页的访问次数、定位请求和导航回调。 */
+/** 占用增长页的显示状态、访问次数、定位请求和导航回调。 */
 export interface GrowthPageProps extends GrowthHandlers {
+  /** 是否正显示本视图：隐藏时不跟着 growthUpdated 刷新。 */
+  active: boolean;
   /** 每次进入视图递增：重新拉状态。 */
   visit: number;
   /** 要展开并高亮的行；focusNonce 变了才执行。 */
@@ -28,7 +31,7 @@ export interface GrowthPageProps extends GrowthHandlers {
 }
 
 /** 展示按 App 汇总的占用、增长记录与目录明细。 */
-export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninstall }: GrowthPageProps) {
+export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, goUninstall }: GrowthPageProps) {
   const t = useT();
   const [state, setState] = React.useState<GrowthState | null>(null);
   const [sort, setSort] = React.useState<GrowthSort>("week");
@@ -36,16 +39,25 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
   const [details, setDetails] = React.useState<Record<string, UninstallDetail | null>>({});
   const [hl, setHl] = React.useState<string | null>(null);
   const focused = React.useRef<{ key: string; nonce: number } | null>(null);
+  /** 上次核对卸载明细时的记录（时间、条数）。 */
+  const measured = React.useRef<{ lastAt: number; records: number } | null>(null);
 
   const load = React.useCallback(async () => {
     try {
-      setState(await growthApi.state());
-      setDetails({}); // 新记录或重进页面后重新核对卸载能移走的内容。
+      const s = await growthApi.state();
+      setState(s);
+      // 有了新记录才重新核对卸载能移走的内容；只是刷新状态时保留已取到的明细，展开的行不闪。
+      const was = measured.current;
+      if (!was || was.lastAt !== s.status.lastAt || was.records !== s.records) {
+        measured.current = { lastAt: s.status.lastAt, records: s.records };
+        setDetails({});
+      }
     }
     catch (e) { toast(translate("growth.loadFail", { msg: errText(e) }), "err"); }
   }, []); // useT 每次渲染返回新函数；加载回调保持稳定，错误文案仍读取当前语言。
-  React.useEffect(() => { void load(); }, [load, visit]);
-  React.useEffect(() => growthApi.onUpdated(() => { void load(); }), [load]);
+  React.useEffect(() => { if (active) void load(); }, [load, visit, active]);
+  // 只在显示时跟着 growthUpdated 刷新：隐藏的页面不拉状态，也不在别的页面弹读取失败。
+  React.useEffect(() => active ? growthApi.onUpdated(() => { void load(); }) : undefined, [load, active]);
 
   const focusReady = !!state?.supported && state.records > 0 && state.apps.some((a) => a.key === focusKey);
   // 通知 / 菜单栏定位：等目标行加载后展开、滚到中间，高亮 900ms。
@@ -102,7 +114,7 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
           <p className="muted">{t("growth.sub")}</p>
         </div>
         <Button onClick={() => void measure()} disabled={state.status.running}>
-          <RefreshCw size={14} className={state.status.running ? "spin" : undefined} />
+          <RefreshCw size={14} className={state.status.running ? "animate-spin" : undefined} />
           {state.status.running ? t("growth.measuring") : t("growth.measureNow")}
         </Button>
       </header>
@@ -154,8 +166,8 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
               <span>{t("growth.col.size")}</span>
               <span>{t("growth.col.day")}</span>
               <span>{t("growth.col.week")}</span>
-              <span>{t("growth.col.month")}</span>
-              <span />
+              <span className="cz-growth-month">{t("growth.col.month")}</span>
+              <span className="cz-growth-spark" />
             </li>
             {sortApps(state.apps, view === "baseline" ? "size" : sort).map((a) => {
               const isOpen = open === a.key;
@@ -165,7 +177,10 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
                 <li key={a.key} data-growth-key={a.key} className={`cz-growth-item${hl === a.key ? " cz-growth-hl" : ""}`}>
                   <button type="button" className="cz-growth-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : a.key)}>
                     <span className="cz-growth-name">
-                      {a.name}
+                      <span className="cz-growth-icon" style={{ background: iconColor(a.name) }} aria-hidden>
+                        {(a.name.replace(/^\.+/, "") || a.name).charAt(0).toUpperCase()}
+                      </span>
+                      <span className="cz-growth-label">{a.name}</span>
                       {a.kind === "macos" && <Badge variant="optional">{t("growth.badge.macos")}</Badge>}
                       {a.kind === "unknown" && <Badge variant="optional">{t("growth.badge.unknown")}</Badge>}
                       {a.ignored && <Badge variant="optional">{t("growth.badge.ignored")}</Badge>}
@@ -173,7 +188,7 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
                     <span className="num">{human(a.size)}{a.partial && " *"}</span>
                     <span className="num">{fmtDelta(a.day, atLeast)}</span>
                     <span className="num">{fmtDelta(a.week, atLeast)}</span>
-                    <span className="num">{fmtDelta(a.month, atLeast)}</span>
+                    <span className="num cz-growth-month">{fmtDelta(a.month, atLeast)}</span>
                     <svg className="cz-growth-spark" viewBox="0 0 72 18" width="72" height="18" aria-hidden>
                       {spark && <path d={spark} />}
                     </svg>
@@ -185,11 +200,11 @@ export function GrowthPage({ visit, focusKey, focusNonce, goLeftovers, goUninsta
                         {a.folders.map((f) => (
                           <li key={f.path} className="cz-growth-folder">
                             <span className="cz-growth-path" title={f.path}>{shortHome(f.path)}</span>
-                            <span className="num">{human(f.size)}{!f.complete && " *"}</span>
-                            <span className="num">{fmtDelta(f.week, atLeast)}</span>
                             {f.denied && <span className="muted">{t("growth.denied")}</span>}
                             {f.outside && <span className="muted">{t("growth.outside")}</span>}
-                            <Button variant="ghost" size="sm" onClick={() => void reveal(f.path)} aria-label={t("growth.reveal")}>
+                            <span className="num cz-growth-fsize">{human(f.size)}{!f.complete && " *"}</span>
+                            <span className="num cz-growth-fweek">{fmtDelta(f.week, atLeast)}</span>
+                            <Button variant="ghost" size="sm" className="cz-growth-reveal" onClick={() => void reveal(f.path)} aria-label={t("growth.reveal")}>
                               <FolderOpen size={14} />
                             </Button>
                           </li>

@@ -100,7 +100,7 @@ function switchView(v: View, tool?: string) {
   if (v === "skills") showReactSkills();
   if (v === "apps") showReactApps();
   if (v === "fullscan") showReactFullScan();
-  if (v === "growth") showReactGrowth();
+  showReactGrowth(v === "growth");
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
   if (v === "photos") showReactPhotos();

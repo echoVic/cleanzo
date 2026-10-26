@@ -9,14 +9,14 @@ export function setGrowthHandlers(h: GrowthHandlers) {
   Object.assign(handlers, h);
 }
 
-/** 每次切到占用增长视图都挂载 / 复用 React 根。 */
-export function showReactGrowth() {
+/** main.ts 每次切换视图都调用：active 表示是否切到了本视图（进入时重新拉状态，隐藏时不跟着刷新）。 */
+export function showReactGrowth(active: boolean) {
   const el = document.querySelector<HTMLElement>("#growth-react-root");
-  if (el) mountGrowth(el, handlers);
+  if (el) mountGrowth(el, handlers, active);
 }
 
 /** 通知或菜单栏点进来：定位到这一行（调用方负责先切到本视图）。 */
 export function focusReactGrowth(key: string) {
   requestGrowthFocus(key);
-  showReactGrowth();
+  showReactGrowth(true);
 }

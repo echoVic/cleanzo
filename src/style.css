@@ -1838,8 +1838,21 @@ body {
 .cz-growth-item { transition: background-color var(--t-state) var(--e-out); border-radius: 8px; }
 .cz-growth-item:hover, .cz-growth-hl { background: var(--bg-subtle); }
 .cz-growth-name { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 行首的字母头像，同状态页的应用图标 */
+.cz-growth-icon { width: 24px; height: 24px; border-radius: 7px; flex: none; color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.cz-growth-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cz-growth-spark path { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.7; }
 .cz-growth-detail { padding: 4px 10px 12px 18px; display: grid; gap: 8px; }
 .cz-growth-detail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.cz-growth-folder { display: grid; grid-template-columns: minmax(0, 1fr) 84px 92px auto auto; gap: 8px; align-items: center; font-size: 12px; }
+/* 一行最多六项：路径、读不了、在主目录外、大小、7 天、显示。说明夹在路径和数字之间，
+   数字和按钮固定在右边几列，各目录行对齐；没有说明时那两列宽度为 0。 */
+.cz-growth-folder { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 84px 92px auto; gap: 8px; align-items: center; font-size: 12px; }
+.cz-growth-fsize { grid-column: 4; }
+.cz-growth-fweek { grid-column: 5; }
+.cz-growth-reveal { grid-column: 6; }
 .cz-growth-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 窄窗口：收起 30 天和曲线两列，给名字留出位置 */
+@media (max-width: 880px) {
+  .cz-growth-row { grid-template-columns: minmax(0, 1fr) 84px 92px 92px; }
+  .cz-growth-month, .cz-growth-spark { display: none; }
+}
