@@ -52,6 +52,10 @@
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/><path d="M8.5 11h5M11 8.5v5"/></svg>
             <span data-i18n="nav.fullscan">空间分析</span>
           </button>
+          <button class="nav-item" data-view="growth" type="button">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m7 14 4-4 3 3 5-6"/></svg>
+            <span data-i18n="nav.growth">占用增长</span>
+          </button>
           <button class="nav-item" data-view="large" type="button">
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 15h4.5L11 8l3 9 2.5-5H20"/><circle cx="12" cy="12" r="9"/></svg>
             <span data-i18n="nav.large">大文件</span>
@@ -98,6 +102,11 @@
         <!-- 全盘扫描（React 页面，内容由 React 挂载） -->
         <section id="view-fullscan" class="view hidden">
           <div id="fullscan-react-root"></div>
+        </section>
+
+        <!-- 占用增长（React 页面，内容由 React 挂载） -->
+        <section id="view-growth" class="view hidden">
+          <div id="growth-react-root"></div>
         </section>
 
         <!-- 大文件专清（React 页面，内容由 React 挂载） -->

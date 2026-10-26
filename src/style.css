@@ -1825,3 +1825,21 @@ body {
   .toast, .toast.show { transform: translate(-50%, 0); transition: opacity var(--t-fade) linear; }
   .skeleton, .st-skel .sk-line, .st-skel-row .sk-line { animation: none; }
 }
+
+/* 占用增长页：沿用卡片、描边与动效令牌。 */
+.cz-growth-banner { display: grid; gap: 8px; padding: 14px 16px; margin: 0 0 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); }
+.cz-growth-banner-quiet { display: flex; align-items: center; justify-content: space-between; }
+.cz-growth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.cz-growth-status, .cz-growth-note { margin: 0 0 8px; font-size: 12px; }
+.cz-growth-toolbar { display: flex; justify-content: flex-end; margin: 4px 0 8px; }
+.cz-growth-list { list-style: none; margin: 0; padding: 0; }
+.cz-growth-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 92px 92px 92px 72px; gap: 8px; align-items: center; width: 100%; padding: 8px 10px; text-align: left; background: none; border: 0; border-radius: 8px; }
+.cz-growth-head { font-size: 12px; }
+.cz-growth-item { transition: background-color var(--t-state) var(--e-out); border-radius: 8px; }
+.cz-growth-item:hover, .cz-growth-hl { background: var(--bg-subtle); }
+.cz-growth-name { display: flex; gap: 6px; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cz-growth-spark path { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.7; }
+.cz-growth-detail { padding: 4px 10px 12px 18px; display: grid; gap: 8px; }
+.cz-growth-detail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cz-growth-folder { display: grid; grid-template-columns: minmax(0, 1fr) 84px 92px auto auto; gap: 8px; align-items: center; font-size: 12px; }
+.cz-growth-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

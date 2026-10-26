@@ -4,6 +4,8 @@ import { setSettingsLangHandler, showReactSettings } from "./react/settings/entr
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
 import { showReactApps } from "./react/apps/entry";
+import { showReactGrowth, focusReactGrowth, setGrowthHandlers } from "./react/growth/entry";
+import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
 import { showReactClean } from "./react/clean/entry";
 import { setGoCleanHandler, showReactStatus } from "./react/status/entry";
@@ -11,7 +13,7 @@ import { setCrashGoClean } from "./react/list/crash-dumps";
 import { bumpLang } from "./ui/i18n-react";
 import { $, toast, VIEWS, type View } from "./shared";
 // Services and types are generated from the Go code by `mygo generate`.
-import { Cleaner, LanguageSettings } from "./mygo";
+import { Cleaner, LanguageSettings, events } from "./mygo";
 import { t, currentLang, type LangPref } from "./i18n";
 import { connectLanguage } from "./language";
 
@@ -98,6 +100,7 @@ function switchView(v: View, tool?: string) {
   if (v === "skills") showReactSkills();
   if (v === "apps") showReactApps();
   if (v === "fullscan") showReactFullScan();
+  if (v === "growth") showReactGrowth();
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
   if (v === "photos") showReactPhotos();
@@ -111,6 +114,14 @@ void initReactAITools().then(initReactSkills);
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
 setCrashGoClean(() => switchView("clean"));
+setGrowthHandlers({
+  goLeftovers: () => { switchView("apps"); showReactApps("leftovers"); },
+  goUninstall: () => switchView("apps"),
+});
+// 通知 / 菜单栏点进来：切到占用增长并定位那一行。
+if (window.mygo) events.growthFocus.on((key) => { switchView("growth"); focusReactGrowth(key); });
+// 第一版只做 macOS：Windows 上隐藏入口。
+if (isWindows()) document.querySelector<HTMLElement>('.nav-item[data-view="growth"]')?.classList.add("hidden");
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

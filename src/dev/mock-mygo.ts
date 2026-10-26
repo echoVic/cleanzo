@@ -2,7 +2,7 @@ import type { Runtime, Channel } from "mygo-runtime";
 import type {
   Cleaner, LanguageSettings, AppInfo, AppUsage, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
-  StatusSample, SubItem, SystemInfo, UninstallDetail,
+  StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -63,6 +63,24 @@ async function stream<T>(channel: Channel<T>, run: (emit: (value: T, ms?: number
 function createRuntime(): Runtime {
   const now = Math.floor(Date.now() / 1000);
   let settings: Settings = { disabledGroups: [], ignored: [], custom: [] };
+  // 占用增长：ToDesk（/Library 下的 dumps 在涨）和飞书（LarkShell）
+  let growthConfig: GrowthConfig = { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [] as string[], asked: true };
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const growthApps = (): GrowthApp[] => [
+    { key: "app:com.youqu.todesk.mac", name: "ToDesk", kind: "app", orphan: false, appPath: "/Applications/ToDesk.app",
+      size: 152 * GB, partial: false, ignored: growthConfig.ignored.includes("app:com.youqu.todesk.mac"),
+      day: { bytes: 5.6 * GB, atLeast: false, days: 1 }, week: { bytes: 38 * GB, atLeast: false, days: 7 }, month: { bytes: 140 * GB, atLeast: false, days: 30 },
+      spark: Array.from({ length: 30 }, (_, i) => (i < 6 ? -1 : (i - 5) * 5.6 * GB)),
+      folders: [
+        { path: "/Library/Application Support/ToDesk/dumps", size: 150 * GB, complete: true, denied: false, outside: true, week: { bytes: 38 * GB, atLeast: false, days: 7 } },
+        { path: "/Users/mock/Library/Caches/ToDesk", size: 2 * GB, complete: true, denied: false, outside: false, week: null },
+      ] },
+    { key: "app:com.electron.lark", name: "飞书", kind: "app", orphan: false, appPath: "/Applications/Lark.app",
+      size: 27.8 * GB, partial: false, ignored: growthConfig.ignored.includes("app:com.electron.lark"),
+      day: { bytes: 0.2 * GB, atLeast: false, days: 1 }, week: { bytes: 1.1 * GB, atLeast: false, days: 7 }, month: null,
+      spark: Array.from({ length: 30 }, (_, i) => 26 * GB + i * 0.06 * GB),
+      folders: [{ path: "/Users/mock/Library/Application Support/LarkShell", size: 25.1 * GB, complete: true, denied: false, outside: false, week: { bytes: GB, atLeast: false, days: 7 } }] },
+  ];
   const info: SystemInfo = {
     version: "0.2.4", os: "darwin", arch: "arm64", goVersion: "go1.27.1",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
@@ -149,6 +167,7 @@ function createRuntime(): Runtime {
     lastOpened: days < 0 ? 0 : now - days * 86400, running,
   });
   const apps: AppInfo[] = [
+    app("ToDesk", "com.youqu.todesk.mac", 180 * MB, "4.8", 1),
     app("Xcode", "com.apple.dt.Xcode", 12.4 * GB, "26.0", 3),
     app("Docker", "com.docker.docker", 2.1 * GB, "4.43.1", 48),
     app("Visual Studio Code", "com.microsoft.VSCode", 640 * MB, "1.105", 1),
@@ -223,6 +242,14 @@ function createRuntime(): Runtime {
     & { "LanguageSettings.SetLanguage": typeof LanguageSettings.setLanguage };
   const handlers = {
     "Cleaner.Info": async () => info,
+    "Cleaner.GrowthState": async () => ({
+      supported: true, config: growthConfig, records: 5, apps: growthApps(),
+      status: { running: false, lastAt: nowSec() - 3600, nextAt: nowSec() + 82800, fda: true, notifications: "allowed" },
+      alerts: [{ key: "app:com.youqu.todesk.mac", name: "ToDesk", window: "day", days: 1, bytes: 5.6 * GB, atLeast: false,
+        folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
+    }),
+    "Cleaner.GrowthMeasureNow": async () => {},
+    "Cleaner.SaveGrowthConfig": async (c) => { growthConfig = structuredClone(c); },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
       await emit(sample());
       for (;;) { await wait(2000); await emit(sample()); }
