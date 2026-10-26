@@ -86,7 +86,7 @@ function deferred<T>() {
 // 无浏览器的 effect 测试：保留 hook 槽位与依赖，执行页面实际的加载、定位和刷新回调。
 async function pageHarness(focusKey: string | null = null) {
   const React = await import("react");
-  const { GrowthPage } = await import("../src/react/growth/GrowthPage");
+  const { GrowthPanel } = await import("../src/react/growth/GrowthPage");
   const { growthApi } = await import("../src/react/growth/api");
   const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
   const pending: (() => void)[] = [];
@@ -150,6 +150,10 @@ async function pageHarness(focusKey: string | null = null) {
     if (!React.isValidElement<Record<string, any>>(node)) return [];
     return [node, ...nodes(node.props.children)];
   }
+  /** 一个节点里所有的文字（含按钮）。 */
+  const textOf = (node: React.ReactNode): string => Array.isArray(node) ? node.map(textOf).join("") :
+    React.isValidElement<{ children?: React.ReactNode }>(node) ? textOf(node.props.children) :
+    typeof node === "string" || typeof node === "number" ? String(node) : "";
   Object.assign(globalThis, {
     document: { querySelectorAll: () => [], querySelector: () =>
       nodes(tree).some((el) => el.props["data-growth-key"] === focusKey) ? { scrollIntoView: () => { scrolled++; } } : null },
@@ -178,7 +182,7 @@ async function pageHarness(focusKey: string | null = null) {
       for (let i = 0; i < 10; i++) {
         if (dirty) {
           dirty = false; cursor = 0;
-          tree = GrowthPage({ ...shown, focusKey, focusNonce: 1, goLeftovers() {}, goUninstall() {} });
+          tree = GrowthPanel({ ...shown, focusKey, focusNonce: 1, goLeftovers() {}, goUninstall() {} });
           for (const effect of pending.splice(0)) effect();
         }
         await Promise.resolve();
@@ -186,11 +190,13 @@ async function pageHarness(focusKey: string | null = null) {
     },
     frame() { for (const [id, fn] of [...frames]) { frames.delete(id); fn(0); } },
     openRow() { nodes(tree).find((el) => el.type === "button" && el.props.className === "cz-growth-row")!.props.onClick(); },
-    text() {
-      const text = (node: React.ReactNode): string => Array.isArray(node) ? node.map(text).join("") :
-        React.isValidElement<{ children?: React.ReactNode }>(node) ? text(node.props.children) :
-        typeof node === "string" || typeof node === "number" ? String(node) : "";
-      return text(tree);
+    text() { return textOf(tree); },
+    /** 有没有 className 正好是 cls 的元素。 */
+    has(cls: string) { return nodes(tree).some((el) => el.props.className === cls); },
+    /** 状态那一行的文字（含「现在量一次」）。 */
+    statusLine() {
+      const el = nodes(tree).find((n) => n.props.className === "cz-growth-statusline");
+      return el ? textOf(el) : "";
     },
     close() {
       for (const slot of slots) slot.cleanup?.();
@@ -703,6 +709,17 @@ test("没有记录时「现在量一次」只在空状态里，量的时候转�
     await page.settle();
     expect(page.guide()).toBeNull();
     expect(page.text()).toContain(t("growth.measureNow"));
+  } finally { page.close(); }
+});
+
+test("面板没有页头；有记录时「现在量一次」在状态那一行里", async () => {
+  const page = await pageHarness();
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(state({ records: 2, apps: [app({})] }));
+    await page.settle();
+    expect(page.has("view-head")).toBe(false);
+    expect(page.statusLine()).toContain(t("growth.measureNow"));
   } finally { page.close(); }
 });
 

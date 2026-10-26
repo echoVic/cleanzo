@@ -19,8 +19,8 @@ export interface GrowthHandlers {
   goUninstall: (appPath: string) => void;
 }
 
-/** 占用增长页的显示状态、访问次数、定位请求和导航回调。 */
-export interface GrowthPageProps extends GrowthHandlers {
+/** 占用增长面板的显示状态、访问次数、定位请求和导航回调。 */
+export interface GrowthPanelProps extends GrowthHandlers {
   /** 是否正显示本视图：隐藏时不跟着 growthUpdated 刷新。 */
   active: boolean;
   /** 每次进入视图递增：重新拉状态。 */
@@ -30,8 +30,8 @@ export interface GrowthPageProps extends GrowthHandlers {
   focusNonce: number;
 }
 
-/** 展示按 App 汇总的占用、增长记录与目录明细。 */
-export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, goUninstall }: GrowthPageProps) {
+/** 按 App 汇总的占用、增长记录与目录明细。放在进程页的磁盘占用标签里，没有自己的页头。 */
+export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, goUninstall }: GrowthPanelProps) {
   const t = useT();
   const [state, setState] = React.useState<GrowthState | null>(null);
   const [sort, setSort] = React.useState<GrowthSort>("week");
@@ -101,26 +101,13 @@ export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, g
   const toggleIgnore = (a: GrowthApp) => void save(a.ignored ? { unignore: a.key } : { ignore: a.key });
 
   const view = growthView(state);
-  if (!state || view === "unsupported") return <div className="cz-react" />;
+  if (!state || view === "unsupported") return null;
   const banner = growthBanner(state);
   const atLeast = (s: string) => t("growth.atLeast", { size: s });
   const fmtTime = (sec: number) => new Date(sec * 1000).toLocaleString();
 
   return (
-    <div className="cz-react">
-      <header className="view-head">
-        <div>
-          <h2>{t("nav.growth")}</h2>
-          <p className="muted">{t("growth.sub")}</p>
-        </div>
-        {/* 还没有记录时，入口是空状态里的大按钮，这里不再放一个。 */}
-        {view !== "empty" && (
-          <Button onClick={() => void measure()} disabled={state.status.running}>
-            <RefreshCw size={14} className={state.status.running ? "animate-spin" : undefined} />
-            {state.status.running ? t("growth.measuring") : t("growth.measureNow")}
-          </Button>
-        )}
-      </header>
+    <div className="cz-growth-panel">
 
       {banner === "optin" && (
         <div className="cz-growth-banner">
@@ -139,10 +126,19 @@ export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, g
         </div>
       )}
 
-      <p className="cz-growth-status muted">
-        {state.status.lastAt ? t("growth.status.last", { time: fmtTime(state.status.lastAt) }) : t("growth.status.never")}
-        {state.config.enabled && state.status.nextAt > 0 && <> · {t("growth.status.next", { time: fmtTime(state.status.nextAt) })}</>}
-      </p>
+      <div className="cz-growth-statusline">
+        <p className="cz-growth-status muted">
+          {state.status.lastAt ? t("growth.status.last", { time: fmtTime(state.status.lastAt) }) : t("growth.status.never")}
+          {state.config.enabled && state.status.nextAt > 0 && <> · {t("growth.status.next", { time: fmtTime(state.status.nextAt) })}</>}
+        </p>
+        {/* 还没有记录时，入口是空状态里的大按钮，这里不再放一个。 */}
+        {view !== "empty" && (
+          <Button size="sm" onClick={() => void measure()} disabled={state.status.running}>
+            <RefreshCw size={14} className={state.status.running ? "animate-spin" : undefined} />
+            {state.status.running ? t("growth.measuring") : t("growth.measureNow")}
+          </Button>
+        )}
+      </div>
       {!state.status.fda && <p className="cz-growth-note muted">{t("growth.fda")}</p>}
       {state.config.enabled && state.status.notifications === "denied" && <p className="cz-growth-note muted">{t("growth.notifDenied")}</p>}
 
@@ -228,6 +224,22 @@ export function GrowthPage({ active, visit, focusKey, focusNonce, goLeftovers, g
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+/** 独立的「占用增长」页：页头 + 面板。进程页接好后（Task 5），连同 entry.ts、mount.tsx 一起删掉。 */
+export function GrowthPage(props: GrowthPanelProps) {
+  const t = useT();
+  return (
+    <div className="cz-react">
+      <header className="view-head">
+        <div>
+          <h2>{t("nav.growth")}</h2>
+          <p className="muted">{t("growth.sub")}</p>
+        </div>
+      </header>
+      <GrowthPanel {...props} />
     </div>
   );
 }

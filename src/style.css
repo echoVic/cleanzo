@@ -1831,6 +1831,8 @@ body {
 .cz-growth-banner-quiet { display: flex; align-items: center; justify-content: space-between; }
 .cz-growth-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .cz-growth-status, .cz-growth-note { margin: 0 0 8px; font-size: 12px; }
+.cz-growth-statusline { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; }
+.cz-growth-statusline .cz-growth-status { flex: 1; min-width: 0; margin: 0; }
 .cz-growth-toolbar { display: flex; justify-content: flex-end; margin: 4px 0 8px; }
 .cz-growth-list { list-style: none; margin: 0; padding: 0; }
 .cz-growth-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 92px 92px 92px 72px; gap: 8px; align-items: center; width: 100%; padding: 8px 10px; text-align: left; background: none; border: 0; border-radius: 8px; }
