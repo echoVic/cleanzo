@@ -108,7 +108,6 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
 
   return (
     <div className="cz-growth-panel">
-
       {banner === "optin" && (
         <div className="cz-growth-banner">
           <strong>{t("growth.optin.title")}</strong>
