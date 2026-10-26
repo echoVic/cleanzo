@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -75,6 +76,7 @@ type processSource struct {
 	bundleID    func(bundle string) string // CFBundleIdentifier of an .app
 	pressure    func() uint64
 	cpu         func() (busy, total uint64) // cumulative ticks
+	now         func() time.Time            // nil uses time.Now; tests inject a deterministic clock
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -83,6 +85,24 @@ var (
 	processInterval    = 2 * time.Second // one sample
 	processOthersEvery = 3               // ps runs on every third sample, about every six seconds
 )
+
+// Info.plist fallback reads survive pauses and page visits. Hold the lock
+// through the read so concurrent watches also read each bundle only once.
+var processBundleIDs = struct {
+	sync.Mutex
+	values map[string]string
+}{values: make(map[string]string)}
+
+func processBundleID(bundle string, read func(string) string) string {
+	processBundleIDs.Lock()
+	defer processBundleIDs.Unlock()
+	id, ok := processBundleIDs.values[bundle]
+	if !ok {
+		id = read(bundle)
+		processBundleIDs.values[bundle] = id
+	}
+	return id
+}
 
 // ---- bound methods --------------------------------------------------------
 
@@ -104,6 +124,9 @@ func (Cleaner) WatchProcesses(ctx context.Context, ch *mygo.Channel[ProcessSampl
 // after QuitApp left the app running and the user confirmed. Matching,
 // exclusions (Finder, Cleanzo) and results are QuitApp's.
 func (Cleaner) ForceQuitApp(path string) (bool, error) {
+	if !processSupported() {
+		return false, codeError{Code: "unsupported"}
+	}
 	return quitAppWith(path, workspaceList, workspaceForceTerminate)
 }
 
@@ -111,33 +134,42 @@ func (Cleaner) ForceQuitApp(path string) (bool, error) {
 
 // watchProcessesWith runs the loop against an injected sender and source.
 func watchProcessesWith(ctx context.Context, send func(ProcessSample) error, src processSource) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := src.now
+	if now == nil {
+		now = time.Now
+	}
+	prevAt := now()
 	prev := snapshotProcs(src.procs())
 	prevBusy, prevTotal := src.cpu()
-	prevAt := time.Now()
 	others := src.others(ctx)
 	if err := sleepCtx(ctx, processFirstDelay); err != nil {
 		return err
 	}
-	// One Info.plist read per app for the whole watch.
-	ids := map[string]string{}
 	bundleID := func(bundle string) string {
-		id, ok := ids[bundle]
-		if !ok {
-			id = src.bundleID(bundle)
-			ids[bundle] = id
-		}
-		return id
+		return processBundleID(bundle, src.bundleID)
 	}
 	tick := time.NewTicker(processInterval)
 	defer tick.Stop()
 	for n := 0; ; n++ {
-		if n > 0 && n%processOthersEvery == 0 {
-			others = src.others(ctx)
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		elapsed := time.Since(prevAt)
+		if n > 0 && n%processOthersEvery == 0 {
+			if refreshed := src.others(ctx); refreshed != nil {
+				others = refreshed
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		curAt := now()
+		elapsed := curAt.Sub(prevAt)
 		cur := snapshotProcs(src.procs())
 		busy, total := src.cpu()
-		prevAt = time.Now()
+		prevAt = curAt
 		sample := ProcessSample{
 			Rows:     groupProcesses(prev, cur, others, src.apps(), src.responsible, src.system, bundleID, elapsed),
 			Pressure: src.pressure(),
@@ -191,6 +223,12 @@ type processGroup struct {
 // pid counts none this round. Other accounts' numbers are ps's, marked
 // estimated. Rows come ordered by key, children by name.
 func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []workspaceApp, responsible func(int32) int32, system func(string) bool, bundleID func(string) string, elapsed time.Duration) []ProcessRow {
+	workspaceIDs := make(map[string]string, len(apps))
+	for _, app := range apps {
+		if app.Path != "" && app.BundleID != "" {
+			workspaceIDs[strings.ToLower(app.Path)] = app.BundleID
+		}
+	}
 	groups := map[string]*processGroup{}
 	add := func(key, kind, bundle, name string, cpu float64, memory uint64, estimated bool) {
 		g := groups[key]
@@ -231,7 +269,11 @@ func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []
 		row := g.row
 		if row.Kind == "app" {
 			row.Name = displayName(row.Key, row.Path, apps, nil)
-			row.BundleID = strings.ToLower(bundleID(row.Path))
+			id := workspaceIDs[strings.ToLower(row.Path)]
+			if id == "" {
+				id = bundleID(row.Path)
+			}
+			row.BundleID = strings.ToLower(id)
 			row.Quit = canQuit(row.Path, apps)
 		} else {
 			row.Name = row.Key[strings.IndexByte(row.Key, ':')+1:]

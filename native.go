@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/binary"
+	"math/bits"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -34,7 +35,25 @@ var (
 	hostPort         uint32
 
 	nativeOnce sync.Once
+	// Keep the 1/1 fallback if mach_timebase_info is unavailable or fails.
+	nativeTimebase = machTimebaseInfo{numer: 1, denom: 1}
 )
+
+type machTimebaseInfo struct{ numer, denom uint32 }
+
+// machTicksToNs uses a full-width product, saturating if even the result
+// cannot fit in the uint64 nanosecond counter.
+func machTicksToNs(ticks uint64, numer, denom uint32) uint64 {
+	if numer == 0 || denom == 0 {
+		return ticks
+	}
+	hi, lo := bits.Mul64(ticks, uint64(numer))
+	if hi >= uint64(denom) {
+		return ^uint64(0)
+	}
+	ns, _ := bits.Div64(hi, lo, uint64(denom))
+	return ns
+}
 
 const (
 	hostVMInfo64Flavor    = 4 // HOST_VM_INFO64
@@ -67,8 +86,8 @@ type hostCPULoad struct {
 // Offsets into rusage_info_v2, which starts with a 16-byte UUID and only
 // ever appends fields, so these are stable across macOS versions.
 const (
-	riUserNs    = 16 // ri_user_time, nanoseconds
-	riSystemNs  = 24 // ri_system_time
+	riUserNs    = 16 // ri_user_time, Mach absolute time units; convert before use
+	riSystemNs  = 24 // ri_system_time, Mach absolute time units
 	riFootprint = 72 // ri_phys_footprint, the Activity Monitor "Memory" column
 	riStartAbs  = 80 // ri_proc_start_abstime, identifies reused pids
 )
@@ -78,6 +97,14 @@ func nativeInit() {
 		lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
 		if err != nil {
 			return // the accessors below stay nil and report errors
+		}
+		if symbol, err := purego.Dlsym(lib, "mach_timebase_info"); err == nil {
+			var readTimebase func(*machTimebaseInfo) int32
+			purego.RegisterFunc(&readTimebase, symbol)
+			var info machTimebaseInfo
+			if readTimebase(&info) == 0 && info.numer != 0 && info.denom != 0 {
+				nativeTimebase = info
+			}
 		}
 		purego.RegisterLibFunc(&machHostSelf, lib, "mach_host_self")
 		purego.RegisterLibFunc(&hostStat64, lib, "host_statistics64")
@@ -161,8 +188,8 @@ func nativeProcs() []procReading {
 		r := procReading{
 			Pid:       pid,
 			Footprint: binary.LittleEndian.Uint64(rusage[riFootprint:]),
-			UserNs:    binary.LittleEndian.Uint64(rusage[riUserNs:]),
-			SysNs:     binary.LittleEndian.Uint64(rusage[riSystemNs:]),
+			UserNs:    machTicksToNs(binary.LittleEndian.Uint64(rusage[riUserNs:]), nativeTimebase.numer, nativeTimebase.denom),
+			SysNs:     machTicksToNs(binary.LittleEndian.Uint64(rusage[riSystemNs:]), nativeTimebase.numer, nativeTimebase.denom),
 			Start:     binary.LittleEndian.Uint64(rusage[riStartAbs:]),
 		}
 		if l := procPidPathFn(pid, unsafe.Pointer(&path[0]), uint32(len(path))); l > 0 {

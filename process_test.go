@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,7 +63,7 @@ func TestGroupProcessesCPUFromThePreviousReading(t *testing.T) {
 	})
 	cur := snapshotProcs([]procReading{
 		{Pid: 1, Path: "/usr/bin/yes", UserNs: 3e9, Start: 7},            // 2 s of CPU in 2 s: 100%
-		{Pid: 2, Path: "/opt/homebrew/bin/node", UserNs: 1e9, Start: 99}, // pid reused: none this round
+		{Pid: 2, Path: "/opt/homebrew/bin/node", UserNs: 9e9, Start: 99}, // pid reused despite a larger counter: none this round
 		{Pid: 3, Path: "/bin/zsh", UserNs: 2e9, Start: 9},                // counters went back: none
 		{Pid: 4, Path: "/usr/bin/top", UserNs: 9e9, Start: 10},           // new: none
 	})
@@ -163,5 +165,204 @@ func TestWatchProcessesStopsDuringTheFirstWait(t *testing.T) {
 	err := watchProcessesWith(ctx, func(ProcessSample) error { sent = true; return nil }, fakeProcessSource(&ps))
 	if !errors.Is(err, context.Canceled) || sent {
 		t.Fatalf("err = %v, sent = %v; want canceled before any sample", err, sent)
+	}
+}
+
+func TestParsePsOutputPreservesChinesePath(t *testing.T) {
+	got := parsePsOutput([]byte("7046 0 2.5 1024 /Applications/语雀.app/Contents/MacOS/语雀\n"), 501)
+	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "/Applications/语雀.app/Contents/MacOS/语雀"}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestGroupProcessesPrefersWorkspaceBundleIDs(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "Workspace.app")
+	fallback := filepath.Join(t.TempDir(), "Fallback.app")
+	cur := snapshotProcs([]procReading{
+		{Pid: 1, Path: filepath.Join(bundle, "Contents", "MacOS", "Workspace")},
+		{Pid: 2, Path: filepath.Join(fallback, "Contents", "MacOS", "Fallback")},
+	})
+	apps := []workspaceApp{
+		{Path: strings.ToUpper(bundle), BundleID: "COM.Example.Workspace"},
+		{Path: fallback}, // A workspace entry without an ID still needs the fallback.
+	}
+	var reads []string
+	rows := groupProcesses(cur, cur, nil, apps, func(p int32) int32 { return p }, testSystemPath, func(path string) string {
+		reads = append(reads, path)
+		return "COM.Example.Fallback"
+	}, 0)
+	got := rowsByKey(rows)
+	if id := got["app:"+strings.ToLower(bundle)].BundleID; id != "com.example.workspace" {
+		t.Errorf("workspace ID = %q", id)
+	}
+	if id := got["app:"+strings.ToLower(fallback)].BundleID; id != "com.example.fallback" {
+		t.Errorf("fallback ID = %q", id)
+	}
+	if len(reads) != 1 || reads[0] != fallback {
+		t.Errorf("Info.plist reads = %v, want only %s", reads, fallback)
+	}
+}
+
+func TestWatchProcessesCachesBundleIDsAcrossWatches(t *testing.T) {
+	resetProcessBundleIDs(t)
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	for _, id := range []string{"com.example.cached", ""} {
+		t.Run("id="+id, func(t *testing.T) {
+			bundle := filepath.Join(t.TempDir(), "Cached.app")
+			var ps, reads atomic.Int32
+			src := fakeProcessSource(&ps)
+			src.procs = func() []procReading {
+				return []procReading{{Pid: 1, Path: filepath.Join(bundle, "Contents", "MacOS", "Cached")}}
+			}
+			src.bundleID = func(string) string { reads.Add(1); return id }
+			closed := errors.New("finished sample")
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() {
+					err := watchProcessesWith(context.Background(), func(s ProcessSample) error {
+						if got := rowsByKey(s.Rows)["app:"+strings.ToLower(bundle)].BundleID; got != id {
+							t.Errorf("bundle ID = %q, want %q", got, id)
+						}
+						return closed
+					}, src)
+					if !errors.Is(err, closed) {
+						t.Errorf("watch error = %v", err)
+					}
+				})
+			}
+			wg.Wait()
+			if n := reads.Load(); n != 1 {
+				t.Errorf("bundle ID read %d times across watches, want 1", n)
+			}
+		})
+	}
+}
+
+func resetProcessBundleIDs(t *testing.T) {
+	t.Helper()
+	processBundleIDs.Lock()
+	old := processBundleIDs.values
+	processBundleIDs.values = make(map[string]string)
+	processBundleIDs.Unlock()
+	t.Cleanup(func() {
+		processBundleIDs.Lock()
+		processBundleIDs.values = old
+		processBundleIDs.Unlock()
+	})
+}
+
+func TestWatchProcessesCanceledBeforeReading(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var ps atomic.Int32
+	src := fakeProcessSource(&ps)
+	reads := 0
+	src.procs = func() []procReading { reads++; return nil }
+	err := watchProcessesWith(ctx, func(ProcessSample) error { t.Error("sent after cancellation"); return nil }, src)
+	if !errors.Is(err, context.Canceled) || reads != 0 || ps.Load() != 0 {
+		t.Fatalf("err=%v procs=%d others=%d, want canceled and no reads", err, reads, ps.Load())
+	}
+}
+
+func TestWatchProcessesStopsAfterPsCancels(t *testing.T) {
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var ps atomic.Int32
+	src := fakeProcessSource(&ps)
+	reads, sent := 0, 0
+	src.procs = func() []procReading { reads++; return nil }
+	src.others = func(context.Context) []otherProc {
+		if ps.Add(1) == 2 {
+			cancel()
+		}
+		return nil
+	}
+	err := watchProcessesWith(ctx, func(ProcessSample) error { sent++; return nil }, src)
+	if !errors.Is(err, context.Canceled) || reads != 4 || sent != 3 || ps.Load() != 2 {
+		t.Fatalf("err=%v procs=%d sent=%d ps=%d, want canceled, 4, 3, 2", err, reads, sent, ps.Load())
+	}
+}
+
+func TestWatchProcessesKeepsOthersWhenPsFails(t *testing.T) {
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var ps atomic.Int32
+	src := fakeProcessSource(&ps)
+	src.others = func(context.Context) []otherProc {
+		switch ps.Add(1) {
+		case 1:
+			return []otherProc{{Pid: 9, CPU: 7, Memory: 42, Path: "/sbin/launchd"}}
+		case 2:
+			return nil // failure: keep the previous successful reading
+		default:
+			return []otherProc{} // success: no other accounts' processes remain
+		}
+	}
+	samples := 0
+	err := watchProcessesWith(ctx, func(s ProcessSample) error {
+		samples++
+		want := 1
+		if samples == 7 {
+			want = 0
+			cancel()
+		}
+		if s.Others != want || len(s.Rows) != 1+want {
+			t.Errorf("sample %d: others=%d rows=%d, want %d, %d", samples, s.Others, len(s.Rows), want, 1+want)
+		}
+		if want == 1 {
+			r := rowsByKey(s.Rows)["sys:launchd"]
+			if r.CPU != 7 || r.Memory != 42 || !r.Estimated {
+				t.Errorf("sample %d lost the previous estimate: %+v", samples, r)
+			}
+		}
+		return nil
+	}, src)
+	if !errors.Is(err, context.Canceled) || samples != 7 {
+		t.Fatalf("err=%v samples=%d", err, samples)
+	}
+}
+
+func TestWatchProcessesUsesReadStartForBothCPUEndpoints(t *testing.T) {
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	var ps atomic.Int32
+	src := fakeProcessSource(&ps)
+	at := time.Unix(1, 0)
+	src.now = func() time.Time { return at }
+	reads := uint64(0)
+	src.procs = func() []procReading {
+		reads++
+		at = at.Add(500 * time.Millisecond)
+		return []procReading{{Pid: 1, Path: "/usr/bin/yes", Start: 1, UserNs: reads * 1e9}}
+	}
+	src.others = func(context.Context) []otherProc { at = at.Add(750 * time.Millisecond); return nil }
+	src.pressure = func() uint64 { at = at.Add(time.Second); return 0 }
+	closed := errors.New("finished two samples")
+	var cpus []float64
+	err := watchProcessesWith(context.Background(), func(s ProcessSample) error {
+		cpus = append(cpus, s.Rows[0].CPU)
+		if len(cpus) == 2 {
+			return closed
+		}
+		return nil
+	}, src)
+	if !errors.Is(err, closed) || len(cpus) != 2 {
+		t.Fatalf("err=%v CPU=%v", err, cpus)
+	}
+	if cpus[0] < 79.99 || cpus[0] > 80.01 || cpus[1] < 66.66 || cpus[1] > 66.67 {
+		t.Fatalf("CPU=%v, want [80, 66.6667] from read-start intervals", cpus)
+	}
+}
+
+func TestQuitForceUnsupportedOffMacOS(t *testing.T) {
+	if processSupported() {
+		t.Skip("non-macOS binding contract")
+	}
+	ok, err := (Cleaner{}).ForceQuitApp("")
+	ce, isCode := err.(codeError)
+	if ok || !isCode || ce.Code != "unsupported" {
+		t.Fatalf("got (%v, %v), want false and unsupported", ok, err)
 	}
 }

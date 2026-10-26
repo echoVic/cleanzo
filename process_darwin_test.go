@@ -2,12 +2,71 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestNativeProcsCPUTimeMatchesGetrusage(t *testing.T) {
+	processCPU := func() uint64 {
+		for _, p := range nativeProcs() {
+			if p.Pid == int32(os.Getpid()) {
+				return p.UserNs + p.SysNs
+			}
+		}
+		t.Fatal("nativeProcs did not report this process")
+		return 0
+	}
+	usage := func() time.Duration {
+		var r syscall.Rusage
+		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &r); err != nil {
+			t.Fatal(err)
+		}
+		return time.Duration(r.Utime.Nano()) + time.Duration(r.Stime.Nano())
+	}
+	beforeProc, beforeUsage := processCPU(), usage()
+	var work uint64 = 1
+	for usage()-beforeUsage < 200*time.Millisecond {
+		for range 100_000 {
+			work = work*1664525 + 1013904223
+		}
+	}
+	runtime.KeepAlive(work)
+	procDelta, usageDelta := processCPU()-beforeProc, usage()-beforeUsage
+	ratio := float64(procDelta) / float64(usageDelta)
+	t.Logf("nativeProcs delta %v, getrusage delta %v, ratio %.4f", time.Duration(procDelta), usageDelta, ratio)
+	if ratio < 0.8 || ratio > 1.2 {
+		t.Fatalf("CPU deltas differ by more than 20%%: ratio %.4f", ratio)
+	}
+}
+
+func TestNativeProcsMachTimeConversion(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		ticks        uint64
+		numer, denom uint32
+		want         uint64
+	}{
+		{"apple silicon", 3, 125, 3, 125},
+		{"fraction", 4, 125, 3, 166},
+		{"128-bit product", ^uint64(0), 2, 3, 12297829382473034410},
+		{"saturate", ^uint64(0), 125, 3, ^uint64(0)},
+		{"missing numerator", 123, 0, 3, 123},
+		{"missing denominator", 123, 125, 0, 123},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := machTicksToNs(tc.ticks, tc.numer, tc.denom); got != tc.want {
+				t.Fatalf("got %d ns, want %d", got, tc.want)
+			}
+		})
+	}
+}
 
 // processFixture is one Mac's worth of processes for the grouping tests.
 func processFixture() (cur map[int32]procReading, others []otherProc, apps []workspaceApp, responsible func(int32) int32) {
@@ -138,7 +197,7 @@ func TestGroupProcessesNamesQuitAndBundleIDs(t *testing.T) {
 
 // TestProcessSamplingBudget measures spec §六.9 on this Mac. The loop
 // together with the ps it starts may use 3% of one core on average.
-// Opt in with CLEANZO_PERF=1; it runs for 30 seconds. Don't use -race,
+// Opt in with CLEANZO_PERF=1; it runs for 60 seconds. Don't use -race,
 // which inflates the CPU.
 func TestProcessSamplingBudget(t *testing.T) {
 	if os.Getenv("CLEANZO_PERF") == "" {
@@ -153,7 +212,7 @@ func TestProcessSamplingBudget(t *testing.T) {
 		tv := func(v syscall.Timeval) time.Duration { return time.Duration(v.Nano()) }
 		return tv(self.Utime) + tv(self.Stime) + tv(kids.Utime) + tv(kids.Stime)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	samples, rows := 0, 0
 	before, start := usage(), time.Now()
@@ -163,5 +222,114 @@ func TestProcessSamplingBudget(t *testing.T) {
 	t.Logf("%d samples, %d rows in the last, CPU %v in %v: %.2f%% of one core", samples, rows, used.Round(time.Millisecond), wall.Round(time.Second), pct)
 	if pct > 3 {
 		t.Errorf("sampling used %.2f%% of one core, budget 3%%", pct)
+	}
+}
+
+func TestGroupProcessesPreservesChineseBundle(t *testing.T) {
+	const path = "/Applications/语雀.app/Contents/MacOS/语雀"
+	cur := snapshotProcs([]procReading{{Pid: 1, Path: path, Footprint: 1024}})
+	others := []otherProc{{Pid: 2, Path: path, Memory: 2048}}
+	rows := groupProcesses(cur, cur, others, nil, func(p int32) int32 { return p }, systemExecutable, noBundleIDs, 0)
+	if len(rows) != 1 || rows[0].Key != "app:/applications/语雀.app" || rows[0].Path != "/Applications/语雀.app" || rows[0].Procs != 2 || !rows[0].Estimated {
+		t.Fatalf("Chinese bundle was split: %+v", rows)
+	}
+}
+
+func TestSystemExecutable(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"/System/Library/Frameworks/service", true},
+		{"/usr/libexec/service", true},
+		{"/usr/sbin/service", true},
+		{"/sbin/service", true},
+		{"/Library/Apple/service", true},
+		{"/bin/zsh", false},
+		{"/usr/bin/yes", false},
+		{"/opt/homebrew/bin/node", false},
+		{"/Applications/X.app/Contents/MacOS/X", false},
+		{"/Systematic/service", false},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := systemExecutable(tc.path); got != tc.want {
+				t.Fatalf("systemExecutable(%q)=%v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// Replace only the ps command boundary: these tests never execute /bin/ps.
+func fakeProcessPs(t *testing.T, mode string) {
+	t.Helper()
+	old := processPsCommand
+	t.Cleanup(func() { processPsCommand = old })
+	t.Setenv("CLEANZO_PROCESS_PS_HELPER", mode)
+	processPsCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name != "/bin/ps" || strings.Join(args, " ") != "-axww -o pid=,uid=,pcpu=,rss=,comm=" {
+			t.Errorf("unexpected ps command: %s %v", name, args)
+		}
+		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestProcessPsHelper$")
+	}
+}
+
+func TestProcessPsHelper(t *testing.T) {
+	mode := os.Getenv("CLEANZO_PROCESS_PS_HELPER")
+	if mode == "" {
+		return
+	}
+	if os.Getenv("LC_ALL") != "en_US.UTF-8" {
+		fmt.Fprintln(os.Stderr, "ps needs en_US.UTF-8 to preserve Unicode paths")
+		os.Exit(2)
+	}
+	if mode == "empty" {
+		os.Exit(0)
+	}
+	// Use another uid even when the parent is root, so self-filtering must
+	// depend on the command's PID rather than the parser's uid filter.
+	uid := uint32(os.Getuid()) + 1
+	fmt.Printf("%d %d 0.1 1 /bin/ps\n", os.Getpid(), uid)
+	if mode == "self-only" {
+		os.Exit(0)
+	}
+	fmt.Printf("12345 %d 2.5 1024 /Applications/语雀.app/Contents/MacOS/语雀\n", uid)
+	if mode == "fail" {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestParsePsCommandPreservesUnicodeAndSkipsItself(t *testing.T) {
+	fakeProcessPs(t, "success")
+	got := readOtherProcs(context.Background())
+	if len(got) != 1 || got[0].Pid != 12345 || got[0].Path != "/Applications/语雀.app/Contents/MacOS/语雀" || got[0].CPU != 2.5 {
+		t.Fatalf("ps reading = %+v, want only the unchanged Chinese path", got)
+	}
+}
+
+func TestParsePsCommandFailureIsUnavailable(t *testing.T) {
+	fakeProcessPs(t, "fail")
+	if got := readOtherProcs(context.Background()); got != nil {
+		t.Fatalf("failed ps returned a partial successful reading: %+v", got)
+	}
+}
+
+func TestParsePsCommandSuccessCanBeEmpty(t *testing.T) {
+	for _, mode := range []string{"empty", "self-only"} {
+		t.Run(mode, func(t *testing.T) {
+			fakeProcessPs(t, mode)
+			if got := readOtherProcs(context.Background()); got == nil || len(got) != 0 {
+				t.Fatalf("successful empty ps reading = %+v; want a non-nil empty slice", got)
+			}
+		})
+	}
+}
+
+func TestParsePsCommandCanceledIsUnavailable(t *testing.T) {
+	fakeProcessPs(t, "success")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := readOtherProcs(ctx); got != nil {
+		t.Fatalf("canceled ps returned a successful reading: %+v", got)
 	}
 }

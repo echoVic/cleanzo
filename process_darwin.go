@@ -15,6 +15,9 @@ func processSupported() bool { return true }
 // processPsTimeout bounds one ps run.
 var processPsTimeout = 3 * time.Second
 
+// Tests replace this command boundary without running the real ps.
+var processPsCommand = exec.CommandContext
+
 // realProcessSource wires the loop to the native reads: libproc for this
 // user's processes, the setuid /bin/ps for everyone else's.
 func realProcessSource() processSource {
@@ -33,17 +36,26 @@ func realProcessSource() processSource {
 // readOtherProcs runs ps, which is setuid root and so can report every
 // account's processes; libproc refuses other accounts' (EPERM). The
 // numbers are ps's, a decaying CPU average and resident memory, hence
-// estimates. LC_ALL=C keeps the decimal point a dot.
+// estimates. en_US.UTF-8 preserves Unicode paths and keeps a decimal dot.
 func readOtherProcs(ctx context.Context) []otherProc {
 	ctx, cancel := context.WithTimeout(ctx, processPsTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/bin/ps", "-axww", "-o", "pid=,uid=,pcpu=,rss=,comm=")
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	cmd := processPsCommand(ctx, "/bin/ps", "-axww", "-o", "pid=,uid=,pcpu=,rss=,comm=")
+	cmd.Env = append(os.Environ(), "LC_ALL=en_US.UTF-8")
 	out, err := cmd.Output()
-	if ctx.Err() != nil || (err != nil && len(out) == 0) {
+	if ctx.Err() != nil || err != nil {
 		return nil
 	}
-	return parsePsOutput(out, uint32(os.Getuid()))
+	procs := parsePsOutput(out, uint32(os.Getuid()))
+	// A non-nil empty slice is a successful read with no other processes;
+	// nil means unavailable and tells the loop to keep its last reading.
+	others := make([]otherProc, 0, len(procs))
+	for _, p := range procs {
+		if p.Pid != int32(cmd.Process.Pid) {
+			others = append(others, p)
+		}
+	}
+	return others
 }
 
 // systemExecutable reports programs that ship with macOS: daemons, agents
