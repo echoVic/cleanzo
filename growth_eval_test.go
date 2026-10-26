@@ -79,6 +79,36 @@ func TestDayThresholdIncludesEquality(t *testing.T) {
 	}
 }
 
+// The seven-day threshold is inclusive like the day's, and it is WeeklyGB:
+// exactly the threshold alerts over the week, one byte less does not. The base
+// is five days old, so no day alert can stand in for it.
+func TestWeekThresholdIncludesEquality(t *testing.T) {
+	h := []growthSnapshot{at(-5*24*time.Hour, true, done(todesk, 10*gb))}
+	weekly20 := cfg2()
+	weekly20.WeeklyGB = 20
+	for _, tc := range []struct {
+		name string
+		cfg  GrowthConfig
+		grew int64
+		want int
+	}{
+		{"exactly 10 GB", cfg2(), 10 * gb, 1},
+		{"one byte below 10 GB", cfg2(), 10*gb - 1, 0},
+		{"exactly 20 GB of a 20 GB threshold", weekly20, 20 * gb, 1},
+		{"one byte below 20 GB", weekly20, 20*gb - 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := evaluateGrowth(h, at(0, true, done(todesk, 10*gb+tc.grew)), tc.cfg, byBase)
+			if len(a) != tc.want {
+				t.Fatalf("alerts = %+v, want %d", a, tc.want)
+			}
+			if tc.want == 1 && (a[0].Window != "week" || a[0].Bytes != tc.grew || a[0].Days != 5) {
+				t.Fatalf("exactly the weekly threshold must alert over the week: %+v", a)
+			}
+		})
+	}
+}
+
 func TestDayWindowBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name string
