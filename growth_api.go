@@ -90,9 +90,3 @@ func (Cleaner) SaveGrowthConfig(c GrowthConfig) error {
 	growth.changed()
 	return nil
 }
-
-// applyGrowthLifecycle is replaced by growth_app.go in Task 6.
-func applyGrowthLifecycle(GrowthConfig) error { return nil }
-
-// refreshGrowthTray is replaced by growth_app.go in Task 6.
-func refreshGrowthTray() {}

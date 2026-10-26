@@ -1876,44 +1876,58 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 	}
 }
 
+// mainWindow is the app's window while it exists.
+var mainWindow *mygo.Window
+
+// newMainWindow creates the main window with the options Cleanzo always
+// used, including the smoke tour hooks.
+func newMainWindow() *mygo.Window {
+	opts := mygo.WindowOptions{
+		Title:           "Cleanzo",
+		Width:           1000,
+		Height:          700,
+		MinWidth:        560,
+		MinHeight:       420,
+		BackgroundColor: "light-dark(#f6f7f9, #0f1115)", // the page's --bg in src/style.css
+		StateKey:        "main",
+		URL:             "/",
+	}
+	smokeDir := os.Getenv("CLEANZO_SMOKE_DIR")
+	if smokeDir != "" {
+		opts.Page.PreloadScript = smokeScript
+	}
+	w := mygo.NewWindow(opts)
+	if runtime.GOOS == "windows" {
+		w.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
+			if req.URL == "ms-settings:appsfeatures" || strings.HasPrefix(req.URL, "https://") || strings.HasPrefix(req.URL, "http://") {
+				go mygo.Shell.OpenExternal(req.URL)
+			}
+			return nil
+		})
+	}
+	if smokeDir != "" {
+		startSmoke(w, smokeDir)
+	}
+	return w
+}
+
 func main() {
 	mygo.App.SetLanguages("en", "zh-Hans")
 	// 自动检查更新的频率：4 小时一次（默认一天），新发布的版本当天就能被看到。
 	mygo.Use(updater.New(updater.Options{Interval: 4 * time.Hour}))
 	mygo.Bind(Cleaner{})
 	mygo.Bind(LanguageSettings{})
+	registerGrowthLifecycle() // before Run, to hear the notification click that launched the app
 
 	mygo.App.WhenReady(func() {
 		if runtime.GOOS == "windows" && !mygo.WebViewAvailable() {
 			go offerWebView()
 			return
 		}
-		opts := mygo.WindowOptions{
-			Title:           "Cleanzo",
-			Width:           1000,
-			Height:          700,
-			MinWidth:        560,
-			MinHeight:       420,
-			BackgroundColor: "light-dark(#f6f7f9, #0f1115)", // the page's --bg in src/style.css
-			StateKey:        "main",
-			URL:             "/",
+		if startGrowthResident() {
+			return // opened at login with monitoring on: menu bar icon only (spec §六)
 		}
-		smokeDir := os.Getenv("CLEANZO_SMOKE_DIR")
-		if smokeDir != "" {
-			opts.Page.PreloadScript = smokeScript
-		}
-		w := mygo.NewWindow(opts)
-		if runtime.GOOS == "windows" {
-			w.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
-				if req.URL == "ms-settings:appsfeatures" || strings.HasPrefix(req.URL, "https://") || strings.HasPrefix(req.URL, "http://") {
-					go mygo.Shell.OpenExternal(req.URL)
-				}
-				return nil
-			})
-		}
-		if smokeDir != "" {
-			startSmoke(w, smokeDir)
-		}
+		mainWindow = newMainWindow()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
