@@ -70,8 +70,10 @@ func growthKeepRunning(supported bool, enabled func() bool) bool {
 // records: they would hold up the first window. It starts the monitor's loop,
 // and with monitoring on, makes the menu bar icon with the lines that act and
 // no more, which refreshGrowthTray completes on another goroutine. It reports
-// true when the app was opened at login with monitoring on: then no window
-// opens, and the Dock icon is dropped before anything else is made.
+// true when the app was opened at login with monitoring on, and the icon is
+// there: then no window opens, and the Dock icon is dropped before anything
+// else is made. Without the icon nothing would show that Cleanzo runs, so the
+// window opens after all, with its Dock icon.
 //
 // It leaves the login item alone: only SaveGrowthConfig and the menu's "turn
 // off" change it, so what the user set in System Settings stays.
@@ -89,6 +91,10 @@ func startGrowthResident() bool {
 		go refreshGrowthTray()
 	}
 	growth.start()
+	if atLogin && growthTray.Load() == nil {
+		mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular) // the window comes with its Dock icon
+		return false
+	}
 	return atLogin
 }
 
@@ -310,9 +316,10 @@ func growthMenuAction(it growthMenuItem) {
 }
 
 // turnOffGrowth switches monitoring and the login item off, as the menu bar's
-// "turn off" asks. It takes growthConfigMu like SaveGrowthConfig, which holds
-// it while applyGrowthLifecycle waits for the main thread, so it must not run
-// on that thread.
+// "turn off" asks, and stops a background measurement under way. It takes
+// growthConfigMu like SaveGrowthConfig, which holds it while
+// applyGrowthLifecycle waits for the main thread, so it must not run on that
+// thread.
 func turnOffGrowth() {
 	growthConfigMu.Lock()
 	cfg := loadGrowthConfig(growthDir())
@@ -328,6 +335,7 @@ func turnOffGrowth() {
 		log.Println("growth:", err)
 		return
 	}
+	growth.cancelBackground() // after the save, so the stopped run sees monitoring off
 	growth.setNext(time.Time{})
 	growth.changed()
 }

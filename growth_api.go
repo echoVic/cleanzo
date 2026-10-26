@@ -186,7 +186,8 @@ func (p GrowthConfigPatch) apply(c GrowthConfig) GrowthConfig {
 // SaveGrowthConfig changes the monitor's settings as p asks, validates and
 // saves them, then applies them: the menu bar icon, staying open without
 // windows, the login item. Turning monitoring on takes a baseline record at
-// once.
+// once and posts a notification that says it is on; turning it off stops a
+// background measurement under way.
 func (Cleaner) SaveGrowthConfig(p GrowthConfigPatch) error {
 	if !growthSupported() {
 		return errors.New("unsupported")
@@ -211,8 +212,10 @@ func (Cleaner) SaveGrowthConfig(p GrowthConfigPatch) error {
 	applyErr := growthApply(clean)
 	if clean.Enabled && !cur.Enabled {
 		go growth.tick(true)
+		growth.post([]GrowthAlert{growthOnNotice}) // the permission prompt comes now, with the user here
 	}
 	if !clean.Enabled {
+		growth.cancelBackground()   // a background run under way stops
 		growth.setNext(time.Time{}) // nothing is planned while monitoring is off
 	}
 	growth.changed()

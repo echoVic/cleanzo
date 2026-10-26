@@ -322,14 +322,17 @@ func TestSaveGrowthConfigGoesOnAfterALoginError(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("turning monitoring on never started the baseline")
 		}
-		// The tick plans its retry, and the save tells the page: two updates.
-		for range 2 {
+		// The tick plans its retry, the save tells the page, and the
+		// notification that monitoring is on tells what it learned about
+		// permission: three updates.
+		for range 3 {
 			select {
 			case <-updates:
 			case <-time.After(10 * time.Second):
 				t.Fatal("the page was not told")
 			}
 		}
+		growth.posting.Wait()
 		if got, want := growth.status().NextAt, now.Unix(); got != want {
 			t.Errorf("next measurement %d, want %d, the time it fell due", got, want)
 		}

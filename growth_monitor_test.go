@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 func TestGrowthNextRun(t *testing.T) {
@@ -95,6 +97,7 @@ func TestMeasureOnceAlertsOnlyWhileMonitoring(t *testing.T) {
 	}
 	now, size = t0.Add(48*time.Hour), 18*gb
 	m.measureOnce(context.Background())
+	m.posting.Wait() // posts go out on a goroutine of their own
 	if len(sent) != 1 || sent[0].Key != "app:todesk" || sent[0].Bytes != 4*gb || sent[0].Window != "day" {
 		t.Fatalf("sent = %+v", sent)
 	}
@@ -358,6 +361,7 @@ func TestMeasureOnceSavesTheLogBeforePosting(t *testing.T) {
 	}
 	now, size = t0.Add(24*time.Hour), 14*gb
 	m.measureOnce(context.Background())
+	m.posting.Wait()
 	if want := []string{now.Format(time.DateOnly)}; !slices.Equal(logged, want) {
 		t.Fatalf("what the log said when each alert was posted: %q, want %q", logged, want)
 	}
@@ -664,5 +668,172 @@ func TestMeasureOnceLeavesOutRecordsFromTheFuture(t *testing.T) {
 	(&growthMonitor{launched: t0, notifs: "unknown"}).measureOnce(context.Background())
 	if want := t0.Add(-24 * time.Hour).Unix(); prevAt != want {
 		t.Fatalf("the run started from the record at %d, want yesterday's, %d", prevAt, want)
+	}
+}
+
+// The first notification can wait until the user answers macOS's permission
+// prompt. The run does not wait for it: it ends, and says so, while the post
+// still waits. What the post learns about permission reaches the page.
+func TestGrowthRunEndsWhileANotificationWaits(t *testing.T) {
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	c := defaultGrowthConfig()
+	c.Enabled = true
+	if err := saveGrowthConfig(growthDir(), c); err != nil {
+		t.Fatal(err)
+	}
+	m := &growthMonitor{launched: t0, notifs: "unknown"}
+	m.measureOnce(context.Background()) // the baseline
+	posting, answer := make(chan GrowthAlert, 1), make(chan error)
+	growthNotify = func(a GrowthAlert) error { posting <- a; return <-answer }
+	w := watchGrowth(t)
+	now, size = t0.Add(24*time.Hour), 14*gb
+	if !m.run(true) {
+		t.Fatal("the run did not start")
+	}
+	select {
+	case a := <-posting:
+		if a.Key != "app:todesk" {
+			t.Fatalf("posted %+v", a)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("nothing was posted")
+	}
+	w.started()
+	w.ended()
+	if m.status().Running {
+		t.Fatal("the run still counts as running while its notification waits")
+	}
+	answer <- mygo.ErrNotificationsDenied
+	m.posting.Wait()
+	for told := false; !told; {
+		select {
+		case s := <-w.updates:
+			told = s.Notifications == "denied"
+		case <-time.After(10 * time.Second):
+			t.Fatal("the page was not told that notifications are denied")
+		}
+	}
+	if got := m.status().Notifications; got != "denied" {
+		t.Errorf("notifications %q, want denied", got)
+	}
+}
+
+// Turning monitoring on posts one notification that says so, through the
+// notify seam: macOS then asks for permission while the user is at the page,
+// not during a run nobody watches. Saving it on again, or another change,
+// posts nothing. What the post learns about permission is kept.
+func TestTurningMonitoringOnPostsOneConfirmation(t *testing.T) {
+	if !growthSupported() {
+		t.Skip("the growth monitor does not run on this platform")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	old := growth
+	t.Cleanup(func() { growth = old })
+	growth = &growthMonitor{launched: t0, notifs: "unknown"}
+	updates := make(chan GrowthStatus, 16)
+	growthChanged = func(s GrowthStatus) { updates <- s }
+	growthPower = func(context.Context) (bool, int) { return true, 19 } // the baseline waits for the battery
+	posts := make(chan GrowthAlert, 4)
+	growthNotify = func(a GrowthAlert) error { posts <- a; return mygo.ErrNotificationsDenied }
+
+	for _, p := range []GrowthConfigPatch{{Enabled: new(true), Asked: new(true)}, {Enabled: new(true)}, {DailyGB: new(5.0)}} {
+		if err := (Cleaner{}).SaveGrowthConfig(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Three saves, the baseline's tick planning its wait, and the post telling
+	// what it learned: five updates, after which nothing is left running.
+	for range 5 {
+		select {
+		case <-updates:
+		case <-time.After(10 * time.Second):
+			t.Fatal("an update never came")
+		}
+	}
+	growth.posting.Wait()
+	close(posts)
+	var got []GrowthAlert
+	for a := range posts {
+		got = append(got, a)
+	}
+	if len(got) != 1 || got[0] != growthOnNotice {
+		t.Fatalf("posted %+v, want the confirmation once", got)
+	}
+	if s := growth.status().Notifications; s != "denied" {
+		t.Errorf("notifications %q, want what the confirmation learned", s)
+	}
+}
+
+// The confirmation's texts, in both languages.
+func TestGrowthOnNoticeTexts(t *testing.T) {
+	for locale, want := range map[string][2]string{
+		"zh-Hans": {"占用增长监控已打开", "某个 App 涨得异常时，会在这里提醒你。"},
+		"en-US":   {"Storage growth monitoring is on", "You'll be notified here when an app grows fast."},
+	} {
+		if title, body := growthNoticeText(locale, growthOnNotice); title != want[0] || body != want[1] {
+			t.Errorf("%s: %q / %q, want %q / %q", locale, title, body, want[0], want[1])
+		}
+	}
+	a := GrowthAlert{Name: "ToDesk", Window: "day", Bytes: 6012954214, Folder: "/x", Total: 152 * gb}
+	if title, body := growthNoticeText("en", a); title != growthTitle("en", a) || body != growthBody("en", a) {
+		t.Errorf("an alert's texts: %q / %q", title, body)
+	}
+}
+
+// Turning monitoring off, from Settings or from the menu bar, stops a
+// background measurement under way, which then saves nothing.
+func TestTurningMonitoringOffStopsABackgroundRun(t *testing.T) {
+	if !growthSupported() {
+		t.Skip("the growth monitor does not run on this platform")
+	}
+	for name, off := range map[string]func(){
+		"Settings": func() {
+			if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(false)}); err != nil {
+				t.Error(err)
+			}
+		},
+		"the menu bar": turnOffGrowth,
+	} {
+		t.Run(name, func(t *testing.T) {
+			now, size := t0, 10*gb
+			var sent []GrowthAlert
+			stubGrowth(t, &now, &size, &sent)
+			old := growth
+			t.Cleanup(func() { growth = old })
+			growth = &growthMonitor{launched: t0, notifs: "unknown"}
+			updates := make(chan GrowthStatus, 16)
+			growthChanged = func(s GrowthStatus) { updates <- s }
+			atWork := make(chan struct{}, 1)
+			growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+				atWork <- struct{}{}
+				<-ctx.Done()
+				return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, size)}}
+			}
+			on := defaultGrowthConfig()
+			on.Enabled = true
+			if err := saveGrowthConfig(growthDir(), on); err != nil {
+				t.Fatal(err)
+			}
+			if !growth.run(false) {
+				t.Fatal("the background run did not start")
+			}
+			<-atWork
+			off()
+			// The run's start, the change of settings and the run's end.
+			for range 3 {
+				select {
+				case <-updates:
+				case <-time.After(10 * time.Second):
+					t.Fatal("the background run was not stopped")
+				}
+			}
+			if s := growth.status(); s.Running || s.LastAt != 0 {
+				t.Errorf("status %+v, want the run over and nothing saved", s)
+			}
+		})
 	}
 }

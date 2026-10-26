@@ -59,8 +59,9 @@ type growthMonitor struct {
 	cancel      context.CancelFunc
 	launched    time.Time
 	nextAt      time.Time
-	lastAttempt time.Time // when a background run last started, whether or not it left a record
-	notifs      string    // "unknown", "allowed", "denied" or "unsupported"
+	lastAttempt time.Time      // when a background run last started, whether or not it left a record
+	notifs      string         // "unknown", "allowed", "denied" or "unsupported"
+	posting     sync.WaitGroup // the goroutines of post, until they end
 }
 
 // growth is the app's monitor.
@@ -247,9 +248,9 @@ func (m *growthMonitor) run(manual bool) bool {
 
 // measureOnce takes one record and keeps the alerts it raises. With
 // monitoring on, it also posts them within the limits of spec §五, after
-// saving what it picked: a post can wait for the user to answer the permission
-// prompt, and the app may be quit meanwhile. It saves nothing when ctx ends
-// first.
+// saving what it picked, on a goroutine of their own (post): a post can wait
+// for the user to answer the permission prompt, and neither the run nor the
+// log of what was picked waits for it. It saves nothing when ctx ends first.
 func (m *growthMonitor) measureOnce(ctx context.Context) {
 	dir := growthDir()
 	history := growthHistory(dir, growthNow())
@@ -275,13 +276,35 @@ func (m *growthMonitor) measureOnce(ctx context.Context) {
 		picks = pickGrowthNotifications(alerts, &n, now)
 	}
 	_ = saveGrowthNotified(dir, n)
-	for _, a := range picks {
-		m.noteNotify(growthNotify(a))
-	}
+	m.post(picks)
 }
 
-// noteNotify keeps whether notifications can be shown, for the page.
-func (m *growthMonitor) noteNotify(err error) {
+// post shows notes through growthNotify, in order, on a goroutine of its own,
+// so that nobody waits for them: the first one can wait until the user
+// answers macOS's permission prompt. What the posts learn about permission is
+// kept, and the page is told when that changed. posting counts the goroutine
+// until it ends.
+func (m *growthMonitor) post(notes []GrowthAlert) {
+	if len(notes) == 0 {
+		return
+	}
+	notify := growthNotify
+	m.posting.Add(1)
+	go func() {
+		defer m.posting.Done()
+		changed := false
+		for _, a := range notes {
+			changed = m.noteNotify(notify(a)) || changed
+		}
+		if changed {
+			m.changed()
+		}
+	}()
+}
+
+// noteNotify keeps whether notifications can be shown, for the page, and
+// reports whether that changed.
+func (m *growthMonitor) noteNotify(err error) bool {
 	state := "allowed"
 	switch {
 	case errors.Is(err, mygo.ErrNotificationsDenied):
@@ -289,11 +312,13 @@ func (m *growthMonitor) noteNotify(err error) {
 	case errors.Is(err, errGrowthNoNotifications):
 		state = "unsupported"
 	case err != nil:
-		return
+		return false
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := m.notifs != state
 	m.notifs = state
-	m.mu.Unlock()
+	return changed
 }
 
 // cancelBackground stops a background measurement under way.
@@ -328,16 +353,31 @@ func (m *growthMonitor) changed() { growthChanged(m.status()) }
 // an unpackaged `go run`.
 var errGrowthNoNotifications = errors.New("notifications unsupported")
 
-// postGrowthNotification shows one alert. Clicking it opens the growth page
-// at the app, even after a relaunch (App.OnNotificationClick in growth_app.go).
+// growthOnNotice is posted through growthNotify when monitoring is turned on:
+// an alert of no owner, which says that monitoring is on. macOS asks for
+// permission at an app's first notification, and this way it asks while the
+// user is at the page, not during a run nobody watches. Clicking it opens the
+// growth page.
+var growthOnNotice = GrowthAlert{}
+
+// growthNoticeText is the title and body of the notification for a, an alert
+// or growthOnNotice.
+func growthNoticeText(locale string, a GrowthAlert) (title, body string) {
+	if a == growthOnNotice {
+		return nativeTextFor(locale, "growth.notify.enabled", nil), nativeTextFor(locale, "growth.notify.enabledBody", nil)
+	}
+	return growthTitle(locale, a), growthBody(locale, a)
+}
+
+// postGrowthNotification shows one alert, or growthOnNotice. Clicking it opens
+// the growth page at the app, even after a relaunch (App.OnNotificationClick
+// in growth_app.go).
 func postGrowthNotification(a GrowthAlert) error {
 	if !mygo.NotificationsSupported() {
 		return errGrowthNoNotifications
 	}
-	locale := mygo.App.Locale()
-	return mygo.NewNotification(mygo.NotificationOptions{
-		ID: "growth:" + a.Key, Title: growthTitle(locale, a), Body: growthBody(locale, a), Group: "growth",
-	}).Show()
+	title, body := growthNoticeText(mygo.App.Locale(), a)
+	return mygo.NewNotification(mygo.NotificationOptions{ID: "growth:" + a.Key, Title: title, Body: body, Group: "growth"}).Show()
 }
 
 // growthTitle says who grew how much, and over which window.
