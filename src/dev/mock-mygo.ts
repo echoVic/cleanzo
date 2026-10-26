@@ -3,6 +3,7 @@ import type {
   Cleaner, LanguageSettings, AppInfo, AppUsage, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
+  ProcessRow, ProcessSample,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -192,6 +193,31 @@ function createRuntime(): Runtime {
     usage("doubao", "豆包", 3.8, 2, 35, "Doubao"), usage("cmux", "cmux", 3.7, 5, 66), usage("xcode", "Xcode", 2.6, 18, 9),
   ];
   const quitted = new Set<string>();
+  // 进程页：数字每次抖一点；ToDesk 的 bundle ID 对上 growthSummary 里的提醒，挂「磁盘一天」小标签；系统进程是估算值。
+  const jitter = (v: number) => Math.max(0, v * (0.85 + Math.random() * 0.3));
+  const procRow = (p: Partial<ProcessRow> & Pick<ProcessRow, "key" | "name">): ProcessRow => {
+    const r: ProcessRow = { kind: "app", path: "", bundleId: "", cpu: 0, memory: 0, procs: 1, estimated: false, quit: false, children: [], ...p };
+    return r.children.length ? r : { ...r, children: [{ name: r.name, count: r.procs, cpu: r.cpu, memory: r.memory, estimated: r.estimated }] };
+  };
+  const processSample = (): ProcessSample => ({
+    cpu: jitter(62), pressure: 2, own: 454, others: 285,
+    rows: [
+      procRow({
+        key: "app:/applications/google chrome.app", name: "Google Chrome", path: "/Applications/Google Chrome.app", bundleId: "com.google.chrome",
+        cpu: jitter(53.8), memory: 31.5 * GB, procs: 88, quit: true, children: [
+          { name: "Google Chrome", count: 1, cpu: jitter(4), memory: 0.9 * GB, estimated: false },
+          { name: "Google Chrome Helper", count: 25, cpu: jitter(5.5), memory: 5.3 * GB, estimated: false },
+          { name: "Google Chrome Helper (GPU)", count: 1, cpu: jitter(6.1), memory: 1.2 * GB, estimated: false },
+          { name: "Google Chrome Helper (Renderer)", count: 61, cpu: jitter(38.2), memory: 24.1 * GB, estimated: false },
+        ],
+      }),
+      procRow({ key: "app:/applications/doubaowork.app", name: "DoubaoWork", path: "/Applications/DoubaoWork.app", cpu: jitter(40.9), memory: 6.96 * GB, procs: 38, quit: true }),
+      procRow({ key: "sys:WindowServer", name: "WindowServer", kind: "system", cpu: jitter(40.2), memory: 135 * MB, estimated: true }),
+      procRow({ key: "app:/applications/todesk.app", name: "ToDesk", path: "/Applications/ToDesk.app", bundleId: "com.youqu.todesk.mac", cpu: jitter(3.1), memory: 180 * MB, procs: 4, quit: true }),
+      procRow({ key: "cli:node", name: "node", kind: "cli", cpu: jitter(12.6), memory: 2.9 * GB, procs: 8 }),
+      procRow({ key: "sys:mdworker_shared", name: "mdworker_shared", kind: "system", cpu: jitter(1.2), memory: 60 * MB, procs: 6 }),
+    ].filter((r) => !quitted.has(r.path)),
+  });
   let sampleIndex = 0;
   const sample = (): StatusSample => {
     const n = sampleIndex++;
@@ -267,7 +293,16 @@ function createRuntime(): Runtime {
       await emit(sample());
       for (;;) { await wait(2000); await emit(sample()); }
     }),
-    "Cleaner.QuitApp": async (path) => { await wait(700); quitted.add(path); return true; },
+    "Cleaner.QuitApp": async (path) => {
+      // DoubaoWork 正常退出退不掉，用来看进程页的「强制退出」。
+      if (path === "/Applications/DoubaoWork.app") { await wait(5000); return false; }
+      await wait(700); quitted.add(path); return true;
+    },
+    "Cleaner.ForceQuitApp": async (path) => { await wait(500); quitted.add(path); return true; },
+    "Cleaner.WatchProcesses": async (ch) => stream(ch, async (emit) => {
+      await wait(1000);
+      for (;;) { await emit(processSample()); await wait(2000); }
+    }),
     "Cleaner.CrashDumps": async () => ({ total: 0, threshold: GB, dirs: [] }),
     "Cleaner.ScanJunk": async (ch) => stream(ch, async (emit) => {
       const items = junkItems.filter((it) => !settings.disabledGroups.includes(it.group) && !settings.ignored.includes(it.id));
