@@ -1010,7 +1010,8 @@ export const Cleaner = {
    * SaveGrowthConfig changes the monitor's settings as p asks, validates and
    * saves them, then applies them: the menu bar icon, staying open without
    * windows, the login item. Turning monitoring on takes a baseline record at
-   * once.
+   * once and posts a notification that says it is on; turning it off stops a
+   * background measurement under way.
    */
   saveGrowthConfig(p: GrowthConfigPatch): Promise<void> {
     return call("Cleaner.SaveGrowthConfig", p);

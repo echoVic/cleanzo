@@ -950,6 +950,8 @@ func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, prev *growt
 
 - [ ] **Step 5: Write the QoS files**
 
+> Superseded: this QoS + iopolicy pair leaves the thread without its background QoS; the shipped `backgroundThread` makes one setpriority(2) call instead. See Implementation notes (2026-10-26) at the end.
+
 `growth_qos_darwin.go`:
 
 ```go
@@ -4083,3 +4085,23 @@ The executor cannot do these; the reviewer runs them before the release.
 | D | 10 | Smoke list, README and CHANGELOG updated; every check green; the reviewer runs "Reviewer verification" |
 
 Each run ends with the executor's output of the checks listed in Global Constraints. The reviewer then reviews the diff against the spec and this plan and runs the relevant verification items. The reviewer commits each task separately on `feat/growth-monitor`.
+
+## Implementation notes (2026-10-26)
+
+Where the shipped code differs from the code in this plan. Build from the code on `feat/growth-monitor`, not from the blocks above.
+
+- **Background threads** (`growth_qos_darwin.go`, 6110c14): `backgroundThread` puts the thread in Darwin's background state with one `syscall.Setpriority(PRIO_DARWIN_THREAD, 0, PRIO_DARWIN_BG)`, its error checked. The plan's `pthread_set_qos_class_self_np` + `setiopolicy_np` pair does not hold: the iopolicy call resets the QoS to unspecified, and the reverse order makes the QoS call fail, so only the disk throttle was ever in force.
+- **Vanished files** (`measureGrowthEntry`, 6110c14): an item removed during the walk (`fs.ErrNotExist`) is skipped without setting Denied.
+- **Record files** (`growth_store.go`, 6709bb4): `growthRecordAt` is the one definition of a record (a regular `<digits>.json` with a positive time), used by save, prune, load and `lastGrowthAt`; `writeGrowthFile` writes through its own `os.CreateTemp` file and removes it when a write fails.
+- **Where it grew** (`growthTopFolder`, a6e5ebb): a recorded child is named only when it grew; otherwise the entry itself.
+- **Schedule** (`growthNextRun`, `nextRun`, 64a77c1): the 20-hour staleness is judged at launch, so a running app measures every 24 hours; records dated after now do not count; automatic attempts keep an hour apart (`lastAttempt`), turning monitoring on excepted. A measurement held back by the battery or a user scan keeps the time it fell due instead of moving it on (5a6abd4).
+- **Seams set in `init`** (64a77c1, d0dbcf3): `growthChanged` and `growthApply` get their defaults in `init()`, since their initializers would make an initialization cycle through the menu bar's menu.
+- **Patch-based saves** (bbf0880): `SaveGrowthConfig` takes a `GrowthConfigPatch` (only the set fields, plus `ignore` / `unignore` of one owner key) and merges it into the current config under `growthConfigMu`; pages send only what changed.
+- **GrowthSummary** (5a6abd4): a light binding with the config, status and recent alerts, used by the status page and Settings. `GrowthState` builds the attributor only when there is a record, keeps its rows until the records, the ignored owners or the attributor change, and reads each Info.plist once for the app keys and the Uninstall paths.
+- **Owners** (830b3f0): an app-index hit on a `com.apple.*` bundle is a `macos:` owner with the app's name and no bundle; `appPath` is set only for a bundle directly in /Applications or ~/Applications (`installedApp`), the only ones the uninstall flow takes.
+- **Apps page requests** (`src/react/apps/requests.ts`, eec38fb): the tab and uninstall requests live in a module with nonces; the apps page's handled-uninstall marker starts at 0, so a request made before the page first mounts still opens the dialog.
+- **Settings follow the monitor** (bbf0880): the Settings section reloads on `growthUpdated`; a reload that arrives during a save runs after it, and a failed save is read back too, since a login item error leaves the settings saved and applied.
+- **Menu bar off the main thread** (e403814, d0dbcf3): the menu's "turn off" works on a goroutine, because it takes `growthConfigMu`, which `SaveGrowthConfig` holds while it waits for the main thread; the icon starts with the lines that act, and `refreshGrowthTray` fills in the rest from another goroutine. The tray is an `atomic.Pointer`.
+- **Login item from the system** (d0dbcf3, bbf0880): the login item is not applied at launch; the pages show `App.OpenAtLogin()` when the app runs, and a save that leaves the switch alone keeps what System Settings has.
+- **Notifications** (7505f5d): a run posts its picks on a goroutine of its own after saving the log, so it never waits for the permission prompt; turning monitoring on posts one "monitoring is on" notification so macOS asks while the user is there. Turning monitoring off stops a background run; a login launch whose icon cannot be made opens the window.
+- **Unreadable roots and future records** (830b3f0, 5a6abd4): a root or vendor folder that cannot be listed marks the record Cut; records dated after now are left out of a run's history and of the page.
