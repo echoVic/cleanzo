@@ -11,22 +11,24 @@ import (
 	"time"
 )
 
-func TestParsePsOutputKeepsOtherAccountsWithFullPaths(t *testing.T) {
+func TestParsePsOutputKeepsOtherAccountsWithShortNames(t *testing.T) {
 	out := []byte(strings.Join([]string{
-		"    1     0   0.3  12288 /sbin/launchd",
-		"  414    88  40.2 138240 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
-		" 7045     0  10.8  53872 /Applications/Microsoft Defender.app/Contents/MacOS/wdavdaemon",
-		" 9001   501  99.0   4096 /usr/bin/yes",
+		"    1     0   0.3  12288 launchd",
+		"  414    88  40.2 138240 WindowServer",
+		" 7045     0  10.8  53872 wdavdaemon",
+		" 7046     0   2.5   1024 Google Chrome He",
+		" 9001   501  99.0   4096 yes",
 		"    0     0   5.0      0 kernel_task",
 		"garbage line",
-		"   12     0     x      1 /bad/cpu",
+		"   12     0     x      1 badcpu",
 		"",
 	}, "\n"))
 	got := parsePsOutput(out, 501)
 	want := []otherProc{
-		{Pid: 1, UID: 0, CPU: 0.3, Memory: 12288 * 1024, Path: "/sbin/launchd"},
-		{Pid: 414, UID: 88, CPU: 40.2, Memory: 138240 * 1024, Path: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"},
-		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 53872 * 1024, Path: "/Applications/Microsoft Defender.app/Contents/MacOS/wdavdaemon"},
+		{Pid: 1, UID: 0, CPU: 0.3, Memory: 12288 * 1024, Path: "launchd"},
+		{Pid: 414, UID: 88, CPU: 40.2, Memory: 138240 * 1024, Path: "WindowServer"},
+		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 53872 * 1024, Path: "wdavdaemon"},
+		{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "Google Chrome He"},
 		{Pid: 0, UID: 0, CPU: 5.0, Memory: 0, Path: "kernel_task"},
 	}
 	if len(got) != len(want) {
@@ -160,17 +162,26 @@ func TestWatchProcessesStopsDuringTheFirstWait(t *testing.T) {
 	defer setProcessTiming(time.Hour, time.Millisecond)()
 	var ps atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
+	src := fakeProcessSource(&ps)
+	src.others = func(context.Context) []otherProc {
+		ps.Add(1)
+		cancel()
+		return nil
+	}
 	sent := false
-	err := watchProcessesWith(ctx, func(ProcessSample) error { sent = true; return nil }, fakeProcessSource(&ps))
+	err := watchProcessesWith(ctx, func(ProcessSample) error { sent = true; return nil }, src)
 	if !errors.Is(err, context.Canceled) || sent {
 		t.Fatalf("err = %v, sent = %v; want canceled before any sample", err, sent)
 	}
+	if ps.Load() != 1 {
+		t.Fatalf("others called %d times, want the first read before sleepCtx", ps.Load())
+	}
 }
 
-func TestParsePsOutputPreservesChinesePath(t *testing.T) {
-	got := parsePsOutput([]byte("7046 0 2.5 1024 /Applications/语雀.app/Contents/MacOS/语雀\n"), 501)
-	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "/Applications/语雀.app/Contents/MacOS/语雀"}
+func TestParsePsOutputPreservesChineseName(t *testing.T) {
+	got := parsePsOutput([]byte("7046 0 2.5 1024 语雀\n"), 501)
+	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "语雀"}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -243,7 +254,7 @@ func resetProcessBundleIDs(t *testing.T) {
 	t.Helper()
 	processBundleIDs.Lock()
 	old := processBundleIDs.values
-	processBundleIDs.values = make(map[string]string)
+	processBundleIDs.values = make(map[string]*processBundleIDEntry)
 	processBundleIDs.Unlock()
 	t.Cleanup(func() {
 		processBundleIDs.Lock()
@@ -364,5 +375,79 @@ func TestQuitForceUnsupportedOffMacOS(t *testing.T) {
 	ce, isCode := err.(codeError)
 	if ok || !isCode || ce.Code != "unsupported" {
 		t.Fatalf("got (%v, %v), want false and unsupported", ok, err)
+	}
+}
+
+func TestBundleIDSlowReadDoesNotBlockOtherPaths(t *testing.T) {
+	resetProcessBundleIDs(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	done := make(chan string, 1)
+	go func() {
+		done <- processBundleID("slow.app", func(string) string {
+			close(started)
+			<-release
+			return "com.example.slow"
+		})
+	}()
+	defer func() {
+		close(release)
+		if got := <-done; got != "com.example.slow" {
+			t.Errorf("slow ID = %q", got)
+		}
+	}()
+	<-started
+	// Detect the old deadlock without making the test depend on a timeout.
+	if !processBundleIDs.TryLock() {
+		t.Fatal("a blocked bundle read holds the global lock and blocks unrelated paths")
+	}
+	processBundleIDs.Unlock()
+	if got := processBundleID("fast.app", func(string) string { return "com.example.fast" }); got != "com.example.fast" {
+		t.Fatalf("unrelated bundle lookup = %q", got)
+	}
+}
+
+func TestWatchProcessesExpiresOthersAfterTwoConsecutiveFailures(t *testing.T) {
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	old := []otherProc{{Pid: 9, CPU: 7, Memory: 42, Path: "/sbin/launchd"}}
+	fresh := []otherProc{{Pid: 9, CPU: 11, Memory: 99, Path: "/sbin/launchd"}}
+	for _, tc := range []struct {
+		name     string
+		readings [][]otherProc
+		wantCPU  []float64 // one expected estimate per ps refresh period; zero means cleared
+	}{
+		{"two failures expire", [][]otherProc{old, nil, nil}, []float64{7, 7, 0}},
+		{"success resets streak", [][]otherProc{old, nil, fresh, nil, nil}, []float64{7, 7, 11, 11, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var ps atomic.Int32
+			src := fakeProcessSource(&ps)
+			src.others = func(context.Context) []otherProc {
+				return tc.readings[int(ps.Add(1))-1]
+			}
+			samples := 0
+			err := watchProcessesWith(ctx, func(s ProcessSample) error {
+				wantCPU := tc.wantCPU[samples/3]
+				samples++
+				if wantCPU == 0 {
+					if s.Others != 0 || len(s.Rows) != 1 {
+						t.Errorf("sample %d retained stale processes: %+v", samples, s)
+					}
+				} else {
+					r := rowsByKey(s.Rows)["sys:launchd"]
+					if s.Others != 1 || r.CPU != wantCPU || !r.Estimated {
+						t.Errorf("sample %d: others=%d row=%+v, want CPU %v", samples, s.Others, r, wantCPU)
+					}
+				}
+				if samples == 3*(len(tc.readings)-1)+1 {
+					cancel()
+				}
+				return nil
+			}, src)
+			if !errors.Is(err, context.Canceled) || int(ps.Load()) != len(tc.readings) {
+				t.Fatalf("err=%v ps=%d", err, ps.Load())
+			}
+		})
 	}
 }

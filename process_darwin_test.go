@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -263,10 +264,17 @@ func TestSystemExecutable(t *testing.T) {
 func fakeProcessPs(t *testing.T, mode string) {
 	t.Helper()
 	old := processPsCommand
-	t.Cleanup(func() { processPsCommand = old })
+	oldPath := processPidPath
+	t.Cleanup(func() { processPsCommand, processPidPath = old, oldPath })
+	processPidPath = func(pid int32) string {
+		if pid == 12345 {
+			return "/Applications/语雀.app/Contents/MacOS/语雀"
+		}
+		return ""
+	}
 	t.Setenv("CLEANZO_PROCESS_PS_HELPER", mode)
 	processPsCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name != "/bin/ps" || strings.Join(args, " ") != "-axww -o pid=,uid=,pcpu=,rss=,comm=" {
+		if name != "/bin/ps" || strings.Join(args, " ") != "-ax -o pid=,uid=,pcpu=,rss=,ucomm=" {
 			t.Errorf("unexpected ps command: %s %v", name, args)
 		}
 		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestProcessPsHelper$")
@@ -288,11 +296,11 @@ func TestProcessPsHelper(t *testing.T) {
 	// Use another uid even when the parent is root, so self-filtering must
 	// depend on the command's PID rather than the parser's uid filter.
 	uid := uint32(os.Getuid()) + 1
-	fmt.Printf("%d %d 0.1 1 /bin/ps\n", os.Getpid(), uid)
+	fmt.Printf("%d %d 0.1 1 ps\n", os.Getpid(), uid)
 	if mode == "self-only" {
 		os.Exit(0)
 	}
-	fmt.Printf("12345 %d 2.5 1024 /Applications/语雀.app/Contents/MacOS/语雀\n", uid)
+	fmt.Printf("12345 %d 2.5 1024 Google Chrome He\n", uid)
 	if mode == "fail" {
 		os.Exit(1)
 	}
@@ -331,5 +339,50 @@ func TestParsePsCommandCanceledIsUnavailable(t *testing.T) {
 	cancel()
 	if got := readOtherProcs(ctx); got != nil {
 		t.Fatalf("canceled ps returned a successful reading: %+v", got)
+	}
+}
+
+func TestOtherProcsResolvesFullPathsOrKeepsShortName(t *testing.T) {
+	for _, tc := range []struct {
+		name, resolved, want string
+	}{
+		{"full path", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)"},
+		{"short name fallback", "", "Google Chrome He"},
+		{"Chinese path", "/Applications/语雀.app/Contents/MacOS/语雀", "/Applications/语雀.app/Contents/MacOS/语雀"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeProcessPs(t, "success")
+			var lookedUp []int32
+			processPidPath = func(pid int32) string {
+				lookedUp = append(lookedUp, pid)
+				return tc.resolved
+			}
+			got := readOtherProcs(context.Background())
+			if len(got) != 1 || got[0].Path != tc.want {
+				t.Fatalf("got %+v, want Path %q", got, tc.want)
+			}
+			if len(lookedUp) != 1 || lookedUp[0] != 12345 {
+				t.Fatalf("path lookups = %v, want only the other process, excluding ps", lookedUp)
+			}
+		})
+	}
+}
+
+func TestNativeProcsPidPathReadsItself(t *testing.T) {
+	want, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err = filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := nativePidPath(int32(os.Getpid()))
+	got, err = filepath.EvalSymlinks(got)
+	if err != nil || got != want {
+		t.Fatalf("nativePidPath self = %q, err=%v, want %q", got, err, want)
+	}
+	if got := nativePidPath(-1); got != "" {
+		t.Fatalf("nativePidPath invalid PID = %q, want empty", got)
 	}
 }

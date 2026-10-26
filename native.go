@@ -200,6 +200,21 @@ func nativeProcs() []procReading {
 	return out
 }
 
+// nativePidPath reads a process's full executable path, including other
+// accounts' processes, or returns empty when libproc cannot read it.
+func nativePidPath(pid int32) string {
+	nativeInit()
+	if procPidPathFn == nil {
+		return ""
+	}
+	var path [4096]byte
+	n := procPidPathFn(pid, unsafe.Pointer(&path[0]), uint32(len(path)))
+	if n <= 0 || n > int32(len(path)) {
+		return ""
+	}
+	return string(path[:n])
+}
+
 // nativeResponsiblePid returns the pid responsible for starting pid, or -1
 // when the private API is unavailable or fails.
 func nativeResponsiblePid(pid int32) int32 {

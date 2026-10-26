@@ -86,22 +86,28 @@ var (
 	processOthersEvery = 3               // ps runs on every third sample, about every six seconds
 )
 
-// Info.plist fallback reads survive pauses and page visits. Hold the lock
-// through the read so concurrent watches also read each bundle only once.
+type processBundleIDEntry struct {
+	once sync.Once
+	id   string
+}
+
+// Info.plist fallback reads survive pauses and page visits. The global
+// lock only protects entry lookup; each path owns its one-time read.
 var processBundleIDs = struct {
 	sync.Mutex
-	values map[string]string
-}{values: make(map[string]string)}
+	values map[string]*processBundleIDEntry
+}{values: make(map[string]*processBundleIDEntry)}
 
 func processBundleID(bundle string, read func(string) string) string {
 	processBundleIDs.Lock()
-	defer processBundleIDs.Unlock()
-	id, ok := processBundleIDs.values[bundle]
-	if !ok {
-		id = read(bundle)
-		processBundleIDs.values[bundle] = id
+	entry := processBundleIDs.values[bundle]
+	if entry == nil {
+		entry = &processBundleIDEntry{}
+		processBundleIDs.values[bundle] = entry
 	}
-	return id
+	processBundleIDs.Unlock()
+	entry.once.Do(func() { entry.id = read(bundle) })
+	return entry.id
 }
 
 // ---- bound methods --------------------------------------------------------
@@ -145,6 +151,7 @@ func watchProcessesWith(ctx context.Context, send func(ProcessSample) error, src
 	prev := snapshotProcs(src.procs())
 	prevBusy, prevTotal := src.cpu()
 	others := src.others(ctx)
+	othersFailures := 0
 	if err := sleepCtx(ctx, processFirstDelay); err != nil {
 		return err
 	}
@@ -160,6 +167,12 @@ func watchProcessesWith(ctx context.Context, send func(ProcessSample) error, src
 		if n > 0 && n%processOthersEvery == 0 {
 			if refreshed := src.others(ctx); refreshed != nil {
 				others = refreshed
+				othersFailures = 0
+			} else {
+				othersFailures++
+				if othersFailures >= 2 {
+					others = nil
+				}
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -330,8 +343,8 @@ func processName(path string, pid int32) string {
 
 // ---- other accounts through ps --------------------------------------------
 
-// parsePsOutput reads `ps -axww -o pid=,uid=,pcpu=,rss=,comm=` and keeps
-// the processes of accounts other than self. The command is the last
+// parsePsOutput reads `ps -ax -o pid=,uid=,pcpu=,rss=,ucomm=` and keeps
+// the processes of accounts other than self. The short name is the last
 // column and may contain spaces; malformed lines are skipped.
 func parsePsOutput(out []byte, self uint32) []otherProc {
 	var procs []otherProc

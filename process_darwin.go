@@ -18,6 +18,9 @@ var processPsTimeout = 3 * time.Second
 // Tests replace this command boundary without running the real ps.
 var processPsCommand = exec.CommandContext
 
+// Tests replace path lookups independently of the ps command.
+var processPidPath = nativePidPath
+
 // realProcessSource wires the loop to the native reads: libproc for this
 // user's processes, the setuid /bin/ps for everyone else's.
 func realProcessSource() processSource {
@@ -36,11 +39,12 @@ func realProcessSource() processSource {
 // readOtherProcs runs ps, which is setuid root and so can report every
 // account's processes; libproc refuses other accounts' (EPERM). The
 // numbers are ps's, a decaying CPU average and resident memory, hence
-// estimates. en_US.UTF-8 preserves Unicode paths and keeps a decimal dot.
+// estimates. ps only supplies short names; libproc supplies full UTF-8
+// paths. en_US.UTF-8 keeps a decimal dot and readable fallback names.
 func readOtherProcs(ctx context.Context) []otherProc {
 	ctx, cancel := context.WithTimeout(ctx, processPsTimeout)
 	defer cancel()
-	cmd := processPsCommand(ctx, "/bin/ps", "-axww", "-o", "pid=,uid=,pcpu=,rss=,comm=")
+	cmd := processPsCommand(ctx, "/bin/ps", "-ax", "-o", "pid=,uid=,pcpu=,rss=,ucomm=")
 	cmd.Env = append(os.Environ(), "LC_ALL=en_US.UTF-8")
 	out, err := cmd.Output()
 	if ctx.Err() != nil || err != nil {
@@ -52,6 +56,9 @@ func readOtherProcs(ctx context.Context) []otherProc {
 	others := make([]otherProc, 0, len(procs))
 	for _, p := range procs {
 		if p.Pid != int32(cmd.Process.Pid) {
+			if path := processPidPath(p.Pid); path != "" {
+				p.Path = path
+			}
 			others = append(others, p)
 		}
 	}
