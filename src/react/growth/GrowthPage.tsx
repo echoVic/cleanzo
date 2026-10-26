@@ -226,19 +226,3 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
     </div>
   );
 }
-
-/** 独立的「占用增长」页：页头 + 面板。进程页接好后（Task 5），连同 entry.ts、mount.tsx 一起删掉。 */
-export function GrowthPage(props: GrowthPanelProps) {
-  const t = useT();
-  return (
-    <div className="cz-react">
-      <header className="view-head">
-        <div>
-          <h2>{t("nav.growth")}</h2>
-          <p className="muted">{t("growth.sub")}</p>
-        </div>
-      </header>
-      <GrowthPanel {...props} />
-    </div>
-  );
-}

@@ -4,11 +4,11 @@ import { setSettingsLangHandler, showReactSettings } from "./react/settings/entr
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
 import { showReactApps, requestAppsUninstall } from "./react/apps/entry";
-import { showReactGrowth, focusReactGrowth, setGrowthHandlers } from "./react/growth/entry";
+import { showReactProcess, openReactProcess, setProcessHandlers } from "./react/process/entry";
 import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
 import { showReactClean } from "./react/clean/entry";
-import { setGoCleanHandler, setGoGrowthHandler, showReactStatus } from "./react/status/entry";
+import { setGoCleanHandler, setGoProcessHandler, showReactStatus } from "./react/status/entry";
 import { setCrashGoClean } from "./react/list/crash-dumps";
 import { bumpLang } from "./ui/i18n-react";
 import { $, toast, VIEWS, type View } from "./shared";
@@ -100,7 +100,7 @@ function switchView(v: View, tool?: string) {
   if (v === "skills") showReactSkills();
   if (v === "apps") showReactApps();
   if (v === "fullscan") showReactFullScan();
-  showReactGrowth(v === "growth");
+  showReactProcess(v === "process");
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
   if (v === "photos") showReactPhotos();
@@ -111,18 +111,19 @@ applyStaticI18n();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
 // 默认落在「系统状态」（HTML 初始高亮已同步），switchView("status") 即开采样。
 void initReactAITools().then(initReactSkills);
-setGoGrowthHandler(() => switchView("growth"));
+// 状态页的「查看全部」和增长提示：先记下要打开的标签和要定位的行，再切过去。
+setGoProcessHandler((tab, key) => { openReactProcess(tab, key ?? null); switchView("process"); });
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
 setCrashGoClean(() => switchView("clean"));
-setGrowthHandlers({
+setProcessHandlers({
   goLeftovers: () => { switchView("apps"); showReactApps("leftovers"); },
   goUninstall: (appPath) => { switchView("apps"); requestAppsUninstall(appPath); },
 });
-// 通知 / 菜单栏点进来：切到占用增长并定位那一行。
-if (window.mygo) events.growthFocus.on((key) => { switchView("growth"); focusReactGrowth(key); });
-// 第一版只做 macOS：Windows 上隐藏入口。
-if (isWindows()) document.querySelector<HTMLElement>('.nav-item[data-view="growth"]')?.classList.add("hidden");
+// 通知 / 菜单栏点进来：打开进程页的磁盘占用标签并定位那一行。
+if (window.mygo) events.growthFocus.on((key) => { openReactProcess("disk", key); switchView("process"); });
+// 进程页第一版只做 macOS：Windows 上隐藏入口。
+if (isWindows()) document.querySelector<HTMLElement>('.nav-item[data-view="process"]')?.classList.add("hidden");
 // 版本号以应用自己为准，不写死在页面里
 Cleaner.info()
   .then((i) => {

@@ -294,3 +294,17 @@ test("Windows disk legend keeps full labels and 103.3 GB in full-width rows in z
     }
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
+
+test("the top-apps card links to the process page on macOS only", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { StatusPage } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const props = { active: false, goClean() {}, goProcess() {} };
+  try {
+    expect(renderToStaticMarkup(createElement(StatusPage, props))).toContain(t("status.apps.viewAll"));
+    setPlatformForTest("win32");
+    expect(renderToStaticMarkup(createElement(StatusPage, props))).not.toContain(t("status.apps.viewAll"));
+  } finally { setPlatformForTest(undefined); }
+});

@@ -20,6 +20,7 @@ import { statusApi } from "./api";
 import { crashDumps, oversized } from "../list/crash-dumps";
 import { growthApi } from "../growth/api";
 import { growthHint } from "../growth/hint";
+import type { ProcessTab } from "../process/format";
 import type { CrashDumpSummary } from "../../mygo";
 import {
   GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, isSparkShift, pickAlerts, quitErrCode,
@@ -236,11 +237,11 @@ export interface StatusPageProps {
   active: boolean;
   /** 告警 / 磁盘卡的「去清理」：与点侧栏「垃圾清理」同一条路径（main.ts 注入）。 */
   goClean: () => void;
-  /** 增长提示的「查看」：切到占用增长页（main.ts 注入）。 */
-  goGrowth: () => void;
+  /** 增长提示的「查看」、列表的「查看全部」：打开进程页的某个标签，可带磁盘占用标签里要定位的行（main.ts 注入）。 */
+  goProcess: (tab: ProcessTab, focusKey?: string) => void;
 }
 
-export function StatusPage({ active, goClean, goGrowth }: StatusPageProps) {
+export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   const t = useT();
   const [sample, setSample] = React.useState<StatusSample | null>(null);
   const [sysInfo, setSysInfo] = React.useState<SystemInfo | null>(null);
@@ -507,7 +508,7 @@ export function StatusPage({ active, goClean, goGrowth }: StatusPageProps) {
                   size: growthTop.atLeast ? t("growth.atLeast", { size: human(growthTop.bytes) }) : human(growthTop.bytes),
                 })}
               </div>
-              <button className="btn ghost small" type="button" onClick={goGrowth}>
+              <button className="btn ghost small" type="button" onClick={() => goProcess("disk", growthTop.key)}>
                 {t("status.alert.viewGrowth")}
               </button>
             </div>}
@@ -556,6 +557,11 @@ export function StatusPage({ active, goClean, goGrowth }: StatusPageProps) {
               <TabsTrigger value="cpu" className={segTrigger}>{t("status.apps.byCpu")}</TabsTrigger>
             </TabsList>
           </TabsRoot>
+          {!isWindows() && (
+            <button className="st-viewall" type="button" onClick={() => goProcess(sortBy)}>
+              {t("status.apps.viewAll")} ›
+            </button>
+          )}
         </div>
         <div className="st-cols num">
           <span className="c-app">{t("status.apps.appCol")}</span>
