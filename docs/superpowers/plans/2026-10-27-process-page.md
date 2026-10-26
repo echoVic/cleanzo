@@ -2358,4 +2358,23 @@ The maintainer said traecli and Codex write the code (2026-10-26). Claude review
 
 ## Implementation notes
 
-(Filled in during execution: one line per place where the shipped code differs from this plan.)
+One line per place where the shipped code differs from this plan; read these before rebuilding from the task code above.
+
+- **Task 1, CPU units:** `nativeProcs` converts `proc_pid_rusage`'s CPU times from Mach ticks to nanoseconds with `mach_timebase_info`, read once in `nativeInit` and computed in 128-bit math.
+  - On Apple silicon the ticks are 24 MHz (timebase 125/3). The plan's code took them as nanoseconds, so the status page's per-app CPU had been 41.67× too low.
+  - `TestNativeProcsCPUTimeMatchesGetrusage` pins it.
+- **Task 1, `ps`:** it runs `/bin/ps -ax -o pid=,uid=,pcpu=,rss=,ucomm=` under `LC_ALL=en_US.UTF-8` and skips its own pid.
+  - Full paths come from `proc_pidpath` through `nativePidPath`. When that fails, the short name stands in.
+  - A failed refresh keeps the last reading, and two failures in a row clear it.
+- **Task 1, bundle IDs:** app rows take the running app's BundleID from NSWorkspace when it has one. Otherwise they read the plist once per path for the process's lifetime, through a per-path `sync.Once` cache.
+- **Task 1, the loop:** it checks for cancellation at entry, at each iteration and after a `ps` refresh, and takes one timestamp just before each read.
+- **Task 1, other:** `ForceQuitApp` returns `unsupported` off macOS. The budget test averages over 60 s. The tests gained seams for the `ps` command and the clock.
+- **Task 2:** `.cz-growth-panel` is a flex column with a 16px gap, so the panel keeps the page's spacing.
+- **Task 4, rows:** rows divide on `.pr-item` rather than `.st-row`, because the wrapper made every row `:last-child`. A quit greys the whole `.pr-item`, including its expanded processes. A row that can't expand is a `div`, not a disabled button.
+- **Task 4, page:**
+  - The `Channel` is created inside the `try`.
+  - 「重试」 also resumes a paused page.
+  - Quit dialogs clear on leaving and on each visit.
+  - The diagnosis bar has no live-region role, and Pause has no `aria-pressed`.
+  - A quit row hides its button by `done`, without checking `gone`.
+- **Task 5:** none.
