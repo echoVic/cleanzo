@@ -1859,3 +1859,30 @@ body {
   .cz-growth-row { grid-template-columns: minmax(0, 1fr) 84px 92px 92px; }
   .cz-growth-month, .cz-growth-spark { display: none; }
 }
+
+/* 进程页（spec 2026-10-26）：沿用系统状态的 st-* 列表 */
+.pr-head-actions { align-items: center; }
+.pr-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text); font-size: 10.5px; font-style: normal; font-weight: 700; }
+.pr-diag { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn-text); font-size: 13px; line-height: 1.5; }
+.pr-diag > span { flex: 1; min-width: 0; }
+.pr-paused { margin: 0 0 8px; font-size: 12px; }
+.pr-cols .pr-sort { width: 96px; flex: none; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: right; cursor: pointer; }
+.pr-cols .pr-sort[aria-pressed="true"] { color: var(--fg); font-weight: 600; }
+.pr-cols .c-act { width: 168px; }
+.pr-row { content-visibility: auto; contain-intrinsic-size: auto 52px; }
+.pr-app { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.pr-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.pr-toggle:disabled { cursor: default; }
+.pr-chev { width: 10px; flex: none; color: var(--muted); font-size: 11px; }
+.pr-ico-sys { background: var(--bg-subtle); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
+.pr-sys { flex: none; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; }
+.pr-tag { flex: none; padding: 1px 6px; border: 0; border-radius: 6px; background: var(--warn-soft); color: var(--warn-text); font: inherit; font-size: 11px; cursor: pointer; }
+.pr-est { color: var(--muted); }
+.pr-act { display: flex; width: 168px; flex: none; align-items: center; justify-content: flex-end; gap: 8px; }
+.pr-stuck { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pr-force { height: 28px; padding: 0 12px; border: 1px solid var(--danger); border-radius: 7px; background: var(--card); color: var(--danger); font-size: 12px; font-weight: 600; cursor: pointer; }
+.pr-force:disabled { opacity: 0.45; cursor: default; }
+.pr-children { margin: 0; padding: 4px 0; list-style: none; background: var(--bg-subtle); }
+.pr-child { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 20px 0 66px; color: var(--muted); font-size: 12px; }
+.pr-child-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-viewall { margin-left: 8px; padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }

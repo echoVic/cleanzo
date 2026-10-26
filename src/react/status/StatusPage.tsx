@@ -7,6 +7,7 @@ import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "../../ui/components/dialog";
+import { segTrigger } from "../../ui/components/seg";
 import { useT } from "../../ui/i18n-react";
 import { Collapse } from "../../ui/motion/Collapse";
 import { NumberTicker } from "../../ui/motion/NumberTicker";
@@ -230,10 +231,6 @@ const SkRow = () => (
   </div>
 );
 
-const segTrigger =
-  "relative z-[1] cursor-pointer rounded-[6px] px-3 py-1 text-xs leading-[18px] text-[var(--muted)] transition-colors " +
-  "data-[state=active]:font-semibold data-[state=active]:text-[var(--fg)] " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]";
 
 export interface StatusPageProps {
   /** 当前是否停在系统状态视图：进入开 2s 采样流，离开关 Channel。 */

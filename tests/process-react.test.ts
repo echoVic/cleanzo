@@ -1,3 +1,4 @@
+import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
 import { expect, test } from "bun:test";
 import type { GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
 
@@ -129,4 +130,56 @@ test("pruneStuck drops apps that are gone and returns the same set when nothing 
   expect([...pruneStuck(new Set([chrome.path, lark.path]), [chrome, node])]).toEqual([chrome.path]);
   const same = new Set([chrome.path]);
   expect(pruneStuck(same, [chrome])).toBe(same);
+});
+
+/** 渲染一行的静态 HTML；setup-dom 要先于 shared.ts 装好。 */
+async function rowHtml(p: Partial<ProcessRowViewProps> & { row: ProcessRow }): Promise<string> {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { ProcessRowView } = await import("../src/react/process/ProcessPage");
+  const { t } = await import("../src/i18n");
+  return renderToStaticMarkup(createElement(ProcessRowView, {
+    sortBy: "cpu", open: false, tag: null, busy: false, stuck: false, done: false, t,
+    onToggle() {}, onQuit() {}, onForce() {}, onTag() {}, ...p,
+  }));
+}
+
+test("rows: a system process is marked, its numbers are estimates, and it has no buttons", async () => {
+  const { t } = await import("../src/i18n");
+  const html = await rowHtml({ row: ws });
+  expect(html).toContain("WindowServer");
+  expect(html).toContain(t("process.system"));
+  expect(html).toContain("≈ 40%");
+  expect(html).not.toContain("st-quit");
+  expect(html).not.toContain("pr-force");
+});
+
+test("rows: an app quits; while it is still running it offers force quit; a quit row has no buttons", async () => {
+  const { t } = await import("../src/i18n");
+  const app = { ...chrome, procs: 62, children: [
+    { name: "Google Chrome", count: 1, cpu: 4, memory: 0.9 * GB, estimated: false },
+    { name: "Google Chrome Helper (Renderer)", count: 61, cpu: 38.2, memory: 24.1 * GB, estimated: false },
+  ] };
+  const idle = await rowHtml({ row: app });
+  expect(idle).toContain("st-quit");
+  expect(idle).not.toContain("pr-force");
+  expect(idle).toContain(t("status.apps.procs", { n: 62 }));
+  const stuck = await rowHtml({ row: app, stuck: true });
+  expect(stuck).toContain(t("process.stuck"));
+  expect(stuck).toContain("pr-force");
+  expect(stuck).not.toContain("st-quit");
+  const done = await rowHtml({ row: app, done: true });
+  expect(done).not.toContain("st-quit");
+  expect(done).not.toContain("pr-force");
+  expect(await rowHtml({ row: app, open: true })).toContain("Google Chrome Helper (Renderer) × 61");
+  expect(await rowHtml({ row: app, open: false })).not.toContain("× 61");
+});
+
+test("rows: a growth tag shows its window and size; command-line rows have no quit", async () => {
+  const { t } = await import("../src/i18n");
+  const { human } = await import("../src/shared");
+  const tag = { key: "app:com.electron.lark", window: "week" as const, bytes: 11.2 * GB, atLeast: false };
+  expect(await rowHtml({ row: lark, tag })).toContain(t("process.tag.week", { size: `+${human(tag.bytes)}` }));
+  expect(await rowHtml({ row: node })).not.toContain("st-quit");
 });
