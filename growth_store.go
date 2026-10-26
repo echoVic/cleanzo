@@ -113,12 +113,14 @@ func loadGrowthSnapshots(dir string) []growthSnapshot {
 }
 
 // lastGrowthAt is when the newest record was taken, read from file names
-// only (growthRecordAt); zero without records.
-func lastGrowthAt(dir string) time.Time {
+// only (growthRecordAt); zero without records. A record dated after now, which
+// a clock set back leaves behind, does not count: it would stay the newest
+// for as long, and every tick would find the next measurement due.
+func lastGrowthAt(dir string, now time.Time) time.Time {
 	entries, _ := os.ReadDir(filepath.Join(dir, "records"))
 	var last int64
 	for _, e := range entries {
-		if at, ok := growthRecordAt(e); ok {
+		if at, ok := growthRecordAt(e); ok && at <= now.Unix() {
 			last = max(last, at)
 		}
 	}

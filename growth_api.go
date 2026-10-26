@@ -62,6 +62,9 @@ func (Cleaner) GrowthMeasureNow() error {
 // them: the menu bar icon, staying open without windows, the login item.
 // Turning monitoring on takes a baseline record at once.
 func (Cleaner) SaveGrowthConfig(c GrowthConfig) error {
+	if !growthSupported() {
+		return errors.New("unsupported")
+	}
 	clean, err := validateGrowthConfig(c)
 	if err != nil {
 		return err
@@ -80,6 +83,9 @@ func (Cleaner) SaveGrowthConfig(c GrowthConfig) error {
 	}
 	if clean.Enabled && !was {
 		go growth.tick(true)
+	}
+	if !clean.Enabled {
+		growth.setNext(time.Time{}) // nothing is planned while monitoring is off
 	}
 	growth.changed()
 	return nil

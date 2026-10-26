@@ -64,16 +64,16 @@ func TestGrowthSnapshotsSaveLoadAndPrune(t *testing.T) {
 	if len(got) != 2 || got[0].At != ago(89) || got[1].At != cur.At || !got[1].Cut {
 		t.Fatalf("loaded = %+v", got)
 	}
-	if last := lastGrowthAt(dir); !last.Equal(now) {
+	if last := lastGrowthAt(dir, now); !last.Equal(now) {
 		t.Fatalf("last = %v", last)
 	}
-	if last := lastGrowthAt(t.TempDir()); !last.IsZero() {
+	if last := lastGrowthAt(t.TempDir(), now); !last.IsZero() {
 		t.Fatalf("no records: last = %v", last)
 	}
 	junk := t.TempDir()
 	writeFile(t, filepath.Join(junk, "records", "7"), 3)
 	writeFile(t, filepath.Join(junk, "records", "notes.json"), 3)
-	if last := lastGrowthAt(junk); !last.IsZero() {
+	if last := lastGrowthAt(junk, now); !last.IsZero() {
 		t.Fatalf("only files that are not records: last = %v", last)
 	}
 }
@@ -233,5 +233,30 @@ func TestGrowthRecordAtAcceptsOnlyRegularDigitJSON(t *testing.T) {
 		if ok != c.ok || (ok && at != 1793000000) {
 			t.Errorf("growthRecordAt(%q, %v) = %d, %v; want %v", c.name, c.typ, at, ok, c.ok)
 		}
+	}
+}
+
+// A record dated after now, which a clock set back leaves behind, is not the
+// last one: it would make every tick find the next measurement due.
+func TestGrowthLastRecordIgnoresRecordsFromTheFuture(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(200*86400, 0)
+	for _, at := range []int64{now.Add(-3 * time.Hour).Unix(), now.Unix(), now.Add(time.Second).Unix(), now.Add(48 * time.Hour).Unix()} {
+		if err := saveGrowthSnapshot(dir, growthSnapshot{At: at, Entries: []growthEntry{}}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if last := lastGrowthAt(dir, now); !last.Equal(now) {
+		t.Fatalf("last = %v, want %v: a record at now counts, those after it do not", last, now)
+	}
+	if last := lastGrowthAt(dir, now.Add(-time.Hour)); !last.Equal(now.Add(-3 * time.Hour)) {
+		t.Fatalf("an hour earlier: last = %v", last)
+	}
+	only := t.TempDir()
+	if err := saveGrowthSnapshot(only, growthSnapshot{At: now.Add(time.Hour).Unix(), Entries: []growthEntry{}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if last := lastGrowthAt(only, now); !last.IsZero() {
+		t.Fatalf("only a record from the future: last = %v", last)
 	}
 }
