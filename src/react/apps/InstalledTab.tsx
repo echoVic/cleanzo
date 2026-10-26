@@ -18,6 +18,10 @@ interface InstalledTabProps {
   active: boolean;
   /** 向页脚汇报繁忙态（导航 busy）。 */
   onBusyChange: (busy: boolean) => void;
+  /** 占用增长页请求打开卸载对话框的 App。 */
+  uninstallPath?: string | null;
+  /** 外部卸载请求的版本号。 */
+  uninstallNonce?: number;
 }
 
 interface DialogState {
@@ -28,7 +32,7 @@ interface DialogState {
 
 const DIALOG_IDLE: DialogState = { stage: "analyzing", detail: null, failMsg: null };
 
-export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
+export function InstalledTab({ active, onBusyChange, uninstallPath = null, uninstallNonce = 0 }: InstalledTabProps) {
   const t = useT();
 
   const [apps, setApps] = React.useState<AppInfo[]>([]);
@@ -98,6 +102,15 @@ export function InstalledTab({ active, onBusyChange }: InstalledTabProps) {
       setDialog({ stage: "fail", detail: null, failMsg: errText(e) });
     }
   }, []);
+
+  // 占用增长页请求卸载：首次挂载也消费已有请求，后续按 nonce 只打开一次。
+  const firstUninstall = React.useRef(0);
+  React.useEffect(() => {
+    if (uninstallNonce !== firstUninstall.current && uninstallPath) {
+      firstUninstall.current = uninstallNonce;
+      void openDetail(uninstallPath);
+    }
+  }, [uninstallNonce, uninstallPath, openDetail]);
 
   const confirmUninstall = React.useCallback(async () => {
     const d = dialog.detail;

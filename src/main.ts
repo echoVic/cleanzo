@@ -3,7 +3,7 @@ import { initReactSkills, showReactSkills } from "./react/skills/entry";
 import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
-import { showReactApps } from "./react/apps/entry";
+import { showReactApps, requestAppsUninstall } from "./react/apps/entry";
 import { showReactGrowth, focusReactGrowth, setGrowthHandlers } from "./react/growth/entry";
 import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
@@ -116,7 +116,7 @@ setGoCleanHandler(() => switchView("clean"));
 setCrashGoClean(() => switchView("clean"));
 setGrowthHandlers({
   goLeftovers: () => { switchView("apps"); showReactApps("leftovers"); },
-  goUninstall: () => switchView("apps"),
+  goUninstall: (appPath) => { switchView("apps"); requestAppsUninstall(appPath); },
 });
 // 通知 / 菜单栏点进来：切到占用增长并定位那一行。
 if (window.mygo) events.growthFocus.on((key) => { switchView("growth"); focusReactGrowth(key); });

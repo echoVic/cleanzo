@@ -4,6 +4,7 @@ import {
   barWidth, bundleFailed, classifyUninstall, filterApps, orphanFootAfterRemoval,
   parseDoneEv, sortApps, sortOrphans,
 } from "../src/react/apps/helpers";
+import { appsRequest, requestAppsTab, requestAppsUninstall } from "../src/react/apps/requests";
 
 function app(p: Partial<AppInfo> & { name: string; path: string }): AppInfo {
   return { id: p.path, publisher: "", bundleId: "", version: "", size: 0, lastOpened: 0, running: false, ...p };
@@ -259,4 +260,15 @@ test("Windows Apps hide last-opened sorting and fall back from a saved opened so
     setPlatformForTest(undefined);
     setPref("system");
   }
+});
+
+test("增长页请求卸载：切到已安装、记下要打开的 App，两个 nonce 都递增", () => {
+  requestAppsTab("leftovers");
+  const before = appsRequest();
+  requestAppsUninstall("/Applications/Lark.app");
+  const after = appsRequest();
+  expect(after.tab).toBe("installed");
+  expect(after.tabNonce).toBe(before.tabNonce + 1);
+  expect(after.uninstallPath).toBe("/Applications/Lark.app");
+  expect(after.uninstallNonce).toBe(before.uninstallNonce + 1);
 });

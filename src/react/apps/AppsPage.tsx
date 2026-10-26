@@ -12,9 +12,13 @@ interface AppsPageProps {
   initialTab: AppsTab;
   /** 外部桥接请求切 tab 的版本号（垃圾页「残留」动作）。 */
   nonce: number;
+  /** 占用增长页请求打开卸载对话框的 App。 */
+  uninstallPath?: string | null;
+  /** 外部卸载请求的版本号。 */
+  uninstallNonce?: number;
 }
 
-export function AppsPage({ initialTab, nonce }: AppsPageProps) {
+export function AppsPage({ initialTab, nonce, uninstallPath = null, uninstallNonce = 0 }: AppsPageProps) {
   const t = useT();
   const requestedTab = isWindows() ? "installed" : initialTab;
   const [tab, setTab] = React.useState<AppsTab>(requestedTab);
@@ -54,7 +58,7 @@ export function AppsPage({ initialTab, nonce }: AppsPageProps) {
         </TabsList>
         {/* 两个面板都常驻挂载，切 tab 不卸载、不重扫（与旧显隐行为一致）。 */}
         <TabsContent value="installed" forceMount hidden={tab !== "installed" || undefined}>
-          <InstalledTab active={tab === "installed"} onBusyChange={setInstalledBusy} />
+          <InstalledTab active={tab === "installed"} onBusyChange={setInstalledBusy} uninstallPath={uninstallPath} uninstallNonce={uninstallNonce} />
         </TabsContent>
         {!isWindows() && <TabsContent value="leftovers" forceMount hidden={tab !== "leftovers" || undefined}>
           <LeftoversTab
