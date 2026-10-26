@@ -21,7 +21,7 @@ import (
 var smokeScript string
 
 // smokeViews is the complete sidebar tour, in capture order.
-var smokeViews = []string{"status", "clean", "aitools", "skills", "fullscan", "large", "photos", "apps", "settings"}
+var smokeViews = []string{"status", "clean", "aitools", "skills", "fullscan", "growth", "large", "photos", "apps", "settings"}
 
 // smokeDriver keeps the tour testable without a native window.
 type smokeDriver struct {
