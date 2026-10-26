@@ -13,6 +13,7 @@ package main
 //   - growth_app.go runs the menu bar side.
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -55,7 +56,7 @@ type growthEntry struct {
 type growthSnapshot struct {
 	At      int64         `json:"at"`  // unix seconds when the run started
 	FDA     bool          `json:"fda"` // Full Disk Access during the run
-	Cut     bool          `json:"cut"` // the run ended at its time limit before every entry started
+	Cut     bool          `json:"cut"` // entries are missing: the run hit its time limit, or a folder of entries could not be listed
 	Entries []growthEntry `json:"entries"`
 }
 
@@ -74,17 +75,22 @@ var growthVendors = map[string]bool{"google": true, "microsoft": true, "jetbrain
 // Links are never followed, and Cleanzo's own folder is left out. Roots that
 // need Full Disk Access are skipped without it, so measuring never makes
 // macOS ask about other apps' data.
-func growthTargets(roots []growthRoot, fda bool, self string) []growthTarget {
+//
+// unlisted reports a root or vendor folder that exists but could not be
+// listed. Its entries are then missing from the run, as from a run cut short,
+// so the record must say so (Cut): otherwise they would count as new from
+// zero the next time they can be listed.
+func growthTargets(roots []growthRoot, fda bool, self string) (out []growthTarget, unlisted bool) {
 	skip := func(e fs.DirEntry) bool {
 		return e.Type()&fs.ModeSymlink != 0 || e.Name() == ".DS_Store" || e.Name() == ".localized"
 	}
-	var out []growthTarget
 	for _, r := range roots {
 		if r.needsFDA && !fda {
 			continue
 		}
 		entries, err := os.ReadDir(r.path)
 		if err != nil {
+			unlisted = unlisted || !errors.Is(err, fs.ErrNotExist)
 			continue
 		}
 		for _, e := range entries {
@@ -102,6 +108,7 @@ func growthTargets(roots []growthRoot, fda bool, self string) []growthTarget {
 			if e.IsDir() && growthVendors[strings.ToLower(name)] {
 				children, err := os.ReadDir(p)
 				if err != nil {
+					unlisted = unlisted || !errors.Is(err, fs.ErrNotExist)
 					continue
 				}
 				for _, c := range children {
@@ -114,5 +121,5 @@ func growthTargets(roots []growthRoot, fda bool, self string) []growthTarget {
 			out = append(out, growthTarget{path: p, kind: r.kind})
 		}
 	}
-	return out
+	return out, unlisted
 }

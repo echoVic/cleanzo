@@ -22,8 +22,8 @@ var (
 	// growthMeasure takes one record of this Mac.
 	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
 		fda := fullDiskAccess()
-		targets := growthTargets(growthRoots(homeDir(), string(filepath.Separator)), fda, filepath.Dir(configPath()))
-		return takeGrowthSnapshot(ctx, targets, prev, fda, growthNow())
+		targets, unlisted := growthTargets(growthRoots(homeDir(), string(filepath.Separator)), fda, filepath.Dir(configPath()))
+		return takeGrowthSnapshot(ctx, targets, unlisted, prev, fda, growthNow())
 	}
 	growthNotify = postGrowthNotification
 	// growthChanged tells the pages and the menu that something moved. Its

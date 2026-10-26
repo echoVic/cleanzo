@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,11 +68,53 @@ func TestGrowthTargets(t *testing.T) {
 		filepath.Join(sys, "Library", "Application Support", "ToDesk"),
 	}
 	slices.Sort(want)
-	if got := paths(growthTargets(roots, false, self)); !slices.Equal(got, want) {
-		t.Fatalf("without FDA:\n got %q\nwant %q", got, want)
+	// Most roots do not exist in this home: a missing root is not one that
+	// could not be listed.
+	targets, unlisted := growthTargets(roots, false, self)
+	if got := paths(targets); !slices.Equal(got, want) || unlisted {
+		t.Fatalf("without FDA:\n got %q, unlisted %v\nwant %q, listed", got, unlisted, want)
 	}
-	if got := paths(growthTargets(roots, true, self)); !slices.Contains(got, filepath.Join(home, "Library", "Containers", "com.x")) {
-		t.Fatalf("with FDA, Containers missing: %q", got)
+	if targets, _ := growthTargets(roots, true, self); !slices.Contains(paths(targets), filepath.Join(home, "Library", "Containers", "com.x")) {
+		t.Fatalf("with FDA, Containers missing: %q", paths(targets))
+	}
+}
+
+// TestGrowthTargetsReportsUnlistedFolders: a root or a vendor folder that
+// exists but cannot be listed leaves its entries out of the run, which must
+// then say so. Otherwise they would count as new from zero the next day.
+func TestGrowthTargetsReportsUnlistedFolders(t *testing.T) {
+	for _, locked := range [][]string{
+		{"Library", "Caches"},                        // a root
+		{"Library", "Application Support", "Google"}, // a vendor folder
+	} {
+		home, sys := t.TempDir(), t.TempDir()
+		writeFile(t, filepath.Join(home, "Library", "Caches", "Foo", "f"), 10)
+		writeFile(t, filepath.Join(home, "Library", "Application Support", "Google", "Chrome", "f"), 10)
+		dir := filepath.Join(append([]string{home}, locked...)...)
+		if err := os.Chmod(dir, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(dir, 0o755) })
+		if _, unlisted := growthTargets(growthRoots(home, sys), false, ""); !unlisted {
+			t.Errorf("%s could not be listed, and growthTargets did not say so", dir)
+		}
+	}
+}
+
+// TestGrowthAppPathsKeepsOnlyInstalledApps: Uninstall takes only a bundle
+// directly in /Applications or ~/Applications (installedApp). An app in a
+// suite folder, like those in Utilities, /System or an input method folder,
+// gets no bundle, so its row offers no Uninstall.
+func TestGrowthAppPathsKeepsOnlyInstalledApps(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	apps := filepath.Join(home, "Applications")
+	suite := filepath.Join(apps, "Suite")
+	foo := makeApp(t, apps, "Foo.app", "com.example.Foo", "Foo")
+	makeApp(t, suite, "Bar.app", "com.example.bar", "Bar")
+	got := growthAppPaths([]string{apps, suite})
+	if want := map[string]string{"com.example.foo": foo}; !maps.Equal(got, want) {
+		t.Fatalf("growthAppPaths = %v, want %v", got, want)
 	}
 }
 

@@ -126,10 +126,11 @@ func growthOrder(targets []growthTarget, prev *growthSnapshot) []growthTarget {
 // (spec §四):
 //   - each entry gets at most growthEntryLimit;
 //   - the run stops at growthRunLimit;
-//   - entries measured until then are kept, and Cut tells that some never started.
+//   - entries measured until then are kept, and Cut tells that some never
+//     started, or, with unlisted (growthTargets), that some were never listed.
 //
 // Entries come sorted by path.
-func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, prev *growthSnapshot, fda bool, now time.Time) growthSnapshot {
+func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, unlisted bool, prev *growthSnapshot, fda bool, now time.Time) growthSnapshot {
 	order := growthOrder(targets, prev)
 	run, cancel := context.WithTimeout(ctx, growthRunLimit)
 	defer cancel()
@@ -169,7 +170,7 @@ func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, prev *growt
 	for e := range results {
 		s.Entries = append(s.Entries, e)
 	}
-	s.Cut = len(s.Entries) < len(order)
+	s.Cut = unlisted || len(s.Entries) < len(order)
 	slices.SortFunc(s.Entries, func(a, b growthEntry) int { return strings.Compare(a.Path, b.Path) })
 	return s
 }

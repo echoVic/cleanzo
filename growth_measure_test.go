@@ -78,14 +78,19 @@ func TestTakeGrowthSnapshot(t *testing.T) {
 		writeFile(t, filepath.Join(p, "f"), 10)
 		ts = append(ts, growthTarget{path: p, kind: growthHome})
 	}
-	s := takeGrowthSnapshot(context.Background(), ts, nil, true, time.Unix(1000, 0))
+	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0))
 	if s.Cut || len(s.Entries) != 3 || s.At != 1000 || !s.FDA || !slices.IsSortedFunc(s.Entries, func(a, b growthEntry) int { return strings.Compare(a.Path, b.Path) }) {
 		t.Fatalf("snapshot = %+v", s)
+	}
+	// A folder that could not be listed left entries out: the run is cut,
+	// though it measured every target it had.
+	if unlisted := takeGrowthSnapshot(context.Background(), ts, true, nil, true, time.Unix(1000, 0)); !unlisted.Cut || len(unlisted.Entries) != 3 {
+		t.Fatalf("a run missing a folder's entries must be cut: %+v", unlisted)
 	}
 	limit := growthRunLimit
 	growthRunLimit = 0
 	t.Cleanup(func() { growthRunLimit = limit })
-	if cut := takeGrowthSnapshot(context.Background(), ts, nil, true, time.Unix(1000, 0)); !cut.Cut || len(cut.Entries) != 0 {
+	if cut := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0)); !cut.Cut || len(cut.Entries) != 0 {
 		t.Fatalf("a run out of time must be cut and keep nothing unstarted: %+v", cut)
 	}
 }
@@ -164,7 +169,9 @@ func TestMeasureGrowthEntryStopsMidWalkWithLowerBound(t *testing.T) {
 // is kept incomplete, and the run is not cut, since nothing stayed unstarted.
 func TestTakeGrowthSnapshotHonorsEntryLimit(t *testing.T) {
 	limit := growthEntryLimit
-	growthEntryLimit = time.Nanosecond
+	// 0, not a tiny limit: with a coarse clock, as on Windows, a tiny walk can
+	// finish before a nanosecond is seen to pass.
+	growthEntryLimit = 0
 	t.Cleanup(func() { growthEntryLimit = limit })
 	dir := t.TempDir()
 	var ts []growthTarget
@@ -173,7 +180,7 @@ func TestTakeGrowthSnapshotHonorsEntryLimit(t *testing.T) {
 		writeFile(t, filepath.Join(p, "f"), 10)
 		ts = append(ts, growthTarget{path: p, kind: growthHome})
 	}
-	s := takeGrowthSnapshot(context.Background(), ts, nil, true, time.Unix(1000, 0))
+	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0))
 	if s.Cut || len(s.Entries) != 3 {
 		t.Fatalf("snapshot = %+v", s)
 	}

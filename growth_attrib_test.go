@@ -20,11 +20,17 @@ func testGrowthAttributor() growthAttributor {
 	add("com.tencent.xinWeChat", "微信", "WeChat")
 	add("com.google.Chrome", "Google Chrome", "Chrome")
 	add("com.trae.cn", "Trae CN")
+	add("com.apple.dock", "Dock")
 	keys := newAppKeys()
 	keys.add(appIdentity{folder: "Lark", name: "Lark", bid: "com.electron.lark"})
 	keys.add(appIdentity{folder: "WeChat", name: "微信", bid: "com.tencent.xinWeChat"})
 	keys.add(appIdentity{folder: "Google Chrome", name: "Google Chrome", bid: "com.google.Chrome"})
-	return growthAttributor{idx: idx, keys: keys, paths: map[string]string{"com.electron.lark": filepath.Join("/Applications", "Lark.app")}}
+	// Dock has a bundle here only to show that an Apple app never gets one.
+	paths := map[string]string{
+		"com.electron.lark": filepath.Join("/Applications", "Lark.app"),
+		"com.apple.dock":    filepath.Join("/System", "Library", "CoreServices", "Dock.app"),
+	}
+	return growthAttributor{idx: idx, keys: keys, paths: paths}
 }
 
 func TestGrowthOwner(t *testing.T) {
@@ -46,6 +52,8 @@ func TestGrowthOwner(t *testing.T) {
 		{filepath.Join(lib, "Group Containers", "5A4RE8SF68.com.tencent.xinWeChat"), growthHome, "app:com.tencent.xinwechat", "微信", "app", false, ""},
 		{filepath.Join(lib, "Group Containers", "group.com.apple.notes"), growthHome, "macos:com.apple.notes", "com.apple.notes", "macos", false, ""},
 		{filepath.Join(lib, "Caches", "com.apple.geod"), growthHome, "macos:com.apple.geod", "com.apple.geod", "macos", false, ""},
+		// an Apple app found by its folder name counts for macOS under its own name, with nothing to uninstall
+		{filepath.Join(lib, "Application Support", "Dock"), growthHome, "macos:com.apple.dock", "Dock", "macos", false, ""},
 		{filepath.Join(lib, "Caches", "Google", "Chrome"), growthHome, "app:com.google.chrome", "Google Chrome", "app", false, ""},
 		// a vendor's child sits one level below the folders the leftovers tab scans: unknown, but not a leftover
 		{filepath.Join(lib, "Caches", "Google", "DriveFS"), growthHome, dir(filepath.Join(lib, "Caches", "Google", "DriveFS")), filepath.Join("Google", "DriveFS"), "unknown", false, ""},

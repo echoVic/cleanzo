@@ -16,7 +16,7 @@ type growthOwner struct {
 	name    string
 	kind    string // "app", "macos", "dot" or "unknown"
 	orphan  bool   // unknown, no installed app claims it, and the leftovers tab would list it: probably a leftover
-	appPath string // the installed app, for Uninstall; "" when it is not in an app folder
+	appPath string // the installed app, for Uninstall; "" unless Uninstall takes it (growthAppPaths)
 }
 
 // growthAliases map folder names that an app's own names do not match to
@@ -97,17 +97,20 @@ func growthKeys(dirs []string) appKeys {
 	return k
 }
 
-// growthAppPaths finds the bundle of every app in dirs by bundle ID; the
-// first folder in dirs wins.
+// growthAppPaths finds by bundle ID the apps in dirs that Uninstall takes: a
+// bundle directly in /Applications or ~/Applications (installedApp). Apps in
+// suite folders, Utilities, /System or input method folders get none, so
+// their rows offer no Uninstall, which would refuse them. The first folder in
+// dirs wins.
 func growthAppPaths(dirs []string) map[string]string {
 	out := map[string]string{}
 	for _, dir := range dirs {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".app") {
+			p := filepath.Join(dir, e.Name())
+			if !strings.HasSuffix(e.Name(), ".app") || !installedApp(p) {
 				continue
 			}
-			p := filepath.Join(dir, e.Name())
 			if bid := strings.ToLower(readAppIdentity(p).bid); bid != "" {
 				if _, ok := out[bid]; !ok {
 					out[bid] = p
@@ -144,6 +147,11 @@ func (a growthAttributor) owner(e growthEntry) growthOwner {
 	for _, n := range append([]string{id}, growthAliases[strings.ToLower(base)]...) {
 		if app, ok := a.idx.lookup(n); ok {
 			bid := strings.ToLower(app.BundleID)
+			if strings.HasPrefix(bid, "com.apple.") {
+				// Apple's own app, such as Dock or Music, found by its folder name:
+				// macOS, under the app's name, and never uninstalled.
+				return growthOwner{key: "macos:" + bid, name: app.Name, kind: "macos"}
+			}
 			return growthOwner{key: "app:" + bid, name: app.Name, kind: "app", appPath: a.paths[bid]}
 		}
 	}
