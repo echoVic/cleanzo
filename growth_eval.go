@@ -126,8 +126,7 @@ func growthEntryChange(a growthEntry, inBase bool, base growthSnapshot, b growth
 }
 
 // growthTopFolder names where an entry grew most: the child that grew most
-// when the entry records children (against the base's, or 0), else the
-// entry itself.
+// when a recorded child grew (against the base's, or 0), else the entry itself.
 func growthTopFolder(a, b growthEntry) string {
 	best, bestGrew := "", int64(math.MinInt64)
 	for name, size := range b.Children {
@@ -135,7 +134,7 @@ func growthTopFolder(a, b growthEntry) string {
 			best, bestGrew = name, g
 		}
 	}
-	if best == "" {
+	if best == "" || bestGrew <= 0 {
 		return b.Path
 	}
 	return filepath.Join(b.Path, best)

@@ -57,6 +57,58 @@ func TestDayNeedsARecordInItsWindow(t *testing.T) {
 	}
 }
 
+func TestDayThresholdIncludesEquality(t *testing.T) {
+	h := []growthSnapshot{at(-24*time.Hour, true, done(todesk, 10*gb))}
+	for _, tc := range []struct {
+		name string
+		size int64
+		want int
+	}{
+		{"exactly 2 GB", 12 * gb, 1},
+		{"one byte below 2 GB", 12*gb - 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := evaluateGrowth(h, at(0, true, done(todesk, tc.size)), cfg2(), byBase)
+			if len(a) != tc.want {
+				t.Fatalf("alerts = %+v, want %d", a, tc.want)
+			}
+			if tc.want == 1 && (a[0].Window != "day" || a[0].Bytes != 2*gb) {
+				t.Fatalf("exactly the daily threshold must alert: %+v", a)
+			}
+		})
+	}
+}
+
+func TestDayWindowBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want int
+	}{
+		{"19h59m", 19*time.Hour + 59*time.Minute, 0},
+		{"20h", 20 * time.Hour, 1},
+		{"28h", 28 * time.Hour, 1},
+		{"28h01m", 28*time.Hour + time.Minute, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := []growthSnapshot{at(-tc.age, true, done(todesk, 10*gb))}
+			a := evaluateGrowth(h, at(0, true, done(todesk, 13*gb)), cfg2(), byBase)
+			var day []GrowthAlert
+			for _, alert := range a {
+				if alert.Window == "day" {
+					day = append(day, alert)
+				}
+			}
+			if len(day) != tc.want {
+				t.Fatalf("day alerts = %+v, want %d", day, tc.want)
+			}
+			if tc.want == 1 && day[0].Bytes != 3*gb {
+				t.Fatalf("day growth must be 3 GB: %+v", day)
+			}
+		})
+	}
+}
+
 func TestWeekAlertUsesTheEarliestRecordAtLeastThreeDaysOld(t *testing.T) {
 	h := []growthSnapshot{
 		at(-8*24*time.Hour, true, done(todesk, 0)),
@@ -66,6 +118,36 @@ func TestWeekAlertUsesTheEarliestRecordAtLeastThreeDaysOld(t *testing.T) {
 	a := evaluateGrowth(h, at(0, true, done(todesk, 21*gb)), cfg2(), byBase)
 	if len(a) != 1 || a[0].Window != "week" || a[0].Bytes != 11*gb || a[0].Days != 5 {
 		t.Fatalf("alerts = %+v", a)
+	}
+}
+
+func TestWeekWindowBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want int
+	}{
+		{"3 days minus 1 second", 3*24*time.Hour - time.Second, 0},
+		{"3 days", 3 * 24 * time.Hour, 1},
+		{"7 days", 7 * 24 * time.Hour, 1},
+		{"7 days plus 1 second", 7*24*time.Hour + time.Second, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := []growthSnapshot{at(-tc.age, true, done(todesk, 0))}
+			a := evaluateGrowth(h, at(0, true, done(todesk, 12*gb)), cfg2(), byBase)
+			var week []GrowthAlert
+			for _, alert := range a {
+				if alert.Window == "week" {
+					week = append(week, alert)
+				}
+			}
+			if len(week) != tc.want {
+				t.Fatalf("week alerts = %+v, want %d", week, tc.want)
+			}
+			if tc.want == 1 && (week[0].Bytes != 12*gb || week[0].Days != int(tc.age/(24*time.Hour))) {
+				t.Fatalf("week growth and actual days: %+v", week)
+			}
+		})
 	}
 }
 
@@ -103,6 +185,35 @@ func TestNewEntriesCountFromZeroOnlyAgainstAWholeRun(t *testing.T) {
 	}
 }
 
+func TestVanishedEntriesCountOnlyAfterWholeRun(t *testing.T) {
+	base := at(-24*time.Hour, true, done(todesk, 10*gb), done(todeskCache, 2*gb))
+	for _, tc := range []struct {
+		name  string
+		cut   bool
+		bytes int64
+		want  int
+	}{
+		{"whole run has net growth of 1 GB", false, gb, 0},
+		{"cut run compares only the measured entry", true, 3 * gb, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cur := at(0, true, done(todesk, 13*gb))
+			cur.Cut = tc.cut
+			changes := growthChanges(base, cur, byBase)
+			if c, ok := changes["app:todesk"]; !ok || c.bytes != tc.bytes {
+				t.Fatalf("owner changes = %+v, want net growth %d", changes, tc.bytes)
+			}
+			a := evaluateGrowth([]growthSnapshot{base}, cur, cfg2(), byBase)
+			if len(a) != tc.want {
+				t.Fatalf("alerts = %+v, want %d", a, tc.want)
+			}
+			if tc.want == 1 && (a[0].Key != "app:todesk" || a[0].Window != "day" || a[0].Bytes != tc.bytes) {
+				t.Fatalf("only the measured entry's 3 GB growth should alert: %+v", a)
+			}
+		})
+	}
+}
+
 func TestIgnoredAndShrinkingNeverAlert(t *testing.T) {
 	h := []growthSnapshot{at(-24*time.Hour, true, done(todesk, 10*gb), done(codex, 50*gb))}
 	c := cfg2()
@@ -120,6 +231,26 @@ func TestAlertNamesTheChildThatGrewMost(t *testing.T) {
 	a := evaluateGrowth([]growthSnapshot{at(-24*time.Hour, true, base)}, at(0, true, cur), cfg2(), byBase)
 	if len(a) != 1 || a[0].Folder != filepath.Join(todesk, "dumps") {
 		t.Fatalf("alerts = %+v", a)
+	}
+}
+
+func TestTopFolderFallsBackWhenNoChildGrew(t *testing.T) {
+	base := done(todesk, 10*gb)
+	base.Children = map[string]int64{"dumps": 9 * gb, "logs": gb}
+	cur := done(todesk, 17*gb)
+	cur.Children = map[string]int64{"dumps": 8 * gb, "logs": gb}
+	a := evaluateGrowth([]growthSnapshot{at(-24*time.Hour, true, base)}, at(0, true, cur), cfg2(), byBase)
+	if len(a) != 1 || a[0].Folder != todesk || a[0].Bytes != 7*gb {
+		t.Fatalf("growth outside the recorded children must name the entry itself: %+v", a)
+	}
+}
+
+func TestGrowthAlertOrderLargestFirst(t *testing.T) {
+	h := []growthSnapshot{at(-24*time.Hour, true, done(codex, 10*gb), done(todesk, 20*gb))}
+	cur := at(0, true, done(codex, 13*gb), done(todesk, 25*gb))
+	a := evaluateGrowth(h, cur, cfg2(), byBase)
+	if len(a) != 2 || a[0].Key != "app:todesk" || a[0].Bytes != 5*gb || a[1].Key != "app:codex" || a[1].Bytes != 3*gb {
+		t.Fatalf("alerts must come largest first: %+v", a)
 	}
 }
 
