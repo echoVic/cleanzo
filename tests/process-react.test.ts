@@ -170,6 +170,7 @@ test("rows: an app quits; while it is still running it offers force quit; a quit
   expect(stuck).toContain("pr-force");
   expect(stuck).not.toContain("st-quit");
   const done = await rowHtml({ row: app, done: true });
+  expect(done).toContain("pr-item quitted");
   expect(done).not.toContain("st-quit");
   expect(done).not.toContain("pr-force");
   expect(await rowHtml({ row: app, open: true })).toContain("Google Chrome Helper (Renderer) × 61");

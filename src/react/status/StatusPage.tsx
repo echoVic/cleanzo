@@ -231,7 +231,6 @@ const SkRow = () => (
   </div>
 );
 
-
 export interface StatusPageProps {
   /** 当前是否停在系统状态视图：进入开 2s 采样流，离开关 Channel。 */
   active: boolean;

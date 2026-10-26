@@ -58,19 +58,26 @@ export interface ProcessRowViewProps {
 export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, t, onToggle, onQuit, onForce, onTag }: ProcessRowViewProps) {
   const expandable = row.children.length > 1 || (row.children[0]?.count ?? 0) > 1;
   const num = (estimated: boolean) => `st-col num${estimated ? " pr-est" : ""}`;
+  const label = (
+    <>
+      <span className="pr-chev" aria-hidden="true">{expandable ? (open ? "▾" : "›") : ""}</span>
+      <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name) } : undefined} aria-hidden="true">
+        {initial(row.name)}
+      </span>
+      <span className="st-name" title={row.name}>{row.name}</span>
+      {row.procs > 1 && <span className="st-procs">{t("status.apps.procs", { n: row.procs })}</span>}
+      {row.kind === "system" && <span className="pr-sys">{t("process.system")}</span>}
+    </>
+  );
   return (
     <div className={`pr-item${done ? " quitted" : ""}`} data-key={row.key}>
-      <div className={`st-row pr-row${done ? " quitted" : ""}`}>
+      <div className="st-row pr-row">
         <div className="pr-app">
-          <button type="button" className="pr-toggle" aria-expanded={expandable ? open : undefined} disabled={!expandable} onClick={onToggle}>
-            <span className="pr-chev" aria-hidden="true">{expandable ? (open ? "▾" : "›") : ""}</span>
-            <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name) } : undefined} aria-hidden="true">
-              {initial(row.name)}
-            </span>
-            <span className="st-name" title={row.name}>{row.name}</span>
-            {row.procs > 1 && <span className="st-procs">{t("status.apps.procs", { n: row.procs })}</span>}
-            {row.kind === "system" && <span className="pr-sys">{t("process.system")}</span>}
-          </button>
+          {expandable ? (
+            <button type="button" className="pr-toggle" aria-expanded={open} onClick={onToggle}>{label}</button>
+          ) : (
+            <div className="pr-toggle">{label}</div>
+          )}
           {tag && <button type="button" className="pr-tag" onClick={() => onTag(tag.key)}>{tagText(tag, t)}</button>}
         </div>
         <span className={num(row.estimated)}>{est(fmtPct(row.cpu), row.estimated)}</span>
@@ -149,12 +156,21 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setOpen(null);
     setQuit(emptyQuit());
     setStuck(new Set());
+    setQuitTarget(null);
+    setForceTarget(null);
     frozenRef.current = [];
     if (fresh && request.focusKey) {
       const key = request.focusKey;
       setFocus((f) => ({ key, nonce: f.nonce + 1 }));
     }
   }
+
+  React.useEffect(() => {
+    if (!active) {
+      setQuitTarget(null);
+      setForceTarget(null);
+    }
+  }, [active]);
 
   // 窗口隐藏时停采样，回来接着按开关走。
   React.useEffect(() => {
@@ -168,11 +184,12 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   React.useEffect(() => {
     if (!watching) return;
     let live = true;
-    const ch = new Channel<ProcessSample>();
+    let ch: Channel<ProcessSample> | null = null;
     setError(false);
     setCpuHist([]);
     void (async () => {
       try {
+        ch = new Channel<ProcessSample>();
         const done = processApi.watch(ch);
         for await (const s of ch) {
           if (!live) continue; // 已关通道：丢弃迟到的采样
@@ -184,7 +201,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
         if (live) setError(true);
       }
     })();
-    return () => { live = false; ch.close(); };
+    return () => { live = false; ch?.close(); };
   }, [watching, retry]);
 
   // 磁盘占用标签上的数字和行上的小标签：每次进入读一次，增长有变化时再读。
@@ -304,7 +321,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
         </div>
         <div className="head-actions pr-head-actions">
           {tab !== "disk" && (
-            <Button variant="ghost" size="sm" aria-pressed={!running} onClick={() => setRunning((r) => !r)}>
+            <Button variant="ghost" size="sm" onClick={() => setRunning((r) => !r)}>
               {running ? <Pause size={14} /> : <Play size={14} />}
               {running ? t("process.pause") : t("process.resume")}
             </Button>
@@ -332,7 +349,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
       ) : (
         <>
           {diag && (
-            <div className="pr-diag" role="status">
+            <div className="pr-diag">
               <span>
                 {diag.kind === "mem"
                   ? t("process.diag.mem", { name: diag.top?.name ?? "—", size: est(fmtMem(diag.top?.memory ?? 0), !!diag.top?.estimated) })
@@ -361,7 +378,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
               {error ? (
                 <div className="st-empty">
                   {t("status.error")}{" "}
-                  <Button variant="ghost" size="sm" onClick={() => setRetry((n) => n + 1)}>{t("btn.retry")}</Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setRunning(true); setRetry((n) => n + 1); }}>{t("btn.retry")}</Button>
                 </div>
               ) : !sample ? (
                 Array.from({ length: 6 }, (_, i) => (
@@ -376,7 +393,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   tag={rowTag(r, tags)}
                   busy={quit.busy.has(r.path)}
                   stuck={stuck.has(r.path)}
-                  done={quit.done.has(r.key) && !quit.gone.has(r.key)}
+                  done={quit.done.has(r.key)}
                   t={t}
                   onToggle={() => setOpen((o) => (o === r.key ? null : r.key))}
                   onQuit={() => setQuitTarget(r)}
