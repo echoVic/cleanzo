@@ -16,6 +16,12 @@ import (
 	"time"
 )
 
+// readOtherProcs is one reading with nothing remembered.
+func readOtherProcs(ctx context.Context) []otherProc {
+	others, _ := readOtherProcsWith(ctx, nil)
+	return others
+}
+
 func TestNativeProcsCPUTimeMatchesGetrusage(t *testing.T) {
 	processCPU := func() uint64 {
 		for _, p := range nativeProcs() {

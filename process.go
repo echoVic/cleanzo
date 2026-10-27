@@ -36,7 +36,7 @@ type ProcessRow struct {
 	Procs     int            `json:"procs"`
 	Estimated bool           `json:"estimated"` // some process was read through ps
 	Quit      bool           `json:"quit"`      // a Dock app of this user that may be quit
-	Children  []ProcessChild `json:"children"`  // by name, same-name processes merged
+	Children  []ProcessChild `json:"children"`  // by name, same-name processes merged; empty for rows of one process
 }
 
 // ProcessChild is one name inside a row: its processes summed up.

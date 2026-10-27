@@ -581,7 +581,7 @@ export interface ProcessRow {
   estimated: boolean;
   /** a Dock app of this user that may be quit */
   quit: boolean;
-  /** by name, same-name processes merged */
+  /** by name, same-name processes merged; empty for rows of one process */
   children: ProcessChild[];
 }
 

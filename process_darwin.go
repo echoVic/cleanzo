@@ -102,12 +102,6 @@ func otherProcsReader() func(context.Context) []otherProc {
 	}
 }
 
-// readOtherProcs is one reading with nothing remembered.
-func readOtherProcs(ctx context.Context) []otherProc {
-	others, _ := readOtherProcsWith(ctx, nil)
-	return others
-}
-
 // processForeignUIDs lists the effective uids of other accounts' processes.
 // Tests replace it.
 var processForeignUIDs = foreignUIDs

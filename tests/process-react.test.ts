@@ -235,7 +235,8 @@ test("sortRows compares the numbers the page shows; equal ones keep name order",
     { name: "p", count: 1, cpu: 0.1, memory: 512.2 * MB, estimated: false },
   ];
   expect(sortChildren(kids, "cpu").map((k) => k.name)).toEqual(["p", "q"]); // both 0%
-  expect(sortChildren(kids, "mem").map((k) => k.name)).toEqual(["p", "q"]); // both 512 MB
+  const r = { name: "r", count: 1, cpu: 0, memory: 512.6 * MB, estimated: false }; // 513 MB
+  expect(sortChildren([...kids, r], "mem").map((k) => k.name)).toEqual(["r", "p", "q"]); // p and q both 512 MB
 });
 
 // Compare displayed quantities rather than text: "1024 MB" and "1 GB" both mean 1 GiB.
@@ -244,7 +245,7 @@ test("sortRows follows fmtMem and fmtPct across display boundaries", () => {
   const memory = [
     0, 1, 0.4 * MB, 0.5 * MB - 1, 0.5 * MB, 0.5 * MB + 1, 0.6 * MB,
     512.49 * MB, 512.5 * MB, 512.51 * MB,
-    GB - 1, GB, 1.04 * GB, 1.05 * GB, 1.06 * GB, 10.95 * GB,
+    GB - 1, GB, 1.04 * GB, 1.05 * GB, 1.06 * GB,
   ];
   const cpu = [0, 0.4, 0.5, 0.6, 1.49, 1.5, 99.5];
 

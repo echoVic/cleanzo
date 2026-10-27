@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +51,7 @@ func (Cleaner) AppIcon(path string) (string, error) {
 	}
 	url := ""
 	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-		if png := appIconRender(path, appIconPx); len(png) > 0 {
+		if png := appIconRender(path, appIconPx); len(png) > 0 && !iconLooksBlank(png) {
 			url = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 		}
 	}
@@ -57,6 +59,25 @@ func (Cleaner) AppIcon(path string) (string, error) {
 	appIcons.urls[path] = url
 	appIcons.Unlock()
 	return url, nil
+}
+
+// iconLooksBlank rejects PNGs with fewer than one in ten pixels at least
+// half opaque, including the placeholder Icon Services returns when unavailable.
+func iconLooksBlank(data []byte) bool {
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return true
+	}
+	bounds := img.Bounds()
+	visible := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if _, _, _, alpha := img.At(x, y).RGBA(); alpha >= 0x8000 {
+				visible++
+			}
+		}
+	}
+	return visible*10 < bounds.Dx()*bounds.Dy()
 }
 
 func cachedAppIcon(path string) (string, bool) {

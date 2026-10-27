@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"sync"
@@ -9,6 +13,42 @@ import (
 	"testing"
 	"time"
 )
+
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	return testPNGWithColor(t, color.NRGBA{R: 32, G: 64, B: 128, A: 255})
+}
+
+func testPNGWithColor(t *testing.T, c color.NRGBA) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 80, 80))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = c.R, c.G, c.B, c.A
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestIconLooksBlank(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"opaque", testPNG(t), false},
+		{"almost transparent", testPNGWithColor(t, color.NRGBA{A: 6}), true},
+		{"not a PNG", []byte("not a PNG"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := iconLooksBlank(tc.data); got != tc.want {
+				t.Fatalf("iconLooksBlank = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // fakeAppIcons swaps the renderer for one that counts its calls and returns
 // png, and starts from an empty cache; both are restored afterwards.
@@ -24,7 +64,7 @@ func fakeAppIcons(t *testing.T, png []byte) *atomic.Int32 {
 }
 
 func TestAppIconRefusesWhatIsNotAnAppBundle(t *testing.T) {
-	calls := fakeAppIcons(t, []byte{1})
+	calls := fakeAppIcons(t, testPNG(t))
 	dir := t.TempDir()
 	file := filepath.Join(dir, "File.app")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
@@ -41,7 +81,8 @@ func TestAppIconRefusesWhatIsNotAnAppBundle(t *testing.T) {
 }
 
 func TestAppIconDrawsEachBundleOnce(t *testing.T) {
-	calls := fakeAppIcons(t, []byte{1, 2, 3})
+	data := testPNG(t)
+	calls := fakeAppIcons(t, data)
 	app := filepath.Join(t.TempDir(), "Acme.app")
 	if err := os.Mkdir(app, 0o755); err != nil {
 		t.Fatal(err)
@@ -53,7 +94,7 @@ func TestAppIconDrawsEachBundleOnce(t *testing.T) {
 			close(entered)
 			<-release
 		}
-		return []byte{1, 2, 3}
+		return data
 	}
 	urls := make([]string, 8)
 	errs := make([]error, len(urls))
@@ -67,12 +108,17 @@ func TestAppIconDrawsEachBundleOnce(t *testing.T) {
 			urls[i], errs[i] = (Cleaner{}).AppIcon(app)
 		}()
 	}
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the renderer was never called")
+	}
 	started.Wait()
 	close(release)
 	wg.Wait()
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 	for i, u := range urls {
-		if u != "data:image/png;base64,AQID" || errs[i] != nil {
+		if u != want || errs[i] != nil {
 			t.Fatalf("AppIcon = %q, %v; want the PNG as a data URL", u, errs[i])
 		}
 	}
@@ -93,7 +139,7 @@ func TestAppIconSerializesDrawingAcrossBundles(t *testing.T) {
 		if err := os.Mkdir(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		pngs[path] = []byte{byte(i + 1)}
+		pngs[path] = testPNGWithColor(t, color.NRGBA{R: uint8(i + 1), A: 255})
 	}
 	var mu sync.Mutex
 	drawing, maxDrawing := 0, 0
@@ -156,6 +202,22 @@ func TestAppIconRemembersBundlesWithoutAnIcon(t *testing.T) {
 	for range 2 {
 		if got, err := (Cleaner{}).AppIcon(app); got != "" || err != nil {
 			t.Fatalf("AppIcon = %q, %v; want no icon", got, err)
+		}
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("drew %d times, want once", n)
+	}
+}
+
+func TestAppIconRejectsBlankPNG(t *testing.T) {
+	calls := fakeAppIcons(t, testPNGWithColor(t, color.NRGBA{A: 6}))
+	app := filepath.Join(t.TempDir(), "Blank.app")
+	if err := os.Mkdir(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if got, err := (Cleaner{}).AppIcon(app); got != "" || err != nil {
+			t.Fatalf("AppIcon = %q, %v; want no icon for a blank PNG", got, err)
 		}
 	}
 	if n := calls.Load(); n != 1 {
