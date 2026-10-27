@@ -71,13 +71,42 @@ func ownProcsReader() func() []procReading {
 	}
 }
 
+// processAppsEvery is how often, in readings, NSWorkspace's running-app list
+// is read again. With about 320 running apps a read took about 25 ms of
+// main-thread time (in-app profile, 2026-10-27), about 1.3% of a core at one
+// read per 2 s reading, and the list rarely changes. A just-launched app gets
+// its name, bundle ID and quit button within 10 s; quitting reads its own
+// fresh list.
+const processAppsEvery = 5
+
+// processAppList reads the running apps. Tests replace it.
+var processAppList = workspaceList
+
+// appsReader returns the running-app list for one sampling session: read at
+// the first reading and every processAppsEvery-th after it, and retried at
+// the next reading when a read fails (nil). The loop calls it from one
+// goroutine.
+func appsReader() func() []workspaceApp {
+	var apps []workspaceApp
+	age := processAppsEvery // the first call reads
+	return func() []workspaceApp {
+		if age >= processAppsEvery || apps == nil {
+			if fresh := processAppList(); fresh != nil {
+				apps, age = fresh, 0
+			}
+		}
+		age++
+		return apps
+	}
+}
+
 // realProcessSource wires the loop to the native reads: libproc for this
 // user's processes, the setuid /bin/ps for everyone else's.
 func realProcessSource() processSource {
 	return processSource{
 		procs:       ownProcsReader(),
 		others:      otherProcsReader(),
-		apps:        workspaceList,
+		apps:        appsReader(),
 		responsible: nativeResponsiblePid,
 		system:      systemExecutable,
 		bundleID:    func(bundle string) string { return readAppIdentity(bundle).bid },

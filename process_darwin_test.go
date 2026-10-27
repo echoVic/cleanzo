@@ -26,6 +26,47 @@ func readOtherProcs(ctx context.Context) []otherProc {
 	return others
 }
 
+func TestAppsReaderReadsEveryFifthReading(t *testing.T) {
+	old := processAppList
+	t.Cleanup(func() { processAppList = old })
+	call := 0
+	processAppList = func() []workspaceApp {
+		call++
+		return []workspaceApp{{Name: fmt.Sprint(call)}}
+	}
+	read := appsReader()
+	for reading := 1; reading <= 11; reading++ {
+		wantCalls := (reading-1)/5 + 1
+		want := []workspaceApp{{Name: fmt.Sprint(wantCalls)}}
+		if got := read(); !slices.Equal(got, want) {
+			t.Fatalf("reading %d = %+v, want %+v", reading, got, want)
+		}
+		if call != wantCalls {
+			t.Fatalf("reading %d called processAppList %d times, want %d", reading, call, wantCalls)
+		}
+	}
+
+	call = 0
+	processAppList = func() []workspaceApp {
+		call++
+		if call == 1 {
+			return nil
+		}
+		return []workspaceApp{{Name: fmt.Sprint(call)}}
+	}
+	read = appsReader()
+	if got := read(); got != nil || call != 1 {
+		t.Fatalf("failed first reading = %+v, calls %d; want nil, 1 call", got, call)
+	}
+	want := []workspaceApp{{Name: "2"}}
+	if got := read(); !slices.Equal(got, want) || call != 2 {
+		t.Fatalf("retry reading = %+v, calls %d; want %+v, 2 calls", got, call, want)
+	}
+	if got := read(); !slices.Equal(got, want) || call != 2 {
+		t.Fatalf("reused reading = %+v, calls %d; want %+v, 2 calls", got, call, want)
+	}
+}
+
 func TestNativeProcsCPUTimeMatchesGetrusage(t *testing.T) {
 	processCPU := func() uint64 {
 		for _, p := range nativeProcs() {
