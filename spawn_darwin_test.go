@@ -18,6 +18,13 @@ func TestSpawnOutputReadsStandardOutput(t *testing.T) {
 	}
 }
 
+func TestSpawnOutputReadsLargeStandardOutput(t *testing.T) {
+	out, _, err := spawnOutput(context.Background(), "/bin/sh", []string{"sh", "-c", "yes | head -c 1048576"}, nil)
+	if err != nil || len(out) != 1048576 {
+		t.Fatalf("got %d bytes, %v; want 1048576 bytes without error", len(out), err)
+	}
+}
+
 func TestSpawnOutputPassesTheEnvironmentAsGiven(t *testing.T) {
 	env := withEnv([]string{"A=1", "LC_ALL=C", "B=two"}, "LC_ALL=en_US.UTF-8")
 	out, _, err := spawnOutput(context.Background(), "/usr/bin/env", []string{"env"}, env)

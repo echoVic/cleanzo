@@ -103,6 +103,10 @@ func spawnOutput(ctx context.Context, path string, argv, env []string) ([]byte, 
 		}
 	}()
 	out, readErr := io.ReadAll(r)
+	if readErr != nil {
+		// Kill the unreaped child so a blocked writer cannot leave Wait4 waiting forever.
+		_ = syscall.Kill(int(pid), syscall.SIGKILL)
+	}
 	close(stop)
 	<-stopped
 	var status syscall.WaitStatus
