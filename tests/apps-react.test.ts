@@ -272,3 +272,15 @@ test("增长页请求卸载：切到已安装、记下要打开的 App，两个 
   expect(after.uninstallPath).toBe("/Applications/Lark.app");
   expect(after.uninstallNonce).toBe(before.uninstallNonce + 1);
 });
+
+test("installed app row shows the app's icon once known", async () => {
+  await import("./setup-dom");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { InstalledAppRow } = await import("../src/react/apps/InstalledTab");
+  const { loadIcon, resetIconsForTest } = await import("../src/react/icons/cache");
+  const a = app({ id: "acme", name: "Acme", path: "/Applications/Acme.app" });
+  expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('<div class="app-icon">A</div>');
+  resetIconsForTest(async () => "data:image/png;base64,QUJD");
+  await loadIcon("/Applications/Acme.app");
+  expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('class="app-icon cz-app-img"');
+});

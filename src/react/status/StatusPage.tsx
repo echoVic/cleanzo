@@ -27,6 +27,7 @@ import {
   refreshFrozenRows, sortApps, splitMem, syncQuitRows, trimSpark, uptimeParts,
   type QuitState, type SortBy,
 } from "./format";
+import { AppIcon } from "../icons/AppIcon";
 
 type T = ReturnType<typeof useT>;
 
@@ -590,7 +591,9 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
                 <Leave key={key} leaving={leaving}>
                   <div className={`st-row cz-fade-in${quitted ? " quitted" : ""}`} data-key={key}>
                     <div className="st-app">
-                      <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
+                      <AppIcon path={r.path} box="st-ico">
+                        <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
+                      </AppIcon>
                       <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
                       <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>
                     </div>

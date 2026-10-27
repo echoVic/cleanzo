@@ -867,6 +867,16 @@ export interface UninstallResult {
  * into typed TypeScript functions in src/mygo.ts.
  */
 export const Cleaner = {
+  /**
+   * AppIcon returns the icon Finder shows for the app bundle at path, as a
+   * PNG data URL, or "" when there is none: not an absolute path to an .app
+   * folder, gone, or off macOS. Pages show the first letter of the name until
+   * it arrives, and instead of it when there is none. Each bundle is drawn
+   * once.
+   */
+  appIcon(path: string): Promise<string> {
+    return call("Cleaner.AppIcon", path);
+  },
   /** AppUninstallDetail returns the selected app and its platform uninstall details. */
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);

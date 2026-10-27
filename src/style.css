@@ -1529,6 +1529,8 @@ body {
   align-items: center;
   justify-content: center;
 }
+/* App 的真实图标替换首字母圆标：用同一个框的尺寸；PNG 自带形状和阴影，不要底色和圆角。 */
+img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fit: contain; }
 .st-name {
   font-size: 13px;
   font-weight: 500;

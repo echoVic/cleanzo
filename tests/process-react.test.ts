@@ -199,3 +199,14 @@ test("rows: a growth tag shows its window and size; command-line rows have no qu
   expect(await rowHtml({ row: lark, tag })).toContain(t("process.tag.week", { size: `+${human(tag.bytes)}` }));
   expect(await rowHtml({ row: node })).not.toContain("st-quit");
 });
+
+test("rows: an app row shows its icon once known; other rows keep the letter", async () => {
+  const { loadIcon, resetIconsForTest } = await import("../src/react/icons/cache");
+  resetIconsForTest(async () => "data:image/png;base64,QUJD");
+  await loadIcon(chrome.path);
+  const app = await rowHtml({ row: chrome });
+  expect(app).toContain('class="st-ico cz-app-img" src="data:image/png;base64,QUJD"');
+  const cli = await rowHtml({ row: node });
+  expect(cli).toContain('class="st-ico pr-ico-sys"');
+  expect(cli).not.toContain("<img");
+});

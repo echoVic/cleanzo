@@ -12,6 +12,7 @@ import {
 import { UninstallDialog, type UninstallStage } from "./UninstallDialog";
 import { useFlip } from "../../ui/motion/flip";
 import { useLeaveAnimation, usePresence } from "../../ui/motion/presence";
+import { AppIcon } from "../icons/AppIcon";
 
 interface InstalledTabProps {
   /** 该 tab 是否当前选中：首次激活时才懒加载应用列表。 */
@@ -255,7 +256,9 @@ function AnimatedInstalledAppRow(props: InstalledAppRowProps) {
 export function InstalledAppRow({ app: a, moving, onDetail, leaving = false }: InstalledAppRowProps) {
   return (
     <div className="app-row card" key={a.id} data-key={a.id} aria-hidden={leaving || undefined} inert={leaving || undefined}>
-      <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
+        <AppIcon path={a.path} box="app-icon">
+          <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
+        </AppIcon>
       <div className="app-main">
         <div className="app-name">
           {a.name}

@@ -21,6 +21,7 @@ import {
   diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
   type GrowthTag, type ProcessRequest, type ProcessTab,
 } from "./format";
+import { AppIcon } from "../icons/AppIcon";
 
 type T = ReturnType<typeof useT>;
 
@@ -61,9 +62,11 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, t, o
   const label = (
     <>
       <span className="pr-chev" aria-hidden="true">{expandable ? (open ? "▾" : "›") : ""}</span>
-      <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name) } : undefined} aria-hidden="true">
-        {initial(row.name)}
-      </span>
+      <AppIcon path={row.kind === "app" ? row.path : ""} box="st-ico">
+        <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name) } : undefined} aria-hidden="true">
+          {initial(row.name)}
+        </span>
+      </AppIcon>
       <span className="st-name" title={row.name}>{row.name}</span>
       {row.procs > 1 && <span className="st-procs">{t("status.apps.procs", { n: row.procs })}</span>}
       {row.kind === "system" && <span className="pr-sys">{t("process.system")}</span>}

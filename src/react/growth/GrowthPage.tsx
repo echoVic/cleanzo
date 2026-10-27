@@ -12,6 +12,7 @@ import { t as translate } from "../../i18n";
 import { iconColor } from "../status/format";
 import { growthApi } from "./api";
 import { fmtDelta, growthBanner, growthView, sortApps, sparkPath, uninstallGap, type GrowthSort } from "./format";
+import { AppIcon } from "../icons/AppIcon";
 
 /** main.ts 注入的跳转：残留页签、卸载对话框（都走现有流程，本页不删任何东西）。 */
 export interface GrowthHandlers {
@@ -176,9 +177,11 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
                 <li key={a.key} data-growth-key={a.key} className={`cz-growth-item${hl === a.key ? " cz-growth-hl" : ""}`}>
                   <button type="button" className="cz-growth-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : a.key)}>
                     <span className="cz-growth-name">
-                      <span className="cz-growth-icon" style={{ background: iconColor(a.name) }} aria-hidden>
-                        {(a.name.replace(/^\.+/, "") || a.name).charAt(0).toUpperCase()}
-                      </span>
+                      <AppIcon path={a.appPath} box="cz-growth-icon">
+                        <span className="cz-growth-icon" style={{ background: iconColor(a.name) }} aria-hidden>
+                          {(a.name.replace(/^\.+/, "") || a.name).charAt(0).toUpperCase()}
+                        </span>
+                      </AppIcon>
                       <span className="cz-growth-label">{a.name}</span>
                       {a.kind === "macos" && <Badge variant="optional">{t("growth.badge.macos")}</Badge>}
                       {a.kind === "unknown" && <Badge variant="optional">{t("growth.badge.unknown")}</Badge>}
