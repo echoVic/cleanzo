@@ -37,6 +37,7 @@ type hostCPULoad struct{ Ticks [4]uint32 }
 type procReading struct {
 	Pid       int32
 	Path      string
+	Name      string
 	Footprint uint64
 	UserNs    uint64
 	SysNs     uint64
@@ -99,7 +100,7 @@ func windowsProcReadings(procs []procInfo) []procReading {
 		if err != nil {
 			continue
 		}
-		r := procReading{Pid: int32(p.Pid), Path: p.Exe}
+		r := procReading{Pid: int32(p.Pid), Path: p.Exe, Name: filepath.Base(p.Exe)}
 		var created, exited, kernel, user windows.Filetime
 		if windows.GetProcessTimes(h, &created, &exited, &kernel, &user) == nil {
 			r.Start = filetimeTicks(created)

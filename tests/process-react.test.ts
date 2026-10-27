@@ -76,6 +76,12 @@ test("pushCpu keeps the last three readings", () => {
   expect(pushCpu([], 5)).toEqual([5]);
 });
 
+test("diagnose: only the most recent three CPU readings determine the diagnosis", () => {
+  const s = sample({ rows: [chrome, node] });
+  expect(diagnose(s, [20, 80, 85, 99])).toEqual({ kind: "cpu", top: chrome });
+  expect(diagnose(s, [99, 99, 79, 99])).toBeNull();
+});
+
 test("shouldWatch: only while shown, on CPU or memory, running and visible", () => {
   const on = { active: true, tab: "cpu" as const, running: true, hidden: false };
   expect(shouldWatch(on)).toBe(true);
@@ -124,6 +130,15 @@ test("rowTag: only app rows, matched by bundle ID", () => {
   expect(rowTag(chrome, tags)).toBeNull();
   expect(rowTag({ ...lark, kind: "system" }, tags)).toBeNull();
   expect(rowTag({ ...lark, bundleId: "" }, tags)).toBeNull();
+});
+
+test("rowTag: Apple apps can use macos owner tags, with app tags taking priority", () => {
+  const safari = row({ key: "app:/applications/safari.app", bundleId: "com.apple.safari" });
+  const tags = growthTags(summary({ alerts: [alert("macos:com.apple.safari", 5 * GB)] }));
+  expect(rowTag(safari, tags)).toBe(tags.get("macos:com.apple.safari")!);
+  const both = growthTags(summary({ alerts: [alert("macos:com.apple.safari", 5 * GB), alert("app:com.apple.safari", GB)] }));
+  expect(rowTag(safari, both)).toBe(both.get("app:com.apple.safari")!);
+  expect(rowTag(safari, new Map())).toBeNull();
 });
 
 test("pruneStuck drops apps that are gone and returns the same set when nothing changed", () => {

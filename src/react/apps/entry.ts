@@ -9,7 +9,7 @@ export function showReactApps(tab?: "installed" | "leftovers") {
   if (el) mountApps(el);
 }
 
-/** 占用增长页「卸载」：请求后挂载 / 复用根，InstalledTab 据 nonce 打开对话框。 */
+/** 进程页的磁盘占用标签「卸载」：请求后挂载 / 复用根，InstalledTab 据 nonce 打开对话框。 */
 export function requestAppsUninstall(path: string) {
   request(path);
   const el = document.querySelector<HTMLElement>("#apps-react-root");

@@ -25,11 +25,11 @@ func TestParsePsOutputKeepsOtherAccountsWithShortNames(t *testing.T) {
 	}, "\n"))
 	got := parsePsOutput(out, 501)
 	want := []otherProc{
-		{Pid: 1, UID: 0, CPU: 0.3, Memory: 12288 * 1024, Path: "launchd"},
-		{Pid: 414, UID: 88, CPU: 40.2, Memory: 138240 * 1024, Path: "WindowServer"},
-		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 53872 * 1024, Path: "wdavdaemon"},
-		{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "Google Chrome He"},
-		{Pid: 0, UID: 0, CPU: 5.0, Memory: 0, Path: "kernel_task"},
+		{Pid: 1, UID: 0, CPU: 0.3, Memory: 12288 * 1024, Path: "launchd", Name: "launchd"},
+		{Pid: 414, UID: 88, CPU: 40.2, Memory: 138240 * 1024, Path: "WindowServer", Name: "WindowServer"},
+		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 53872 * 1024, Path: "wdavdaemon", Name: "wdavdaemon"},
+		{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "Google Chrome He", Name: "Google Chrome He"},
+		{Pid: 0, UID: 0, CPU: 5.0, Memory: 0, Path: "kernel_task", Name: "kernel_task"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d processes, want %d: %+v", len(got), len(want), got)
@@ -78,6 +78,15 @@ func TestGroupProcessesCPUFromThePreviousReading(t *testing.T) {
 		if got[k].CPU != 0 {
 			t.Errorf("%s CPU = %v, want 0", k, got[k].CPU)
 		}
+	}
+}
+
+func TestGroupProcessesSkipsOwnProcessesWithoutPaths(t *testing.T) {
+	cur := snapshotProcs([]procReading{{Pid: 1, Footprint: 1024}, {Pid: 2, Path: "/usr/bin/yes", Footprint: 2048}})
+	others := []otherProc{{Pid: 3, Path: "kernel_task", Memory: 4096}}
+	rows := groupProcesses(cur, cur, others, nil, func(p int32) int32 { return p }, testSystemPath, noBundleIDs, 0)
+	if len(rows) != 2 || rows[0].Key != "cli:yes" || rows[1].Key != "sys:kernel_task" {
+		t.Fatalf("rows = %+v, want yes and kernel_task without the own pathless process", rows)
 	}
 }
 
@@ -181,7 +190,7 @@ func TestWatchProcessesStopsDuringTheFirstWait(t *testing.T) {
 
 func TestParsePsOutputPreservesChineseName(t *testing.T) {
 	got := parsePsOutput([]byte("7046 0 2.5 1024 语雀\n"), 501)
-	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "语雀"}
+	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "语雀", Name: "语雀"}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
@@ -375,6 +384,17 @@ func TestQuitForceUnsupportedOffMacOS(t *testing.T) {
 	ce, isCode := err.(codeError)
 	if ok || !isCode || ce.Code != "unsupported" {
 		t.Fatalf("got (%v, %v), want false and unsupported", ok, err)
+	}
+}
+
+func TestWatchProcessesUnsupportedOffMacOS(t *testing.T) {
+	if processSupported() {
+		t.Skip("non-macOS binding contract")
+	}
+	err := (Cleaner{}).WatchProcesses(context.Background(), nil)
+	ce, isCode := err.(codeError)
+	if !isCode || ce.Code != "unsupported" {
+		t.Fatalf("got %v, want unsupported", err)
 	}
 }
 

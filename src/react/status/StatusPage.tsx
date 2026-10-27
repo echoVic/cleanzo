@@ -559,7 +559,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
           </TabsRoot>
           {!isWindows() && (
             <button className="st-viewall" type="button" onClick={() => goProcess(sortBy)}>
-              {t("status.apps.viewAll")} ›
+              {t("status.apps.viewAll")} <span aria-hidden="true">›</span>
             </button>
           )}
         </div>

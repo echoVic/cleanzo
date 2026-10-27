@@ -26,6 +26,7 @@ type hostCPULoad struct{ Ticks [4]uint32 }
 type procReading struct {
 	Pid       int32
 	Path      string
+	Name      string
 	Footprint uint64
 	UserNs    uint64
 	SysNs     uint64

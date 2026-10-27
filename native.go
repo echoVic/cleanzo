@@ -12,6 +12,7 @@ package main
 import (
 	"encoding/binary"
 	"math/bits"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -30,6 +31,7 @@ var (
 	procPidRusage    func(pid int32, flavor int32, buf unsafe.Pointer) int32
 	procListAllPids  func(buf unsafe.Pointer, size int32) int32
 	procPidPathFn    func(pid int32, buf unsafe.Pointer, size uint32) int32
+	procNameFn       func(pid int32, buf unsafe.Pointer, size uint32) int32
 	responsibleForFn func(pid int32) int32
 	sysctlByNameFn   func(name *byte, oldp unsafe.Pointer, oldlenp *uintptr, newp unsafe.Pointer, newlen uintptr) int32
 	hostPort         uint32
@@ -112,6 +114,7 @@ func nativeInit() {
 		purego.RegisterLibFunc(&procPidRusage, lib, "proc_pid_rusage")
 		purego.RegisterLibFunc(&procListAllPids, lib, "proc_listallpids")
 		purego.RegisterLibFunc(&procPidPathFn, lib, "proc_pidpath")
+		purego.RegisterLibFunc(&procNameFn, lib, "proc_name")
 		purego.RegisterLibFunc(&sysctlByNameFn, lib, "sysctlbyname")
 		// Private API: probe instead of hard-wiring it. When absent the
 		// attribution falls back to executable names (see monitor.go).
@@ -156,6 +159,7 @@ func nativeCPUTicks() (hostCPULoad, bool) {
 type procReading struct {
 	Pid       int32
 	Path      string
+	Name      string
 	Footprint uint64
 	UserNs    uint64
 	SysNs     uint64
@@ -180,6 +184,7 @@ func nativeProcs() []procReading {
 	}
 	var out []procReading
 	var path [4096]byte
+	var name [256]byte
 	var rusage [512]byte
 	for _, pid := range pids[:n] {
 		if procPidRusage(pid, 2 /* RUSAGE_INFO_V2 */, unsafe.Pointer(&rusage[0])) != 0 {
@@ -194,6 +199,11 @@ func nativeProcs() []procReading {
 		}
 		if l := procPidPathFn(pid, unsafe.Pointer(&path[0]), uint32(len(path))); l > 0 {
 			r.Path = string(path[:l])
+		}
+		if procNameFn != nil {
+			if l := procNameFn(pid, unsafe.Pointer(&name[0]), uint32(len(name))); l > 0 && l <= int32(len(name)) {
+				r.Name = strings.TrimRight(string(name[:l]), "\x00")
+			}
 		}
 		out = append(out, r)
 	}

@@ -2326,8 +2326,10 @@ Expected: PASS. `grep -rn "showReactGrowth\|focusReactGrowth\|setGoGrowthHandler
    - The CPU tab fills in about a second.
    - `yes > /dev/null` in Terminal shows up as its own 「yes」 row at the top within 2 s. It is not counted under 终端.
    - WindowServer carries 「系统」 and ≈, and has no button.
-   - 「暂停」 freezes the numbers and shows 已暂停. While paused, `ps -ax | grep '[/]bin/ps -axww'` finds nothing over 10 s. 「继续」 resumes.
-   - Switching to another page stops `/bin/ps`; check the same way.
+   - First establish a positive control on the running CPU tab: `for i in $(seq 500); do pgrep -f '^/bin/ps -ax -o pid=,uid=' && break; sleep 0.02; done` must find a matching process. If it finds nothing, the checks below are invalid.
+   - 「暂停」 freezes the numbers and shows 已暂停. While paused, run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match. 「继续」 resumes.
+   - Resume sampling on the CPU tab and repeat the positive control, then switch to another page. Run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match.
+   - Return to the running CPU tab and repeat the positive control, then close the window. Run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match.
    - TextEdit with unsaved text:
      - 「退出」 asks first, then TextEdit asks to save;
      - leave TextEdit's dialog open, and after 5 s the row shows 还没退出 and 「强制退出」;

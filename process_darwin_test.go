@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -204,8 +205,10 @@ func TestProcessSamplingBudget(t *testing.T) {
 	if os.Getenv("CLEANZO_PERF") == "" {
 		t.Skip("set CLEANZO_PERF=1 to measure the sampling cost on this Mac")
 	}
+	old := runOnMain
+	runOnMain = func(f func()) { f() }
+	t.Cleanup(func() { runOnMain = old })
 	src := realProcessSource()
-	src.apps = func() []workspaceApp { return nil } // NSWorkspace needs the app's main thread
 	usage := func() time.Duration {
 		var self, kids syscall.Rusage
 		_ = syscall.Getrusage(syscall.RUSAGE_SELF, &self)
@@ -217,7 +220,12 @@ func TestProcessSamplingBudget(t *testing.T) {
 	defer cancel()
 	samples, rows := 0, 0
 	before, start := usage(), time.Now()
-	_ = watchProcessesWith(ctx, func(s ProcessSample) error { samples++; rows = len(s.Rows); return nil }, src)
+	_ = watchProcessesWith(ctx, func(s ProcessSample) error {
+		samples++
+		rows = len(s.Rows)
+		_, err := json.Marshal(s)
+		return err
+	}, src)
 	used, wall := usage()-before, time.Since(start)
 	pct := used.Seconds() / wall.Seconds() * 100
 	t.Logf("%d samples, %d rows in the last, CPU %v in %v: %.2f%% of one core", samples, rows, used.Round(time.Millisecond), wall.Round(time.Second), pct)
@@ -385,4 +393,88 @@ func TestNativeProcsPidPathReadsItself(t *testing.T) {
 	if got := nativePidPath(-1); got != "" {
 		t.Fatalf("nativePidPath invalid PID = %q, want empty", got)
 	}
+}
+
+func TestNativePidPathReadsLaunchd(t *testing.T) {
+	got := nativePidPath(1)
+	if got == "" {
+		t.Skip("libproc cannot read launchd's path")
+	}
+	if got != "/sbin/launchd" {
+		t.Fatalf("nativePidPath(1) = %q, want /sbin/launchd", got)
+	}
+}
+
+func TestForceQuitAppRejectsNonAppBeforeWorkspace(t *testing.T) {
+	old := runOnMain
+	t.Cleanup(func() { runOnMain = old })
+	runOnMain = func(func()) { t.Fatal("non-app path reached workspace") }
+	for _, path := range []string{"/Applications", "/Applications/", "", "/Applications/Test.app/Contents/MacOS/Test"} {
+		ok, err := (Cleaner{}).ForceQuitApp(path)
+		ce, isCode := err.(codeError)
+		if ok || !isCode || ce.Code != "not-app" {
+			t.Fatalf("ForceQuitApp(%q) = (%v, %v), want false and not-app", path, ok, err)
+		}
+	}
+}
+
+func TestForceQuitAppAcceptsAppSuffixCaseAndTrailingSeparators(t *testing.T) {
+	old := runOnMain
+	t.Cleanup(func() { runOnMain = old })
+	// An empty workspace prevents any native reads or app termination.
+	runOnMain = func(func()) {}
+	for _, path := range []string{"/Applications/Test.app", "/Applications/Test.APP///"} {
+		ok, err := (Cleaner{}).ForceQuitApp(path)
+		ce, isCode := err.(codeError)
+		if ok || !isCode || ce.Code != "not-running" {
+			t.Fatalf("ForceQuitApp(%q) = (%v, %v), want false and not-running", path, ok, err)
+		}
+	}
+}
+
+func TestGroupProcessesUsesKernelNames(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, short, key, row, child string
+	}{
+		{"symlinked CLI", "/Users/me/.claude/versions/2.1.304", "claude", "cli:claude", "claude", "claude"},
+		{"truncated system name", "/System/Library/PrivateFrameworks/EcosystemAnalytics.framework/Support/ecosystemanalyticsd", "ecosystemanalyt", "sys:ecosystemanalyticsd", "ecosystemanalyticsd", "ecosystemanalyticsd"},
+		{"Chrome helper", "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)", "Google Chrome He", "app:/applications/google chrome.app", "Google Chrome", "Google Chrome Helper (Renderer)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cur := snapshotProcs([]procReading{{Pid: 1, Path: tc.path, Name: tc.short}})
+			rows := groupProcesses(cur, cur, nil, nil, func(p int32) int32 { return p }, testSystemPath, noBundleIDs, 0)
+			if len(rows) != 1 || rows[0].Key != tc.key || rows[0].Name != tc.row || len(rows[0].Children) != 1 || rows[0].Children[0].Name != tc.child {
+				t.Fatalf("own rows = %+v, want key %q, row %q, child %q", rows, tc.key, tc.row, tc.child)
+			}
+			others := []otherProc{{Pid: 2, Path: tc.path, Name: tc.short}}
+			rows = groupProcesses(nil, nil, others, nil, func(p int32) int32 { return p }, testSystemPath, noBundleIDs, 0)
+			key := tc.key
+			if strings.HasPrefix(key, "cli:") {
+				key = "sys:" + tc.row
+			}
+			if len(rows) != 1 || rows[0].Key != key || rows[0].Name != tc.row || len(rows[0].Children) != 1 || rows[0].Children[0].Name != tc.child {
+				t.Fatalf("other rows = %+v, want key %q, row %q, child %q", rows, key, tc.row, tc.child)
+			}
+		})
+	}
+}
+
+func TestOtherProcsKeepsShortNameAfterPathResolution(t *testing.T) {
+	fakeProcessPs(t, "success")
+	got := readOtherProcs(context.Background())
+	if len(got) != 1 || got[0].Name != "Google Chrome He" {
+		t.Fatalf("other processes = %+v, want the ps short name preserved", got)
+	}
+}
+
+func TestNativeProcsReadsKernelName(t *testing.T) {
+	for _, p := range nativeProcs() {
+		if p.Pid == int32(os.Getpid()) {
+			if p.Name == "" || strings.ContainsRune(p.Name, '\x00') {
+				t.Fatalf("self kernel name = %q, want a nonempty name without a NUL", p.Name)
+			}
+			return
+		}
+	}
+	t.Fatal("nativeProcs did not report this process")
 }

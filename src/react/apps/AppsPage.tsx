@@ -12,7 +12,7 @@ interface AppsPageProps {
   initialTab: AppsTab;
   /** 外部桥接请求切 tab 的版本号（垃圾页「残留」动作）。 */
   nonce: number;
-  /** 占用增长页请求打开卸载对话框的 App。 */
+  /** 进程页的磁盘占用标签请求打开卸载对话框的 App。 */
   uninstallPath?: string | null;
   /** 外部卸载请求的版本号。 */
   uninstallNonce?: number;

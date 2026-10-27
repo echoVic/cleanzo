@@ -69,7 +69,7 @@ test("卸载能移走多少、另外剩多少（不算 App 本身）", () => {
 });
 
 test("新文案中英文都有", () => {
-  for (const key of ["nav.growth", "growth.sub", "growth.optin.body", "growth.uninstallGap", "growth.outside", "growth.badge.unknown"] as const) {
+  for (const key of ["growth.optin.body", "growth.uninstallGap", "growth.outside", "growth.badge.unknown"] as const) {
     storage.set("cleanzo.lang", "en");
     expect(t(key)).not.toBe(key);
     storage.set("cleanzo.lang", "zh");

@@ -163,8 +163,10 @@ export function syncQuitRows(st: QuitState, presentKeys: ReadonlySet<string>): Q
   const gone = new Set(st.gone);
   for (const k of done) {
     if (!presentKeys.has(k)) {
-      gone.add(k);
-      changed = true;
+      if (!gone.has(k)) {
+        gone.add(k);
+        changed = true;
+      }
     } else if (gone.has(k)) {
       done.delete(k);
       gone.delete(k);

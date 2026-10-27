@@ -64,6 +64,7 @@ type otherProc struct {
 	CPU    float64 // ps %cpu, a decaying average
 	Memory uint64  // resident size in bytes
 	Path   string  // the executable's full path, or a bare name like kernel_task
+	Name   string  // the short name from ps's ucomm column
 }
 
 // processSource is everything the loop reads, injectable for tests.
@@ -132,6 +133,9 @@ func (Cleaner) WatchProcesses(ctx context.Context, ch *mygo.Channel[ProcessSampl
 func (Cleaner) ForceQuitApp(path string) (bool, error) {
 	if !processSupported() {
 		return false, codeError{Code: "unsupported"}
+	}
+	if !strings.HasSuffix(strings.ToLower(strings.TrimRight(path, string(filepath.Separator))), ".app") {
+		return false, codeError{Code: "not-app"}
 	}
 	return quitAppWith(path, workspaceList, workspaceForceTerminate)
 }
@@ -264,6 +268,9 @@ func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []
 		c.Estimated = c.Estimated || estimated
 	}
 	for pid, r := range cur {
+		if r.Path == "" {
+			continue
+		}
 		cpu := 0.0
 		if p, ok := prev[pid]; ok && p.Start == r.Start && elapsed > 0 {
 			if now, was := r.UserNs+r.SysNs, p.UserNs+p.SysNs; now > was {
@@ -271,11 +278,11 @@ func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []
 			}
 		}
 		key, kind, bundle := ownProcessKey(r, cur, responsible, system)
-		add(key, kind, bundle, processName(r.Path, r.Pid), cpu, r.Footprint, false)
+		add(key, kind, bundle, processName(r.Path, r.Name, r.Pid), cpu, r.Footprint, false)
 	}
 	for _, o := range others {
 		key, kind, bundle := otherProcessKey(o)
-		add(key, kind, bundle, processName(o.Path, o.Pid), o.CPU, o.Memory, true)
+		add(key, kind, bundle, processName(o.Path, o.Name, o.Pid), o.CPU, o.Memory, true)
 	}
 	rows := make([]ProcessRow, 0, len(groups))
 	for _, g := range groups {
@@ -318,9 +325,9 @@ func ownProcessKey(r procReading, cur map[int32]procReading, responsible func(in
 		}
 	}
 	if sys {
-		return "sys:" + processName(r.Path, r.Pid), "system", ""
+		return "sys:" + processName(r.Path, r.Name, r.Pid), "system", ""
 	}
-	return "cli:" + processName(r.Path, r.Pid), "cli", ""
+	return "cli:" + processName(r.Path, r.Name, r.Pid), "cli", ""
 }
 
 // otherProcessKey places another account's process: its .app's row, else a
@@ -329,16 +336,23 @@ func otherProcessKey(o otherProc) (key, kind, bundle string) {
 	if b := outermostBundle(o.Path); b != "" {
 		return "app:" + strings.ToLower(b), "app", b
 	}
-	return "sys:" + processName(o.Path, o.Pid), "system", ""
+	return "sys:" + processName(o.Path, o.Name, o.Pid), "system", ""
 }
 
-// processName is the executable's file name, or "pid N" when the path is
-// unknown.
-func processName(path string, pid int32) string {
+// processName prefers the executable's full file name, unless the kernel
+// name identifies a differently named target (such as a versioned binary).
+func processName(path, name string, pid int32) string {
 	if path == "" {
+		if name != "" {
+			return name
+		}
 		return "pid " + strconv.Itoa(int(pid))
 	}
-	return filepath.Base(path)
+	base := filepath.Base(path)
+	if name != "" && !strings.HasPrefix(base, name) {
+		return name
+	}
+	return base
 }
 
 // ---- other accounts through ps --------------------------------------------
@@ -362,7 +376,7 @@ func parsePsOutput(out []byte, self uint32) []otherProc {
 		if errPid != nil || errUID != nil || errCPU != nil || errRSS != nil || uint32(uid) == self {
 			continue
 		}
-		procs = append(procs, otherProc{Pid: int32(pid), UID: uint32(uid), CPU: cpu, Memory: rss * 1024, Path: path})
+		procs = append(procs, otherProc{Pid: int32(pid), UID: uint32(uid), CPU: cpu, Memory: rss * 1024, Path: path, Name: path})
 	}
 	return procs
 }

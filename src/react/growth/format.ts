@@ -1,4 +1,4 @@
-// 占用增长页的纯函数：页面状态、横幅、增长文案、排序、迷你曲线、卸载差额。测试直接覆盖。
+// 占用增长面板的纯函数：面板状态、横幅、增长文案、排序、迷你曲线、卸载差额。测试直接覆盖。
 import type { GrowthApp, GrowthDelta, GrowthState, UninstallDetail } from "../../mygo";
 import { human } from "../../shared";
 

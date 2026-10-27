@@ -1869,12 +1869,13 @@ body {
 .pr-cols .pr-sort { width: 96px; flex: none; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: right; cursor: pointer; }
 .pr-cols .pr-sort[aria-pressed="true"] { color: var(--fg); font-weight: 600; }
 .pr-cols .c-act { width: 168px; }
-.pr-item { border-bottom: 1px solid var(--bg-subtle); }
+.pr-item { border-bottom: 1px solid var(--bg-subtle); transition: opacity 0.3s ease; }
 .pr-item:last-child { border-bottom: none; }
 .pr-item.quitted { opacity: 0.45; }
 .pr-row { border-bottom: none; content-visibility: auto; contain-intrinsic-size: auto 52px; }
 .pr-app { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .pr-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+div.pr-toggle { cursor: default; }
 .pr-chev { width: 10px; flex: none; color: var(--muted); font-size: 11px; }
 .pr-ico-sys { background: var(--bg-subtle); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
 .pr-sys { flex: none; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; }

@@ -132,9 +132,9 @@ func openMainWindow() *mygo.Window {
 	return mainWindow
 }
 
-// focusGrowth opens the window on the growth page at one owner. The click of
-// the notification that launched the app can come before the app is ready to
-// make windows, so this waits for that.
+// focusGrowth opens the window on the process page's disk usage tab at one
+// owner. The click of the notification that launched the app can come before
+// the app is ready to make windows, so this waits for that.
 func focusGrowth(key string) {
 	mygo.App.WhenReady(func() {
 		_ = GrowthFocus.Emit(openMainWindow(), key) // delivered once the page is ready

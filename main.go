@@ -496,9 +496,11 @@ func (Cleaner) CleanPaths(paths []string) PathsCleanResult {
 // readBundleInfo extracts display name, bundle id and version from an app's
 // Info.plist (XML or binary) using macOS's built-in plutil.
 func readBundleInfo(plistPath string) (name, bid, version string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	// XML rather than JSON: Info.plist files may hold <date> and <data>
 	// values, which JSON cannot represent, and plutil then fails outright.
-	out, err := quietCommand(exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", plistPath)).Output()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", plistPath)).Output()
 	if err != nil {
 		return "", "", ""
 	}

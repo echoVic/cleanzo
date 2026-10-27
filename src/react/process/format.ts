@@ -45,7 +45,7 @@ export interface Diagnosis {
 export function diagnose(sample: ProcessSample | null, cpuHist: readonly number[]): Diagnosis | null {
   if (!sample) return null;
   if (sample.pressure === 2 || sample.pressure === 4) return { kind: "mem", top: sortRows(sample.rows, "mem")[0] ?? null };
-  if (cpuHist.length >= PROCESS_DIAG.cpuSamples && cpuHist.every((v) => v >= PROCESS_DIAG.cpuBusy)) {
+  if (cpuHist.length >= PROCESS_DIAG.cpuSamples && cpuHist.slice(-PROCESS_DIAG.cpuSamples).every((v) => v >= PROCESS_DIAG.cpuBusy)) {
     return { kind: "cpu", top: sortRows(sample.rows, "cpu")[0] ?? null };
   }
   return null;
@@ -87,9 +87,9 @@ export function growthTags(s: GrowthSummary | null): Map<string, GrowthTag> {
   return out;
 }
 
-/** 进程行上的增长小标签：只给 App 行，按 bundle ID 对上 app:<bundle id>。 */
+/** 进程行上的增长小标签：只给 App 行，按 bundle ID 优先对上 app:<bundle id>，再查 macos:<bundle id>。 */
 export function rowTag(row: ProcessRow, tags: ReadonlyMap<string, GrowthTag>): GrowthTag | null {
-  return row.kind === "app" && row.bundleId ? tags.get(`app:${row.bundleId}`) ?? null : null;
+  return row.kind === "app" && row.bundleId ? tags.get(`app:${row.bundleId}`) ?? tags.get(`macos:${row.bundleId}`) ?? null : null;
 }
 
 /** 「强制退出」只留给还在跑的 App：这一轮已经没有这个 .app 的行就去掉；没变时返回原集合。 */

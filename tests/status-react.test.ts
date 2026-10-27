@@ -157,6 +157,14 @@ test("syncQuitRows is a no-op when no quitted rows are tracked", () => {
   expect(syncQuitRows(st, new Set())).toBe(st);
 });
 
+test("syncQuitRows returns the same state when a gone key remains absent", () => {
+  const st = { ...emptyQuit(), done: new Set(["chrome"]) };
+  const first = syncQuitRows(st, new Set(["code"]));
+  expect(first).not.toBe(st);
+  expect(first.gone.has("chrome")).toBe(true);
+  expect(syncQuitRows(first, new Set(["code"]))).toBe(first);
+});
+
 test("quitErrCode parses structured errors; plain text passes through", () => {
   expect(quitErrCode(new Error(JSON.stringify({ code: "not-running" })))).toBe("not-running");
   expect(quitErrCode(new Error(JSON.stringify({ code: "cannot-quit" })))).toBe("cannot-quit");

@@ -18,7 +18,7 @@ interface InstalledTabProps {
   active: boolean;
   /** 向页脚汇报繁忙态（导航 busy）。 */
   onBusyChange: (busy: boolean) => void;
-  /** 占用增长页请求打开卸载对话框的 App。 */
+  /** 进程页的磁盘占用标签请求打开卸载对话框的 App。 */
   uninstallPath?: string | null;
   /** 外部卸载请求的版本号。 */
   uninstallNonce?: number;
@@ -103,7 +103,7 @@ export function InstalledTab({ active, onBusyChange, uninstallPath = null, unins
     }
   }, []);
 
-  // 占用增长页请求卸载：首次挂载也消费已有请求，后续按 nonce 只打开一次。
+  // 进程页的磁盘占用标签请求卸载：首次挂载也消费已有请求，后续按 nonce 只打开一次。
   const firstUninstall = React.useRef(0);
   React.useEffect(() => {
     if (uninstallNonce !== firstUninstall.current && uninstallPath) {
