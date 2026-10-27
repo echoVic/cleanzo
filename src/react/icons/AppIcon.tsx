@@ -1,8 +1,9 @@
 import * as React from "react";
 import { hasAppIcon, loadIcon, peekIcon } from "./cache";
 
-// 首字母圆标到了视口附近（200px）才开始要图标：长列表里看不到的行不要。
-let observer: IntersectionObserver | null = null;
+// 首字母圆标到了页面滚动容器（.content）的可见区附近（200px）才开始要图标；
+// 找不到滚动容器时以视口为 root，长列表里远处的行不要。
+const observers = new Map<Element | null, IntersectionObserver>();
 const waiting = new Map<Element, () => void>();
 
 function whenVisible(el: Element | null, fn: () => void): () => void {
@@ -10,15 +11,20 @@ function whenVisible(el: Element | null, fn: () => void): () => void {
     fn();
     return () => {};
   }
-  observer ??= new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const go = waiting.get(e.target);
-      waiting.delete(e.target);
-      observer?.unobserve(e.target);
-      go?.();
-    }
-  }, { rootMargin: "200px" });
+  const root = el.closest(".content");
+  let observer = observers.get(root);
+  if (!observer) {
+    observer = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const go = waiting.get(e.target);
+        waiting.delete(e.target);
+        observer?.unobserve(e.target);
+        go?.();
+      }
+    }, { root, rootMargin: "200px" });
+    observers.set(root, observer);
+  }
   waiting.set(el, fn);
   observer.observe(el);
   return () => {

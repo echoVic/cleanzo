@@ -256,9 +256,9 @@ function AnimatedInstalledAppRow(props: InstalledAppRowProps) {
 export function InstalledAppRow({ app: a, moving, onDetail, leaving = false }: InstalledAppRowProps) {
   return (
     <div className="app-row card" key={a.id} data-key={a.id} aria-hidden={leaving || undefined} inert={leaving || undefined}>
-        <AppIcon path={a.path} box="app-icon">
-          <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
-        </AppIcon>
+      <AppIcon path={a.path} box="app-icon">
+        <div className="app-icon">{a.name.charAt(0).toUpperCase()}</div>
+      </AppIcon>
       <div className="app-main">
         <div className="app-name">
           {a.name}

@@ -279,8 +279,10 @@ test("installed app row shows the app's icon once known", async () => {
   const { InstalledAppRow } = await import("../src/react/apps/InstalledTab");
   const { loadIcon, resetIconsForTest } = await import("../src/react/icons/cache");
   const a = app({ id: "acme", name: "Acme", path: "/Applications/Acme.app" });
-  expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('<div class="app-icon">A</div>');
   resetIconsForTest(async () => "data:image/png;base64,QUJD");
-  await loadIcon("/Applications/Acme.app");
-  expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('class="app-icon cz-app-img"');
+  try {
+    expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('<div class="app-icon">A</div>');
+    await loadIcon("/Applications/Acme.app");
+    expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('class="app-icon cz-app-img"');
+  } finally { resetIconsForTest(async () => ""); }
 });

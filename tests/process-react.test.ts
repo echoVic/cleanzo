@@ -203,10 +203,12 @@ test("rows: a growth tag shows its window and size; command-line rows have no qu
 test("rows: an app row shows its icon once known; other rows keep the letter", async () => {
   const { loadIcon, resetIconsForTest } = await import("../src/react/icons/cache");
   resetIconsForTest(async () => "data:image/png;base64,QUJD");
-  await loadIcon(chrome.path);
-  const app = await rowHtml({ row: chrome });
-  expect(app).toContain('class="st-ico cz-app-img" src="data:image/png;base64,QUJD"');
-  const cli = await rowHtml({ row: node });
-  expect(cli).toContain('class="st-ico pr-ico-sys"');
-  expect(cli).not.toContain("<img");
+  try {
+    await loadIcon(chrome.path);
+    const app = await rowHtml({ row: chrome });
+    expect(app).toContain('class="st-ico cz-app-img" src="data:image/png;base64,QUJD"');
+    const cli = await rowHtml({ row: node });
+    expect(cli).toContain('class="st-ico pr-ico-sys"');
+    expect(cli).not.toContain("<img");
+  } finally { resetIconsForTest(async () => ""); }
 });

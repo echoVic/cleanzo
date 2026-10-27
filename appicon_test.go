@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeAppIcons swaps the renderer for one that counts its calls and returns
@@ -44,16 +46,34 @@ func TestAppIconDrawsEachBundleOnce(t *testing.T) {
 	if err := os.Mkdir(app, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	appIconRender = func(string, int) []byte {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return []byte{1, 2, 3}
+	}
 	urls := make([]string, 8)
-	var wg sync.WaitGroup
+	errs := make([]error, len(urls))
+	var started, wg sync.WaitGroup
+	started.Add(len(urls))
 	for i := range urls {
 		wg.Add(1)
-		go func() { defer wg.Done(); urls[i], _ = (Cleaner{}).AppIcon(app) }()
+		go func() {
+			defer wg.Done()
+			started.Done()
+			urls[i], errs[i] = (Cleaner{}).AppIcon(app)
+		}()
 	}
+	<-entered
+	started.Wait()
+	close(release)
 	wg.Wait()
-	for _, u := range urls {
-		if u != "data:image/png;base64,AQID" {
-			t.Fatalf("AppIcon = %q, want the PNG as a data URL", u)
+	for i, u := range urls {
+		if u != "data:image/png;base64,AQID" || errs[i] != nil {
+			t.Fatalf("AppIcon = %q, %v; want the PNG as a data URL", u, errs[i])
 		}
 	}
 	if got, _ := (Cleaner{}).AppIcon(app + string(filepath.Separator)); got != urls[0] {
@@ -61,6 +81,69 @@ func TestAppIconDrawsEachBundleOnce(t *testing.T) {
 	}
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("drew %d times, want once", n)
+	}
+}
+
+func TestAppIconSerializesDrawingAcrossBundles(t *testing.T) {
+	fakeAppIcons(t, nil)
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "A.app"), filepath.Join(dir, "B.app"), filepath.Join(dir, "C.app")}
+	pngs := make(map[string][]byte)
+	for i, path := range paths {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		pngs[path] = []byte{byte(i + 1)}
+	}
+	var mu sync.Mutex
+	drawing, maxDrawing := 0, 0
+	calls := make(map[string]int)
+	appIconRender = func(path string, _ int) []byte {
+		mu.Lock()
+		drawing++
+		maxDrawing = max(maxDrawing, drawing)
+		calls[path]++
+		mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		mu.Lock()
+		drawing--
+		mu.Unlock()
+		return pngs[path]
+	}
+	var urls [3][3]string
+	var errs [3][3]error
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		for j := range urls[i] {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				urls[i][j], errs[i][j] = (Cleaner{}).AppIcon(path)
+			}()
+		}
+	}
+	close(start)
+	wg.Wait()
+	if maxDrawing != 1 {
+		t.Errorf("at most %d icons were drawn simultaneously, want 1", maxDrawing)
+	}
+	total := 0
+	for i, path := range paths {
+		total += calls[path]
+		if calls[path] != 1 {
+			t.Errorf("drew %q %d times, want once", path, calls[path])
+		}
+		want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngs[path])
+		for j, url := range urls[i] {
+			if url != want || errs[i][j] != nil {
+				t.Errorf("AppIcon(%q), call %d = %q, %v; want %q", path, j, url, errs[i][j], want)
+			}
+		}
+	}
+	if total != 3 {
+		t.Errorf("drew %d icons in total, want 3", total)
 	}
 }
 

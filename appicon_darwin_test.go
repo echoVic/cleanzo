@@ -22,8 +22,8 @@ func TestNativeAppIconDrawsTheIcon(t *testing.T) {
 	if b := img.Bounds(); b.Dx() != appIconPx || b.Dy() != appIconPx {
 		t.Fatalf("size %v, want %d × %d", b, appIconPx, appIconPx)
 	}
-	if _, _, _, a := img.At(appIconPx/2, appIconPx/2).RGBA(); a == 0 {
-		t.Fatal("the middle of the icon is transparent: nothing was drawn")
+	if _, _, _, a := img.At(appIconPx/2, appIconPx/2).RGBA(); a != 0xffff {
+		t.Fatalf("the middle of the icon has alpha %#x, want fully opaque (0xffff)", a)
 	}
 }
 
