@@ -45,8 +45,11 @@ func registerGrowthLifecycle() {
 		}
 		mygo.App.Quit()
 	})
-	mygo.App.OnActivate(func(hasVisibleWindows bool) {
-		if !hasVisibleWindows && mygo.App.IsReady() { // no window can be made before that
+	// Reopening the app (Finder, the Dock, Spotlight, `open`) brings the main
+	// window forward every time, not only when AppKit counts no visible
+	// window: one that is open but not in front still has to come back.
+	mygo.App.OnActivate(func(bool) {
+		if mygo.App.IsReady() { // no window can be made before that
 			openMainWindow()
 		}
 	})

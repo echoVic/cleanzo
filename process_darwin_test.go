@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -268,12 +269,13 @@ func TestSystemExecutable(t *testing.T) {
 	}
 }
 
-// Replace only the ps command boundary: these tests never execute /bin/ps.
+// Replace only the ps command boundary: these tests run a stand-in for
+// /bin/ps through the real spawnOutput, never /bin/ps itself.
 func fakeProcessPs(t *testing.T, mode string) {
 	t.Helper()
-	old := processPsCommand
+	old := processPsSpawn
 	oldPath := processPidPath
-	t.Cleanup(func() { processPsCommand, processPidPath = old, oldPath })
+	t.Cleanup(func() { processPsSpawn, processPidPath = old, oldPath })
 	processPidPath = func(pid int32) string {
 		if pid == 12345 {
 			return "/Applications/语雀.app/Contents/MacOS/语雀"
@@ -281,11 +283,11 @@ func fakeProcessPs(t *testing.T, mode string) {
 		return ""
 	}
 	t.Setenv("CLEANZO_PROCESS_PS_HELPER", mode)
-	processPsCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name != "/bin/ps" || strings.Join(args, " ") != "-ax -o pid=,uid=,pcpu=,rss=,ucomm=" {
-			t.Errorf("unexpected ps command: %s %v", name, args)
+	processPsSpawn = func(ctx context.Context, path string, argv, env []string) ([]byte, int32, error) {
+		if path != "/bin/ps" || strings.Join(argv, " ") != "/bin/ps -ax -o pid=,uid=,pcpu=,rss=,ucomm=" {
+			t.Errorf("unexpected ps command: %s %v", path, argv)
 		}
-		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestProcessPsHelper$")
+		return spawnOutput(ctx, os.Args[0], []string{os.Args[0], "-test.run=^TestProcessPsHelper$"}, env)
 	}
 }
 
@@ -477,4 +479,58 @@ func TestNativeProcsReadsKernelName(t *testing.T) {
 		}
 	}
 	t.Fatal("nativeProcs did not report this process")
+}
+
+func TestReadOtherProcsSetsItsOwnLocale(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	fakeProcessPs(t, "success") // the stand-in exits 2 unless LC_ALL is en_US.UTF-8
+	if got := readOtherProcs(context.Background()); len(got) != 1 {
+		t.Fatalf("got %+v; ps did not get LC_ALL=en_US.UTF-8 over the inherited C", got)
+	}
+}
+
+func TestOtherProcsReaderRemembersPaths(t *testing.T) {
+	old, oldPath := processPsSpawn, processPidPath
+	t.Cleanup(func() { processPsSpawn, processPidPath = old, oldPath })
+	uid := os.Getuid() + 1
+	lines, fail := "", false
+	processPsSpawn = func(context.Context, string, []string, []string) ([]byte, int32, error) {
+		if fail {
+			return nil, 0, errors.New("ps failed")
+		}
+		return []byte(lines), 1, nil
+	}
+	var lookups []int32
+	processPidPath = func(pid int32) string {
+		lookups = append(lookups, pid)
+		return fmt.Sprintf("/opt/p%d/tool", pid)
+	}
+	read := otherProcsReader()
+	step := func(ps string, want ...int32) {
+		t.Helper()
+		lines, lookups = ps, nil
+		got := read(context.Background())
+		if got == nil {
+			t.Fatalf("no reading for %q", ps)
+		}
+		for _, p := range got {
+			if p.Path != fmt.Sprintf("/opt/p%d/tool", p.Pid) {
+				t.Fatalf("pid %d path %q", p.Pid, p.Path)
+			}
+		}
+		if !slices.Equal(lookups, want) {
+			t.Fatalf("after %q: lookups %v, want %v", ps, lookups, want)
+		}
+	}
+	both := fmt.Sprintf("10 %d 0.0 1 tool\n11 %d 0.0 1 tool\n", uid, uid)
+	step(both, 10, 11) // the first reading looks both up
+	step(both)         // same pids under the same names: none
+	fail = true
+	if got := read(context.Background()); got != nil {
+		t.Fatalf("a failed ps gave %+v", got)
+	}
+	fail = false
+	step(both)                                        // the failure kept the memory
+	step(fmt.Sprintf("10 %d 0.0 1 other\n", uid), 10) // a new name under pid 10; 11 is gone
+	step(both, 10, 11)                                // 10 changed name again; 11 came back: both looked up
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -480,5 +481,34 @@ func TestWatchProcessesExpiresOthersAfterTwoConsecutiveFailures(t *testing.T) {
 				t.Fatalf("err=%v ps=%d", err, ps.Load())
 			}
 		})
+	}
+}
+
+func TestWatchProcessesSendsNoChildrenForOneProcessRows(t *testing.T) {
+	defer setProcessTiming(time.Millisecond, time.Millisecond)()
+	var ps atomic.Int32
+	src := fakeProcessSource(&ps)
+	src.procs = func() []procReading {
+		return []procReading{
+			{Pid: 1, Path: "/usr/bin/yes", Start: 1},
+			{Pid: 2, Path: "/usr/local/bin/node", Start: 1},
+			{Pid: 3, Path: "/usr/local/bin/node", Start: 1},
+		}
+	}
+	var got ProcessSample
+	stop := errors.New("one sample")
+	if err := watchProcessesWith(context.Background(), func(s ProcessSample) error { got = s; return stop }, src); !errors.Is(err, stop) {
+		t.Fatal(err)
+	}
+	rows := rowsByKey(got.Rows)
+	if yes := rows["cli:yes"]; yes.Procs != 1 || yes.Children == nil || len(yes.Children) != 0 {
+		t.Fatalf("one-process row %+v, want an empty, non-nil child list", yes)
+	}
+	if node := rows["cli:node"]; node.Procs != 2 || len(node.Children) != 1 || node.Children[0].Count != 2 {
+		t.Fatalf("two-process row %+v, want its child list kept", node)
+	}
+	data, err := json.Marshal(rows["cli:yes"])
+	if err != nil || !strings.Contains(string(data), `"children":[]`) {
+		t.Fatalf("JSON %s, %v; want \"children\":[]", data, err)
 	}
 }

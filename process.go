@@ -188,7 +188,7 @@ func watchProcessesWith(ctx context.Context, send func(ProcessSample) error, src
 		busy, total := src.cpu()
 		prevAt = curAt
 		sample := ProcessSample{
-			Rows:     groupProcesses(prev, cur, others, src.apps(), src.responsible, src.system, bundleID, elapsed),
+			Rows:     trimOneProcessRows(groupProcesses(prev, cur, others, src.apps(), src.responsible, src.system, bundleID, elapsed)),
 			Pressure: src.pressure(),
 			Own:      len(cur),
 			Others:   len(others),
@@ -215,6 +215,19 @@ func snapshotProcs(procs []procReading) map[int32]procReading {
 		out[r.Pid] = r
 	}
 	return out
+}
+
+// trimOneProcessRows empties the child list of rows made of one process.
+// The page lists children only for rows it can expand, which takes two
+// processes or more, and these lists were about a quarter of each sample's
+// JSON on a typical Mac. The list stays non-nil so the JSON says [].
+func trimOneProcessRows(rows []ProcessRow) []ProcessRow {
+	for i := range rows {
+		if rows[i].Procs <= 1 {
+			rows[i].Children = []ProcessChild{}
+		}
+	}
+	return rows
 }
 
 // ---- grouping -------------------------------------------------------------
