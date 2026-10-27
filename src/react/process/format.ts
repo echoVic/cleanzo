@@ -1,5 +1,6 @@
 // 进程页的纯逻辑：排序、冻结、诊断、开不开采样、增长小标签、「强制退出」的对账。不依赖 DOM / React，可单测。
 import type { GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
+import { GiB, MiB } from "../status/format";
 
 /** 三个标签：CPU、内存是实时的进程表，磁盘占用是占用增长的列表。 */
 export type ProcessTab = "cpu" | "mem" | "disk";
@@ -14,14 +15,24 @@ export interface ProcessRequest {
 /** 诊断条的 CPU 门槛：整机连续 3 次统计都在 80% 以上（spec §三）。 */
 export const PROCESS_DIAG = { cpuBusy: 80, cpuSamples: 3 } as const;
 
-/** 按 CPU 或内存从高到低，同值按名字；返回新数组，不改采样。 */
-export function sortRows(rows: readonly ProcessRow[], by: "cpu" | "mem"): ProcessRow[] {
-  return [...rows].sort((a, b) => (by === "cpu" ? b.cpu - a.cpu : b.memory - a.memory) || a.name.localeCompare(b.name));
+/** CPU 按显示的整数百分比比（fmtPct）：显示一样的行按名字排，不会每次采样都换位置。 */
+function shownCpu(v: number): number {
+  return Math.max(0, Math.round(v));
 }
 
-/** 展开后的进程：和表一样按当前标签排。 */
+/** 内存按显示的精度比（fmtMem）：1 GB 以上到 0.1 GB，以下到 1 MB。 */
+function shownMem(n: number): number {
+  return n >= GiB ? (Math.round((n / GiB) * 10) / 10) * GiB : Math.round(n / MiB) * MiB;
+}
+
+/** 按 CPU 或内存从高到低，比的是页面上显示的数，同值按名字；返回新数组，不改采样。 */
+export function sortRows(rows: readonly ProcessRow[], by: "cpu" | "mem"): ProcessRow[] {
+  return [...rows].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || a.name.localeCompare(b.name));
+}
+
+/** 展开后的进程：和表一样按当前标签、按显示的数排。 */
 export function sortChildren(children: readonly ProcessChild[], by: "cpu" | "mem"): ProcessChild[] {
-  return [...children].sort((a, b) => (by === "cpu" ? b.cpu - a.cpu : b.memory - a.memory) || a.name.localeCompare(b.name));
+  return [...children].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || a.name.localeCompare(b.name));
 }
 
 /** 冻结期间（确认框开着、正在退出）行和顺序不变，按 key 换上新数字；这一轮没有的行停在上一轮。 */

@@ -212,3 +212,22 @@ test("rows: an app row shows its icon once known; other rows keep the letter", a
     expect(cli).not.toContain("<img");
   } finally { resetIconsForTest(async () => ""); }
 });
+
+test("sortRows compares the numbers the page shows; equal ones keep name order", () => {
+  const MB = 2 ** 20;
+  const a = row({ key: "a", name: "a", cpu: 0.2, memory: 512.4 * MB });
+  const b = row({ key: "b", name: "b", cpu: 0.4, memory: 512.2 * MB });
+  expect(sortRows([b, a], "cpu").map((r) => r.name)).toEqual(["a", "b"]); // both 0%
+  expect(sortRows([b, a], "mem").map((r) => r.name)).toEqual(["a", "b"]); // both 512 MB
+  const c = row({ key: "c", name: "c", cpu: 0.6 }); // 1%
+  expect(sortRows([a, b, c], "cpu").map((r) => r.name)).toEqual(["c", "a", "b"]);
+  const x = row({ key: "x", name: "x", memory: 1.01 * GB }); // 1 GB
+  const y = row({ key: "y", name: "y", memory: 1.04 * GB }); // 1 GB
+  const z = row({ key: "z", name: "z", memory: 1.06 * GB }); // 1.1 GB
+  expect(sortRows([y, x, z], "mem").map((r) => r.name)).toEqual(["z", "x", "y"]);
+  const kids = [
+    { name: "q", count: 1, cpu: 0.3, memory: 0, estimated: false },
+    { name: "p", count: 1, cpu: 0.1, memory: 0, estimated: false },
+  ];
+  expect(sortChildren(kids, "cpu").map((k) => k.name)).toEqual(["p", "q"]); // both 0%
+});
