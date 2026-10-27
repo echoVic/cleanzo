@@ -1399,6 +1399,200 @@ Expected: PASS.
 
 ---
 
+### Task 4: Go — a cheaper `ps` and remembered paths for this user's processes
+
+Added after Tasks 1–3 were measured. The comparison alternated the page between running and paused in 30 s windows, with the production app in front. Running: main 2.71% plus `ps` 0.93% = 3.64%. Paused: 0.13%. Still over the 3% cap. A Go CPU profile of `TestProcessSamplingBudget` and timings on this Mac gave these costs:
+
+| Cost | CPU |
+|---|---|
+| `ps -ax` | ~44 ms per run, all ~1300 processes |
+| `ps -u <other accounts' effective uids>` | ~15 ms per run, the ~225 processes we need |
+| `ps -p <pids>` | 76–89 ms per run, so it's not an option |
+| `kern.proc.all` via `unix.SysctlKinfoProcSlice` | 0.39 ms; gives every process's effective uid |
+| `nativeProcs` | 8.7 ms per sample |
+| ↳ usage alone | 2.5 ms |
+| ↳ proc_pidpath and proc_name per process | the remaining 6.2 ms |
+
+Every process whose effective uid is this user's could be read by libproc, so `-u` by effective uid is the exact complement of `nativeProcs`.
+
+**Files:**
+- Modify: `native.go` (`nativeProcsKnown`), `process_darwin.go` (`foreignUIDs`, the `ps -u` command, `ownProcsReader`), `process_darwin_test.go`
+- Modify: `native_other.go` and `native_windows.go` only if they must, to keep `nativeProcs` building. `nativeProcsKnown` is darwin-only and used only from `process_darwin.go`.
+
+**Interfaces:**
+- Produces:
+  - `func nativeProcsKnown(known func(pid int32, start uint64) (path, name string, ok bool)) []procReading` (`native.go`);
+  - `var processForeignUIDs = foreignUIDs`;
+  - `var processOwnReadings = nativeProcsKnown`;
+  - `func ownProcsReader() func() []procReading`;
+  - `const processIdentityAge = 15`.
+- Unchanged: `nativeProcs()` (the status page uses it). It becomes `nativeProcsKnown(nil)`.
+
+- [ ] **Step 1: `nativeProcsKnown` (`native.go`)**
+
+Rename the body of `nativeProcs` to `nativeProcsKnown(known)`, and make `nativeProcs` call `nativeProcsKnown(nil)`. Inside the loop, after reading `rusage` and filling `Pid`, `Footprint`, `UserNs`, `SysNs` and `Start`:
+
+```go
+		if known != nil {
+			if path, name, ok := known(pid, r.Start); ok {
+				r.Path, r.Name = path, name
+				out = append(out, r)
+				continue
+			}
+		}
+```
+
+Then the existing `procPidPathFn` and `procNameFn` reads follow, unchanged. Doc comment:
+
+```go
+// nativeProcsKnown is nativeProcs, except that a process known gives a path
+// and name for, by pid and start time, keeps them instead of asking libproc
+// again: those two lookups are most of a reading's cost.
+```
+
+- [ ] **Step 2: Remember this user's paths (`process_darwin.go`)**
+
+```go
+// processIdentityAge is how many readings a remembered path and name are
+// kept before they're read again. A process can replace its program with
+// exec and keep its pid and start time; 15 readings is 30 s.
+const processIdentityAge = 15
+
+// processOwnReadings reads this user's processes. Tests replace it.
+var processOwnReadings = nativeProcsKnown
+
+// ownProcsReader returns this user's processes for one sampling session.
+// It remembers each process's path and name by pid and start time, and
+// reads them again after processIdentityAge readings. The loop calls it
+// from one goroutine.
+func ownProcsReader() func() []procReading {
+	type key struct {
+		pid   int32
+		start uint64
+	}
+	type entry struct {
+		path, name string
+		read       int // the reading that looked them up
+	}
+	known := map[key]entry{}
+	n := 0
+	return func() []procReading {
+		n++
+		readings := processOwnReadings(func(pid int32, start uint64) (string, string, bool) {
+			e, ok := known[key{pid, start}]
+			return e.path, e.name, ok && n-e.read < processIdentityAge
+		})
+		next := make(map[key]entry, len(readings))
+		for _, r := range readings {
+			k := key{r.Pid, r.Start}
+			e, ok := known[k]
+			if !ok || n-e.read >= processIdentityAge {
+				e = entry{path: r.Path, name: r.Name, read: n}
+			}
+			next[k] = e
+		}
+		known = next
+		return readings
+	}
+}
+```
+
+In `realProcessSource`, replace `procs: nativeProcs,` with `procs: ownProcsReader(),`.
+
+- [ ] **Step 3: `ps` only for other accounts (`process_darwin.go`)**
+
+```go
+// processForeignUIDs lists the effective uids of other accounts' processes.
+// Tests replace it.
+var processForeignUIDs = foreignUIDs
+
+// foreignUIDs returns, sorted, every effective uid other than this user's
+// that a process runs as: the processes libproc can't read. One sysctl
+// (kern.proc.all) of about 0.4 ms.
+func foreignUIDs() ([]uint32, error) {
+	procs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	if err != nil {
+		return nil, err
+	}
+	me := uint32(os.Geteuid())
+	seen := map[uint32]bool{}
+	var out []uint32
+	for _, p := range procs {
+		if u := p.Eproc.Ucred.Uid; u != me && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// psArgs is the ps command for the accounts in uids: -u by effective uid,
+// which costs about a third of -ax because ps then inspects only those
+// accounts' processes. Without uids it falls back to -ax.
+func psArgs(uids []uint32) []string {
+	args := []string{"/bin/ps", "-o", "pid=,uid=,pcpu=,rss=,ucomm="}
+	if len(uids) == 0 {
+		return append(args, "-ax")
+	}
+	list := make([]string, len(uids))
+	for i, u := range uids {
+		list[i] = strconv.FormatUint(uint64(u), 10)
+	}
+	return append(args, "-u", strings.Join(list, ","))
+}
+```
+
+In `readOtherProcsWith`, replace the `argv := …` line with:
+
+```go
+	uids, err := processForeignUIDs()
+	if err != nil {
+		uids = nil // ps -ax then lists everyone; the uid filter below still applies
+	}
+	argv := psArgs(uids)
+```
+
+The rest of `readOtherProcsWith` is unchanged: the self-pid filter, the uid filter in `parsePsOutput`, and the path memory. Imports: `slices`, `strconv` and `golang.org/x/sys/unix`, which is already a module dependency. The fallback to `-ax` keeps today's behavior whenever the sysctl fails.
+
+- [ ] **Step 4: Tests (`process_darwin_test.go`)**
+
+- **`fakeProcessPs`:**
+  - Also set `processForeignUIDs` to return `[]uint32{0, 7}` (restore it in the cleanup).
+  - Expect the argv `"/bin/ps -o pid=,uid=,pcpu=,rss=,ucomm= -u 0,7"` instead of the `-ax` form.
+  - The stand-in helper is unchanged.
+- **New `TestPsArgsSelectsOtherAccounts`:**
+  - `psArgs(nil)` ends in `-ax`;
+  - `psArgs([]uint32{0, 88, 202})` ends in `-u 0,88,202`.
+- **New `TestForeignUIDsListsOtherAccounts`** (real system):
+  - the result is sorted and non-empty;
+  - it contains 0 (launchd is root);
+  - it doesn't contain `os.Geteuid()`.
+- **New `TestReadOtherProcsFallsBackWithoutUIDs`:** with `processForeignUIDs` returning an error, the argv ends in `-ax` and the reading still succeeds. Use `fakeProcessPs` and override `processForeignUIDs` after it, with the argv check relaxed for this test. A small `fakeProcessPsArgs(t, mode, wantArgv)` helper is fine.
+- **New `TestOwnProcsReaderRemembersPathsUntilTheyAge`:**
+  - Replace `processOwnReadings` with a fake. It calls `known` for a fixed list of `(pid, start)` pairs, records which ones came back `ok == false` ("looked up"), and returns readings with a path built from the pid.
+  - Check, in order:
+    - the first call looks everything up;
+    - calls 2 to 15 look nothing up;
+    - call 16 looks everything up again, because of the age;
+    - a pid whose start time changed is looked up at once, because the pid was reused;
+    - a pid that vanished and came back is looked up again.
+- **New `TestNativeProcsKnownKeepsWhatItIsGiven`** (real system):
+  - With a `known` that answers `("/fake/self", "fake", true)` only for `os.Getpid()`: this process's reading has that path and name, and another process of this user (pick one from `nativeProcs()`) still has its real path.
+  - `nativeProcs()` still reads this process's real path.
+
+- [ ] **Step 5: Verify**
+
+Run:
+- `gofmt -l .`
+- `go vet ./... && GOOS=windows GOARCH=amd64 go vet ./...`
+- `go test -count=1 -run 'Spawn|OtherProcs|ParsePsCommand|ReadOtherProcs|WatchProcesses|GroupProcesses|PsArgs|ForeignUIDs|OwnProcs|NativeProcs|Bindings|SlashPath' .`
+- `CLEANZO_PERF=1 go test -count=1 -run '^TestProcessSamplingBudget$' -v .`
+
+Report the budget line. It was 2.88% before this task, inflated by the test's stubbed app list, which sends every bundle to plutil.
+
+---
+
 ## Reviewer verification (on the maintainer's Mac)
 
 Run after the three tasks are on `feat/growth-monitor`.
@@ -1435,5 +1629,16 @@ Run after the three tasks are on `feat/growth-monitor`.
 | A | Codex (`codex:codex-rescue`, `task --write`) | Task 1 | `../cleanzo-fix-cpu`, branch `fix-cpu` from `9973f0e` |
 | B | traecli | Task 2 | `../cleanzo-fix-icons`, branch `fix-icons` from `9973f0e`, with `node_modules` linked |
 | C | traecli | Task 3 | `../cleanzo-fix-sort`, branch `fix-sort` from `9973f0e`, with `node_modules` linked |
+| D | Codex (`codex:codex-rescue`, `task --write`) | Task 4 | `../cleanzo-fix-cpu2`, branch `fix-cpu2` from the integrated `feat/growth-monitor` head (Tasks 1–3 already on it) |
 
 The runs touch disjoint files and run in parallel. Each task is reviewed in its worktree, then cherry-picked onto `feat/growth-monitor`.
+
+## Implementation notes (2026-10-27)
+
+- **Task 1:**
+  - The reopen change (Step 7) was made and then reverted; `growth_app.go` is as before. The "no window after `open`" seen in testing was the screen being locked: System Events lists no windows and window capture fails for every app while locked.
+  - The path-memory test's last step expects lookups of pids 10 and 11. Pid 10's name goes `other` → `tool`, so it is looked up again.
+- **Task 2:** inside a sandbox without Icon Services, NSWorkspace returns a near-transparent placeholder. That is why the native test requires a fully opaque centre.
+- **Task 3:**
+  - The 样式 line is in §三, not §二.
+  - The boundary test compares amounts parsed back from the text, because "1024 MB" and "1 GB" are both 1 GiB, and "—" and "0 MB" are both zero.
