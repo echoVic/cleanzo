@@ -1,6 +1,7 @@
 import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
 import { expect, test } from "bun:test";
 import type { GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
+import { fmtMem, fmtPct } from "../src/react/status/format";
 
 // i18n 解析读 localStorage，这里钉住中文。
 const storage = new Map([["cleanzo.lang", "zh"]]);
@@ -215,10 +216,14 @@ test("rows: an app row shows its icon once known; other rows keep the letter", a
 
 test("sortRows compares the numbers the page shows; equal ones keep name order", () => {
   const MB = 2 ** 20;
-  const a = row({ key: "a", name: "a", cpu: 0.2, memory: 512.4 * MB });
-  const b = row({ key: "b", name: "b", cpu: 0.4, memory: 512.2 * MB });
+  const a = row({ key: "a", name: "a", cpu: 0.2, memory: 512.2 * MB });
+  const b = row({ key: "b", name: "b", cpu: 0.4, memory: 512.4 * MB });
   expect(sortRows([b, a], "cpu").map((r) => r.name)).toEqual(["a", "b"]); // both 0%
   expect(sortRows([b, a], "mem").map((r) => r.name)).toEqual(["a", "b"]); // both 512 MB
+  const roundedDown = row({ key: "c", name: "c", memory: 512.4 * MB }); // 512 MB
+  const roundedUp = row({ key: "d", name: "d", memory: 512.6 * MB }); // 513 MB
+  // Keep the tie in this assertion so raw-value sorting fails too; truncation would put d last.
+  expect(sortRows([b, a, roundedDown, roundedUp], "mem").map((r) => r.name)).toEqual(["d", "a", "b", "c"]);
   const c = row({ key: "c", name: "c", cpu: 0.6 }); // 1%
   expect(sortRows([a, b, c], "cpu").map((r) => r.name)).toEqual(["c", "a", "b"]);
   const x = row({ key: "x", name: "x", memory: 1.01 * GB }); // 1 GB
@@ -226,8 +231,48 @@ test("sortRows compares the numbers the page shows; equal ones keep name order",
   const z = row({ key: "z", name: "z", memory: 1.06 * GB }); // 1.1 GB
   expect(sortRows([y, x, z], "mem").map((r) => r.name)).toEqual(["z", "x", "y"]);
   const kids = [
-    { name: "q", count: 1, cpu: 0.3, memory: 0, estimated: false },
-    { name: "p", count: 1, cpu: 0.1, memory: 0, estimated: false },
+    { name: "q", count: 1, cpu: 0.3, memory: 512.4 * MB, estimated: false },
+    { name: "p", count: 1, cpu: 0.1, memory: 512.2 * MB, estimated: false },
   ];
   expect(sortChildren(kids, "cpu").map((k) => k.name)).toEqual(["p", "q"]); // both 0%
+  expect(sortChildren(kids, "mem").map((k) => k.name)).toEqual(["p", "q"]); // both 512 MB
+});
+
+// Compare displayed quantities rather than text: "1024 MB" and "1 GB" both mean 1 GiB.
+test("sortRows follows fmtMem and fmtPct across display boundaries", () => {
+  const MB = 2 ** 20;
+  const memory = [
+    0, 1, 0.4 * MB, 0.5 * MB - 1, 0.5 * MB, 0.5 * MB + 1, 0.6 * MB,
+    512.49 * MB, 512.5 * MB, 512.51 * MB,
+    GB - 1, GB, 1.04 * GB, 1.05 * GB, 1.06 * GB, 10.95 * GB,
+  ];
+  const cpu = [0, 0.4, 0.5, 0.6, 1.49, 1.5, 99.5];
+
+  function displayQuantity(text: string, field: "memory" | "cpu") {
+    if (text === "—") return 0;
+    const value = parseFloat(text);
+    return field === "memory" ? value * (text.endsWith(" GB") ? GB : MB) : value;
+  }
+
+  function checkPairs(values: readonly number[], field: "memory" | "cpu", fmt: (value: number) => string) {
+    for (const [i, x] of values.entries()) {
+      for (const y of values.slice(i + 1)) {
+        const high = Math.max(x, y);
+        const low = Math.min(x, y);
+        // Name order and raw-value order must disagree to distinguish display ties.
+        const a = row({ key: "a", name: "a", [field]: low });
+        const b = row({ key: "b", name: "b", [field]: high });
+        const sorted = sortRows([b, a], field === "memory" ? "mem" : "cpu");
+        const context = `${field}: ${high} (${fmt(high)}) vs ${low} (${fmt(low)})`;
+        if (displayQuantity(fmt(high), field) === displayQuantity(fmt(low), field)) {
+          expect(sorted.map((r) => r.name), context).toEqual(["a", "b"]);
+        } else {
+          expect(sorted.map((r) => r.name), context).toEqual(["b", "a"]);
+        }
+      }
+    }
+  }
+
+  checkPairs(memory, "memory", fmtMem);
+  checkPairs(cpu, "cpu", fmtPct);
 });
