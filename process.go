@@ -370,9 +370,10 @@ func processName(path, name string, pid int32) string {
 
 // ---- other accounts through ps --------------------------------------------
 
-// parsePsOutput reads `ps -ax -o pid=,uid=,pcpu=,rss=,ucomm=` and keeps
-// the processes of accounts other than self. The short name is the last
-// column and may contain spaces; malformed lines are skipped.
+// parsePsOutput reads other accounts' processes from ps (selected by
+// effective uid), with columns pid, uid, pcpu, rss and ucomm, and keeps
+// accounts other than self. The short name is the last column and may
+// contain spaces; malformed lines are skipped.
 func parsePsOutput(out []byte, self uint32) []otherProc {
 	var procs []otherProc
 	sc := bufio.NewScanner(bytes.NewReader(out))

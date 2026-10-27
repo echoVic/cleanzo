@@ -870,9 +870,10 @@ export const Cleaner = {
   /**
    * AppIcon returns the icon Finder shows for the app bundle at path, as a
    * PNG data URL, or "" when there is none: not an absolute path to an .app
-   * folder, gone, or off macOS. Pages show the first letter of the name until
-   * it arrives, and instead of it when there is none. Each bundle is drawn
-   * once.
+   * folder, gone, off macOS, or drawn almost transparent (the placeholder
+   * when Icon Services is unavailable). Pages show the first letter of the
+   * name until it arrives, and instead of it when there is none. Each bundle
+   * is drawn once.
    */
   appIcon(path: string): Promise<string> {
     return call("Cleaner.AppIcon", path);

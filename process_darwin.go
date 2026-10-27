@@ -25,21 +25,22 @@ var processPsSpawn = spawnOutput
 var processPidPath = nativePidPath
 
 // processIdentityAge is how many readings a remembered path and name are
-// kept before they're read again. A process can replace its program with
-// exec and keep its pid and start time; 15 readings is 30 s.
+// kept before they're read again, as a backstop for identity changes the
+// executable UUID does not distinguish; 15 readings is 30 s.
 const processIdentityAge = 15
 
 // processOwnReadings reads this user's processes. Tests replace it.
 var processOwnReadings = nativeProcsKnown
 
 // ownProcsReader returns this user's processes for one sampling session.
-// It remembers each process's path and name by pid and start time, and
-// reads them again after processIdentityAge readings. The loop calls it
-// from one goroutine.
+// It remembers nonempty paths and their names by pid, start time and
+// executable UUID, and reads them again after processIdentityAge readings.
+// The loop calls it from one goroutine.
 func ownProcsReader() func() []procReading {
 	type key struct {
 		pid   int32
 		start uint64
+		uuid  [16]byte
 	}
 	type entry struct {
 		path, name string
@@ -49,13 +50,16 @@ func ownProcsReader() func() []procReading {
 	n := 0
 	return func() []procReading {
 		n++
-		readings := processOwnReadings(func(pid int32, start uint64) (string, string, bool) {
-			e, ok := known[key{pid, start}]
+		readings := processOwnReadings(func(pid int32, start uint64, uuid [16]byte) (string, string, bool) {
+			e, ok := known[key{pid, start, uuid}]
 			return e.path, e.name, ok && n-e.read < processIdentityAge
 		})
 		next := make(map[key]entry, len(readings))
 		for _, r := range readings {
-			k := key{r.Pid, r.Start}
+			if r.Path == "" {
+				continue
+			}
+			k := key{r.Pid, r.Start, r.UUID}
 			e, ok := known[k]
 			if !ok || n-e.read >= processIdentityAge {
 				e = entry{path: r.Path, name: r.Name, read: n}
@@ -93,8 +97,24 @@ type otherPath struct{ name, path string }
 // it from one goroutine.
 func otherProcsReader() func(context.Context) []otherProc {
 	var paths map[int32]otherPath
+	listAll := false
 	return func(ctx context.Context) []otherProc {
-		others, next := readOtherProcsWith(ctx, paths)
+		var uids []uint32
+		if !listAll {
+			var err error
+			uids, err = processForeignUIDs()
+			if err != nil {
+				uids = nil // ps -ax still applies the uid filter below
+			}
+		}
+		others, next := readOtherProcsWith(ctx, uids, paths)
+		if others == nil && len(uids) > 0 && ctx.Err() == nil {
+			// A process can run under a uid without an account. ps -u rejects
+			// the whole list: e.g. "ps: No user name or ID matches '4242424'".
+			// Retry immediately with -ax and keep using it for this session.
+			listAll = true
+			others, next = readOtherProcsWith(ctx, nil, paths)
+		}
 		if others != nil {
 			paths = next
 		}
@@ -147,15 +167,12 @@ func psArgs(uids []uint32) []string {
 // numbers are ps's, a decaying CPU average and resident memory, hence
 // estimates. ps only supplies short names; libproc supplies full UTF-8
 // paths, reused from known for a pid still listed under the same name.
+// uids selects effective uids; nil lists all accounts with -ax.
 // en_US.UTF-8 keeps a decimal dot and readable fallback names. It returns
 // the reading and the paths to remember; nil when ps failed.
-func readOtherProcsWith(ctx context.Context, known map[int32]otherPath) ([]otherProc, map[int32]otherPath) {
+func readOtherProcsWith(ctx context.Context, uids []uint32, known map[int32]otherPath) ([]otherProc, map[int32]otherPath) {
 	ctx, cancel := context.WithTimeout(ctx, processPsTimeout)
 	defer cancel()
-	uids, err := processForeignUIDs()
-	if err != nil {
-		uids = nil // ps -ax then lists everyone; the uid filter below still applies
-	}
 	argv := psArgs(uids)
 	out, self, err := processPsSpawn(ctx, argv[0], argv, withEnv(os.Environ(), "LC_ALL=en_US.UTF-8"))
 	if ctx.Err() != nil || err != nil {

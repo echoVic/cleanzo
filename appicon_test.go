@@ -51,12 +51,12 @@ func TestIconLooksBlank(t *testing.T) {
 }
 
 // fakeAppIcons swaps the renderer for one that counts its calls and returns
-// png, and starts from an empty cache; both are restored afterwards.
-func fakeAppIcons(t *testing.T, png []byte) *atomic.Int32 {
+// icon, and starts from an empty cache; both are restored afterwards.
+func fakeAppIcons(t *testing.T, icon []byte) *atomic.Int32 {
 	t.Helper()
 	var calls atomic.Int32
 	old := appIconRender
-	appIconRender = func(string, int) []byte { calls.Add(1); return png }
+	appIconRender = func(string, int) []byte { calls.Add(1); return icon }
 	reset := func() { appIcons.Lock(); clear(appIcons.urls); appIcons.Unlock() }
 	reset()
 	t.Cleanup(func() { appIconRender = old; reset() })

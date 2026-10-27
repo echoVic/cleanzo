@@ -18,7 +18,11 @@ import (
 
 // readOtherProcs is one reading with nothing remembered.
 func readOtherProcs(ctx context.Context) []otherProc {
-	others, _ := readOtherProcsWith(ctx, nil)
+	uids, err := processForeignUIDs()
+	if err != nil {
+		uids = nil
+	}
+	others, _ := readOtherProcsWith(ctx, uids, nil)
 	return others
 }
 
@@ -351,19 +355,62 @@ func TestReadOtherProcsFallsBackWithoutUIDs(t *testing.T) {
 	}
 }
 
+func TestOtherProcsReaderFallsBackWhenUIDHasNoAccount(t *testing.T) {
+	old, oldPath, oldUIDs := processPsSpawn, processPidPath, processForeignUIDs
+	t.Cleanup(func() { processPsSpawn, processPidPath, processForeignUIDs = old, oldPath, oldUIDs })
+	uid := uint32(os.Getuid()) + 1
+	processForeignUIDs = func() ([]uint32, error) { return []uint32{uid, 4242424}, nil }
+	processPidPath = func(int32) string { return "/opt/foreign/tool" }
+	var calls [][]string
+	processPsSpawn = func(_ context.Context, path string, argv, _ []string) ([]byte, int32, error) {
+		calls = append(calls, slices.Clone(argv))
+		if path != "/bin/ps" {
+			t.Fatalf("unexpected ps path: %q", path)
+		}
+		if slices.Contains(argv, "-u") {
+			return nil, 0, errors.New("ps: No user name or ID matches '4242424'")
+		}
+		if !slices.Contains(argv, "-ax") {
+			t.Fatalf("unexpected ps command: %v", argv)
+		}
+		return []byte(fmt.Sprintf("12345 %d 2.5 1024 tool\n", uid)), 1, nil
+	}
+	read := otherProcsReader()
+	want := []otherProc{{Pid: 12345, UID: uid, CPU: 2.5, Memory: 1024 * 1024, Path: "/opt/foreign/tool", Name: "tool"}}
+	if got := read(context.Background()); !slices.Equal(got, want) {
+		t.Fatalf("first reading = %+v, want %+v from the immediate fallback", got, want)
+	}
+	if len(calls) != 2 || !slices.Contains(calls[0], "-u") || !slices.Contains(calls[1], "-ax") {
+		t.Fatalf("first reading commands = %v, want -u followed by -ax", calls)
+	}
+	calls = nil
+	if got := read(context.Background()); !slices.Equal(got, want) {
+		t.Fatalf("second reading = %+v, want %+v", got, want)
+	}
+	if len(calls) != 1 || !slices.Contains(calls[0], "-ax") || slices.Contains(calls[0], "-u") {
+		t.Fatalf("second reading commands = %v, want only one -ax without -u", calls)
+	}
+}
+
 func TestOwnProcsReaderRemembersPathsUntilTheyAge(t *testing.T) {
 	old := processOwnReadings
 	t.Cleanup(func() { processOwnReadings = old })
-	procs := []procReading{{Pid: 10, Start: 100}, {Pid: 11, Start: 200}}
+	procs := []procReading{{Pid: 10, Start: 100, UUID: [16]byte{1}}, {Pid: 11, Start: 200, UUID: [16]byte{2}}}
+	blankPath := false
 	var lookedUp []int32
-	processOwnReadings = func(known func(int32, uint64) (string, string, bool)) []procReading {
+	processOwnReadings = func(known func(int32, uint64, [16]byte) (string, string, bool)) []procReading {
 		out := slices.Clone(procs)
 		for i := range out {
 			r := &out[i]
-			path, name, ok := known(r.Pid, r.Start)
+			path, name, ok := known(r.Pid, r.Start, r.UUID)
 			if !ok {
 				lookedUp = append(lookedUp, r.Pid)
 				path, name = fmt.Sprintf("/opt/p%d/tool", r.Pid), fmt.Sprintf("tool%d", r.Pid)
+				if blankPath && r.Pid == 10 {
+					path = ""
+				} else if r.UUID[0] == 3 {
+					path, name = "/bin/sleep", "sleep"
+				}
 			}
 			r.Path, r.Name = path, name
 		}
@@ -381,6 +428,10 @@ func TestOwnProcsReaderRemembersPathsUntilTheyAge(t *testing.T) {
 			wantPath, wantName := "/opt/p10/tool", "tool10"
 			if r.Pid == 11 {
 				wantPath, wantName = "/opt/p11/tool", "tool11"
+			} else if blankPath {
+				wantPath = ""
+			} else if r.UUID[0] == 3 {
+				wantPath, wantName = "/bin/sleep", "sleep"
 			}
 			if r.Path != wantPath || r.Name != wantName {
 				t.Fatalf("reading %d: pid %d path/name = %q/%q, want %q/%q", reading, r.Pid, r.Path, r.Name, wantPath, wantName)
@@ -399,8 +450,18 @@ func TestOwnProcsReaderRemembersPathsUntilTheyAge(t *testing.T) {
 	step(17, 10)
 	procs = procs[1:] // pid 10 vanished
 	step(18)
-	procs = []procReading{{Pid: 10, Start: 101}, {Pid: 11, Start: 200}}
+	procs = []procReading{{Pid: 10, Start: 101, UUID: [16]byte{1}}, {Pid: 11, Start: 200, UUID: [16]byte{2}}}
 	step(19, 10)
+	procs[0].Start = 102
+	blankPath = true
+	step(20, 10)
+	step(21, 10) // an empty path is read again
+	blankPath = false
+	step(22, 10) // a path that becomes available is picked up immediately
+	step(23)
+	procs[0].UUID = [16]byte{3} // exec keeps the pid and start time
+	step(24, 10)
+	step(25)
 }
 
 func TestNativeProcsKnownKeepsWhatItIsGiven(t *testing.T) {
@@ -418,13 +479,24 @@ func TestNativeProcsKnownKeepsWhatItIsGiven(t *testing.T) {
 		t.Fatal("nativeProcs did not report another process of this user with a real path")
 	}
 	foundSelf, foundOther := false, false
-	for _, p := range nativeProcsKnown(func(pid int32, start uint64) (string, string, bool) {
+	var selfStart uint64
+	var selfUUID [16]byte
+	for _, p := range nativeProcsKnown(func(pid int32, start uint64, uuid [16]byte) (string, string, bool) {
+		if pid == self {
+			selfStart, selfUUID = start, uuid
+		}
 		return "/fake/self", "fake", pid == self
 	}) {
 		if p.Pid == self {
 			foundSelf = true
 			if p.Path != "/fake/self" || p.Name != "fake" {
 				t.Fatalf("known self = %+v, want the supplied path and name", p)
+			}
+			if p.Start != selfStart || p.UUID != selfUUID {
+				t.Fatalf("known received start=%d uuid=%x, want this reading's start=%d uuid=%x", selfStart, selfUUID, p.Start, p.UUID)
+			}
+			if p.Footprint == 0 || p.UUID == ([16]byte{}) {
+				t.Fatalf("known self = %+v, want live usage and executable UUID", p)
 			}
 		}
 		if p.Pid == other.Pid {
@@ -656,9 +728,10 @@ func TestReadOtherProcsSetsItsOwnLocale(t *testing.T) {
 }
 
 func TestOtherProcsReaderRemembersPaths(t *testing.T) {
-	old, oldPath := processPsSpawn, processPidPath
-	t.Cleanup(func() { processPsSpawn, processPidPath = old, oldPath })
+	old, oldPath, oldUIDs := processPsSpawn, processPidPath, processForeignUIDs
+	t.Cleanup(func() { processPsSpawn, processPidPath, processForeignUIDs = old, oldPath, oldUIDs })
 	uid := os.Getuid() + 1
+	processForeignUIDs = func() ([]uint32, error) { return []uint32{uint32(uid)}, nil }
 	lines, fail := "", false
 	processPsSpawn = func(context.Context, string, []string, []string) ([]byte, int32, error) {
 		if fail {

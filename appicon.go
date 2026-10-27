@@ -33,9 +33,10 @@ var appIconDrawing sync.Mutex
 
 // AppIcon returns the icon Finder shows for the app bundle at path, as a
 // PNG data URL, or "" when there is none: not an absolute path to an .app
-// folder, gone, or off macOS. Pages show the first letter of the name until
-// it arrives, and instead of it when there is none. Each bundle is drawn
-// once.
+// folder, gone, off macOS, or drawn almost transparent (the placeholder
+// when Icon Services is unavailable). Pages show the first letter of the
+// name until it arrives, and instead of it when there is none. Each bundle
+// is drawn once.
 func (Cleaner) AppIcon(path string) (string, error) {
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".app") {
@@ -51,8 +52,8 @@ func (Cleaner) AppIcon(path string) (string, error) {
 	}
 	url := ""
 	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-		if png := appIconRender(path, appIconPx); len(png) > 0 && !iconLooksBlank(png) {
-			url = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+		if icon := appIconRender(path, appIconPx); len(icon) > 0 && !iconLooksBlank(icon) {
+			url = "data:image/png;base64," + base64.StdEncoding.EncodeToString(icon)
 		}
 	}
 	appIcons.Lock()

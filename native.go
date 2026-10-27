@@ -164,6 +164,7 @@ type procReading struct {
 	UserNs    uint64
 	SysNs     uint64
 	Start     uint64
+	UUID      [16]byte
 }
 
 // nativeProcs lists the current user's processes with their paths and usage.
@@ -173,9 +174,9 @@ func nativeProcs() []procReading {
 }
 
 // nativeProcsKnown is nativeProcs, except that a process known gives a path
-// and name for, by pid and start time, keeps them instead of asking libproc
-// again: those two lookups are most of a reading's cost.
-func nativeProcsKnown(known func(pid int32, start uint64) (path, name string, ok bool)) []procReading {
+// and name for, by pid, start time and executable UUID, keeps them instead
+// of asking libproc again: those two lookups are most of a reading's cost.
+func nativeProcsKnown(known func(pid int32, start uint64, uuid [16]byte) (path, name string, ok bool)) []procReading {
 	nativeInit()
 	if procListAllPids == nil || procPidRusage == nil {
 		return nil
@@ -204,8 +205,9 @@ func nativeProcsKnown(known func(pid int32, start uint64) (path, name string, ok
 			SysNs:     machTicksToNs(binary.LittleEndian.Uint64(rusage[riSystemNs:]), nativeTimebase.numer, nativeTimebase.denom),
 			Start:     binary.LittleEndian.Uint64(rusage[riStartAbs:]),
 		}
+		copy(r.UUID[:], rusage[:16]) // ri_uuid changes when exec replaces the executable
 		if known != nil {
-			if path, name, ok := known(pid, r.Start); ok {
+			if path, name, ok := known(pid, r.Start, r.UUID); ok {
 				r.Path, r.Name = path, name
 				out = append(out, r)
 				continue
