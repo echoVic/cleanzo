@@ -6,6 +6,10 @@ const version = "0.2.5";
 
 export default defineConfig({
   name: "Cleanzo",
+  // Names the disk image, the Windows installer and the update archives
+  // (cleanzo-<version>-arm64.dmg, cleanzo-setup-<version>-amd64.exe). Keep
+  // it: installed apps update through files named after it.
+  slug: "cleanzo",
   identifier: "com.cleanzo.app",
   version,
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs

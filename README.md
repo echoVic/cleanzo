@@ -9,7 +9,7 @@
 
 ## Windows
 
-支持 Windows 10/11 x64。在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载 `Cleanzo Setup <v> amd64.exe` 并运行，按用户安装到 `%LOCALAPPDATA%\Programs\Cleanzo`。
+支持 Windows 10/11 x64。在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载 `cleanzo-setup-<v>-amd64.exe` 并运行，按用户安装到 `%LOCALAPPDATA%\Programs\Cleanzo`。
 
 需要 WebView2 Runtime（Windows 11 内置）；缺少时应用会提示并提供官方下载链接。未签名的构建可能触发 SmartScreen，确认下载来源后选择 **More info → Run anyway**（更多信息 → 仍要运行）。
 
@@ -56,7 +56,7 @@ bun run dev      # 开发模式，带热更新
 bun run build
 # 产物：
 #   build/darwin-arm64/Cleanzo.app
-#   build/darwin-arm64/Cleanzo <v> arm64.dmg
+#   build/darwin-arm64/cleanzo-<v>-arm64.dmg
 ```
 
 `bun run build` 会用 `mygo.config.ts` 里配置的 Developer ID 证书签名，并提交苹果公证，只有存着这张证书的机器能完成（发版步骤见 [docs/RELEASING.md](docs/RELEASING.md)）。没有证书时，构建一个 ad hoc 签名、不公证的版本，只适合在自己的 Mac 上用：

@@ -21,8 +21,14 @@ MYGO_UPDATER_PRIVATE_KEY="$(cat <私钥文件>)" bun run build
 
 ```sh
 spctl -a -vvv -t exec build/darwin-arm64/Cleanzo.app   # source=Notarized Developer ID
-xcrun stapler validate "build/darwin-arm64/Cleanzo <v> arm64.dmg"
+xcrun stapler validate build/darwin-arm64/cleanzo-<v>-arm64.dmg
 ```
+
+## 产物的名字
+
+从 mygo 0.7 起，dmg、Windows 安装包和更新包都用 `mygo.config.ts` 的 `slug`（`cleanzo`）命名：`cleanzo-<v>-arm64.dmg`、`cleanzo-setup-<v>-amd64.exe`。按构建出来的名字上传，不再改名。
+
+构建还会写出一行命令安装用的 `install.sh`（macOS）、`install.ps1`（Windows）和 `build/SHA256SUMS`。目前不上传这三个文件。要提供一行命令安装时，把它们和各平台合并后的 `SHA256SUMS` 一起上传到最新的 release；`install.ps1` 按构建出来的安装包名字查找，所以安装包不能改名。
 
 ## Windows
 
@@ -32,9 +38,9 @@ xcrun stapler validate "build/darwin-arm64/Cleanzo <v> arm64.dmg"
 MYGO_UPDATER_PRIVATE_KEY=… bun run build:windows
 ```
 
-构建产物在 `build/windows-amd64/`。将以下文件上传到与 macOS 文件相同的 GitHub release：
+构建产物在 `build/windows-amd64/`。将以下文件按构建出来的名字上传到与 macOS 文件相同的 GitHub release：
 
-- `Cleanzo Setup <v> amd64.exe`
+- `cleanzo-setup-<v>-amd64.exe`
 - `cleanzo-<v>-windows-amd64.tar.gz`
 - 生成的 `.delta` 增量包
 - `update-windows-amd64.json`

@@ -91,7 +91,7 @@ jobs:
       - name: Install the debug build
         shell: pwsh
         run: |
-          $installer = Get-ChildItem 'build\windows-amd64\Cleanzo Setup *.exe' | Select-Object -First 1
+          $installer = Get-ChildItem 'build\windows-amd64\cleanzo-setup-*-amd64.exe' | Select-Object -First 1
           if (!$installer) { throw 'Cleanzo installer not found' }
           $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
