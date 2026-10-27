@@ -169,6 +169,13 @@ type procReading struct {
 // nativeProcs lists the current user's processes with their paths and usage.
 // Processes whose usage cannot be read (other users', root's) are skipped.
 func nativeProcs() []procReading {
+	return nativeProcsKnown(nil)
+}
+
+// nativeProcsKnown is nativeProcs, except that a process known gives a path
+// and name for, by pid and start time, keeps them instead of asking libproc
+// again: those two lookups are most of a reading's cost.
+func nativeProcsKnown(known func(pid int32, start uint64) (path, name string, ok bool)) []procReading {
 	nativeInit()
 	if procListAllPids == nil || procPidRusage == nil {
 		return nil
@@ -196,6 +203,13 @@ func nativeProcs() []procReading {
 			UserNs:    machTicksToNs(binary.LittleEndian.Uint64(rusage[riUserNs:]), nativeTimebase.numer, nativeTimebase.denom),
 			SysNs:     machTicksToNs(binary.LittleEndian.Uint64(rusage[riSystemNs:]), nativeTimebase.numer, nativeTimebase.denom),
 			Start:     binary.LittleEndian.Uint64(rusage[riStartAbs:]),
+		}
+		if known != nil {
+			if path, name, ok := known(pid, r.Start); ok {
+				r.Path, r.Name = path, name
+				out = append(out, r)
+				continue
+			}
 		}
 		if l := procPidPathFn(pid, unsafe.Pointer(&path[0]), uint32(len(path))); l > 0 {
 			r.Path = string(path[:l])

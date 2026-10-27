@@ -273,9 +273,16 @@ func TestSystemExecutable(t *testing.T) {
 // /bin/ps through the real spawnOutput, never /bin/ps itself.
 func fakeProcessPs(t *testing.T, mode string) {
 	t.Helper()
+	fakeProcessPsArgs(t, mode, "/bin/ps -o pid=,uid=,pcpu=,rss=,ucomm= -u 0,7")
+}
+
+func fakeProcessPsArgs(t *testing.T, mode, wantArgv string) {
+	t.Helper()
 	old := processPsSpawn
 	oldPath := processPidPath
-	t.Cleanup(func() { processPsSpawn, processPidPath = old, oldPath })
+	oldUIDs := processForeignUIDs
+	t.Cleanup(func() { processPsSpawn, processPidPath, processForeignUIDs = old, oldPath, oldUIDs })
+	processForeignUIDs = func() ([]uint32, error) { return []uint32{0, 7}, nil }
 	processPidPath = func(pid int32) string {
 		if pid == 12345 {
 			return "/Applications/语雀.app/Contents/MacOS/语雀"
@@ -284,11 +291,164 @@ func fakeProcessPs(t *testing.T, mode string) {
 	}
 	t.Setenv("CLEANZO_PROCESS_PS_HELPER", mode)
 	processPsSpawn = func(ctx context.Context, path string, argv, env []string) ([]byte, int32, error) {
-		if path != "/bin/ps" || strings.Join(argv, " ") != "/bin/ps -ax -o pid=,uid=,pcpu=,rss=,ucomm=" {
+		if path != "/bin/ps" || strings.Join(argv, " ") != wantArgv {
 			t.Errorf("unexpected ps command: %s %v", path, argv)
 		}
 		return spawnOutput(ctx, os.Args[0], []string{os.Args[0], "-test.run=^TestProcessPsHelper$"}, env)
 	}
+}
+
+func TestPsArgsSelectsOtherAccounts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		uids []uint32
+		want []string
+	}{
+		{"no accounts", nil, []string{"/bin/ps", "-o", "pid=,uid=,pcpu=,rss=,ucomm=", "-ax"}},
+		{"other accounts", []uint32{0, 88, 202}, []string{"/bin/ps", "-o", "pid=,uid=,pcpu=,rss=,ucomm=", "-u", "0,88,202"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := psArgs(tc.uids); !slices.Equal(got, tc.want) {
+				t.Fatalf("psArgs(%v) = %v, want %v", tc.uids, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestForeignUIDsListsOtherAccounts(t *testing.T) {
+	uids, err := foreignUIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uids) == 0 || !slices.IsSorted(uids) {
+		t.Fatalf("foreignUIDs = %v, want a sorted, non-empty list", uids)
+	}
+	if !slices.Contains(uids, 0) {
+		t.Fatalf("foreignUIDs = %v, want root (launchd)", uids)
+	}
+	if slices.Contains(uids, uint32(os.Geteuid())) {
+		t.Fatalf("foreignUIDs = %v, includes this user's effective uid %d", uids, os.Geteuid())
+	}
+	for i := 1; i < len(uids); i++ {
+		if uids[i-1] == uids[i] {
+			t.Fatalf("foreignUIDs = %v, contains duplicate uid %d", uids, uids[i])
+		}
+	}
+}
+
+func TestReadOtherProcsFallsBackWithoutUIDs(t *testing.T) {
+	fakeProcessPsArgs(t, "success", "/bin/ps -o pid=,uid=,pcpu=,rss=,ucomm= -ax")
+	processForeignUIDs = func() ([]uint32, error) { return nil, errors.New("sysctl failed") }
+	got := readOtherProcs(context.Background())
+	if len(got) != 1 || got[0].Pid != 12345 || got[0].Path != "/Applications/语雀.app/Contents/MacOS/语雀" || got[0].CPU != 2.5 {
+		t.Fatalf("fallback ps reading = %+v, want the other process with its full path", got)
+	}
+}
+
+func TestOwnProcsReaderRemembersPathsUntilTheyAge(t *testing.T) {
+	old := processOwnReadings
+	t.Cleanup(func() { processOwnReadings = old })
+	procs := []procReading{{Pid: 10, Start: 100}, {Pid: 11, Start: 200}}
+	var lookedUp []int32
+	processOwnReadings = func(known func(int32, uint64) (string, string, bool)) []procReading {
+		out := slices.Clone(procs)
+		for i := range out {
+			r := &out[i]
+			path, name, ok := known(r.Pid, r.Start)
+			if !ok {
+				lookedUp = append(lookedUp, r.Pid)
+				path, name = fmt.Sprintf("/opt/p%d/tool", r.Pid), fmt.Sprintf("tool%d", r.Pid)
+			}
+			r.Path, r.Name = path, name
+		}
+		return out
+	}
+	read := ownProcsReader()
+	step := func(reading int, want ...int32) {
+		t.Helper()
+		lookedUp = nil
+		got := read()
+		if len(got) != len(procs) {
+			t.Fatalf("reading %d: got %d processes, want %d", reading, len(got), len(procs))
+		}
+		for _, r := range got {
+			wantPath, wantName := "/opt/p10/tool", "tool10"
+			if r.Pid == 11 {
+				wantPath, wantName = "/opt/p11/tool", "tool11"
+			}
+			if r.Path != wantPath || r.Name != wantName {
+				t.Fatalf("reading %d: pid %d path/name = %q/%q, want %q/%q", reading, r.Pid, r.Path, r.Name, wantPath, wantName)
+			}
+		}
+		if !slices.Equal(lookedUp, want) {
+			t.Fatalf("reading %d: lookups = %v, want %v", reading, lookedUp, want)
+		}
+	}
+	step(1, 10, 11)
+	for n := 2; n <= 15; n++ {
+		step(n)
+	}
+	step(16, 10, 11)
+	procs[0].Start = 101 // pid 10 was reused
+	step(17, 10)
+	procs = procs[1:] // pid 10 vanished
+	step(18)
+	procs = []procReading{{Pid: 10, Start: 101}, {Pid: 11, Start: 200}}
+	step(19, 10)
+}
+
+func TestNativeProcsKnownKeepsWhatItIsGiven(t *testing.T) {
+	self := int32(os.Getpid())
+	var other procReading
+	for _, p := range nativeProcs() {
+		if p.Pid != self && p.Path != "" {
+			other = p
+			if p.Pid == int32(os.Getppid()) {
+				break
+			}
+		}
+	}
+	if other.Pid == 0 {
+		t.Fatal("nativeProcs did not report another process of this user with a real path")
+	}
+	foundSelf, foundOther := false, false
+	for _, p := range nativeProcsKnown(func(pid int32, start uint64) (string, string, bool) {
+		return "/fake/self", "fake", pid == self
+	}) {
+		if p.Pid == self {
+			foundSelf = true
+			if p.Path != "/fake/self" || p.Name != "fake" {
+				t.Fatalf("known self = %+v, want the supplied path and name", p)
+			}
+		}
+		if p.Pid == other.Pid {
+			foundOther = true
+			if p.Path != other.Path || p.Name != other.Name || p.Start != other.Start {
+				t.Fatalf("unknown process identity = %+v, want %+v", p, other)
+			}
+		}
+	}
+	if !foundSelf || !foundOther {
+		t.Fatalf("nativeProcsKnown found self=%v, other=%v", foundSelf, foundOther)
+	}
+	want, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err = filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range nativeProcs() {
+		if p.Pid == self {
+			got, err := filepath.EvalSymlinks(p.Path)
+			if err != nil || got != want || p.Name == "fake" || p.Name == "" {
+				t.Fatalf("nativeProcs self = %+v, err=%v, want real path %q and name", p, err, want)
+			}
+			return
+		}
+	}
+	t.Fatal("nativeProcs did not report this process")
 }
 
 func TestProcessPsHelper(t *testing.T) {
