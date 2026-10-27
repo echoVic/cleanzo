@@ -205,10 +205,10 @@ func TestProcessSamplingBudget(t *testing.T) {
 	if os.Getenv("CLEANZO_PERF") == "" {
 		t.Skip("set CLEANZO_PERF=1 to measure the sampling cost on this Mac")
 	}
-	old := runOnMain
-	runOnMain = func(f func()) { f() }
-	t.Cleanup(func() { runOnMain = old })
 	src := realProcessSource()
+	// NSWorkspace needs the app's main thread; calling it directly in a
+	// test binary can crash because tests run on a non-main thread.
+	src.apps = func() []workspaceApp { return nil }
 	usage := func() time.Duration {
 		var self, kids syscall.Rusage
 		_ = syscall.Getrusage(syscall.RUSAGE_SELF, &self)

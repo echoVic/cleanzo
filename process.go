@@ -268,7 +268,7 @@ func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []
 		c.Estimated = c.Estimated || estimated
 	}
 	for pid, r := range cur {
-		if r.Path == "" {
+		if r.Path == "" && r.Footprint == 0 {
 			continue
 		}
 		cpu := 0.0

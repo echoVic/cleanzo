@@ -81,12 +81,23 @@ func TestGroupProcessesCPUFromThePreviousReading(t *testing.T) {
 	}
 }
 
-func TestGroupProcessesSkipsOwnProcessesWithoutPaths(t *testing.T) {
-	cur := snapshotProcs([]procReading{{Pid: 1, Footprint: 1024}, {Pid: 2, Path: "/usr/bin/yes", Footprint: 2048}})
+func TestGroupProcessesSkipsOwnZombiesWithoutPaths(t *testing.T) {
+	cur := snapshotProcs([]procReading{{Pid: 1, Name: "node", Footprint: 0}, {Pid: 2, Path: "/usr/bin/yes", Footprint: 2048}})
 	others := []otherProc{{Pid: 3, Path: "kernel_task", Memory: 4096}}
 	rows := groupProcesses(cur, cur, others, nil, func(p int32) int32 { return p }, testSystemPath, noBundleIDs, 0)
 	if len(rows) != 2 || rows[0].Key != "cli:yes" || rows[1].Key != "sys:kernel_task" {
-		t.Fatalf("rows = %+v, want yes and kernel_task without the own pathless process", rows)
+		t.Fatalf("rows = %+v, want yes and kernel_task without the own pathless zombie", rows)
+	}
+}
+
+func TestGroupProcessesKeepsOwnLiveProcessesWithoutPaths(t *testing.T) {
+	cur := snapshotProcs([]procReading{{Pid: 1, Name: "node", Footprint: 1024}})
+	rows := groupProcesses(cur, cur, nil, nil, func(p int32) int32 { return p }, testSystemPath, noBundleIDs, 0)
+	if len(rows) != 1 || rows[0].Key != "cli:node" || rows[0].Name != "node" || rows[0].Kind != "cli" || rows[0].Procs != 1 || rows[0].Memory != 1024 {
+		t.Fatalf("rows = %+v, want a live node CLI row with 1 process and 1024 bytes", rows)
+	}
+	if len(rows[0].Children) != 1 || rows[0].Children[0].Name != "node" || rows[0].Children[0].Count != 1 || rows[0].Children[0].Memory != 1024 {
+		t.Fatalf("children = %+v, want a node child with 1 process and 1024 bytes", rows[0].Children)
 	}
 }
 

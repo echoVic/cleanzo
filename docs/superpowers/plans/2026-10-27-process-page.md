@@ -2327,9 +2327,9 @@ Expected: PASS. `grep -rn "showReactGrowth\|focusReactGrowth\|setGoGrowthHandler
    - `yes > /dev/null` in Terminal shows up as its own 「yes」 row at the top within 2 s. It is not counted under 终端.
    - WindowServer carries 「系统」 and ≈, and has no button.
    - First establish a positive control on the running CPU tab: `for i in $(seq 500); do pgrep -f '^/bin/ps -ax -o pid=,uid=' && break; sleep 0.02; done` must find a matching process. If it finds nothing, the checks below are invalid.
-   - 「暂停」 freezes the numbers and shows 已暂停. While paused, run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match. 「继续」 resumes.
-   - Resume sampling on the CPU tab and repeat the positive control, then switch to another page. Run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match.
-   - Return to the running CPU tab and repeat the positive control, then close the window. Run `for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then echo 'FAIL: ps is still running'; exit 1; fi; sleep 0.02; done` for at least 10 s; it must never find a match.
+   - 「暂停」 freezes the numbers and shows 已暂停. While paused, run `cleanzo_ps_result=OK; for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then cleanzo_ps_result=FAIL; fi; sleep 0.02; done; echo "$cleanzo_ps_result"` for at least 10 s; it must print OK. 「继续」 resumes.
+   - Resume sampling on the CPU tab and repeat the positive control, then switch to another page. Run `cleanzo_ps_result=OK; for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then cleanzo_ps_result=FAIL; fi; sleep 0.02; done; echo "$cleanzo_ps_result"` for at least 10 s; it must print OK.
+   - Return to the running CPU tab and repeat the positive control, then close the window. Run `cleanzo_ps_result=OK; for i in $(seq 500); do if pgrep -f '^/bin/ps -ax -o pid=,uid='; then cleanzo_ps_result=FAIL; fi; sleep 0.02; done; echo "$cleanzo_ps_result"` for at least 10 s; it must print OK.
    - TextEdit with unsaved text:
      - 「退出」 asks first, then TextEdit asks to save;
      - leave TextEdit's dialog open, and after 5 s the row shows 还没退出 and 「强制退出」;
@@ -2380,3 +2380,4 @@ One line per place where the shipped code differs from this plan; read these bef
   - The diagnosis bar has no live-region role, and Pause has no `aria-pressed`.
   - A quit row hides its button by `done`, without checking `gone`.
 - **Task 5:** none.
+- **N, naming limitation:** On macOS, `proc_name` and ps's `ucomm` both record the name of the file a symlink points to, so Claude Code (`…/versions/2.1.304`) still appears as `2.1.304`. Showing `claude` would require reading `argv[0]` with `KERN_PROCARGS2` and caching it by `(pid, start)`; this version does not implement that. The `Name` field names live processes whose paths cannot be read.
