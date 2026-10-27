@@ -1593,6 +1593,63 @@ Report the budget line. It was 2.88% before this task, inflated by the test's st
 
 ---
 
+### Task 5: Go — ask NSWorkspace for the running apps every fifth reading
+
+Added after Task 4. The alternating measurement of the build with Tasks 1–4 gave running minus paused = 3.26% (main ≈ 2.9% + ps 0.39%). A Go CPU profile of the production app on the 进程 CPU tab (60 s, `runtime/pprof` in a scratch build) gave 2.24 s, 3.73% of a core. **`main.workspaceList` took 790 ms of it (35%, about 1.3% of a core).** That is NSWorkspace's list of about 320 running apps, read on the main thread on every 2 s reading. The sampling loop itself took 390 ms: libproc 240 ms, grouping 110 ms. The list rarely changes, and groupProcesses uses it only for bundle IDs, localized names and whether a row can be quit. Quitting reads its own fresh list.
+
+**Files:** Modify `process_darwin.go` and `process_darwin_test.go`.
+
+- [ ] **Step 1: Read the list every fifth time (`process_darwin.go`)**
+
+```go
+// processAppsEvery is how often, in readings, NSWorkspace's running-app list
+// is read again. With about 320 running apps a read took about 25 ms of
+// main-thread time (in-app profile, 2026-10-27), about 1.3% of a core at one
+// read per 2 s reading, and the list rarely changes. A just-launched app gets
+// its name, bundle ID and quit button within 10 s; quitting reads its own
+// fresh list.
+const processAppsEvery = 5
+
+// processAppList reads the running apps. Tests replace it.
+var processAppList = workspaceList
+
+// appsReader returns the running-app list for one sampling session: read at
+// the first reading and every processAppsEvery-th after it, and retried at
+// the next reading when a read fails (nil). The loop calls it from one
+// goroutine.
+func appsReader() func() []workspaceApp {
+	var apps []workspaceApp
+	age := processAppsEvery // the first call reads
+	return func() []workspaceApp {
+		if age >= processAppsEvery || apps == nil {
+			if fresh := processAppList(); fresh != nil {
+				apps, age = fresh, 0
+			}
+		}
+		age++
+		return apps
+	}
+}
+```
+
+In `realProcessSource`, replace `apps: workspaceList,` with `apps: appsReader(),`.
+
+- [ ] **Step 2: Test (`process_darwin_test.go`)**
+
+`TestAppsReaderReadsEveryFifthReading`:
+- Replace `processAppList` (restore it in a cleanup) with a fake that counts calls and returns `[]workspaceApp{{Name: fmt.Sprint(call)}}`.
+- Call the reader 11 times. Expect the fake to be called on calls 1, 6 and 11. Calls 2–5 return the list from call 1, and calls 7–10 the list from call 6.
+- A second reader whose fake returns nil the first time and a list the second time: call 1 returns nil, call 2 reads again and returns the list, and call 3 reuses it.
+
+- [ ] **Step 3: Verify**
+
+Run:
+- `gofmt -l .`
+- `go vet ./... && GOOS=windows GOARCH=amd64 go vet ./...`
+- `go test -count=1 -run 'AppsReader|WatchProcesses|GroupProcesses|OwnProcs|OtherProcs|ReadOtherProcs|ParsePsCommand|Bindings|SlashPath' .`
+
+---
+
 ## Reviewer verification (on the maintainer's Mac)
 
 Run after the three tasks are on `feat/growth-monitor`.
@@ -1630,6 +1687,7 @@ Run after the three tasks are on `feat/growth-monitor`.
 | B | traecli | Task 2 | `../cleanzo-fix-icons`, branch `fix-icons` from `9973f0e`, with `node_modules` linked |
 | C | traecli | Task 3 | `../cleanzo-fix-sort`, branch `fix-sort` from `9973f0e`, with `node_modules` linked |
 | D | Codex (`codex:codex-rescue`, `task --write`) | Task 4 | `../cleanzo-fix-cpu2`, branch `fix-cpu2` from the integrated `feat/growth-monitor` head (Tasks 1–3 already on it) |
+| E | traecli | Task 5 | the main checkout, on `feat/growth-monitor` after Task 4's fix round |
 
 The runs touch disjoint files and run in parallel. Each task is reviewed in its worktree, then cherry-picked onto `feat/growth-monitor`.
 
