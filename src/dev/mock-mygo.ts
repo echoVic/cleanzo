@@ -2,7 +2,7 @@ import type { Runtime, Channel } from "mygo-runtime";
 import type {
   Cleaner, LanguageSettings, AppInfo, AppUsage, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
-  StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
+  MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample,
 } from "../mygo";
 
@@ -91,6 +91,15 @@ function createRuntime(): Runtime {
   const info: SystemInfo = {
     version: "0.2.4", os: "darwin", arch: "arm64", goVersion: "go1.27.1",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
+  };
+  const machineInfo: MachineInfo = {
+    model: "MacBook Pro (16-inch, 2023)", modelId: "Mac14,10", perfCores: 8, effCores: 4, gpuCores: 19,
+    displays: [
+      { id: 1, name: "Built-in Retina Display", builtin: true, width: 1728, height: 1117, hz: 120 },
+      { id: 2, name: "LS27D80xU", builtin: false, width: 1920, height: 1080, hz: 60 },
+    ],
+    displaySig: "1,2",
+    ssd: { model: "APPLE SSD AP0512Z", capacity: 500_277_792_768, smart: true, warning: 0, tempC: 33, spare: 100, used: 26, written: 624.5e12 },
   };
   const disk: DiskStat = { total: 460 * GB, used: 369 * GB, free: 91 * GB };
   const gone = new Set<string>();
@@ -228,10 +237,15 @@ function createRuntime(): Runtime {
     return {
       memory: { total: 32 * GB, used: app + wired + compressed, app, wired, compressed, cached: 3.6 * GB, pressure: 2, swapUsed: 6.2 * GB, swapTotal: 8 * GB },
       cpu: { usage: 39 + Math.sin(n * 0.7) * 31, load1: 2.8 + drift(1), load5: 2.4, load15: 2.1 },
-      disk: { ...disk }, battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal", temperature: 0, adapterWatts: 0 },
+      disk: { ...disk }, battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal", temperature: 30.6, adapterWatts: 90 },
       apps: runningApps.filter((a) => !quitted.has(a.path)).map((a, i) => ({ ...a, memory: a.memory * (1 + drift(i) * 0.08), cpu: Math.max(0, a.cpu + drift(i + 2) * 14) })),
       procs: 740 + Math.round(drift(3) * 8),
-      machine: null,
+      machine: {
+        thermal: 0, chipTemp: 48 + drift(4) * 4, fanCount: 2, fans: [1333, 1464], power: 36 + drift(5) * 6,
+        perfCpu: 31 + drift(6) * 20, effCpu: 58 + drift(7) * 20, gpu: 8 + Math.abs(drift(8)) * 20, gpuMemory: 1.1 * GB,
+        diskRead: 10.3e6 * (1 + drift(9)), diskWrite: 9.6e6 * (1 + drift(10)), diskTemp: 36,
+        netDown: 120_000 * (1 + drift(11)), netUp: 110_000 * (1 + drift(12)), netKind: "wifi", displaySig: "1,2",
+      },
     };
   };
 
@@ -275,6 +289,7 @@ function createRuntime(): Runtime {
     & { "LanguageSettings.SetLanguage": typeof LanguageSettings.setLanguage };
   const handlers = {
     "Cleaner.Info": async () => info,
+    "Cleaner.MachineInfo": async () => machineInfo,
     "Cleaner.GrowthSummary": async () => growthSummary(),
     "Cleaner.GrowthState": async () => ({ ...growthSummary(), records: 5, apps: growthApps() }),
     "Cleaner.GrowthMeasureNow": async () => {},

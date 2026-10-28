@@ -1,5 +1,6 @@
 // 系统状态页纯展示 / 选择逻辑：不依赖 DOM / React，可单测。
-import type { AppUsage, StatusSample } from "../../mygo";
+import type { AppUsage, DisplayInfo, StatusSample } from "../../mygo";
+import type { Lang } from "../../i18n";
 
 export const GiB = 2 ** 30;
 export const MiB = 2 ** 20;
@@ -175,4 +176,100 @@ export function syncQuitRows(st: QuitState, presentKeys: ReadonlySet<string>): Q
   }
   if (!changed) return st;
   return { busy: st.busy, done, gone };
+}
+
+// ---- 机器信息（设计 2026-10-28 §三） ----
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** 括号里的一段，中文界面改写尺寸和月份："16-inch" → "16 英寸"，"Nov 2023" → "2023 年 11 月"。 */
+function modelPart(part: string, lang: Lang): string {
+  if (lang !== "zh") return part;
+  const inch = /^(\d+(?:\.\d+)?)-inch$/.exec(part);
+  if (inch) return `${inch[1]} 英寸`;
+  const dated = /^([A-Z][a-z]{2})[a-z]* (\d{4})$/.exec(part);
+  const month = dated ? MONTHS.indexOf(dated[1]!) : -1;
+  if (dated && month >= 0) return `${dated[2]} 年 ${month + 1} 月`;
+  return part;
+}
+
+/** 型号标识推出的系列名，设备树读不到型号全名时用；Apple 芯片的新标识（Mac14,10）看不出系列，只能写 "Mac"。 */
+const FAMILIES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^MacBookPro/, "MacBook Pro"], [/^MacBookAir/, "MacBook Air"], [/^MacBook\d/, "MacBook"],
+  [/^Macmini/, "Mac mini"], [/^MacPro/, "Mac Pro"], [/^iMac/, "iMac"],
+];
+
+/**
+ * 页头标题（设计 §三.1）：设备树的型号全名拆成名字和括号里的说明。
+ * "MacBook Pro (16-inch, 2023)" → 中文 { name: "MacBook Pro", note: "16 英寸 · 2023" }，英文 note 是 "16-inch, 2023"。
+ * 没有型号全名时用型号标识：{ name: 系列名, note: "Mac14,10" }；都没有时两项都空，页头退回「系统状态」。
+ */
+export function modelLabel(model: string, modelId: string, lang: Lang): { name: string; note: string } {
+  const full = model.trim();
+  const m = /^(.+?)\s*\((.+)\)$/.exec(full);
+  if (m) {
+    const parts = m[2]!.split(",").map((p) => p.trim()).filter(Boolean).map((p) => modelPart(p, lang));
+    return { name: m[1]!, note: parts.join(lang === "zh" ? " · " : ", ") };
+  }
+  if (full) return { name: full, note: "" };
+  const id = modelId.trim();
+  if (!id) return { name: "", note: "" };
+  const family = FAMILIES.find(([re]) => re.test(id));
+  return { name: family ? family[1] : "Mac", note: id };
+}
+
+/** 每秒字节 → [数, 单位]，十进制（和活动监视器一致）：<1 MB/s 用 KB/s 取整，以上一位小数；负数或 NaN = 读不到 → ["—", ""]。 */
+export function fmtRate(bps: number): [string, string] {
+  if (!(bps >= 0)) return ["—", ""];
+  if (bps >= 1e9) return [(bps / 1e9).toFixed(1), "GB/s"];
+  if (bps >= 1e6) return [(bps / 1e6).toFixed(1), "MB/s"];
+  return [String(Math.round(bps / 1e3)), "KB/s"];
+}
+
+/** fmtRate 拼成一段文字，如 "10.3 MB/s"；读不到 → "—"。 */
+export function fmtRateText(bps: number): string {
+  const [v, unit] = fmtRate(bps);
+  return unit ? `${v} ${unit}` : v;
+}
+
+/** 摄氏度取整，如 "52 °C"；0 = 读不到 → "—"。 */
+export function fmtTemp(c: number): string {
+  return c > 0 ? `${Math.round(c)} °C` : "—";
+}
+
+/** 十进制容量（SSD 容量、累计写入用厂商口径）：100 以上取整，以下一位小数（去掉 .0）；0 = 读不到 → "—"。 */
+export function fmtDec(n: number): string {
+  if (!(n > 0)) return "—";
+  const [v, unit] = n >= 1e12 ? [n / 1e12, "TB"] : [n / 1e9, "GB"];
+  const s = v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, "");
+  return `${s} ${unit}`;
+}
+
+/** NVMe 严重警告的各位（SMART 日志第 0 字节）：0 备用块不足、1 温度超限、2 可靠性下降、3 只读、4 断电保护失效。 */
+const SSD_WARNINGS = [
+  "status.ssd.warn.spare", "status.ssd.warn.temp", "status.ssd.warn.reliability",
+  "status.ssd.warn.readonly", "status.ssd.warn.backup",
+] as const;
+export type SsdWarningKey = (typeof SSD_WARNINGS)[number] | "status.ssd.warn.other";
+
+/** 警告位 → 文案 key；只有规范之外的位时给一条笼统的「报告了警告」。 */
+export function ssdWarnings(bits: number): SsdWarningKey[] {
+  const out: SsdWarningKey[] = SSD_WARNINGS.filter((_, i) => (bits >> i) & 1);
+  if (out.length === 0 && bits !== 0) out.push("status.ssd.warn.other");
+  return out;
+}
+
+/** 一台显示器："LS27D80xU 1920×1080 @60Hz"；没有名字时用 fallback（「内建显示器」「外接显示器」）。 */
+export function displayText(d: DisplayInfo, fallback: string): string {
+  const name = d.name.trim() || fallback;
+  if (!(d.width > 0 && d.height > 0)) return name;
+  return `${name} ${d.width}×${d.height}${d.hz > 0 ? ` @${d.hz}Hz` : ""}`;
+}
+
+/** 网络曲线纵轴的下限：空闲时几 KB/s 的波动不会被放大成满格。 */
+export const NET_SPARK_FLOOR = 100_000;
+
+/** 网络曲线的纵轴上限：最近一分钟的最大值，至少 NET_SPARK_FLOOR。 */
+export function netSparkMax(hist: readonly number[]): number {
+  return Math.max(NET_SPARK_FLOOR, ...hist);
 }

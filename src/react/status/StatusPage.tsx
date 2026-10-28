@@ -2,7 +2,8 @@ import { isWindows } from "../../platform";
 import * as React from "react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { AppUsage, BatteryStatus, GrowthSummary, StatusSample, SystemInfo } from "../../mygo";
+import type { AppUsage, BatteryStatus, GrowthSummary, MachineInfo, MachineSample, SSDInfo, StatusSample, SystemInfo } from "../../mygo";
+import { currentLang } from "../../i18n";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -23,8 +24,9 @@ import { growthHint } from "../growth/hint";
 import type { ProcessTab } from "../process/format";
 import type { CrashDumpSummary } from "../../mygo";
 import {
-  GiB, MiB, SPARK_POINTS, emptyQuit, fmtMem, fmtPct, iconColor, isSparkShift, pickAlerts, quitErrCode,
-  refreshFrozenRows, sortApps, splitMem, syncQuitRows, trimSpark, uptimeParts,
+  GiB, MiB, SPARK_POINTS, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText, fmtTemp, iconColor,
+  isSparkShift, modelLabel, netSparkMax, pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem, ssdWarnings,
+  syncQuitRows, trimSpark, uptimeParts,
   type QuitState, type SortBy,
 } from "./format";
 import { AppIcon } from "../icons/AppIcon";
@@ -51,6 +53,16 @@ const DiskIcon = () => (
 const BatteryIcon = () => (
   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="8" width="17" height="9" rx="2" /><path d="M21.5 11v3" /><path d="m10 10-2 3h2.2L10 16" />
+  </svg>
+);
+const GpuIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="2" /><rect x="6" y="9.5" width="7" height="5" rx="1" /><path d="M16 10.5h2M16 13.5h2M6 18v2.5M10 18v2.5" />
+  </svg>
+);
+const NetIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M8 4v16M8 20l-3.5-3.5M8 20l3.5-3.5M16 20V4M16 4l-3.5 3.5M16 4l3.5 3.5" />
   </svg>
 );
 const CalloutIcon = () => (
@@ -109,8 +121,15 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
 }
 
 const SPARK_STEP = 120 / (SPARK_POINTS - 1);
-/** 30 点 0–100% 面积曲线；重开采样时缓冲清空，不足 2 点不画。 */
-function SparkSvg({ hist }: { hist: number[] }) {
+/** 曲线配色：CPU 用主题色，GPU 紫、网络蓝（与内存条的联动、App 两色一致）。 */
+const SPARK_TONE = {
+  accent: { stroke: "var(--accent)", fill: "var(--accent-soft)", fillOpacity: undefined },
+  gpu: { stroke: "var(--seg-wired)", fill: "var(--seg-wired)", fillOpacity: 0.14 },
+  net: { stroke: "var(--seg-app)", fill: "var(--seg-app)", fillOpacity: 0.14 },
+} as const;
+
+/** 30 点面积曲线，纵轴 0–max（默认 0–100%）；重开采样时缓冲清空，不足 2 点不画。 */
+function SparkSvg({ hist, max = 100, tone = "accent" }: { hist: number[]; max?: number; tone?: keyof typeof SPARK_TONE }) {
   const group = React.useRef<SVGGElement>(null);
   const prev = React.useRef<number[]>(hist);
   const ms = dur("spark");
@@ -128,22 +147,30 @@ function SparkSvg({ hist }: { hist: number[] }) {
     if (shift) void play(g, [{ transform: "translateX(0px)" }, { transform: `translateX(${-SPARK_STEP}px)` }], dur("spark"), EASE.out, { fill: "forwards" });
   }, [hist, shift]);
   if (pts.length < 2) return null;
-  const y = (v: number) => (28 - (Math.max(0, Math.min(100, v)) / 100) * 26).toFixed(1);
+  const top = max > 0 ? max : 100;
+  const y = (v: number) => (28 - (Math.max(0, Math.min(top, v)) / top) * 26).toFixed(1);
+  const c = SPARK_TONE[tone];
   const line = `M${pts.map((v, i) => `${(i * SPARK_STEP).toFixed(1)},${y(v)}`).join(" L")}`;
   const area = `${line} L${((pts.length - 1) * SPARK_STEP).toFixed(1)},28 L0,28 Z`;
   return (
     <div className="st-spark" aria-hidden="true">
       <svg viewBox="0 0 120 28" preserveAspectRatio="none">
         <g ref={group}>
-          <path fill="var(--accent-soft)" d={area} />
-          <path fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinejoin="round" d={line} />
+          <path fill={c.fill} fillOpacity={c.fillOpacity} d={area} />
+          <path fill="none" stroke={c.stroke} strokeWidth={1.5} strokeLinejoin="round" d={line} />
         </g>
       </svg>
     </div>
   );
 }
 
-export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cores: number; hist: number[]; t: T }) {
+export function CpuCard({ cpu, cores, hist, t, m, split }: {
+  cpu: StatusSample["cpu"]; cores: number; hist: number[]; t: T;
+  /** macOS：性能核、能效核各自的使用率（读不到为 -1） */
+  m?: MachineSample | null;
+  /** 性能核、能效核的个数（MachineInfo；0 = 还不知道） */
+  split?: { perf: number; eff: number };
+}) {
   const loads: Array<[string, string]> = [
     [t("status.cpu.load1"), cpu.load1.toFixed(1)],
     [t("status.cpu.load5"), cpu.load5.toFixed(1)],
@@ -158,23 +185,48 @@ export function CpuCard({ cpu, cores, hist, t }: { cpu: StatusSample["cpu"]; cor
       {!isWindows() && <div className="mloads num">
         {loads.map(([label, v], i) => <div key={i}><span>{label}</span><b>{v}</b></div>)}
       </div>}
+      {m && (m.perfCpu >= 0 || m.effCpu >= 0) && (
+        <ul className="mlegend num">
+          {m.perfCpu >= 0 && <li><span>{split?.perf ? t("status.cpu.perfN", { n: split.perf }) : t("status.cpu.perf")}</span><b>{fmtPct(m.perfCpu)}</b></li>}
+          {m.effCpu >= 0 && <li><span>{split?.eff ? t("status.cpu.effN", { n: split.eff }) : t("status.cpu.eff")}</span><b>{fmtPct(m.effCpu)}</b></li>}
+        </ul>
+      )}
       <div className="mfoot num">{cores > 0 ? t("status.cpu.cores", { n: cores }) : "—"}</div>
     </article>
   );
 }
 
-export function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onClean: () => void }) {
+export function DiskCard({ d, t, onClean, ssd, live }: {
+  d: StatusSample["disk"]; t: T; onClean: () => void;
+  /** macOS：内置 SSD（MachineInfo）；没有时不写型号、健康、寿命和写入量 */
+  ssd?: SSDInfo | null;
+  /** macOS：读写速度和 NAND 温度（MachineSample） */
+  live?: MachineSample | null;
+}) {
   const usedPct = d.total ? Math.min(100, Math.round((d.used / d.total) * 100)) : 0;
   const freeUnit = d.free > 0 ? splitMem(d.free)[1] : "";
+  const smart = ssd?.smart ? ssd : null;
+  const warns = smart ? ssdWarnings(smart.warning) : [];
+  // NAND 传感器优先；没有时用进入首页时 SMART 日志里的温度
+  const temp = live && live.diskTemp > 0 ? live.diskTemp : smart ? smart.tempC : 0;
   return (
     <article className="mcard cz-fade-in">
-      <div className="mhead"><DiskIcon /><span>{t("status.card.disk")}</span></div>
+      <div className="mhead">
+        <DiskIcon /><span>{t("status.card.disk")}</span>
+        {warns.length > 0 && <em className="mbadge crit" title={warns.map((k) => t(k)).join("、")}>{t("status.ssd.attention")}</em>}
+      </div>
       <div className="mhero num"><NumberTicker as="b" value={d.free} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
-      <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}</div>
+      <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}{ssd?.model ? ` · ${ssd.model}` : ""}</div>
       <div className="mviz"><div className="mbar"><i style={{ width: `${usedPct}%` }} /></div></div>
       <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
         <li><span>{t("status.disk.used")}</span><b>{usedPct}%</b></li>
         <li><span>{t("status.disk.avail")}</span><b>{fmtMem(d.free)}</b></li>
+        {live && live.diskRead >= 0 && <li><span>{t("status.disk.read")}</span><b>{fmtRateText(live.diskRead)}</b></li>}
+        {live && live.diskWrite >= 0 && <li><span>{t("status.disk.write")}</span><b>{fmtRateText(live.diskWrite)}</b></li>}
+        {smart && <li><span>{t("status.ssd.health")}</span><b>{warns.length > 0 ? t(warns[0]!) : t("status.ssd.ok")}</b></li>}
+        {smart && <li><span>{t("status.ssd.life")}</span><b>{`${smart.used}%`}</b></li>}
+        {smart && smart.written > 0 && <li><span>{t("status.ssd.written")}</span><b>{fmtDec(smart.written)}</b></li>}
+        {temp > 0 && <li><span>{t("status.disk.temp")}</span><b>{fmtTemp(temp)}</b></li>}
       </ul>
       <div className="mfoot">
         <span>{t("status.disk.footHint")}</span>
@@ -184,7 +236,7 @@ export function DiskCard({ d, t, onClean }: { d: StatusSample["disk"]; t: T; onC
   );
 }
 
-function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
+export function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
   const cond = b.condition.trim().toLowerCase();
   const badge = cond && cond !== "good" && cond !== "normal"
     ? <em className="mbadge">{t("status.battery.service")}</em>
@@ -214,9 +266,83 @@ function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
       <ul className="mlegend num">
         <li><span>{t("status.battery.maxCap")}</span><b>{healthPct > 0 ? `${healthPct}%` : "—"}</b></li>
         <li><span>{t("status.battery.condition")}</span><b>{condVal}</b></li>
+        {b.temperature > 0 && <li><span>{t("status.battery.temp")}</span><b>{fmtTemp(b.temperature)}</b></li>}
+        {b.plugged && b.adapterWatts > 0 && <li><span>{t("status.battery.adapter")}</span><b>{`${b.adapterWatts} W`}</b></li>}
       </ul>
       <div className="mfoot num">{b.cycles > 0 ? t("status.battery.cycles", { n: b.cycles }) : "—"}</div>
     </article>
+  );
+}
+
+export function GpuCard({ m, cores, displays, hist, t }: { m: MachineSample; cores: number; displays: number; hist: number[]; t: T }) {
+  return (
+    <article className="mcard cz-fade-in">
+      <div className="mhead"><GpuIcon /><span>{t("status.card.gpu")}</span></div>
+      {m.gpu >= 0
+        ? <div className="mhero num"><NumberTicker as="b" value={m.gpu} format={(v) => String(Math.round(v))} /><i>%</i></div>
+        : <div className="mhero num"><b className="ph">—</b></div>}
+      <div className="mhcapt">{t("status.gpu.caption")}</div>
+      <div className="mviz"><SparkSvg hist={hist} tone="gpu" /></div>
+      <ul className="mlegend num">
+        <li><span>{t("status.gpu.memory")}</span><b>{fmtMem(m.gpuMemory)}</b></li>
+        <li><span>{t("status.gpu.displays")}</span><b>{displays > 0 ? t("status.gpu.displayCount", { n: displays }) : "—"}</b></li>
+      </ul>
+      <div className="mfoot num">{cores > 0 ? t("status.cpu.cores", { n: cores }) : "—"}</div>
+    </article>
+  );
+}
+
+export function NetCard({ m, hist, t }: { m: MachineSample; hist: number[]; t: T }) {
+  const [down, downUnit] = fmtRate(m.netDown);
+  const [up, upUnit] = fmtRate(m.netUp);
+  const kind = m.netKind === "wifi" ? t("status.net.wifi") : m.netKind === "ethernet" ? t("status.net.ethernet") : "";
+  return (
+    <article className="mcard cz-fade-in">
+      <div className="mhead"><NetIcon /><span>{t("status.card.network")}</span>{kind && <span className="mhead-note">{kind}</span>}</div>
+      <div className="mhero mhero-duo num">
+        <i>↓</i><b>{down}</b><i>{downUnit}</i>
+        <i className="mgap">↑</i><b>{up}</b><i>{upUnit}</i>
+      </div>
+      <div className="mhcapt">{t("status.net.caption")}</div>
+      <div className="mviz"><SparkSvg hist={hist} max={netSparkMax(hist)} tone="net" /></div>
+      <div className="mfoot">{t("status.net.foot")}</div>
+    </article>
+  );
+}
+
+/** thermal state 四档（NSProcessInfo）：正常 / 偏热 / 很热 / 过热。 */
+const THERMAL = [
+  { key: "status.health.thermal0", tone: "ok" },
+  { key: "status.health.thermal1", tone: "warn" },
+  { key: "status.health.thermal2", tone: "crit" },
+  { key: "status.health.thermal3", tone: "crit" },
+] as const;
+
+/** 健康条（设计 §三.2）：读不到的格子整格省掉，四格都读不到时整条不出现。 */
+export function HealthStrip({ m, t }: { m: MachineSample; t: T }) {
+  const tiles: Array<{ key: string; label: string; value: React.ReactNode; tone?: string }> = [];
+  const thermal = m.thermal >= 0 ? THERMAL[Math.min(m.thermal, THERMAL.length - 1)] : undefined;
+  if (thermal) tiles.push({ key: "thermal", label: t("status.health.thermal"), value: t(thermal.key), tone: thermal.tone });
+  if (m.chipTemp > 0) tiles.push({ key: "chip", label: t("status.health.chipTemp"), value: fmtTemp(m.chipTemp) });
+  if (m.fanCount === 0) {
+    tiles.push({ key: "fans", label: t("status.health.fans"), value: t("status.health.noFans") });
+  } else if (m.fanCount > 0 && m.fans.length > 0) {
+    const value = m.fans.every((rpm) => rpm < 1)
+      ? t("status.health.fansIdle")
+      : <>{m.fans.join(" · ")} <small>rpm</small></>;
+    tiles.push({ key: "fans", label: t("status.health.fans"), value });
+  }
+  if (m.power > 0) tiles.push({ key: "power", label: t("status.health.power"), value: `${Math.round(m.power)} W` });
+  if (tiles.length === 0) return null;
+  return (
+    <section className="st-health cz-fade-in" aria-label={t("status.health.label")}>
+      {tiles.map((x) => (
+        <div key={x.key} className="st-htile">
+          <span className="k">{x.label}</span>
+          <b className={x.tone ? `v num ${x.tone}` : "v num"}>{x.value}</b>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -238,7 +364,7 @@ export interface StatusPageProps {
   active: boolean;
   /** 告警 / 磁盘卡的「去清理」：与点侧栏「垃圾清理」同一条路径（main.ts 注入）。 */
   goClean: () => void;
-  /** 增长提示的「查看」、列表的「查看全部」：打开进程页的某个标签，可带磁盘占用标签里要定位的行（main.ts 注入）。 */
+  /** 增长提示的「查看」、内存提示的「看谁在占内存」（macOS）：打开进程页的某个标签，可带磁盘占用标签里要定位的行（main.ts 注入）。 */
   goProcess: (tab: ProcessTab, focusKey?: string) => void;
 }
 
@@ -248,6 +374,10 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   const [sysInfo, setSysInfo] = React.useState<SystemInfo | null>(null);
   const [error, setError] = React.useState(false);
   const [cpuHist, setCpuHist] = React.useState<number[]>([]);
+  /** 这台 Mac 是什么（macOS）：每次进入读一次，显示器变了再读；读到之前页头还是「系统状态」。 */
+  const [machine, setMachine] = React.useState<MachineInfo | null>(null);
+  const [gpuHist, setGpuHist] = React.useState<number[]>([]);
+  const [netHist, setNetHist] = React.useState<number[]>([]);
   const [sortBy, setSortBy] = React.useState<SortBy>("mem");
   const [hover, setHover] = React.useState(false);
   const [focus, setFocus] = React.useState(false);
@@ -282,6 +412,9 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   const infoSeqRef = React.useRef(0);
   const sysInfoRef = React.useRef(sysInfo);
   sysInfoRef.current = sysInfo;
+  const machineRef = React.useRef(machine);
+  machineRef.current = machine;
+  const machineSeqRef = React.useRef(0);
   const goCleanRef = React.useRef(goClean);
   goCleanRef.current = goClean;
   /** 冻结期间的行集合与顺序（只更新数字）；重开采样时清空。 */
@@ -305,15 +438,28 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
     }
   }, []);
 
+  /** 型号、核数、GPU、显示器、SSD（macOS）：读不到时保留上一次的；从没读到时页头保持原样。 */
+  const loadMachine = React.useCallback(async () => {
+    if (isWindows()) return;
+    const seq = ++machineSeqRef.current;
+    try {
+      const m = await statusApi.machine();
+      if (seq === machineSeqRef.current) setMachine(m);
+    } catch { /* 下次进入或显示器变化时再读 */ }
+  }, []);
+
   const startWatch = React.useCallback(async () => {
     const myRun = ++runRef.current;
     stoppedRef.current = false;
     setError(false);
     setSample(null);
     setCpuHist([]);
+    setGpuHist([]);
+    setNetHist([]);
     setQuit(emptyQuit());
     frozenRowsRef.current = [];
     void loadInfo();
+    void loadMachine();
     const ch = new Channel<StatusSample>();
     chanRef.current = ch;
     try {
@@ -322,6 +468,14 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
         if (runRef.current !== myRun) continue; // 已切走 / 重开：丢弃旧采样
         setSample(s);
         setCpuHist((prev) => trimSpark(prev, s.cpu.usage));
+        const m = s.machine;
+        if (m) {
+          if (m.gpu >= 0) setGpuHist((prev) => trimSpark(prev, m.gpu));
+          if (m.netDown >= 0) setNetHist((prev) => trimSpark(prev, m.netDown));
+          // 接上或拔掉显示器：采样里的签名和页头读到的不同，重读一次
+          const known = machineRef.current;
+          if (known?.displaySig && m.displaySig && m.displaySig !== known.displaySig) void loadMachine();
+        }
       }
       await done;
     } catch (e) {
@@ -330,11 +484,13 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
         setError(true);
         setSample(null);
         setCpuHist([]);
+        setGpuHist([]);
+        setNetHist([]);
       }
     } finally {
       if (chanRef.current === ch) chanRef.current = null;
     }
-  }, [loadInfo]);
+  }, [loadInfo, loadMachine]);
 
   const stopWatch = React.useCallback(() => {
     stoppedRef.current = true;
@@ -419,20 +575,35 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
 
   // ---- 派生视图 ----
 
-  const machineParts: string[] = [];
+  let memPart = "", osPart = "", upPart = "";
   if (sysInfo) {
-    if (sysInfo.chip) machineParts.push(sysInfo.chip);
-    if (sysInfo.memory >= GiB) machineParts.push(t("status.machine.mem", { size: `${Math.round(sysInfo.memory / GiB)} GB` }));
-    else if (sysInfo.memory) machineParts.push(t("status.machine.mem", { size: `${Math.round(sysInfo.memory / MiB)} MB` }));
-    if (sysInfo.osVersion) machineParts.push(t("status.osVersion", { version: sysInfo.osVersion }));
+    if (sysInfo.memory >= GiB) memPart = t("status.machine.mem", { size: `${Math.round(sysInfo.memory / GiB)} GB` });
+    else if (sysInfo.memory) memPart = t("status.machine.mem", { size: `${Math.round(sysInfo.memory / MiB)} MB` });
+    if (sysInfo.osVersion) osPart = t("status.osVersion", { version: sysInfo.osVersion });
     const up = sysInfo.bootTime > 0 ? uptimeParts(sysInfo.bootTime, Date.now() / 1000) : null;
     if (up) {
-      machineParts.push(
-        up.days >= 1 ? t("status.uptime.days", { d: up.days, h: up.hours })
-          : up.hours >= 1 ? t("status.uptime.hours", { h: up.hours, m: up.mins })
-            : t("status.uptime.mins", { m: up.mins }),
-      );
+      upPart = up.days >= 1 ? t("status.uptime.days", { d: up.days, h: up.hours })
+        : up.hours >= 1 ? t("status.uptime.hours", { h: up.hours, m: up.mins })
+          : t("status.uptime.mins", { m: up.mins });
     }
+  }
+  const machineParts = [sysInfo?.chip ?? "", memPart, osPart, upPart].filter(Boolean);
+  // macOS 页头讲这台机器（设计 §三.1）：型号作标题；规格一行；系统、运行时长和显示器一行。
+  const label = machine && !isWindows() ? modelLabel(machine.model, machine.modelId, currentLang()) : null;
+  const specParts: string[] = [];
+  const hwParts: string[] = [];
+  if (machine && label?.name) {
+    if (sysInfo?.chip) specParts.push(sysInfo.chip);
+    const { perfCores: p, effCores: e } = machine;
+    if (p > 0 && e > 0) specParts.push(t("status.spec.cpuSplit", { n: p + e, p, e }));
+    else if (sysInfo?.cores) specParts.push(t("status.spec.cpu", { n: sysInfo.cores }));
+    if (machine.gpuCores > 0) specParts.push(t("status.spec.gpu", { n: machine.gpuCores }));
+    if (memPart) specParts.push(memPart);
+    if (machine.ssd && machine.ssd.capacity > 0) specParts.push(t("status.spec.disk", { size: fmtDec(machine.ssd.capacity) }));
+    if (osPart) hwParts.push(osPart);
+    if (upPart) hwParts.push(upPart);
+    const screens = machine.displays.map((d) => displayText(d, t(d.builtin ? "status.display.builtin" : "status.display.external")));
+    if (screens.length > 0) hwParts.push(screens.join(" + "));
   }
 
   // hover / 焦点 / 确认框 / 等待期：冻结行集合与顺序，数字继续更新
@@ -462,12 +633,22 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   return (
     <div className="cz-react">
       <header className="view-head">
-        <div>
-          <h2>{t("nav.status")}</h2>
-          <p className="muted">{t("status.sub")}</p>
-          {machineParts.length > 0 && <p className="st-machine num">{machineParts.join(" · ")}</p>}
-        </div>
+        {label?.name ? (
+          <div>
+            <h2 className="st-model">{label.name}{label.note && <span className="st-model-note">{label.note}</span>}</h2>
+            {specParts.length > 0 && <p className="muted num">{specParts.join(" · ")}</p>}
+            {hwParts.length > 0 && <p className="st-machine num">{hwParts.join(" · ")}</p>}
+          </div>
+        ) : (
+          <div>
+            <h2>{t("nav.status")}</h2>
+            <p className="muted">{t("status.sub")}</p>
+            {machineParts.length > 0 && <p className="st-machine num">{machineParts.join(" · ")}</p>}
+          </div>
+        )}
       </header>
+
+      {!isWindows() && !error && sample?.machine && <HealthStrip m={sample.machine} t={t} />}
 
       {/* 与原生 #st-alerts 一致：告警始终占一个区块位（为空时也保留节奏），多条告警紧贴排列。 */}
       <div className="st-alerts">
@@ -488,9 +669,9 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
                 <button
                   className="btn ghost small"
                   type="button"
-                  onClick={() => (a.action === "apps" ? viewApps() : goCleanRef.current())}
+                  onClick={() => (a.action !== "apps" ? goCleanRef.current() : isWindows() ? viewApps() : goProcess("mem"))}
                 >
-                  {a.action === "apps" ? t("status.alert.viewApps") : t("status.disk.clean")}
+                  {a.action !== "apps" ? t("status.disk.clean") : isWindows() ? t("status.alert.viewApps") : t("status.alert.viewInProcess")}
                 </button>
               )}
             </div> : key === "crashDumps" && bigDumps[0] ? <div className="st-callout warn" role="status">
@@ -532,105 +713,117 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       ) : (
         <section className="st-grid" aria-label="指标卡">
           {sample ? (
-            <>
-              <MemoryCard m={sample.memory} t={t} />
-              <CpuCard cpu={sample.cpu} cores={sysInfo?.cores ?? 0} hist={cpuHist} t={t} />
-              <DiskCard d={sample.disk} t={t} onClean={() => goCleanRef.current()} />
-              {sample.battery && <BatteryCard b={sample.battery} t={t} />}
-            </>
+            isWindows() ? (
+              <>
+                <MemoryCard m={sample.memory} t={t} />
+                <CpuCard cpu={sample.cpu} cores={sysInfo?.cores ?? 0} hist={cpuHist} t={t} />
+                <DiskCard d={sample.disk} t={t} onClean={() => goCleanRef.current()} />
+                {sample.battery && <BatteryCard b={sample.battery} t={t} />}
+              </>
+            ) : (
+              <>
+                <CpuCard
+                  cpu={sample.cpu} cores={sysInfo?.cores ?? 0} hist={cpuHist} t={t}
+                  m={sample.machine} split={machine ? { perf: machine.perfCores, eff: machine.effCores } : undefined}
+                />
+                {sample.machine && <GpuCard m={sample.machine} cores={machine?.gpuCores ?? 0} displays={machine?.displays.length ?? 0} hist={gpuHist} t={t} />}
+                <MemoryCard m={sample.memory} t={t} />
+                <DiskCard d={sample.disk} t={t} onClean={() => goCleanRef.current()} ssd={machine?.ssd} live={sample.machine} />
+                {sample.machine && <NetCard m={sample.machine} hist={netHist} t={t} />}
+                {sample.battery && <BatteryCard b={sample.battery} t={t} />}
+              </>
+            )
           ) : (
-            Array.from({ length: 4 }, (_, i) => <SkCard key={i} />)
+            Array.from({ length: isWindows() ? 4 : 6 }, (_, i) => <SkCard key={i} />)
           )}
         </section>
       )}
 
-      <section className="st-listcard">
-        <div ref={listHeadRef} className={`st-list-head${hl ? " hl" : ""}`}>
-          <h3>{t("status.apps.title")}</h3>
-          <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
-            <TabsList
-              ref={segRef}
-              aria-label="排序方式"
-              className="relative ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
-            >
-              <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
-              <TabsTrigger value="mem" className={segTrigger}>{t("status.apps.byMemory")}</TabsTrigger>
-              <TabsTrigger value="cpu" className={segTrigger}>{t("status.apps.byCpu")}</TabsTrigger>
-            </TabsList>
-          </TabsRoot>
-          {!isWindows() && (
-            <button className="st-viewall" type="button" onClick={() => goProcess(sortBy)}>
-              {t("status.apps.viewAll")} <span aria-hidden="true">›</span>
-            </button>
-          )}
-        </div>
-        <div className="st-cols num">
-          <span className="c-app">{t("status.apps.appCol")}</span>
-          <span className="c-mem">{t("status.apps.memCol")}</span>
-          <span className="c-cpu">{t("status.apps.cpuCol")}</span>
-          <span className="c-act" />
-        </div>
-        <section
-          ref={listRef}
-          className="st-list"
-          aria-live="polite"
-          onMouseEnter={() => setHover(true)}
-          onMouseLeave={() => setHover(false)}
-          onFocusCapture={() => setFocus(true)}
-          onBlurCapture={() => setFocus(false)}
-        >
-          {error ? null : !sample ? (
-            Array.from({ length: 3 }, (_, i) => <SkRow key={i} />)
-          ) : rowsP.length === 0 ? (
-            <div className="st-empty">{t("status.apps.empty")}</div>
-          ) : (
-            rowsP.map(({ item: r, key, leaving }) => {
-              const quitted = leaving || (quit.done.has(r.key) && !quit.gone.has(r.key));
-              const busy = quit.busy.has(r.path);
-              return (
-                <Leave key={key} leaving={leaving}>
-                  <div className={`st-row cz-fade-in${quitted ? " quitted" : ""}`} data-key={key}>
-                    <div className="st-app">
-                      <AppIcon path={r.path} box="st-ico">
-                        <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
-                      </AppIcon>
-                      <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
-                      <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>
-                    </div>
-                    <span className="st-col st-mem num">{fmtMem(r.memory)}</span>
-                    <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
-                    <span className="st-act">
-                      {r.quit && !leaving && !quit.done.has(r.key) && (
-                        <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)}>
-                          {busy ? t("status.apps.quitting") : t("status.apps.quit")}
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                </Leave>
-              );
-            })
-          )}
-        </section>
-        <p className="st-footnote muted small">
-          {sample ? t("status.footnote", { n: sample.procs.toLocaleString() }) : ""}
-        </p>
-      </section>
-
-      <Dialog open={quitTarget !== null} onOpenChange={(v) => { if (!v) setQuitTarget(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("status.quit.title", { name: quitTarget?.name ?? "" })}</DialogTitle>
-            <DialogDescription>
-              {t("status.quit.body", { name: quitTarget?.name ?? "" })}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 flex justify-end gap-2">
-            <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
-            {quitTarget && <Button onClick={() => void doQuit(quitTarget)}>{t("status.quit.ok")}</Button>}
+      {/* 「占用最多的应用」只在 Windows 首页：macOS 有「进程」页（设计 2026-10-28 §三.5）。 */}
+      {isWindows() && <>
+        <section className="st-listcard">
+          <div ref={listHeadRef} className={`st-list-head${hl ? " hl" : ""}`}>
+            <h3>{t("status.apps.title")}</h3>
+            <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+              <TabsList
+                ref={segRef}
+                aria-label="排序方式"
+                className="relative ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
+              >
+                <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
+                <TabsTrigger value="mem" className={segTrigger}>{t("status.apps.byMemory")}</TabsTrigger>
+                <TabsTrigger value="cpu" className={segTrigger}>{t("status.apps.byCpu")}</TabsTrigger>
+              </TabsList>
+            </TabsRoot>
           </div>
-        </DialogContent>
-      </Dialog>
+          <div className="st-cols num">
+            <span className="c-app">{t("status.apps.appCol")}</span>
+            <span className="c-mem">{t("status.apps.memCol")}</span>
+            <span className="c-cpu">{t("status.apps.cpuCol")}</span>
+            <span className="c-act" />
+          </div>
+          <section
+            ref={listRef}
+            className="st-list"
+            aria-live="polite"
+            onMouseEnter={() => setHover(true)}
+            onMouseLeave={() => setHover(false)}
+            onFocusCapture={() => setFocus(true)}
+            onBlurCapture={() => setFocus(false)}
+          >
+            {error ? null : !sample ? (
+              Array.from({ length: 3 }, (_, i) => <SkRow key={i} />)
+            ) : rowsP.length === 0 ? (
+              <div className="st-empty">{t("status.apps.empty")}</div>
+            ) : (
+              rowsP.map(({ item: r, key, leaving }) => {
+                const quitted = leaving || (quit.done.has(r.key) && !quit.gone.has(r.key));
+                const busy = quit.busy.has(r.path);
+                return (
+                  <Leave key={key} leaving={leaving}>
+                    <div className={`st-row cz-fade-in${quitted ? " quitted" : ""}`} data-key={key}>
+                      <div className="st-app">
+                        <AppIcon path={r.path} box="st-ico">
+                          <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
+                        </AppIcon>
+                        <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
+                        <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>
+                      </div>
+                      <span className="st-col st-mem num">{fmtMem(r.memory)}</span>
+                      <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
+                      <span className="st-act">
+                        {r.quit && !leaving && !quit.done.has(r.key) && (
+                          <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)}>
+                            {busy ? t("status.apps.quitting") : t("status.apps.quit")}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  </Leave>
+                );
+              })
+            )}
+          </section>
+          <p className="st-footnote muted small">
+            {sample ? t("status.footnote", { n: sample.procs.toLocaleString() }) : ""}
+          </p>
+        </section>
+
+        <Dialog open={quitTarget !== null} onOpenChange={(v) => { if (!v) setQuitTarget(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("status.quit.title", { name: quitTarget?.name ?? "" })}</DialogTitle>
+              <DialogDescription>
+                {t("status.quit.body", { name: quitTarget?.name ?? "" })}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-4 flex justify-end gap-2">
+              <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
+              {quitTarget && <Button onClick={() => void doQuit(quitTarget)}>{t("status.quit.ok")}</Button>}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </>}
     </div>
   );
 }

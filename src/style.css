@@ -1471,6 +1471,41 @@ body {
 /* ---- CPU 迷你曲线（30 点面积图） ---- */
 .st-spark { width: 100%; }
 .st-spark svg { display: block; width: 100%; height: 32px; overflow: hidden; }
+/* ---- macOS 首页：型号作标题、健康条（设计 2026-10-28 §三） ---- */
+.view-head h2.st-model { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 10px; }
+.st-model-note { font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+#view-status .cz-react .st-health { margin-top: 20px; }
+#view-status .cz-react .st-health + .st-alerts:not(:empty) { margin-top: 16px; }
+.st-health { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.st-htile {
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.st-htile .k { display: block; font-size: 12px; color: var(--muted); }
+.st-htile .v {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.st-htile .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.st-htile .v.ok { color: var(--accent-strong); }
+.st-htile .v.warn { color: var(--warn-text); }
+.st-htile .v.crit { color: var(--danger); }
+/* 卡片标题右侧的说明（网络的连接方式） */
+.mhead-note { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); }
+/* 网络卡：下载、上传两个数并排 */
+.mhero-duo b { font-size: 22px; }
+.mhero .mgap { margin-left: 10px; }
 
 /* ---- 应用列表卡 ---- */
 .st-listcard {
@@ -1890,4 +1925,3 @@ div.pr-toggle { cursor: default; }
 .pr-children { margin: 0; padding: 4px 0; list-style: none; background: var(--bg-subtle); }
 .pr-child { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 20px 0 66px; color: var(--muted); font-size: 12px; }
 .pr-child-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.st-viewall { margin-left: 8px; padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }

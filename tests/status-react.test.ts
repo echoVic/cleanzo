@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { t } from "../src/i18n";
-import type { AppUsage, StatusSample } from "../src/mygo";
+import type { AppUsage, MachineSample, SSDInfo, StatusSample } from "../src/mygo";
 import {
-  SPARK_POINTS, STATUS_ALERT, emptyQuit, fmtMem, fmtPct, iconColor,
-  pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem, syncQuitRows,
-  trimSpark, uptimeParts,
+  NET_SPARK_FLOOR, SPARK_POINTS, STATUS_ALERT, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText,
+  fmtTemp, iconColor, modelLabel, netSparkMax, pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem,
+  ssdWarnings, syncQuitRows, trimSpark, uptimeParts,
 } from "../src/react/status/format";
 
 // i18n 解析读 localStorage（try/catch 兜底），这里显式钉住语言偏好。
@@ -44,9 +44,24 @@ const sample = (over: Partial<StatusSample> = {}): StatusSample => ({
   },
   cpu: { usage: 23.4, load1: 8.3, load5: 5.3, load15: 4.9 },
   disk: { total: 460 * GB, used: 369 * GB, free: 91 * GB },
-  battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal" },
+  battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal", temperature: 0, adapterWatts: 0 },
   apps: [chrome(), code(), finder()],
   procs: 740,
+  machine: null,
+  ...over,
+});
+
+// 维护者这台 Mac 2026-10-28 的真实读数（spike）。
+const machineSample = (over: Partial<MachineSample> = {}): MachineSample => ({
+  thermal: 0, chipTemp: 51.9, fanCount: 2, fans: [1333, 1464], power: 37.8,
+  perfCpu: 31, effCpu: 58, gpu: 8, gpuMemory: 1.1 * GB,
+  diskRead: 10_300_000, diskWrite: 9_600_000, diskTemp: 36,
+  netDown: 120_000, netUp: 110_000, netKind: "wifi", displaySig: "1,2",
+  ...over,
+});
+const ssd = (over: Partial<SSDInfo> = {}): SSDInfo => ({
+  model: "APPLE SSD AP0512Z", capacity: 500_277_792_768, smart: true, warning: 0,
+  tempC: 33, spare: 100, used: 26, written: 624.4e12,
   ...over,
 });
 
@@ -303,7 +318,7 @@ test("Windows disk legend keeps full labels and 103.3 GB in full-width rows in z
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
 
-test("the top-apps card links to the process page on macOS only", async () => {
+test("the top-apps list is Windows-only, without View All; macOS lists no apps", async () => {
   await import("./setup-dom");
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -311,8 +326,198 @@ test("the top-apps card links to the process page on macOS only", async () => {
   const { setPlatformForTest } = await import("../src/platform");
   const props = { active: false, goClean() {}, goProcess() {} };
   try {
-    expect(renderToStaticMarkup(createElement(StatusPage, props))).toContain(t("status.apps.viewAll"));
+    setPlatformForTest("darwin");
+    const mac = renderToStaticMarkup(createElement(StatusPage, props));
+    expect(mac).not.toContain("st-listcard");
+    expect(mac).not.toContain(t("status.apps.title"));
     setPlatformForTest("win32");
-    expect(renderToStaticMarkup(createElement(StatusPage, props))).not.toContain(t("status.apps.viewAll"));
+    const win = renderToStaticMarkup(createElement(StatusPage, props));
+    expect(win).toContain("st-listcard");
+    expect(win).toContain(t("status.apps.title"));
+    expect(win).not.toContain("st-viewall");
   } finally { setPlatformForTest(undefined); }
+});
+
+test("modelLabel splits the device-tree name and localizes the details", () => {
+  expect(modelLabel("MacBook Pro (16-inch, 2023)", "Mac14,10", "zh")).toEqual({ name: "MacBook Pro", note: "16 英寸 · 2023" });
+  expect(modelLabel("MacBook Pro (16-inch, 2023)", "Mac14,10", "en")).toEqual({ name: "MacBook Pro", note: "16-inch, 2023" });
+  expect(modelLabel("MacBook Air (13-inch, M2, 2022)", "Mac14,2", "zh")).toEqual({ name: "MacBook Air", note: "13 英寸 · M2 · 2022" });
+  expect(modelLabel("MacBook Pro (14-inch, M3, Nov 2023)", "Mac15,3", "zh").note).toBe("14 英寸 · M3 · 2023 年 11 月");
+  expect(modelLabel("Mac Studio (2023)", "Mac14,13", "en")).toEqual({ name: "Mac Studio", note: "2023" });
+  expect(modelLabel("Mac Pro", "Mac14,8", "zh")).toEqual({ name: "Mac Pro", note: "" });
+  // 设备树没有型号全名：由型号标识推出系列名，标识写在旁边（设计 §三.1）
+  expect(modelLabel("", "Mac14,10", "zh")).toEqual({ name: "Mac", note: "Mac14,10" });
+  expect(modelLabel("", "MacBookAir10,1", "en")).toEqual({ name: "MacBook Air", note: "MacBookAir10,1" });
+  expect(modelLabel(" ", "", "zh")).toEqual({ name: "", note: "" });
+});
+
+test("machine numbers format without NaN: rates, temperatures, drive sizes", () => {
+  expect(fmtRate(-1)).toEqual(["—", ""]);
+  expect(fmtRate(Number.NaN)).toEqual(["—", ""]);
+  expect(fmtRate(0)).toEqual(["0", "KB/s"]);
+  expect(fmtRate(1_500)).toEqual(["2", "KB/s"]);
+  expect(fmtRate(1_230_000)).toEqual(["1.2", "MB/s"]);
+  expect(fmtRate(2_500_000_000)).toEqual(["2.5", "GB/s"]);
+  expect(fmtRateText(-1)).toBe("—");
+  expect(fmtRateText(10_300_000)).toBe("10.3 MB/s");
+  expect(fmtTemp(0)).toBe("—");
+  expect(fmtTemp(51.9)).toBe("52 °C");
+  expect(fmtDec(0)).toBe("—");
+  expect(fmtDec(500_277_792_768)).toBe("500 GB");
+  expect(fmtDec(64.5e9)).toBe("64.5 GB");
+  expect(fmtDec(624.4e12)).toBe("624 TB");
+  expect(fmtDec(1.5e12)).toBe("1.5 TB");
+  expect(fmtDec(2e12)).toBe("2 TB");
+});
+
+test("ssdWarnings names each NVMe critical-warning bit", () => {
+  expect(ssdWarnings(0)).toEqual([]);
+  expect(ssdWarnings(0x01)).toEqual(["status.ssd.warn.spare"]);
+  expect(ssdWarnings(0x0a)).toEqual(["status.ssd.warn.temp", "status.ssd.warn.readonly"]);
+  expect(ssdWarnings(0x20)).toEqual(["status.ssd.warn.other"]);
+});
+
+test("displayText writes the name, size and refresh rate", () => {
+  const d = { id: 2, name: "LS27D80xU", builtin: false, width: 1920, height: 1080, hz: 60 };
+  expect(displayText(d, "外接显示器")).toBe("LS27D80xU 1920×1080 @60Hz");
+  expect(displayText({ ...d, name: " ", builtin: true, width: 1728, height: 1117, hz: 120 }, "内建显示器")).toBe("内建显示器 1728×1117 @120Hz");
+  expect(displayText({ ...d, hz: 0 }, "外接显示器")).toBe("LS27D80xU 1920×1080");
+  expect(displayText({ ...d, width: 0, height: 0 }, "外接显示器")).toBe("LS27D80xU");
+});
+
+test("the network chart keeps a floor so idle traffic doesn't fill it", () => {
+  expect(netSparkMax([])).toBe(NET_SPARK_FLOOR);
+  expect(netSparkMax([5_000, 20_000])).toBe(NET_SPARK_FLOOR);
+  expect(netSparkMax([500_000, 2_000_000])).toBe(2_000_000);
+});
+
+test("the health strip shows what it read and leaves out the rest", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { HealthStrip } = await import("../src/react/status/StatusPage");
+  const { setPref } = await import("../src/i18n");
+  const html = (m: MachineSample) => renderToStaticMarkup(createElement(HealthStrip, { m, t }));
+  try {
+    setPref("zh");
+    const full = html(machineSample());
+    for (const s of ["散热状态", "正常", "芯片温度", "52 °C", "风扇", "1333 · 1464", "rpm", "整机功耗", "38 W"]) expect(full).toContain(s);
+    expect(full).toContain('class="v num ok"');
+    const hot = html(machineSample({ thermal: 2 }));
+    expect(hot).toContain("很热");
+    expect(hot).toContain('class="v num crit"');
+    // MacBook Air 没有风扇：写「无风扇」，不写 0
+    expect(html(machineSample({ fanCount: 0, fans: [] }))).toContain("无风扇");
+    expect(html(machineSample({ fans: [0, 0] }))).toContain("未转动");
+    // 读不到的整格省掉；什么都读不到时整条不出现
+    const partial = html(machineSample({ chipTemp: 0, power: 0, fanCount: -1, fans: [] }));
+    for (const s of ["芯片温度", "整机功耗", "风扇"]) expect(partial).not.toContain(s);
+    expect(partial).not.toMatch(/NaN|undefined/);
+    expect(html(machineSample({ thermal: -1, chipTemp: 0, power: 0, fanCount: -1, fans: [] }))).toBe("");
+  } finally { setPref("system"); }
+});
+
+test("the macOS CPU card splits performance and efficiency cores", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { CpuCard } = await import("../src/react/status/StatusPage");
+  const { setPref } = await import("../src/i18n");
+  try {
+    setPref("zh");
+    const base = { cpu: sample().cpu, cores: 12, hist: [10], t };
+    const split = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample(), split: { perf: 8, eff: 4 } }));
+    for (const s of ["性能核（8）", "31%", "能效核（4）", "58%"]) expect(split).toContain(s);
+    // 核数还没读到：只写「性能核」「能效核」
+    const counts = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample() }));
+    expect(counts).toContain("性能核");
+    expect(counts).not.toContain("性能核（");
+    const unknown = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample({ perfCpu: -1, effCpu: -1 }) }));
+    expect(unknown).not.toContain("性能核");
+  } finally { setPref("system"); }
+});
+
+test("the GPU and network cards show live numbers, and dashes until they are known", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { GpuCard, NetCard } = await import("../src/react/status/StatusPage");
+  const { setPref } = await import("../src/i18n");
+  try {
+    setPref("zh");
+    const gpu = renderToStaticMarkup(createElement(GpuCard, { m: machineSample(), cores: 19, displays: 2, hist: [8, 9], t }));
+    for (const s of ["GPU", "19 核", "占用的内存", "1.1 GB", "显示器", "2 台"]) expect(gpu).toContain(s);
+    const gpuUnknown = renderToStaticMarkup(createElement(GpuCard, { m: machineSample({ gpu: -1, gpuMemory: 0 }), cores: 0, displays: 0, hist: [], t }));
+    expect(gpuUnknown).toContain('<b class="ph">—</b>');
+    expect(gpuUnknown).not.toMatch(/NaN|undefined|>-1/);
+
+    const net = renderToStaticMarkup(createElement(NetCard, { m: machineSample(), hist: [120_000, 90_000], t }));
+    for (const s of ["网络", '<span class="mhead-note">Wi-Fi</span>', "120", "110", "KB/s", "只算 Wi-Fi 和以太网"]) expect(net).toContain(s);
+    const wired = renderToStaticMarkup(createElement(NetCard, { m: machineSample({ netKind: "ethernet" }), hist: [], t }));
+    expect(wired).toContain('<span class="mhead-note">以太网</span>');
+    // 第一份采样还没有速度：写「—」，不写 -1，也不写连接方式
+    const first = renderToStaticMarkup(createElement(NetCard, { m: machineSample({ netDown: -1, netUp: -1, netKind: "" }), hist: [], t }));
+    expect(first).toContain("—");
+    expect(first).not.toContain("mhead-note");
+    expect(first).not.toMatch(/NaN|undefined|>-1/);
+  } finally { setPref("system"); }
+});
+
+test("the macOS disk card adds the SSD and live read/write; without them it stays as before", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { DiskCard } = await import("../src/react/status/StatusPage");
+  const { setPref } = await import("../src/i18n");
+  const d = { total: 460 * GB, used: 424.7 * GB, free: 35.3 * GB };
+  const html = (over: { ssd?: SSDInfo | null; live?: MachineSample | null }) =>
+    renderToStaticMarkup(createElement(DiskCard, { d, t, onClean() {}, ...over }));
+  try {
+    setPref("zh");
+    const mac = html({ ssd: ssd(), live: machineSample() });
+    for (const s of ["APPLE SSD AP0512Z", "读取", "10.3 MB/s", "写入", "9.6 MB/s", "健康", "正常", "寿命已用", "26%", "已写入", "624 TB", "温度", "36 °C"]) {
+      expect(mac).toContain(s);
+    }
+    expect(mac).not.toContain("需要留意");
+    const worn = html({ ssd: ssd({ warning: 0x01 }), live: machineSample() });
+    expect(worn).toContain("需要留意");
+    expect(worn).toContain("备用块不足");
+    // 没有 NAND 传感器时用 SMART 日志里的温度
+    expect(html({ ssd: ssd(), live: machineSample({ diskTemp: 0 }) })).toContain("33 °C");
+    // SMART 读不到、速度还没有：这些行都不出现
+    const bare = html({ ssd: ssd({ smart: false }), live: machineSample({ diskRead: -1, diskWrite: -1, diskTemp: 0 }) });
+    for (const s of ["健康", "寿命已用", "已写入", "读取", "写入", "温度"]) expect(bare).not.toContain(s);
+    expect(bare).toContain("APPLE SSD AP0512Z");
+    const plain = html({});
+    for (const s of ["读取", "健康", "APPLE"]) expect(plain).not.toContain(s);
+  } finally { setPref("system"); }
+});
+
+test("the battery card adds its temperature and the adapter's watts when known", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { BatteryCard } = await import("../src/react/status/StatusPage");
+  const { setPref } = await import("../src/i18n");
+  const b = { ...sample().battery!, temperature: 30.64, adapterWatts: 90 };
+  try {
+    setPref("zh");
+    const html = renderToStaticMarkup(createElement(BatteryCard, { b, t }));
+    for (const s of ["温度", "31 °C", "90 W"]) expect(html).toContain(s);
+    expect(renderToStaticMarkup(createElement(BatteryCard, { b: { ...b, plugged: false, full: false }, t }))).not.toContain("90 W");
+    const unknown = renderToStaticMarkup(createElement(BatteryCard, { b: { ...b, temperature: 0, adapterWatts: 0 }, t }));
+    expect(unknown).not.toContain("°C");
+    expect(unknown).not.toContain("90 W");
+  } finally { setPref("system"); }
+});
+
+test("English machine strings", async () => {
+  const { setPref } = await import("../src/i18n");
+  try {
+    setPref("en");
+    expect(t("status.spec.cpuSplit", { n: 12, p: 8, e: 4 })).toBe("12-core CPU (8P + 4E)");
+    expect(t("status.health.noFans")).toBe("No fans");
+    expect(t("status.alert.viewInProcess")).toBe("See what's using memory");
+    expect(t("status.ssd.warn.spare")).toBe("Low spare blocks");
+  } finally { setPref("system"); }
 });
