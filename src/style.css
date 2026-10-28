@@ -1426,10 +1426,10 @@ body {
 .mlegend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
 .mlegend li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mlegend li b { margin-left: auto; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
-/* Windows memory and disk legends use full-width rows to keep labels and units intact. */
-.mlegend.mlegend-win { grid-template-columns: minmax(0, 1fr); }
-.mlegend-win li > span { overflow: visible; text-overflow: clip; flex: none; }
-.mlegend-win li b { flex: none; white-space: nowrap; }
+/* Full-width rows keep labels and units intact: the Windows memory and disk legends, and the macOS CPU split and GPU lists. */
+.mlegend.mlegend-win, .mlegend.mlegend-rows { grid-template-columns: minmax(0, 1fr); }
+.mlegend-win li > span, .mlegend-rows li > span { overflow: visible; text-overflow: clip; flex: none; }
+.mlegend-win li b, .mlegend-rows li b { flex: none; white-space: nowrap; }
 .mdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 
 /* CPU 负载三格占图例槽 */
@@ -1501,11 +1501,16 @@ body {
 .st-htile .v.ok { color: var(--accent-strong); }
 .st-htile .v.warn { color: var(--warn-text); }
 .st-htile .v.crit { color: var(--danger); }
+.st-htile.st-skel .sk-line { margin-top: 0; }
+.st-htile.st-skel .sk-line + .sk-line { margin-top: 10px; height: 16px; }
 /* 卡片标题右侧的说明（网络的连接方式） */
 .mhead-note { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); }
-/* 网络卡：下载、上传两个数并排 */
+/* macOS 首页六张卡：最多三列，每列至少 280px，窗口窄时自动折成两列、一列 */
+.st-grid.st-grid-machine { grid-template-columns: repeat(auto-fill, minmax(max(280px, calc((100% - 32px) / 3)), 1fr)); }
+/* 网络卡：下载、上传两组数各自不折行，卡片窄时第二组换到下一行 */
+.mhero-duo { flex-wrap: wrap; column-gap: 10px; row-gap: 2px; }
+.mhero-duo .mdir { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
 .mhero-duo b { font-size: 22px; }
-.mhero .mgap { margin-left: 10px; }
 
 /* ---- 应用列表卡 ---- */
 .st-listcard {

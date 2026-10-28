@@ -186,7 +186,7 @@ export function CpuCard({ cpu, cores, hist, t, m, split }: {
         {loads.map(([label, v], i) => <div key={i}><span>{label}</span><b>{v}</b></div>)}
       </div>}
       {m && (m.perfCpu >= 0 || m.effCpu >= 0) && (
-        <ul className="mlegend num">
+        <ul className="mlegend num mlegend-rows">
           {m.perfCpu >= 0 && <li><span>{split?.perf ? t("status.cpu.perfN", { n: split.perf }) : t("status.cpu.perf")}</span><b>{fmtPct(m.perfCpu)}</b></li>}
           {m.effCpu >= 0 && <li><span>{split?.eff ? t("status.cpu.effN", { n: split.eff }) : t("status.cpu.eff")}</span><b>{fmtPct(m.effCpu)}</b></li>}
         </ul>
@@ -213,7 +213,7 @@ export function DiskCard({ d, t, onClean, ssd, live }: {
     <article className="mcard cz-fade-in">
       <div className="mhead">
         <DiskIcon /><span>{t("status.card.disk")}</span>
-        {warns.length > 0 && <em className="mbadge crit" title={warns.map((k) => t(k)).join("、")}>{t("status.ssd.attention")}</em>}
+        {warns.length > 0 && <em className="mbadge crit" title={warns.map((k) => t(k)).join(currentLang() === "zh" ? "、" : ", ")}>{t("status.ssd.attention")}</em>}
       </div>
       <div className="mhero num"><NumberTicker as="b" value={d.free} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}{ssd?.model ? ` · ${ssd.model}` : ""}</div>
@@ -283,7 +283,7 @@ export function GpuCard({ m, cores, displays, hist, t }: { m: MachineSample; cor
         : <div className="mhero num"><b className="ph">—</b></div>}
       <div className="mhcapt">{t("status.gpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} tone="gpu" /></div>
-      <ul className="mlegend num">
+      <ul className="mlegend num mlegend-rows">
         <li><span>{t("status.gpu.memory")}</span><b>{fmtMem(m.gpuMemory)}</b></li>
         <li><span>{t("status.gpu.displays")}</span><b>{displays > 0 ? t("status.gpu.displayCount", { n: displays }) : "—"}</b></li>
       </ul>
@@ -300,8 +300,8 @@ export function NetCard({ m, hist, t }: { m: MachineSample; hist: number[]; t: T
     <article className="mcard cz-fade-in">
       <div className="mhead"><NetIcon /><span>{t("status.card.network")}</span>{kind && <span className="mhead-note">{kind}</span>}</div>
       <div className="mhero mhero-duo num">
-        <i>↓</i><b>{down}</b><i>{downUnit}</i>
-        <i className="mgap">↑</i><b>{up}</b><i>{upUnit}</i>
+        <span className="mdir"><i aria-hidden="true">↓</i><span className="sr-only">{t("status.net.down")}</span><b>{down}</b><i>{downUnit}</i></span>
+        <span className="mdir"><i aria-hidden="true">↑</i><span className="sr-only">{t("status.net.up")}</span><b>{up}</b><i>{upUnit}</i></span>
       </div>
       <div className="mhcapt">{t("status.net.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} max={netSparkMax(hist)} tone="net" /></div>
@@ -320,17 +320,17 @@ const THERMAL = [
 
 /** 健康条（设计 §三.2）：读不到的格子整格省掉，四格都读不到时整条不出现。 */
 export function HealthStrip({ m, t }: { m: MachineSample; t: T }) {
-  const tiles: Array<{ key: string; label: string; value: React.ReactNode; tone?: string }> = [];
+  const tiles: Array<{ key: string; label: string; value: React.ReactNode; tone?: string; title?: string }> = [];
   const thermal = m.thermal >= 0 ? THERMAL[Math.min(m.thermal, THERMAL.length - 1)] : undefined;
   if (thermal) tiles.push({ key: "thermal", label: t("status.health.thermal"), value: t(thermal.key), tone: thermal.tone });
   if (m.chipTemp > 0) tiles.push({ key: "chip", label: t("status.health.chipTemp"), value: fmtTemp(m.chipTemp) });
   if (m.fanCount === 0) {
     tiles.push({ key: "fans", label: t("status.health.fans"), value: t("status.health.noFans") });
   } else if (m.fanCount > 0 && m.fans.length > 0) {
-    const value = m.fans.every((rpm) => rpm < 1)
-      ? t("status.health.fansIdle")
-      : <>{m.fans.join(" · ")} <small>rpm</small></>;
-    tiles.push({ key: "fans", label: t("status.health.fans"), value });
+    const idle = m.fans.every((rpm) => rpm < 1);
+    const value = idle ? t("status.health.fansIdle") : <>{m.fans.join(" · ")} <small>rpm</small></>;
+    // 三个以上风扇时格子放不下，悬停看全
+    tiles.push({ key: "fans", label: t("status.health.fans"), value, title: idle ? undefined : `${m.fans.join(" · ")} rpm` });
   }
   if (m.power > 0) tiles.push({ key: "power", label: t("status.health.power"), value: `${Math.round(m.power)} W` });
   if (tiles.length === 0) return null;
@@ -339,7 +339,7 @@ export function HealthStrip({ m, t }: { m: MachineSample; t: T }) {
       {tiles.map((x) => (
         <div key={x.key} className="st-htile">
           <span className="k">{x.label}</span>
-          <b className={x.tone ? `v num ${x.tone}` : "v num"}>{x.value}</b>
+          <b className={x.tone ? `v num ${x.tone}` : "v num"} title={x.title}>{x.value}</b>
         </div>
       ))}
     </section>
@@ -357,6 +357,15 @@ const SkRow = () => (
   <div className="st-row st-skel-row">
     <div className="sk-line w40" /><div className="sk-line w60" /><div className="sk-line w70" /><div className="sk-line w50" />
   </div>
+);
+
+/** 健康条的骨架：首份采样到达前先占住高度，卡片不会在采样到达时往下跳。 */
+const SkHealth = () => (
+  <section className="st-health" aria-hidden="true">
+    {Array.from({ length: 4 }, (_, i) => (
+      <div key={i} className="st-htile st-skel"><div className="sk-line w40" /><div className="sk-line w60" /></div>
+    ))}
+  </section>
 );
 
 export interface StatusPageProps {
@@ -648,7 +657,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
         )}
       </header>
 
-      {!isWindows() && !error && sample?.machine && <HealthStrip m={sample.machine} t={t} />}
+      {!isWindows() && !error && (sample ? sample.machine && <HealthStrip m={sample.machine} t={t} /> : <SkHealth />)}
 
       {/* 与原生 #st-alerts 一致：告警始终占一个区块位（为空时也保留节奏），多条告警紧贴排列。 */}
       <div className="st-alerts">
@@ -711,7 +720,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
           </button>
         </div>
       ) : (
-        <section className="st-grid" aria-label="指标卡">
+        <section className={isWindows() ? "st-grid" : "st-grid st-grid-machine"} aria-label="指标卡">
           {sample ? (
             isWindows() ? (
               <>

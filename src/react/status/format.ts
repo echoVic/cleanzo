@@ -218,11 +218,11 @@ export function modelLabel(model: string, modelId: string, lang: Lang): { name: 
   return { name: family ? family[1] : "Mac", note: id };
 }
 
-/** 每秒字节 → [数, 单位]，十进制（和活动监视器一致）：<1 MB/s 用 KB/s 取整，以上一位小数；负数或 NaN = 读不到 → ["—", ""]。 */
+/** 每秒字节 → [数, 单位]，十进制（和活动监视器一致）：<1 MB/s 用 KB/s 取整，以上一位小数；按取整后的值选单位，不会出现 "1000 KB/s"；负数或 NaN = 读不到 → ["—", ""]。 */
 export function fmtRate(bps: number): [string, string] {
   if (!(bps >= 0)) return ["—", ""];
-  if (bps >= 1e9) return [(bps / 1e9).toFixed(1), "GB/s"];
-  if (bps >= 1e6) return [(bps / 1e6).toFixed(1), "MB/s"];
+  if (bps >= 999.95e6) return [(bps / 1e9).toFixed(1), "GB/s"];
+  if (bps >= 999.5e3) return [(bps / 1e6).toFixed(1), "MB/s"];
   return [String(Math.round(bps / 1e3)), "KB/s"];
 }
 

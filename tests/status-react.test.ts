@@ -358,6 +358,9 @@ test("machine numbers format without NaN: rates, temperatures, drive sizes", () 
   expect(fmtRate(1_500)).toEqual(["2", "KB/s"]);
   expect(fmtRate(1_230_000)).toEqual(["1.2", "MB/s"]);
   expect(fmtRate(2_500_000_000)).toEqual(["2.5", "GB/s"]);
+  // 按取整后的值选单位：不会出现 "1000 KB/s" 或 "1000.0 MB/s"
+  expect(fmtRate(999_600)).toEqual(["1.0", "MB/s"]);
+  expect(fmtRate(999_960_000)).toEqual(["1.0", "GB/s"]);
   expect(fmtRateText(-1)).toBe("—");
   expect(fmtRateText(10_300_000)).toBe("10.3 MB/s");
   expect(fmtTemp(0)).toBe("—");
@@ -406,6 +409,12 @@ test("the health strip shows what it read and leaves out the rest", async () => 
     const hot = html(machineSample({ thermal: 2 }));
     expect(hot).toContain("很热");
     expect(hot).toContain('class="v num crit"');
+    const warm = html(machineSample({ thermal: 1 }));
+    expect(warm).toContain("偏热");
+    expect(warm).toContain('class="v num warn"');
+    expect(html(machineSample({ thermal: 3 }))).toContain("过热");
+    expect(html(machineSample({ thermal: 7 }))).toContain("过热"); // 超出四档按最高一档
+    expect(full).toContain('title="1333 · 1464 rpm"');
     // MacBook Air 没有风扇：写「无风扇」，不写 0
     expect(html(machineSample({ fanCount: 0, fans: [] }))).toContain("无风扇");
     expect(html(machineSample({ fans: [0, 0] }))).toContain("未转动");
@@ -428,6 +437,7 @@ test("the macOS CPU card splits performance and efficiency cores", async () => {
     const base = { cpu: sample().cpu, cores: 12, hist: [10], t };
     const split = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample(), split: { perf: 8, eff: 4 } }));
     for (const s of ["性能核（8）", "31%", "能效核（4）", "58%"]) expect(split).toContain(s);
+    expect(split).toContain('class="mlegend num mlegend-rows"');
     // 核数还没读到：只写「性能核」「能效核」
     const counts = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample() }));
     expect(counts).toContain("性能核");
@@ -453,6 +463,9 @@ test("the GPU and network cards show live numbers, and dashes until they are kno
 
     const net = renderToStaticMarkup(createElement(NetCard, { m: machineSample(), hist: [120_000, 90_000], t }));
     for (const s of ["网络", '<span class="mhead-note">Wi-Fi</span>', "120", "110", "KB/s", "只算 Wi-Fi 和以太网"]) expect(net).toContain(s);
+    expect(net).toContain('<i aria-hidden="true">↓</i><span class="sr-only">下载</span>');
+    expect(net).toContain('<span class="sr-only">上传</span>');
+    expect(gpu).toContain('class="mlegend num mlegend-rows"');
     const wired = renderToStaticMarkup(createElement(NetCard, { m: machineSample({ netKind: "ethernet" }), hist: [], t }));
     expect(wired).toContain('<span class="mhead-note">以太网</span>');
     // 第一份采样还没有速度：写「—」，不写 -1，也不写连接方式
