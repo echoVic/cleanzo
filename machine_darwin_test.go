@@ -5,10 +5,11 @@ package main
 import "testing"
 
 func TestReadMachineInfoLive(t *testing.T) {
-	// NSScreen wants the main thread, which a test binary never serves, so
-	// the names stay out here; the reviewer checks them in the app.
+	// NSScreen wants the main thread, which a test binary never serves; run
+	// the closure on this goroutine instead, as TestWorkspaceListRuns does
+	// for NSWorkspace.
 	prev := runOnMain
-	runOnMain = func(func()) {}
+	runOnMain = func(f func()) { f() }
 	t.Cleanup(func() { runOnMain = prev })
 
 	info := readMachineInfo()
@@ -38,6 +39,11 @@ func TestReadMachineInfoLive(t *testing.T) {
 	if info.Model == "" || info.ModelID == "" || info.PerfCores == 0 || info.EffCores == 0 ||
 		info.GPUCores == 0 || len(info.Displays) == 0 || info.DisplaySig == "" {
 		t.Errorf("on a real Mac every identity field reads: %+v", info)
+	}
+	for _, d := range info.Displays {
+		if d.Name == "" {
+			t.Errorf("display %d has no name", d.ID)
+		}
 	}
 	if s := info.SSD; s == nil || s.Model == "" || s.Capacity == 0 || !s.SMART || s.Written == 0 {
 		t.Errorf("on a real Mac the SSD and its SMART log read: %+v", s)

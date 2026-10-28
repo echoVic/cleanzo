@@ -23,7 +23,7 @@ type MachineInfo struct {
 	GPUCores   int           `json:"gpuCores"`   // GPU cores
 	Displays   []DisplayInfo `json:"displays"`   // the active displays; never null
 	DisplaySig string        `json:"displaySig"` // the active displays' IDs; samples carry it too, so the page re-reads on a change
-	SSD        *SSDInfo      `json:"ssd"`        // nil: no internal NVMe drive could be read
+	SSD        *SSDInfo      `json:"ssd"`        // nil: nothing about the internal drive could be read
 }
 
 // DisplayInfo is one active display in its current mode.

@@ -513,7 +513,7 @@ export interface MachineInfo {
   displays: DisplayInfo[];
   /** the active displays' IDs; samples carry it too, so the page re-reads on a change */
   displaySig: string;
-  /** nil: no internal NVMe drive could be read */
+  /** nil: nothing about the internal drive could be read */
   ssd: SSDInfo | null;
 }
 

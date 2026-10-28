@@ -40,7 +40,9 @@ func readMachineInfo() MachineInfo {
 
 // coreCounts splits the physical cores by performance level. Each level
 // carries its name, so the order of perflevel0 and perflevel1 doesn't
-// matter.
+// matter. A level with another name (a future core type) makes the split
+// unknown rather than wrong: both counts come back 0 and the page leaves
+// the split out.
 func coreCounts() (perf, eff int) {
 	levels := int(nativeSysctlUint64("hw.nperflevels"))
 	for i := 0; i < levels; i++ {
@@ -51,6 +53,9 @@ func coreCounts() (perf, eff int) {
 		case "Efficiency":
 			eff = n
 		}
+	}
+	if perf+eff != int(nativeSysctlUint64("hw.physicalcpu")) {
+		return 0, 0
 	}
 	return perf, eff
 }
@@ -147,7 +152,8 @@ func screenNames() map[uint32]string {
 }
 
 // readSSD reads the internal NVMe drive: model, size and SMART health. nil
-// when there is nothing to read, as in a virtual machine.
+// when none of it can be read; a virtual machine's boot disk still reports
+// its size, without a model or a SMART log.
 func readSSD() *SSDInfo {
 	ssd := SSDInfo{Model: nvmeModel(), Capacity: internalDiskSize()}
 	if page, ok := nvmeSMARTLog(); ok {
@@ -159,9 +165,13 @@ func readSSD() *SSDInfo {
 	return &ssd
 }
 
-// nvmeModel is the NVMe controller's model number.
+// nvmeModel is the internal NVMe controller's model number. Drives in
+// Thunderbolt or USB4 enclosures are NVMe too; they say they're external.
 func nvmeModel() (model string) {
 	ioEach("IONVMeController", func(s uint32) bool {
+		if ioPropString(s, "Physical Interconnect Location") == "External" {
+			return true
+		}
 		model = strings.TrimSpace(ioPropString(s, "Model Number"))
 		return model == ""
 	})
@@ -219,6 +229,9 @@ func nvmeSMARTLog() (page [512]byte, ok bool) {
 			return true
 		}
 		cfRelease(capable)
+		if nvmeExternal(s) {
+			return true
+		}
 		var iface uintptr
 		var score int32
 		if ioCreatePlugInInterfaceForService(s, userClient, plugIn, &iface, &score) != 0 || iface == 0 {
@@ -243,6 +256,14 @@ func nvmeSMARTLog() (page [512]byte, ok bool) {
 		return false
 	})
 	return page, ok
+}
+
+// nvmeExternal reports whether a block device says it sits outside the
+// Mac, like a drive in a Thunderbolt enclosure.
+func nvmeExternal(s uint32) bool {
+	characteristics := ioProp(s, "Protocol Characteristics")
+	defer cfRelease(characteristics)
+	return cfGoString(cfDictValue(characteristics, "Physical Interconnect Location")) == "External"
 }
 
 // cfUUID makes a CFUUID from its text form (+1; release it).
