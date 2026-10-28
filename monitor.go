@@ -90,7 +90,7 @@ type StatusSample struct {
 	Disk    DiskStat       `json:"disk"`
 	Battery *BatteryStatus `json:"battery"` // nil: desktop Mac, or not read yet
 	Apps    []AppUsage     `json:"apps"`    // always empty on macOS, where the 进程 page lists apps
-	Procs   int            `json:"procs"`   // processes counted, this user only
+	Procs   int            `json:"procs"`   // processes counted, this user only; 0 on macOS, where the home page lists no apps
 	Machine *MachineSample `json:"machine"` // the home page's machine readings; macOS only, nil elsewhere
 }
 

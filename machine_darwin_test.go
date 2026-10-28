@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"maps"
 	"os"
 	"syscall"
@@ -113,6 +114,9 @@ func TestInterfaceBytesLive(t *testing.T) {
 	counts := interfaceBytes()
 	t.Logf("%d interfaces; en0 %+v", len(counts), counts["en0"])
 	if len(counts) == 0 {
+		if onThisMac() {
+			t.Fatal("the interface list reads on a real Mac")
+		}
 		t.Skip("the interface list is not readable here")
 	}
 	if _, ok := counts["lo0"]; !ok {
@@ -165,7 +169,7 @@ func TestMachineReaderLive(t *testing.T) {
 	}
 	if s.Thermal < 0 || s.ChipTemp < 15 || s.ChipTemp > 110 || s.FanCount < 0 || s.Power <= 0 ||
 		s.PerfCPU < 0 || s.EffCPU < 0 || s.GPU < 0 || s.GPUMemory == 0 || s.DiskRead < 0 || s.NetDown < 0 ||
-		s.NetKind == "" || s.DiskTemp <= 0 || s.DisplaySig == "" {
+		s.NetKind == "" || s.DiskTemp <= 0 || s.DisplaySig == "" || len(s.Fans) != s.FanCount {
 		t.Errorf("on a real Mac every live reading is known: %+v", *s)
 	}
 }
@@ -207,7 +211,7 @@ func TestStatusSamplingBudget(t *testing.T) {
 	samples := 0
 	var last *MachineSample
 	before, start := rusageCPU(), time.Now()
-	_ = watchStatusWith(ctx, func(s StatusSample) error {
+	err := watchStatusWith(ctx, func(s StatusSample) error {
 		samples++
 		last = s.Machine
 		_, err := json.Marshal(s)
@@ -217,6 +221,12 @@ func TestStatusSamplingBudget(t *testing.T) {
 	pct := used.Seconds() / wall.Seconds() * 100
 	t.Logf("%d samples, CPU %v in %v: %.2f%% of one core; last machine reading %+v",
 		samples, used.Round(time.Millisecond), wall.Round(time.Second), pct, last)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the loop stopped early: %v", err)
+	}
+	if samples < 25 {
+		t.Errorf("%d samples in 60 s, want about 30", samples)
+	}
 	if pct > 1 {
 		t.Errorf("sampling used %.2f%% of one core, budget 1%%", pct)
 	}

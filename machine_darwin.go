@@ -397,6 +397,7 @@ func (r *machineReader) close() {
 	cfRelease(r.store)
 	r.hidServices, r.hid, r.primaryKey, r.store = 0, 0, 0, 0
 	r.dies, r.nand = nil, 0
+	r.rot = sensorRotation{}
 }
 
 // ---- CPU clusters -------------------------------------------------------------
@@ -600,7 +601,9 @@ func (r *machineReader) readNetwork(s *MachineSample, elapsed time.Duration) {
 	counts := interfaceBytes()
 	primary := r.primaryInterface()
 	if _, seen := r.ifKinds[primary]; !seen && strings.HasPrefix(primary, "en") {
-		r.ifKinds = interfaceKinds() // an adapter plugged in since the page opened
+		for name, kind := range interfaceKinds() { // an adapter plugged in since the page opened
+			r.ifKinds[name] = kind
+		}
 		if _, seen := r.ifKinds[primary]; !seen {
 			r.ifKinds[primary] = "" // don't ask again for this one
 		}
@@ -729,12 +732,13 @@ func (r *machineReader) smcRead(key string) (typ uint32, data []byte, ok bool) {
 	k := smcKey(key)
 	info, known := r.smcKeys[k]
 	if !known {
-		out, ok := r.smcCall(&smcParam{Key: k, Data8: smcReadKeyInfo})
-		if !ok {
-			return 0, nil, false
+		if out, ok := r.smcCall(&smcParam{Key: k, Data8: smcReadKeyInfo}); ok {
+			info = smcKeyInfo{size: out.DataSize, typ: out.DataType}
 		}
-		info = smcKeyInfo{size: out.DataSize, typ: out.DataType}
-		r.smcKeys[k] = info
+		r.smcKeys[k] = info // a key this Mac lacks stays at size 0 and isn't asked for again
+	}
+	if info.size == 0 {
+		return 0, nil, false
 	}
 	out, ok := r.smcCall(&smcParam{Key: k, DataSize: info.size, Data8: smcReadBytes})
 	if !ok || info.size > uint32(len(out.Bytes)) {
@@ -749,16 +753,24 @@ func (r *machineReader) smcFloat(key string) (float64, bool) {
 	if !ok || typ != smcKey("flt ") || len(b) != 4 {
 		return 0, false
 	}
-	return float64(math.Float32frombits(binary.LittleEndian.Uint32(b))), true
+	v := float64(math.Float32frombits(binary.LittleEndian.Uint32(b)))
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false // JSON can't carry them: the sample would fail to send
+	}
+	return v, true
 }
 
-// fanSpeeds reads each fan's current speed (F<i>Ac); never nil.
+// fanSpeeds reads each fan's current speed (F<i>Ac). If any fan can't be
+// read the speeds are unknown (empty), so a gap never moves a reading onto
+// the wrong fan. Never nil.
 func (r *machineReader) fanSpeeds() []int {
 	speeds := []int{}
 	for i := 0; i < r.fans; i++ {
-		if v, ok := r.smcFloat(fmt.Sprintf("F%dAc", i)); ok && v >= 0 {
-			speeds = append(speeds, int(math.Round(v)))
+		v, ok := r.smcFloat(fmt.Sprintf("F%dAc", i))
+		if !ok || v < 0 {
+			return []int{}
 		}
+		speeds = append(speeds, int(math.Round(v)))
 	}
 	return speeds
 }
@@ -838,7 +850,7 @@ func sensorCelsius(service uintptr) float64 {
 	}
 	defer cfRelease(event)
 	t := hidEventGetFloatValue(event, hidTemperatureField)
-	if t <= 0 || t > 150 {
+	if !(t > 0 && t <= 150) { // also rejects NaN, which JSON can't carry
 		return 0
 	}
 	return t

@@ -894,7 +894,7 @@ export interface StatusSample {
   battery: BatteryStatus | null;
   /** always empty on macOS, where the 进程 page lists apps */
   apps: AppUsage[];
-  /** processes counted, this user only */
+  /** processes counted, this user only; 0 on macOS, where the home page lists no apps */
   procs: number;
   /** the home page's machine readings; macOS only, nil elsewhere */
   machine: MachineSample | null;
