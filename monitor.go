@@ -116,7 +116,7 @@ type statusSource struct {
 	disk      func() DiskStat
 	terminate func(pid int32) bool
 	group     func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
-	machine   machineSampler                                                               // optional: the live machine readings (macOS)
+	machine   func() machineSampler                                                        // optional: opens the live machine readings (macOS)
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -786,11 +786,15 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 	// The previous snapshots are taken before the half-second wait, so the
 	// first sample's usage and per-app CPU are measured over a real 500ms
 	// interval, not two adjacent reads.
+	var machine machineSampler
+	if src.machine != nil {
+		machine = src.machine() // after the battery read has started, so it doesn't wait on this
+	}
 	prevProcs := readProcState(src)
 	prevCPU := readCPUTicks(src)
-	if src.machine != nil {
-		defer src.machine.close()
-		src.machine.read(time.Now()) // starts its counters over the same wait
+	if machine != nil {
+		defer machine.close()
+		machine.read(time.Now()) // starts its counters over the same wait
 	}
 	prevAt := time.Now()
 	if err := sleepCtx(ctx, statusFirstDelay); err != nil {
@@ -810,8 +814,8 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 		prevAt = time.Now()
 		sample := buildSample(prevProcs, curProcs, prevCPU, curCPU, src, elapsed)
 		sample.Battery = latest
-		if src.machine != nil {
-			sample.Machine = src.machine.read(time.Now())
+		if machine != nil {
+			sample.Machine = machine.read(time.Now())
 		}
 
 		// A battery result that arrived while sampling is used next round;

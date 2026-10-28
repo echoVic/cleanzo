@@ -14,6 +14,7 @@ import (
 	"math"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -218,15 +219,44 @@ const (
 	comSMARTReadData  = 40
 )
 
+var (
+	smartMu   sync.Mutex
+	smartLast *[512]byte // the last log read, for when the drive is busy
+)
+
 // nvmeSMARTLog reads the internal drive's SMART log through macOS's NVMe
 // SMART plug-in. It needs no administrator rights (checked 2026-10-28 as
-// uid 501).
-func nvmeSMARTLog() (page [512]byte, ok bool) {
+// uid 501). The plug-in admits one reader at a time across the system, so
+// reads are serialized here, retried while another program holds it, and
+// fall back to the last log read.
+func nvmeSMARTLog() ([512]byte, bool) {
+	smartMu.Lock()
+	defer smartMu.Unlock()
+	for try := 0; try < 3; try++ {
+		page, ok, busy := nvmeSMARTRead()
+		if ok {
+			smartLast = &page
+			return page, true
+		}
+		if !busy {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if smartLast != nil {
+		return *smartLast, true
+	}
+	return [512]byte{}, false
+}
+
+// nvmeSMARTRead reads the SMART log once. busy reports that a drive was
+// there but another reader held the plug-in.
+func nvmeSMARTRead() (page [512]byte, ok, busy bool) {
 	userClient, plugIn := cfUUID(nvmeSMARTUserClientTypeID), cfUUID(ioCFPlugInInterfaceID)
 	defer cfRelease(userClient)
 	defer cfRelease(plugIn)
 	if userClient == 0 || plugIn == 0 {
-		return page, false
+		return page, false, false
 	}
 	ioEach("IONVMeBlockStorageDevice", func(s uint32) bool {
 		capable := ioProp(s, "NVMe SMART Capable")
@@ -239,7 +269,9 @@ func nvmeSMARTLog() (page [512]byte, ok bool) {
 		}
 		var iface uintptr
 		var score int32
-		if ioCreatePlugInInterfaceForService(s, userClient, plugIn, &iface, &score) != 0 || iface == 0 {
+		if rc := ioCreatePlugInInterfaceForService(s, userClient, plugIn, &iface, &score); rc != 0 || iface == 0 {
+			// kIOReturnNoResources or kIOReturnExclusiveAccess: someone else has it open.
+			busy = busy || uint32(rc) == 0xe00002be || uint32(rc) == 0xe00002c5
 			return true
 		}
 		defer ioDestroyPlugInInterface(iface)
@@ -260,7 +292,7 @@ func nvmeSMARTLog() (page [512]byte, ok bool) {
 		page, ok = *buf, true
 		return false
 	})
-	return page, ok
+	return page, ok, busy
 }
 
 // nvmeExternal reports whether a block device says it sits outside the

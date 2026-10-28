@@ -10,7 +10,7 @@ export function setGoCleanHandler(fn: () => void) {
   goClean.fn = fn;
 }
 
-/** 增长提示的「查看」、列表的「查看全部」：打开进程页的某个标签（main.ts 注入）。 */
+/** 增长提示的「查看」、内存提示的「看谁在占内存」：打开进程页的某个标签（main.ts 注入）。 */
 export function setGoProcessHandler(fn: (tab: ProcessTab, focusKey?: string) => void) {
   goProcess.fn = fn;
 }

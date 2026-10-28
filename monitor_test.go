@@ -553,7 +553,7 @@ func TestWatchStatusWithoutAppList(t *testing.T) {
 	src := fakeSource()
 	src.procs, src.apps = nil, nil // macOS: the home page lists no apps
 	machine := &fakeMachine{}
-	src.machine = machine
+	src.machine = func() machineSampler { return machine }
 	ctx, cancel := context.WithCancel(context.Background())
 	got := make(chan StatusSample, 1)
 	done := make(chan error, 1)

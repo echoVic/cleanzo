@@ -349,6 +349,8 @@ test("modelLabel splits the device-tree name and localizes the details", () => {
   expect(modelLabel("", "Mac14,10", "zh")).toEqual({ name: "Mac", note: "Mac14,10" });
   expect(modelLabel("", "MacBookAir10,1", "en")).toEqual({ name: "MacBook Air", note: "MacBookAir10,1" });
   expect(modelLabel(" ", "", "zh")).toEqual({ name: "", note: "" });
+  // 「M3 Pro or M3 Max」这种段不进标题：芯片在规格行里
+  expect(modelLabel("MacBook Pro (14-inch, M3 Pro or M3 Max, Nov 2023)", "Mac15,8", "zh").note).toBe("14 英寸 · 2023 年 11 月");
 });
 
 test("machine numbers format without NaN: rates, temperatures, drive sizes", () => {
@@ -460,6 +462,9 @@ test("the GPU and network cards show live numbers, and dashes until they are kno
     const gpuUnknown = renderToStaticMarkup(createElement(GpuCard, { m: machineSample({ gpu: -1, gpuMemory: 0 }), cores: 0, displays: 0, hist: [], t }));
     expect(gpuUnknown).toContain('<b class="ph">—</b>');
     expect(gpuUnknown).not.toMatch(/NaN|undefined|>-1/);
+    // 读不到的行整行省掉
+    expect(gpuUnknown).not.toContain("占用的内存");
+    expect(gpuUnknown).not.toContain("mlegend");
 
     const net = renderToStaticMarkup(createElement(NetCard, { m: machineSample(), hist: [120_000, 90_000], t }));
     for (const s of ["网络", '<span class="mhead-note">Wi-Fi</span>', "120", "110", "KB/s", "只算 Wi-Fi 和以太网"]) expect(net).toContain(s);

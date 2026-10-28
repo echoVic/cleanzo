@@ -87,7 +87,7 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
       {m.total
         ? (
           <div className="mhero num">
-            <NumberTicker as="b" value={m.used} format={(v) => splitMem(v)[0]} /><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
+            <NumberTicker as="b" value={m.used} fps={15} format={(v) => splitMem(v)[0]} /><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
           </div>
         )
         : <div className="mhero num"><b className="ph">—</b></div>}
@@ -121,6 +121,9 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
 }
 
 const SPARK_STEP = 120 / (SPARK_POINTS - 1);
+/** 平移时 svg 多画一格：宽 120 + 一格，平移一格占 svg 自身宽度的百分比。 */
+const SPARK_WIDE = 120 + SPARK_STEP;
+const SPARK_SHIFT_PCT = (SPARK_STEP / SPARK_WIDE) * 100;
 /** 曲线配色：CPU 用主题色，GPU 紫、网络蓝（与内存条的联动、App 两色一致）。 */
 const SPARK_TONE = {
   accent: { stroke: "var(--accent)", fill: "var(--accent-soft)", fillOpacity: undefined },
@@ -130,7 +133,7 @@ const SPARK_TONE = {
 
 /** 30 点面积曲线，纵轴 0–max（默认 0–100%）；重开采样时缓冲清空，不足 2 点不画。 */
 function SparkSvg({ hist, max = 100, tone = "accent" }: { hist: number[]; max?: number; tone?: keyof typeof SPARK_TONE }) {
-  const group = React.useRef<SVGGElement>(null);
+  const svg = React.useRef<SVGSVGElement>(null);
   const prev = React.useRef<number[]>(hist);
   const ms = dur("spark");
   // 同一次采样保留同一组点，悬停等重渲染不打断平移。
@@ -141,10 +144,11 @@ function SparkSvg({ hist, max = 100, tone = "accent" }: { hist: number[]; max?: 
   }, [hist, ms]);
   React.useLayoutEffect(() => {
     prev.current = hist;
-    const g = group.current;
-    if (!g) return;
-    g.getAnimations().forEach((a) => a.cancel());
-    if (shift) void play(g, [{ transform: "translateX(0px)" }, { transform: `translateX(${-SPARK_STEP}px)` }], dur("spark"), EASE.out, { fill: "forwards" });
+    const el = svg.current;
+    if (!el) return;
+    el.getAnimations().forEach((a) => a.cancel());
+    // 移动整张 svg 而不是里面的 <g>：WebKit 把它交给合成器，平移时网页不用每帧重排重画
+    if (shift) void play(el, [{ transform: "translateX(0)" }, { transform: `translateX(-${SPARK_SHIFT_PCT}%)` }], dur("spark"), EASE.out, { fill: "forwards" });
   }, [hist, shift]);
   if (pts.length < 2) return null;
   const top = max > 0 ? max : 100;
@@ -154,11 +158,9 @@ function SparkSvg({ hist, max = 100, tone = "accent" }: { hist: number[]; max?: 
   const area = `${line} L${((pts.length - 1) * SPARK_STEP).toFixed(1)},28 L0,28 Z`;
   return (
     <div className="st-spark" aria-hidden="true">
-      <svg viewBox="0 0 120 28" preserveAspectRatio="none">
-        <g ref={group}>
-          <path fill={c.fill} fillOpacity={c.fillOpacity} d={area} />
-          <path fill="none" stroke={c.stroke} strokeWidth={1.5} strokeLinejoin="round" d={line} />
-        </g>
+      <svg ref={svg} viewBox={`0 0 ${SPARK_WIDE.toFixed(2)} 28`} preserveAspectRatio="none" style={{ width: `${((SPARK_WIDE / 120) * 100).toFixed(3)}%` }}>
+        <path fill={c.fill} fillOpacity={c.fillOpacity} d={area} />
+        <path fill="none" stroke={c.stroke} strokeWidth={1.5} strokeLinejoin="round" d={line} />
       </svg>
     </div>
   );
@@ -179,7 +181,7 @@ export function CpuCard({ cpu, cores, hist, t, m, split }: {
   return (
     <article className="mcard cz-fade-in">
       <div className="mhead"><CpuIcon /><span>{t("status.card.cpu")}</span></div>
-      <div className="mhero num"><NumberTicker as="b" value={cpu.usage} format={(v) => String(Math.round(v))} /><i>%</i></div>
+      <div className="mhero num"><NumberTicker as="b" value={cpu.usage} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{t("status.cpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} /></div>
       {!isWindows() && <div className="mloads num">
@@ -215,7 +217,7 @@ export function DiskCard({ d, t, onClean, ssd, live }: {
         <DiskIcon /><span>{t("status.card.disk")}</span>
         {warns.length > 0 && <em className="mbadge crit" title={warns.map((k) => t(k)).join(currentLang() === "zh" ? "、" : ", ")}>{t("status.ssd.attention")}</em>}
       </div>
-      <div className="mhero num"><NumberTicker as="b" value={d.free} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
+      <div className="mhero num"><NumberTicker as="b" value={d.free} fps={15} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}{ssd?.model ? ` · ${ssd.model}` : ""}</div>
       <div className="mviz"><div className="mbar"><i style={{ width: `${usedPct}%` }} /></div></div>
       <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
@@ -258,7 +260,7 @@ export function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
   return (
     <article className="mcard cz-fade-in">
       <div className="mhead"><BatteryIcon /><span>{t("status.card.battery")}</span>{badge}</div>
-      <div className="mhero num"><NumberTicker as="b" value={b.percent} format={(v) => String(Math.round(v))} /><i>%</i></div>
+      <div className="mhero num"><NumberTicker as="b" value={b.percent} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{state}</div>
       <div className="mviz">
         <div className={`mbar${healthPct > 0 && healthPct < 80 ? " low" : ""}`}><i style={{ width: `${healthPct}%` }} /></div>
@@ -279,14 +281,16 @@ export function GpuCard({ m, cores, displays, hist, t }: { m: MachineSample; cor
     <article className="mcard cz-fade-in">
       <div className="mhead"><GpuIcon /><span>{t("status.card.gpu")}</span></div>
       {m.gpu >= 0
-        ? <div className="mhero num"><NumberTicker as="b" value={m.gpu} format={(v) => String(Math.round(v))} /><i>%</i></div>
+        ? <div className="mhero num"><NumberTicker as="b" value={m.gpu} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
         : <div className="mhero num"><b className="ph">—</b></div>}
       <div className="mhcapt">{t("status.gpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} tone="gpu" /></div>
-      <ul className="mlegend num mlegend-rows">
-        <li><span>{t("status.gpu.memory")}</span><b>{fmtMem(m.gpuMemory)}</b></li>
-        <li><span>{t("status.gpu.displays")}</span><b>{displays > 0 ? t("status.gpu.displayCount", { n: displays }) : "—"}</b></li>
-      </ul>
+      {(m.gpuMemory > 0 || displays > 0) && (
+        <ul className="mlegend num mlegend-rows">
+          {m.gpuMemory > 0 && <li><span>{t("status.gpu.memory")}</span><b>{fmtMem(m.gpuMemory)}</b></li>}
+          {displays > 0 && <li><span>{t("status.gpu.displays")}</span><b>{t("status.gpu.displayCount", { n: displays })}</b></li>}
+        </ul>
+      )}
       <div className="mfoot num">{cores > 0 ? t("status.cpu.cores", { n: cores }) : "—"}</div>
     </article>
   );
@@ -611,7 +615,10 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
     if (machine.ssd && machine.ssd.capacity > 0) specParts.push(t("status.spec.disk", { size: fmtDec(machine.ssd.capacity) }));
     if (osPart) hwParts.push(osPart);
     if (upPart) hwParts.push(upPart);
-    const screens = machine.displays.map((d) => displayText(d, t(d.builtin ? "status.display.builtin" : "status.display.external")));
+    // 内建屏的名字是 macOS 按自己的语言给的（中文界面里会是英文），用我们自己的说法
+    const screens = machine.displays.map((d) => (d.builtin
+      ? displayText({ ...d, name: "" }, t("status.display.builtin"))
+      : displayText(d, t("status.display.external"))));
     if (screens.length > 0) hwParts.push(screens.join(" + "));
   }
 

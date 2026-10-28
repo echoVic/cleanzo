@@ -208,7 +208,8 @@ export function modelLabel(model: string, modelId: string, lang: Lang): { name: 
   const full = model.trim();
   const m = /^(.+?)\s*\((.+)\)$/.exec(full);
   if (m) {
-    const parts = m[2]!.split(",").map((p) => p.trim()).filter(Boolean).map((p) => modelPart(p, lang));
+    // 「M3 Pro or M3 Max」这种段去掉：芯片在规格行里已经写了
+    const parts = m[2]!.split(",").map((p) => p.trim()).filter((p) => p && !/\bor\b/.test(p)).map((p) => modelPart(p, lang));
     return { name: m[1]!, note: parts.join(lang === "zh" ? " · " : ", ") };
   }
   if (full) return { name: full, note: "" };

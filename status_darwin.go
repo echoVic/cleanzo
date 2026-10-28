@@ -18,7 +18,7 @@ func realStatusSource() statusSource {
 		battery:   statusBattery,
 		disk:      diskStat,
 		terminate: workspaceTerminate,
-		machine:   newMachineReader(),
+		machine:   newMachineReader,
 	}
 }
 

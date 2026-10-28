@@ -1,6 +1,6 @@
 import type { Runtime, Channel } from "mygo-runtime";
 import type {
-  Cleaner, LanguageSettings, AppInfo, AppUsage, BigItem, CleanResult, DirItem,
+  Cleaner, LanguageSettings, AppInfo, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample,
@@ -193,14 +193,6 @@ function createRuntime(): Runtime {
     app("微信", "com.tencent.xinWeChat", 980 * MB, "4.1", 0, true, "WeChat"),
     app("OBS Studio", "com.obsproject.obs-studio", 720 * MB, "31.1", -1, false, "OBS"),
   ];
-  const usage = (key: string, name: string, memory: number, cpu: number, procs: number, file = name): AppUsage => ({
-    key, name, path: `/Applications/${file}.app`, memory: memory * GB, cpu, procs, quit: true,
-  });
-  const runningApps: AppUsage[] = [
-    usage("chrome", "Google Chrome", 20.5, 11, 62), usage("arc", "Arc", 11.7, 31, 14),
-    usage("trae", "TRAE CN", 6.1, 10, 79), usage("lark", "飞书", 4.7, 3, 23, "Lark"),
-    usage("doubao", "豆包", 3.8, 2, 35, "Doubao"), usage("cmux", "cmux", 3.7, 5, 66), usage("xcode", "Xcode", 2.6, 18, 9),
-  ];
   const quitted = new Set<string>();
   // 进程页：数字每次抖一点；ToDesk 的 bundle ID 对上 growthSummary 里的提醒，挂「磁盘一天」小标签；系统进程是估算值。
   const jitter = (v: number) => Math.max(0, v * (0.85 + Math.random() * 0.3));
@@ -238,8 +230,8 @@ function createRuntime(): Runtime {
       memory: { total: 32 * GB, used: app + wired + compressed, app, wired, compressed, cached: 3.6 * GB, pressure: 2, swapUsed: 6.2 * GB, swapTotal: 8 * GB },
       cpu: { usage: 39 + Math.sin(n * 0.7) * 31, load1: 2.8 + drift(1), load5: 2.4, load15: 2.1 },
       disk: { ...disk }, battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal", temperature: 30.6, adapterWatts: 90 },
-      apps: runningApps.filter((a) => !quitted.has(a.path)).map((a, i) => ({ ...a, memory: a.memory * (1 + drift(i) * 0.08), cpu: Math.max(0, a.cpu + drift(i + 2) * 14) })),
-      procs: 740 + Math.round(drift(3) * 8),
+      apps: [],
+      procs: 0,
       machine: {
         thermal: 0, chipTemp: 48 + drift(4) * 4, fanCount: 2, fans: [1333, 1464], power: 36 + drift(5) * 6,
         perfCpu: 31 + drift(6) * 20, effCpu: 58 + drift(7) * 20, gpu: 8 + Math.abs(drift(8)) * 20, gpuMemory: 1.1 * GB,

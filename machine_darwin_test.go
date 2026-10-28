@@ -9,6 +9,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -229,5 +230,29 @@ func TestStatusSamplingBudget(t *testing.T) {
 	}
 	if pct > 1 {
 		t.Errorf("sampling used %.2f%% of one core, budget 1%%", pct)
+	}
+}
+
+func TestNVMeSMARTLogSurvivesOverlappingReads(t *testing.T) {
+	if !onThisMac() {
+		t.Skip("needs the real drive: set CLEANZO_HW=1")
+	}
+	if !iokitInit() {
+		t.Fatal("IOKit loads on a real Mac")
+	}
+	var wg sync.WaitGroup
+	ok := make([]bool, 4)
+	for i := range ok {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, ok[i] = nvmeSMARTLog()
+		}(i)
+	}
+	wg.Wait()
+	for i, read := range ok {
+		if !read {
+			t.Errorf("overlapping read %d lost the SMART log", i)
+		}
 	}
 }

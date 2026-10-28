@@ -111,7 +111,7 @@ applyStaticI18n();
 // AI 工具页是 React 挂载的，无需原生初始化；侧栏显隐由后端 listAITools 决定，启动时已安装即可见。
 // 默认落在「系统状态」（HTML 初始高亮已同步），switchView("status") 即开采样。
 void initReactAITools().then(initReactSkills);
-// 状态页的「查看全部」和增长提示：先记下要打开的标签和要定位的行，再切过去。
+// 状态页的增长提示和内存提示：先记下要打开的标签和要定位的行，再切过去。
 setGoProcessHandler((tab, key) => { openReactProcess(tab, key ?? null); switchView("process"); });
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
