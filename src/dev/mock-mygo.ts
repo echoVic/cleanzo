@@ -228,9 +228,10 @@ function createRuntime(): Runtime {
     return {
       memory: { total: 32 * GB, used: app + wired + compressed, app, wired, compressed, cached: 3.6 * GB, pressure: 2, swapUsed: 6.2 * GB, swapTotal: 8 * GB },
       cpu: { usage: 39 + Math.sin(n * 0.7) * 31, load1: 2.8 + drift(1), load5: 2.4, load15: 2.1 },
-      disk: { ...disk }, battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal" },
+      disk: { ...disk }, battery: { percent: 100, charging: false, full: true, plugged: true, cycles: 170, maxCapacity: 83, condition: "Normal", temperature: 0, adapterWatts: 0 },
       apps: runningApps.filter((a) => !quitted.has(a.path)).map((a, i) => ({ ...a, memory: a.memory * (1 + drift(i) * 0.08), cpu: Math.max(0, a.cpu + drift(i + 2) * 14) })),
       procs: 740 + Math.round(drift(3) * 8),
+      machine: null,
     };
   };
 

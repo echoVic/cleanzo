@@ -5,11 +5,12 @@ import (
 	"os/exec"
 )
 
-// realStatusSource wires the loop to the native reads in native.go.
+// realStatusSource wires the loop to the native reads in native.go and
+// machine_darwin.go. It reads no processes and no NSWorkspace list: the
+// home page only talks about the machine, and the 进程 page shows who uses
+// what (design docs/superpowers/specs/2026-10-28-home-machine-design.md).
 func realStatusSource() statusSource {
 	return statusSource{
-		procs: nativeProcs,
-		apps:  workspaceList,
 		memory: func() MemoryStatus {
 			return readMemoryStatus()
 		},
@@ -17,6 +18,7 @@ func realStatusSource() statusSource {
 		battery:   statusBattery,
 		disk:      diskStat,
 		terminate: workspaceTerminate,
+		machine:   newMachineReader(),
 	}
 }
 
@@ -60,12 +62,18 @@ func readSwapUsage() (used, total uint64) {
 
 // statusBattery runs system_profiler, whose JSON is the only source that
 // matches System Settings (it rounds Maximum Capacity itself). Slow, so it
-// lives behind a context deadline and refreshes only once a minute.
+// lives behind a context deadline and refreshes only once a minute. The
+// battery's temperature and the adapter's watts, which it leaves out, come
+// from AppleSmartBattery.
 func statusBattery(ctx context.Context) *BatteryStatus {
 	cmd := exec.CommandContext(ctx, "/usr/sbin/system_profiler", "-json", "SPPowerDataType")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
-	return parseBatteryJSON(out)
+	b := parseBatteryJSON(out)
+	if b != nil {
+		b.Temperature, b.AdapterWatts = smartBatteryExtras(b.Plugged)
+	}
+	return b
 }

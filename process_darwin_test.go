@@ -261,13 +261,7 @@ func TestProcessSamplingBudget(t *testing.T) {
 	// NSWorkspace needs the app's main thread; calling it directly in a
 	// test binary can crash because tests run on a non-main thread.
 	src.apps = func() []workspaceApp { return nil }
-	usage := func() time.Duration {
-		var self, kids syscall.Rusage
-		_ = syscall.Getrusage(syscall.RUSAGE_SELF, &self)
-		_ = syscall.Getrusage(syscall.RUSAGE_CHILDREN, &kids)
-		tv := func(v syscall.Timeval) time.Duration { return time.Duration(v.Nano()) }
-		return tv(self.Utime) + tv(self.Stime) + tv(kids.Utime) + tv(kids.Stime)
-	}
+	usage := rusageCPU
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	samples, rows := 0, 0

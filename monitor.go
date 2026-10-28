@@ -65,6 +65,9 @@ type BatteryStatus struct {
 	Cycles      int    `json:"cycles"`
 	MaxCapacity int    `json:"maxCapacity"`
 	Condition   string `json:"condition"` // e.g. "Normal"; "" unknown
+	// macOS only, from AppleSmartBattery; 0 unknown.
+	Temperature  float64 `json:"temperature"`  // °C
+	AdapterWatts int     `json:"adapterWatts"` // the connected adapter's rating; also 0 when not plugged in
 }
 
 // AppUsage is one merged row: a bundle's processes summed up. CPU is a
@@ -86,8 +89,9 @@ type StatusSample struct {
 	CPU     CPUStatus      `json:"cpu"`
 	Disk    DiskStat       `json:"disk"`
 	Battery *BatteryStatus `json:"battery"` // nil: desktop Mac, or not read yet
-	Apps    []AppUsage     `json:"apps"`
-	Procs   int            `json:"procs"` // processes counted, this user only
+	Apps    []AppUsage     `json:"apps"`    // always empty on macOS, where the 进程 page lists apps
+	Procs   int            `json:"procs"`   // processes counted, this user only
+	Machine *MachineSample `json:"machine"` // the home page's machine readings; macOS only, nil elsewhere
 }
 
 // procSample is the pid-keyed state the delta math needs. Start is
@@ -104,7 +108,7 @@ type procSample struct {
 
 // statusSource is everything the loop reads, injectable for tests.
 type statusSource struct {
-	procs     func() []procReading
+	procs     func() []procReading // nil: no app list (macOS)
 	apps      func() []workspaceApp
 	memory    func() MemoryStatus
 	cpu       func() (busy, total uint64) // cumulative ticks
@@ -112,6 +116,7 @@ type statusSource struct {
 	disk      func() DiskStat
 	terminate func(pid int32) bool
 	group     func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
+	machine   machineSampler                                                               // optional: the live machine readings (macOS)
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -756,7 +761,8 @@ type cpuTicks struct{ Busy, Total uint64 }
 // page is open. The first sample waits for the CPU's second reading (so
 // usage is real, not a since-boot average) and for the first battery read,
 // three seconds at most; afterwards battery refreshes once a minute in the
-// background and rides along with each sample. Cancel the context (the
+// background and rides along with each sample. On macOS each sample also
+// carries the machine readings and no app list. Cancel the context (the
 // frontend closes the channel) to stop.
 func (Cleaner) WatchStatus(ctx context.Context, ch *mygo.Channel[StatusSample]) error {
 	return watchStatusWith(ctx, ch.Send, realStatusSource())
@@ -782,6 +788,10 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 	// interval, not two adjacent reads.
 	prevProcs := readProcState(src)
 	prevCPU := readCPUTicks(src)
+	if src.machine != nil {
+		defer src.machine.close()
+		src.machine.read(time.Now()) // starts its counters over the same wait
+	}
 	prevAt := time.Now()
 	if err := sleepCtx(ctx, statusFirstDelay); err != nil {
 		return err
@@ -800,6 +810,9 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 		prevAt = time.Now()
 		sample := buildSample(prevProcs, curProcs, prevCPU, curCPU, src, elapsed)
 		sample.Battery = latest
+		if src.machine != nil {
+			sample.Machine = src.machine.read(time.Now())
+		}
 
 		// A battery result that arrived while sampling is used next round;
 		// drain what is here now so the first sample has it if it won the
@@ -853,6 +866,9 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 
 func readProcState(src statusSource) map[int32]procSample {
 	out := map[int32]procSample{}
+	if src.procs == nil {
+		return out // macOS: the home page lists no apps
+	}
 	for _, r := range src.procs() {
 		out[r.Pid] = procSample{Pid: r.Pid, Path: r.Path, Memory: r.Footprint, UserNs: r.UserNs, SysNs: r.SysNs, Start: r.Start}
 	}
@@ -874,8 +890,11 @@ func buildSample(prevProcs, curProcs map[int32]procSample, prevCPU, curCPU cpuTi
 	sample := StatusSample{
 		Memory: src.memory(),
 		Disk:   src.disk(),
-		Apps:   mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed, src.group),
+		Apps:   []AppUsage{},
 		Procs:  len(curProcs),
+	}
+	if src.procs != nil {
+		sample.Apps = mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed, src.group)
 	}
 	if d := curCPU.Total - prevCPU.Total; d > 0 && prevCPU.Total > 0 {
 		sample.CPU.Usage = clampPct(float64(curCPU.Busy-prevCPU.Busy) / float64(d) * 100)

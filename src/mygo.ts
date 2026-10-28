@@ -159,6 +159,10 @@ export interface BatteryStatus {
   maxCapacity: number;
   /** e.g. "Normal"; "" unknown */
   condition: string;
+  /** macOS only, from AppleSmartBattery; 0 unknown. */
+  temperature: number;
+  /** the connected adapter's rating; also 0 when not plugged in */
+  adapterWatts: number;
 }
 
 /** BigItem is a large directory discovered by the full scan. */
@@ -518,6 +522,47 @@ export interface MachineInfo {
 }
 
 /**
+ * MachineSample is the home page's live machine reading, taken with each
+ * status sample on macOS. Unknown values: temperatures, power and
+ * GPUMemory 0; percentages and rates -1; Thermal and FanCount -1
+ * (FanCount 0 means the Mac has no fans).
+ */
+export interface MachineSample {
+  /** NSProcessInfo thermal state: 0 nominal, 1 fair, 2 serious, 3 critical */
+  thermal: number;
+  /** °C, the hottest SoC die sensor */
+  chipTemp: number;
+  /** fans the SMC reports */
+  fanCount: number;
+  /** rpm per fan; never null */
+  fans: number[];
+  /** W, the whole system (SMC PSTR) */
+  power: number;
+  /** % busy, performance cores */
+  perfCpu: number;
+  /** % busy, efficiency cores */
+  effCpu: number;
+  /** % device utilization */
+  gpu: number;
+  /** bytes the GPU has in use */
+  gpuMemory: number;
+  /** bytes/s, all disks */
+  diskRead: number;
+  /** bytes/s, all disks */
+  diskWrite: number;
+  /** °C, the SSD's NAND sensor */
+  diskTemp: number;
+  /** bytes/s over Wi-Fi and Ethernet */
+  netDown: number;
+  /** bytes/s over Wi-Fi and Ethernet */
+  netUp: number;
+  /** "wifi", "ethernet", or "" when not connected or unknown */
+  netKind: string;
+  /** as MachineInfo.DisplaySig */
+  displaySig: string;
+}
+
+/**
  * MemoryStatus is the memory picture in Activity Monitor's terms.
  * All byte values; zero means "could not be read" and shows as a dash.
  */
@@ -847,9 +892,12 @@ export interface StatusSample {
   disk: DiskStat;
   /** nil: desktop Mac, or not read yet */
   battery: BatteryStatus | null;
+  /** always empty on macOS, where the 进程 page lists apps */
   apps: AppUsage[];
   /** processes counted, this user only */
   procs: number;
+  /** the home page's machine readings; macOS only, nil elsewhere */
+  machine: MachineSample | null;
 }
 
 /** SubItem is a separately selectable part of an item. */
@@ -1229,7 +1277,8 @@ export const Cleaner = {
    * page is open. The first sample waits for the CPU's second reading (so
    * usage is real, not a since-boot average) and for the first battery read,
    * three seconds at most; afterwards battery refreshes once a minute in the
-   * background and rides along with each sample. Cancel the context (the
+   * background and rides along with each sample. On macOS each sample also
+   * carries the machine readings and no app list. Cancel the context (the
    * frontend closes the channel) to stop.
    */
   watchStatus(ch: Channel<StatusSample>): Promise<void> {

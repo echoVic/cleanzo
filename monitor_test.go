@@ -8,7 +8,9 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -525,6 +527,69 @@ func TestWatchStatusCancelStops(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel must stop the loop")
+	}
+}
+
+// fakeMachine counts reads and remembers being closed.
+type fakeMachine struct {
+	reads  int
+	closed bool
+}
+
+func (f *fakeMachine) read(time.Time) *MachineSample {
+	f.reads++
+	s := newMachineSample()
+	s.ChipTemp = float64(f.reads)
+	return s
+}
+
+func (f *fakeMachine) close() { f.closed = true }
+
+func TestWatchStatusWithoutAppList(t *testing.T) {
+	oldDelay, oldBudget, oldInterval := statusFirstDelay, statusFirstBudget, statusInterval
+	statusFirstDelay, statusFirstBudget, statusInterval = 10*time.Millisecond, time.Second, time.Hour
+	defer func() { statusFirstDelay, statusFirstBudget, statusInterval = oldDelay, oldBudget, oldInterval }()
+
+	src := fakeSource()
+	src.procs, src.apps = nil, nil // macOS: the home page lists no apps
+	machine := &fakeMachine{}
+	src.machine = machine
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan StatusSample, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- watchStatusWith(ctx, func(s StatusSample) error {
+			select {
+			case got <- s:
+			default:
+			}
+			return nil
+		}, src)
+	}()
+	var s StatusSample
+	select {
+	case s = <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no sample arrived")
+	}
+	cancel()
+	<-done
+	if s.Apps == nil || len(s.Apps) != 0 || s.Procs != 0 {
+		t.Errorf("no app list: apps %v, procs %d", s.Apps, s.Procs)
+	}
+	if b, err := json.Marshal(s); err != nil || !strings.Contains(string(b), `"apps":[]`) {
+		t.Errorf("apps must be [] in JSON, not null: %s", b)
+	}
+	// The first read starts the counters before the half-second wait; the
+	// first sample carries the second read.
+	if s.Machine == nil || s.Machine.ChipTemp != 2 {
+		t.Errorf("machine reading = %+v, want the second read", s.Machine)
+	}
+	if !machine.closed {
+		t.Error("the machine reader is closed when the watch stops")
+	}
+	if s.Memory.Total != 32<<30 || s.CPU.Usage != 25 {
+		t.Errorf("the other readings still arrive: %+v %+v", s.Memory, s.CPU)
 	}
 }
 

@@ -1,16 +1,18 @@
 package main
 
 // machine.go is the home page's machine side (design:
-// docs/superpowers/specs/2026-10-28-home-machine-design.md). MachineInfo
-// says what this Mac is; the page reads it when it opens and again when
-// the displays change. The reads are in machine_darwin.go; the rules here
-// are pure, so they test on any platform.
+// docs/superpowers/specs/2026-10-28-home-machine-design.md).
+// MachineInfo says what this Mac is; the page reads it when it opens and
+// again when the displays change. MachineSample is the live side, taken
+// with each status sample. The reads are in machine_darwin.go; the rules
+// here are pure, so they test on any platform.
 
 import (
 	"encoding/binary"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // MachineInfo says what this Mac is. Fields that cannot be read stay zero
@@ -84,4 +86,143 @@ func displaySignature(ids []uint32) string {
 		parts[i] = strconv.FormatUint(uint64(id), 10)
 	}
 	return strings.Join(parts, ",")
+}
+
+// MachineSample is the home page's live machine reading, taken with each
+// status sample on macOS. Unknown values: temperatures, power and
+// GPUMemory 0; percentages and rates -1; Thermal and FanCount -1
+// (FanCount 0 means the Mac has no fans).
+type MachineSample struct {
+	Thermal    int     `json:"thermal"`    // NSProcessInfo thermal state: 0 nominal, 1 fair, 2 serious, 3 critical
+	ChipTemp   float64 `json:"chipTemp"`   // °C, the hottest SoC die sensor
+	FanCount   int     `json:"fanCount"`   // fans the SMC reports
+	Fans       []int   `json:"fans"`       // rpm per fan; never null
+	Power      float64 `json:"power"`      // W, the whole system (SMC PSTR)
+	PerfCPU    float64 `json:"perfCpu"`    // % busy, performance cores
+	EffCPU     float64 `json:"effCpu"`     // % busy, efficiency cores
+	GPU        float64 `json:"gpu"`        // % device utilization
+	GPUMemory  uint64  `json:"gpuMemory"`  // bytes the GPU has in use
+	DiskRead   float64 `json:"diskRead"`   // bytes/s, all disks
+	DiskWrite  float64 `json:"diskWrite"`  // bytes/s, all disks
+	DiskTemp   float64 `json:"diskTemp"`   // °C, the SSD's NAND sensor
+	NetDown    float64 `json:"netDown"`    // bytes/s over Wi-Fi and Ethernet
+	NetUp      float64 `json:"netUp"`      // bytes/s over Wi-Fi and Ethernet
+	NetKind    string  `json:"netKind"`    // "wifi", "ethernet", or "" when not connected or unknown
+	DisplaySig string  `json:"displaySig"` // as MachineInfo.DisplaySig
+}
+
+// newMachineSample is a reading with everything unknown.
+func newMachineSample() *MachineSample {
+	return &MachineSample{
+		Thermal: -1, FanCount: -1, Fans: []int{},
+		PerfCPU: -1, EffCPU: -1, GPU: -1,
+		DiskRead: -1, DiskWrite: -1, NetDown: -1, NetUp: -1,
+	}
+}
+
+// machineSampler takes the live readings for one status watch. The loop
+// calls read once before its first sample to start the counters, then once
+// per sample, and close when it stops.
+type machineSampler interface {
+	read(now time.Time) *MachineSample
+	close()
+}
+
+// clusterUsage is each core cluster's busy share between two per-core tick
+// readings (user, system, idle, nice), in percent; -1 for a cluster with
+// no cores or no elapsed ticks. kinds[i] is 'P' or 'E' for logical CPU i.
+// The counters are 32-bit and wrap, so deltas are taken in uint32.
+func clusterUsage(prev, cur [][4]uint32, kinds []byte) (perf, eff float64) {
+	var busy, total [2]uint64 // [0] performance, [1] efficiency
+	if len(prev) == len(cur) {
+		for i := range cur {
+			if i >= len(kinds) {
+				break
+			}
+			k := 0
+			switch kinds[i] {
+			case 'P':
+			case 'E':
+				k = 1
+			default:
+				continue
+			}
+			delta := func(j int) uint64 { return uint64(cur[i][j] - prev[i][j]) }
+			b := delta(0) + delta(1) + delta(3)
+			busy[k] += b
+			total[k] += b + delta(2)
+		}
+	}
+	share := func(k int) float64 {
+		if total[k] == 0 {
+			return -1
+		}
+		return clampPct(float64(busy[k]) / float64(total[k]) * 100)
+	}
+	return share(0), share(1)
+}
+
+// byteRate is bytes per second between two cumulative counters; -1 when no
+// time passed or the counter went backwards (a disk went away).
+func byteRate(prev, cur uint64, elapsed time.Duration) float64 {
+	if elapsed <= 0 || cur < prev {
+		return -1
+	}
+	return float64(cur-prev) / elapsed.Seconds()
+}
+
+// sensorRotation spreads die-sensor reads over samples: one read costs
+// about a millisecond and an M2 Pro has 26 die sensors. Each sample reads
+// a few sensors in turn plus the one that last read hottest, and the chip
+// temperature is the highest of every sensor's latest reading.
+type sensorRotation struct {
+	latest []float64 // °C per sensor; 0 not read yet, or unreadable
+	next   int
+}
+
+func newSensorRotation(n int) sensorRotation {
+	return sensorRotation{latest: make([]float64, n)}
+}
+
+// pick returns the sensors to read now: the next k in turn, plus the
+// hottest if it isn't among them.
+func (r *sensorRotation) pick(k int) []int {
+	n := len(r.latest)
+	if n == 0 {
+		return nil
+	}
+	if k > n {
+		k = n
+	}
+	out := make([]int, 0, k+1)
+	for j := 0; j < k; j++ {
+		out = append(out, (r.next+j)%n)
+	}
+	r.next = (r.next + k) % n
+	if hot := r.hottest(); hot >= 0 && !slices.Contains(out, hot) {
+		out = append(out, hot)
+	}
+	return out
+}
+
+// record keeps sensor i's latest reading.
+func (r *sensorRotation) record(i int, celsius float64) { r.latest[i] = celsius }
+
+// hottest is the sensor with the highest latest reading, -1 before any.
+func (r *sensorRotation) hottest() int {
+	best := -1
+	for i, v := range r.latest {
+		if v > 0 && (best < 0 || v > r.latest[best]) {
+			best = i
+		}
+	}
+	return best
+}
+
+// highest is the chip temperature: the highest latest reading, 0 before any.
+func (r *sensorRotation) highest() float64 {
+	if i := r.hottest(); i >= 0 {
+		return r.latest[i]
+	}
+	return 0
 }
