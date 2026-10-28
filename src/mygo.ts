@@ -244,6 +244,20 @@ export interface DiskStat {
   free: number;
 }
 
+/** DisplayInfo is one active display in its current mode. */
+export interface DisplayInfo {
+  id: number;
+  /** NSScreen's localized name; "" unknown */
+  name: string;
+  builtin: boolean;
+  /** the mode's width in points */
+  width: number;
+  /** the mode's height in points */
+  height: number;
+  /** refresh rate; 0 unknown */
+  hz: number;
+}
+
 /** FullScanEvent streams per-directory results and the final summary. */
 export interface FullScanEvent {
   /** "item" | "done" */
@@ -481,6 +495,29 @@ export interface LargeScanResult {
 }
 
 /**
+ * MachineInfo says what this Mac is. Fields that cannot be read stay zero
+ * or empty, and the page leaves them out.
+ */
+export interface MachineInfo {
+  /** the device tree's product-name, e.g. "MacBook Pro (16-inch, 2023)" */
+  model: string;
+  /** hw.model, e.g. "Mac14,10" */
+  modelId: string;
+  /** performance cores */
+  perfCores: number;
+  /** efficiency cores */
+  effCores: number;
+  /** GPU cores */
+  gpuCores: number;
+  /** the active displays; never null */
+  displays: DisplayInfo[];
+  /** the active displays' IDs; samples carry it too, so the page re-reads on a change */
+  displaySig: string;
+  /** nil: no internal NVMe drive could be read */
+  ssd: SSDInfo | null;
+}
+
+/**
  * MemoryStatus is the memory picture in Activity Monitor's terms.
  * All byte values; zero means "could not be read" and shows as a dash.
  */
@@ -597,6 +634,29 @@ export interface ProcessSample {
   own: number;
   /** other accounts' processes, estimated from ps */
   others: number;
+}
+
+/**
+ * SSDInfo is the internal drive. Warning through Written are valid only
+ * when SMART is true.
+ */
+export interface SSDInfo {
+  /** e.g. "APPLE SSD AP0512Z"; "" unknown */
+  model: string;
+  /** bytes, the whole disk; 0 unknown */
+  capacity: number;
+  /** the SMART log was read */
+  smart: boolean;
+  /** NVMe critical warning bits; 0 is healthy */
+  warning: number;
+  /** composite temperature when read; 0 unknown */
+  tempC: number;
+  /** available spare, percent */
+  spare: number;
+  /** percentage of rated life used; can pass 100 */
+  used: number;
+  /** bytes written over the drive's life */
+  written: number;
 }
 
 /** ScanSummary closes a junk scan. */
@@ -1036,6 +1096,13 @@ export const Cleaner = {
    */
   listSkillRoots(): Promise<SkillRoot[]> {
     return call("Cleaner.ListSkillRoots");
+  },
+  /**
+   * MachineInfo reads what this Mac is: model, cores, GPU, displays and the
+   * internal SSD. Off macOS it is empty.
+   */
+  machineInfo(): Promise<MachineInfo> {
+    return call("Cleaner.MachineInfo");
   },
   /**
    * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
