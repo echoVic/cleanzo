@@ -21,8 +21,8 @@ func TestIOKitLoads(t *testing.T) {
 		t.Error("mach_task_self_ was not read")
 	}
 	t.Logf("IOHID %v, CoreGraphics %v, SystemConfiguration %v", hidOK, cgOK, scOK)
-	if onThisMac() && !(hidOK && cgOK && scOK) {
-		t.Error("on a real Mac every group loads")
+	if !(hidOK && cgOK && scOK) {
+		t.Error("every group's symbols resolve on every supported macOS")
 	}
 }
 
@@ -63,6 +63,9 @@ func TestCFHelpers(t *testing.T) {
 	if cfDictValue(dict, "Missing") != 0 || cfDictValue(0, "Watts") != 0 {
 		t.Error("a missing key or dictionary reads as 0")
 	}
+	if cfDictValue(n, "Watts") != 0 || cfDictValue(s, "Watts") != 0 {
+		t.Error("a number or a string is not a dictionary")
+	}
 }
 
 func TestCString(t *testing.T) {
@@ -81,10 +84,27 @@ func TestIOEach(t *testing.T) {
 	if !iokitInit() {
 		t.Skip("IOKit is not available")
 	}
-	seen := 0
-	ioEach("IOMedia", func(uint32) bool { seen++; return true })
+	seen, sized := 0, 0
+	ioEach("IOMedia", func(s uint32) bool {
+		seen++
+		if n, ok := ioPropInt(s, "Size"); ok && n > 0 {
+			sized++
+		}
+		return true
+	})
 	if seen == 0 {
+		if onThisMac() {
+			t.Fatal("a real Mac has IOMedia")
+		}
 		t.Skip("no IOMedia here")
+	}
+	if sized == 0 {
+		t.Error("no IOMedia reported its Size")
+	}
+	if s := ioFirst("IOMedia"); s == 0 {
+		t.Error("ioFirst missed a class that exists")
+	} else {
+		ioObjectRelease(s)
 	}
 	visited := 0
 	ioEach("IOMedia", func(uint32) bool { visited++; return false })
@@ -107,6 +127,9 @@ func TestIOPropReadsTheDeviceTree(t *testing.T) {
 	}
 	product := ioRegistryEntryFromPath(0, "IODeviceTree:/product")
 	if product == 0 {
+		if onThisMac() {
+			t.Fatal("an Apple silicon Mac's device tree has a product node")
+		}
 		t.Skip("no IODeviceTree:/product here")
 	}
 	defer ioObjectRelease(product)

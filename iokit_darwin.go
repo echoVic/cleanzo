@@ -38,6 +38,7 @@ var (
 	cfStringGetTypeID         func() uint64
 	cfNumberGetTypeID         func() uint64
 	cfDataGetTypeID           func() uint64
+	cfDictionaryGetTypeID     func() uint64
 	cfNumberCreate            func(alloc uintptr, typ int64, value unsafe.Pointer) uintptr
 	cfNumberGetValue          func(n uintptr, typ int64, out unsafe.Pointer) bool
 	cfDataGetLength           func(data uintptr) int64
@@ -131,6 +132,7 @@ func iokitInit() bool {
 			"CFStringGetTypeID":         &cfStringGetTypeID,
 			"CFNumberGetTypeID":         &cfNumberGetTypeID,
 			"CFDataGetTypeID":           &cfDataGetTypeID,
+			"CFDictionaryGetTypeID":     &cfDictionaryGetTypeID,
 			"CFNumberCreate":            &cfNumberCreate,
 			"CFNumberGetValue":          &cfNumberGetValue,
 			"CFDataGetLength":           &cfDataGetLength,
@@ -252,6 +254,7 @@ func cfStr(s string) uintptr {
 
 // cfGoString copies a CFString, or a CFData holding NUL-terminated text the
 // way the device tree stores names, into a Go string. Anything else is "".
+// Strings over 511 bytes read as "" too; the names it reads are far shorter.
 func cfGoString(ref uintptr) string {
 	if ref == 0 {
 		return ""
@@ -299,12 +302,17 @@ func cfNumber(v int64) uintptr {
 }
 
 // cfDictValue looks key up in a CFDictionary. The value belongs to the
-// dictionary: don't release it.
+// dictionary: don't release it. Anything that isn't a dictionary reads as
+// 0: CFDictionaryGetValue on another type raises an Objective-C exception,
+// which aborts the app.
 func cfDictValue(dict uintptr, key string) uintptr {
-	if dict == 0 {
+	if dict == 0 || cfGetTypeID(dict) != cfDictionaryGetTypeID() {
 		return 0
 	}
 	k := cfStr(key)
+	if k == 0 {
+		return 0
+	}
 	defer cfRelease(k)
 	return cfDictionaryGetValue(dict, k)
 }
@@ -312,6 +320,9 @@ func cfDictValue(dict uintptr, key string) uintptr {
 // ioProp copies one registry property (+1; release it), 0 when absent.
 func ioProp(entry uint32, key string) uintptr {
 	k := cfStr(key)
+	if k == 0 {
+		return 0 // not valid UTF-8; a NULL key would crash IOKit
+	}
 	defer cfRelease(k)
 	return ioRegistryEntryCreateCFProperty(entry, k, 0, 0)
 }
