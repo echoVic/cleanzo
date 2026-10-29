@@ -3978,3 +3978,13 @@ The live tests then skip, or check only what they read. Inside a sandbox, run th
 ```
 
 The reviewer re-runs everything outside the sandbox, including the `CLEANZO_HW=1` and `CLEANZO_PERF=1` runs.
+
+## Implementation notes (2026-10-28/29)
+
+- **Executors:** Codex's provider failed once (503) and then took 3 h on Task 3; traecli wrote Tasks 1, 2 and 4 and every fix round.
+- **Task 1:** `cfDictValue` also checks that its argument is a CFDictionary; CoreFoundation aborts the app when CFDictionaryGetValue gets anything else. `ioProp` returns 0 for a key that isn't valid UTF-8.
+- **Task 2:** drives that say "Physical Interconnect Location" = "External" are skipped; a core split that doesn't add up to hw.physicalcpu reports 0/0; the test runs the NSScreen closure synchronously.
+- **Task 3:** NaN and ±Inf from sensors and SMC floats are rejected (mygo's JSON encoder refuses them and the stream would end); a failed fan read makes all fan speeds unknown; missing SMC keys are cached.
+- **Task 4:** the macOS grid is capped at three columns (minimum 280 px); the network numbers wrap per direction; a placeholder health strip holds the space before the first sample.
+- **Final review:** the SMART plug-in admits one reader system-wide (overlapping opens get 0xe00002be, kIOReturnNoResources), so reads are serialized, retried and fall back to the last page; the machine reader opens after the battery read starts; unknown GPU rows are omitted; the built-in display uses the app's own label.
+- **Budget** (production build, home vs 设置, 30 s × 3): the old home page was 5.56% / 3.38%; the first build was ~1.6% / ~2.3%. Width transitions on the bars and per-frame number rolls were the cost. Bars now move with transform, the chart glide animates the outer `<svg>`, and — the maintainer's choice on 2026-10-29 — macOS home numbers change in place (Windows keeps the roll). Final: main+children 0.83% (main alone 0.57%), web 1.39%.
