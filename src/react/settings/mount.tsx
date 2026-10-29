@@ -6,11 +6,11 @@ import "../../ui/index.css";
 let root: Root | null = null;
 
 /** 在原生视图的容器里挂载设置页；session 递增触发页面重新读取配置。 */
-export function mountSettings(el: HTMLElement, callbacks: SettingsCallbacks, session: number) {
+export function mountSettings(el: HTMLElement, callbacks: SettingsCallbacks, session: number, focus: { id: string; nonce: number }) {
   if (!root) root = createRoot(el);
   root.render(
     <React.StrictMode>
-      <SettingsPage callbacks={callbacks} session={session} />
+      <SettingsPage callbacks={callbacks} session={session} focus={focus} />
     </React.StrictMode>,
   );
 }

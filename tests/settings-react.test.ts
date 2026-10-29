@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Settings } from "../src/mygo";
 import {
-  baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue,
+  baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
 } from "../src/react/settings/settings-helpers";
 
 function settings(over: Partial<Settings> = {}): Settings {
@@ -68,4 +68,11 @@ test("Windows settings omit the permission section; macOS keeps its controls", a
     expect(renderToStaticMarkup(createElement(PermissionsSection, props))).toBe("");
     expect(resolveFolderName("", "C:\\Users\\alice\\Downloads")).toBe("Downloads");
   } finally { setPlatformForTest(undefined); }
+});
+
+test("toggleMenuBarItem keeps the menu bar's order and drops names it doesn't know", () => {
+  expect(toggleMenuBarItem(["mem", "cpu"], "gpu", true)).toEqual(["cpu", "mem", "gpu"]);
+  expect(toggleMenuBarItem(["cpu", "mem"], "cpu", false)).toEqual(["mem"]);
+  expect(toggleMenuBarItem(["cpu"], "cpu", true)).toEqual(["cpu"]);
+  expect(toggleMenuBarItem(["cpu", "bogus"], "battery", true)).toEqual(["cpu", "battery"]);
 });

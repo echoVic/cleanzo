@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import type { GrowthApp, GrowthConfig, GrowthConfigPatch, GrowthState, UninstallDetail } from "../src/mygo";
+import type { GrowthApp, GrowthConfig, GrowthConfigPatch, GrowthState, MenuBarState, UninstallDetail } from "../src/mygo";
 import { t } from "../src/i18n";
 
 const storage = new Map([["cleanzo.lang", "zh"]]);
@@ -335,17 +335,17 @@ test("增长设置错误码：开机启动错误带名称，阈值错误有中�
 
 // 执行设置页实际的 effect 和保存回调，验证后端回读、禁用状态及失败回退。
 // 后端合并补丁的方式（与 Go 的 GrowthConfigPatch.apply 一致）。
-function mergePatch(c: GrowthConfig, p: GrowthConfigPatch): GrowthConfig {
+function mergePatch(c: GrowthConfig, p: GrowthConfigPatch, readings = false): GrowthConfig {
   const key = (k: string | undefined) => (k ?? "").trim().toLowerCase();
   let ignored = c.ignored;
   if (key(p.ignore) && !ignored.includes(key(p.ignore))) ignored = [...ignored, key(p.ignore)];
   ignored = ignored.filter((k) => k !== key(p.unignore));
   const enabled = p.enabled ?? c.enabled;
-  return { enabled, openAtLogin: enabled && (p.openAtLogin ?? c.openAtLogin), asked: p.asked ?? c.asked,
+  return { enabled, openAtLogin: (enabled || readings) && (p.openAtLogin ?? c.openAtLogin), asked: p.asked ?? c.asked,
     dailyGB: p.dailyGB ?? c.dailyGB, weeklyGB: p.weeklyGB ?? c.weeklyGB, ignored };
 }
 
-async function growthSettingsHarness(snapshot: GrowthState) {
+async function growthSettingsHarness(snapshot: GrowthState, menuBarItems: string[] = [], available: string[] = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"], supported = true) {
   const React = await import("react");
   const { SettingsPage } = await import("../src/react/settings/SettingsPage");
   const { settingsApi } = await import("../src/react/settings/api");
@@ -358,6 +358,8 @@ async function growthSettingsHarness(snapshot: GrowthState) {
   let session = 1;
   let reads = 0;
   let tree: React.ReactNode;
+  let menuBar: MenuBarState = { supported, items: menuBarItems, available };
+  const menuSaved: string[][] = [];
   let saveError: Error | null = null;
   let saveApplied = false;
   let readError = false;
@@ -404,9 +406,17 @@ async function growthSettingsHarness(snapshot: GrowthState) {
       saved.push(patch);
       if (gate) await gate.promise;
       if (saveError && !saveApplied) throw saveError;
-      snapshot = { ...snapshot, config: mergePatch(snapshot.config, patch) };
+      snapshot = { ...snapshot, config: mergePatch(snapshot.config, patch, menuBar.items.length > 0) };
       if (saveError) throw saveError; // 开机启动出错：设置已保存并生效，错误最后返回
     }),
+    spyOn(settingsApi, "menuBar").mockImplementation(async () => menuBar),
+    spyOn(settingsApi, "saveMenuBar").mockImplementation(async (items) => {
+      menuSaved.push(items);
+      menuBar = { ...menuBar, items };
+      // 和 Go 一样：读数全关、后台监控也关着时，开机启动跟着取消
+      if (items.length === 0 && !snapshot.config.enabled) snapshot = { ...snapshot, config: { ...snapshot.config, openAtLogin: false } };
+    }),
+    spyOn(settingsApi, "onMenuBarUpdated").mockImplementation(() => () => {}),
     spyOn(growthApi, "onUpdated").mockImplementation((fn) => {
       updated = () => fn(snapshot.status);
       return () => { updated = () => {}; };
@@ -422,7 +432,7 @@ async function growthSettingsHarness(snapshot: GrowthState) {
     return [node, ...nodes(node.props.children)];
   }
   return {
-    saved, toast,
+    saved, toast, menuSaved,
     get reads() { return reads; },
     checkbox(label: string) {
       const row = nodes(tree).find((el) => el.type === "label" && nodes(el).some((child) => child.type === "span" && child.props.children === label));
@@ -430,6 +440,7 @@ async function growthSettingsHarness(snapshot: GrowthState) {
     },
     select(id: string) { return nodes(tree).find((el) => el.type === "select" && el.props.id === id)?.props; },
     headings() { return nodes(tree).filter((el) => el.type === "h3").map((el) => el.props.children); },
+    hasText(text: string) { return nodes(tree).some((el) => el.props.children === text); },
     holdSave() { gate = deferred<void>(); return gate; },
     /** applied：像开机启动出错那样，设置已保存并生效后才返回错误。 */
     failSave(error: Error, applied = false) { saveError = error; saveApplied = applied; },
@@ -462,8 +473,8 @@ test("增长设置：关监控后回读后端的开机启动值，保存期间�
   const page = await growthSettingsHarness(state({ config }));
   try {
     await page.settle();
-    expect(page.headings().slice(0, 3)).toEqual([t("settings.general"), t("nav.clean"), t("settings.growth")]);
-    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(false);
+    expect(page.headings().slice(0, 4)).toEqual([t("settings.general"), t("nav.clean"), t("settings.menubar"), t("settings.growth")]);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(false);
     expect(page.select("growth-daily")?.children.map((option: any) => option.props.value)).toEqual([1, 2, 5, 10]);
     expect(page.select("growth-weekly")?.children.map((option: any) => option.props.value)).toEqual([5, 10, 20, 50]);
     const gate = page.holdSave();
@@ -471,15 +482,15 @@ test("增长设置：关监控后回读后端的开机启动值，保存期间�
     await page.settle();
     expect(page.saved).toEqual([{ enabled: false, asked: true }]);
     expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);
-    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(true);
     expect(page.select("growth-daily")?.disabled).toBe(true);
     gate.resolve();
     await page.settle();
     expect(page.reads).toBe(2);
     expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(false);
     expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(false);
-    expect(page.checkbox(t("settings.growth.login"))?.checked).toBe(false);
-    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+    expect(page.checkbox(t("settings.menubar.login"))?.checked).toBe(false);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(true);
   } finally { page.close(); }
 });
 
@@ -489,10 +500,10 @@ test("增长设置：保存失败保留原值并通过 errText 显示错误 toas
     try {
       await page.settle();
       page.failSave(new Error(JSON.stringify({ code, args: ["拒绝"] })));
-      if (code === "growth-login") page.checkbox(t("settings.growth.login"))!.onCheckedChange(true);
+      if (code === "growth-login") page.checkbox(t("settings.menubar.login"))!.onCheckedChange(true);
       else page.select("growth-daily")!.onChange({ target: { value: "5" } });
       await page.settle();
-      expect(page.checkbox(t("settings.growth.login"))?.checked).toBe(false);
+      expect(page.checkbox(t("settings.menubar.login"))?.checked).toBe(false);
       expect(page.select("growth-daily")?.value).toBe(2);
       expect(page.select("growth-daily")?.disabled).toBe(false);
       expect(page.toast.textContent).toBe(code === "growth-login" ? "无法设置开机启动：拒绝" : "提醒阈值无效");
@@ -536,7 +547,7 @@ test("增长设置：重新进入时等待配置刷新，改阈值不会覆盖�
     page.reenter(state({ config: fresh }));
     await page.settle();
     expect(page.checkbox(t("settings.growth.enable"))?.disabled).toBe(true);
-    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(true);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(true);
     expect(page.select("growth-daily")?.disabled).toBe(true);
     expect(page.select("growth-weekly")?.disabled).toBe(true);
     page.select("growth-daily")!.onChange({ target: { value: "5" } });
@@ -560,7 +571,7 @@ test("增长设置：每个控件只发自己改的字段，不带整份旧配�
     await page.settle();
     page.select("growth-weekly")!.onChange({ target: { value: "20" } });
     await page.settle();
-    page.checkbox(t("settings.growth.login"))!.onCheckedChange(true);
+    page.checkbox(t("settings.menubar.login"))!.onCheckedChange(true);
     await page.settle();
     page.checkbox(t("settings.growth.enable"))!.onCheckedChange(false);
     await page.settle();
@@ -613,7 +624,55 @@ test("增长设置：开机启动出错时设置已保存并生效，回读后�
     expect(page.toast.textContent).toBe("无法设置开机启动：拒绝");
     expect(page.reads).toBe(2);
     expect(page.checkbox(t("settings.growth.enable"))?.checked).toBe(true);
-    expect(page.checkbox(t("settings.growth.login"))?.disabled).toBe(false);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(false);
+  } finally { page.close(); }
+});
+
+test("菜单栏设置：按固定顺序列出这台 Mac 能显示的读数，勾选时发整份列表", async () => {
+  const page = await growthSettingsHarness(state({}), ["cpu", "mem"], ["cpu", "mem", "gpu", "net", "disk", "temp"]);
+  try {
+    await page.settle();
+    expect(page.headings()).toContain(t("settings.menubar"));
+    for (const it of ["cpu", "mem", "gpu", "net", "disk", "temp"]) {
+      expect(page.checkbox(t(`settings.menubar.item.${it}` as Parameters<typeof t>[0]))).toBeDefined();
+    }
+    expect(page.checkbox(t("settings.menubar.item.battery"))).toBeUndefined();
+    expect(page.checkbox(t("settings.menubar.item.cpu"))?.checked).toBe(true);
+    expect(page.checkbox(t("settings.menubar.item.gpu"))?.checked).toBe(false);
+    page.checkbox(t("settings.menubar.item.gpu"))!.onCheckedChange(true);
+    await page.settle();
+    page.checkbox(t("settings.menubar.item.cpu"))!.onCheckedChange(false);
+    await page.settle();
+    expect(page.menuSaved).toEqual([["cpu", "mem", "gpu"], ["mem", "gpu"]]);
+    expect(page.checkbox(t("settings.menubar.item.gpu"))?.checked).toBe(true);
+  } finally { page.close(); }
+});
+
+test("菜单栏设置：有读数时，后台监控关着也能勾开机启动；读数全关后变灰并说明", async () => {
+  const config = { ...state({}).config, enabled: false, openAtLogin: true };
+  const page = await growthSettingsHarness(state({ config }), ["cpu", "mem"]);
+  try {
+    await page.settle();
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(false);
+    expect(page.checkbox(t("settings.menubar.login"))?.checked).toBe(true);
+    expect(page.hasText(t("settings.menubar.loginOff"))).toBe(false);
+    page.checkbox(t("settings.menubar.item.cpu"))!.onCheckedChange(false);
+    await page.settle();
+    page.checkbox(t("settings.menubar.item.mem"))!.onCheckedChange(false);
+    await page.settle();
+    expect(page.menuSaved.at(-1)).toEqual([]);
+    expect(page.checkbox(t("settings.menubar.login"))?.checked).toBe(false);
+    expect(page.checkbox(t("settings.menubar.login"))?.disabled).toBe(true);
+    expect(page.hasText(t("settings.menubar.loginOff"))).toBe(true);
+  } finally { page.close(); }
+});
+
+test("菜单栏设置：不支持菜单栏读数时整节不显示", async () => {
+  const page = await growthSettingsHarness(state({}), [], [], false);
+  try {
+    await page.settle();
+    expect(page.headings()).not.toContain(t("settings.menubar"));
+    expect(page.checkbox(t("settings.menubar.login"))).toBeUndefined();
   } finally { page.close(); }
 });
 

@@ -66,6 +66,7 @@ function createRuntime(): Runtime {
   let settings: Settings = { disabledGroups: [], ignored: [], custom: [] };
   // 占用增长：ToDesk（/Library 下的 dumps 在涨）和飞书（LarkShell）
   let growthConfig: GrowthConfig = { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [] as string[], asked: true };
+  let menuBarItems: string[] = ["cpu", "mem"];
   const nowSec = () => Math.floor(Date.now() / 1000);
   const growthApps = (): GrowthApp[] => [
     { key: "app:com.youqu.todesk.mac", name: "ToDesk", kind: "app", orphan: false, appPath: "/Applications/ToDesk.app",
@@ -293,9 +294,15 @@ function createRuntime(): Runtime {
       ignored = ignored.filter((k) => k !== key(p.unignore));
       const enabled = p.enabled ?? growthConfig.enabled;
       growthConfig = {
-        enabled, openAtLogin: enabled && (p.openAtLogin ?? growthConfig.openAtLogin), asked: p.asked ?? growthConfig.asked,
+        enabled, openAtLogin: (enabled || menuBarItems.length > 0) && (p.openAtLogin ?? growthConfig.openAtLogin), asked: p.asked ?? growthConfig.asked,
         dailyGB: p.dailyGB ?? growthConfig.dailyGB, weeklyGB: p.weeklyGB ?? growthConfig.weeklyGB, ignored,
       };
+    },
+    "Cleaner.MenuBar": async () => ({ supported: true, items: menuBarItems, available: ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"] }),
+    // 和 Go 一样按固定顺序存；读数全关、后台监控也关着时取消开机启动。
+    "Cleaner.SaveMenuBar": async (items) => {
+      menuBarItems = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"].filter((it) => items.includes(it));
+      if (menuBarItems.length === 0 && !growthConfig.enabled) growthConfig = { ...growthConfig, openAtLogin: false };
     },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
       await emit(sample());

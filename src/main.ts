@@ -1,6 +1,6 @@
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
 import { initReactSkills, showReactSkills } from "./react/skills/entry";
-import { setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
+import { requestSettingsSection, setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
 import { showReactApps, requestAppsUninstall } from "./react/apps/entry";
@@ -128,6 +128,7 @@ if (window.mygo) events.menuBarGo.on((g) => {
     openReactProcess(g.tab === "mem" || g.tab === "disk" ? g.tab : "cpu", g.key || null);
     switchView("process");
   } else if (g.page === "clean" || g.page === "settings") {
+    if (g.page === "settings" && g.tab === "menubar") requestSettingsSection("menubar");
     switchView(g.page);
   } else {
     switchView("status");

@@ -5,6 +5,12 @@ import type { LangPref } from "../../ui/i18n-react";
 
 const callbacks: SettingsCallbacks = { changeLanguage: async () => {} };
 let session = 0;
+let focus = { id: "", nonce: 0 };
+
+/** 下次进入设置页时滚到哪一节（「菜单栏设置…」进来时为 "menubar"）；调用方随后切到设置页。 */
+export function requestSettingsSection(id: string) {
+  focus = { id, nonce: focus.nonce + 1 };
+}
 
 /** main.ts 注入语言切换回调（走已有的 language.change + toast）。 */
 export function setSettingsLangHandler(changeLanguage: (pref: LangPref) => Promise<void>) {
@@ -15,5 +21,5 @@ export function setSettingsLangHandler(changeLanguage: (pref: LangPref) => Promi
 export function showReactSettings() {
   session++;
   const el = document.querySelector<HTMLElement>("#settings-react-root");
-  if (el) mountSettings(el, callbacks, session);
+  if (el) mountSettings(el, callbacks, session, focus);
 }

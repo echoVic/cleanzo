@@ -1,9 +1,10 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { CustomFolder, GrowthConfig, GrowthConfigPatch, Settings } from "../../mygo";
+import type { CustomFolder, GrowthConfig, GrowthConfigPatch, MenuBarState, Settings } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
+import { scrollBehavior } from "../../ui/motion/motion";
 import { useT, type DictKey, type LangPref } from "../../ui/i18n-react";
 import { errText, displayPath, toast } from "../../shared";
 import { ruleName, getPref } from "../../i18n";
@@ -11,7 +12,7 @@ import { markCleanStale } from "../clean/entry";
 import { growthApi } from "../growth/api";
 import { settingsApi } from "./api";
 import {
-  GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue,
+  GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
   type GroupId,
 } from "./settings-helpers";
 
@@ -24,6 +25,8 @@ interface Props {
   callbacks: SettingsCallbacks;
   /** 每次进入设置页 +1，驱动重新读取配置。 */
   session: number;
+  /** 要滚到的一节和请求序号（「菜单栏设置…」进来时 id 为 "menubar"）；序号变了才滚。 */
+  focus?: { id: string; nonce: number };
 }
 
 /** 不可变地更新错误 Map，触发重渲染。 */
@@ -39,7 +42,7 @@ function withoutError(m: Map<string, unknown>, key: string): Map<string, unknown
   return n;
 }
 
-export function SettingsPage({ callbacks, session }: Props) {
+export function SettingsPage({ callbacks, session, focus }: Props) {
   const t = useT();
   const [settings, setSettings] = React.useState<Settings | null>(null);
   const settingsRef = React.useRef<Settings | null>(null);
@@ -61,6 +64,12 @@ export function SettingsPage({ callbacks, session }: Props) {
   const growthSavingRef = React.useRef(false);
   /** 保存期间来的重读（重进页面、后端广播）：保存结束后补读一次。 */
   const growthReloadRef = React.useRef(false);
+  const [menuBar, setMenuBar] = React.useState<MenuBarState | null>(null);
+  const [menuBarBusy, setMenuBarBusy] = React.useState(false);
+  const menuBarSeqRef = React.useRef(0);
+  const menuBarSavingRef = React.useRef(false);
+  const [sectionHl, setSectionHl] = React.useState(false);
+  const focusedRef = React.useRef(0);
 
   const loadSeqRef = React.useRef(0);
   const permSeqRef = React.useRef(0);
@@ -180,6 +189,58 @@ export function SettingsPage({ callbacks, session }: Props) {
     setGrowthBusy(false);
     if (growthReloadRef.current) { growthReloadRef.current = false; void loadGrowth(); }
   };
+
+  /** 每次进入、后端广播变化时重读菜单栏读数；不支持（Windows）时整节不显示。 */
+  const loadMenuBar = React.useCallback(async () => {
+    const seq = ++menuBarSeqRef.current;
+    if (isWindows()) {
+      setMenuBar(null);
+      return;
+    }
+    try {
+      const s = await settingsApi.menuBar();
+      if (seq === menuBarSeqRef.current) setMenuBar(s.supported ? s : null);
+    } catch {
+      if (seq === menuBarSeqRef.current) setMenuBar(null);
+    }
+  }, []);
+
+  React.useEffect(() => { void loadMenuBar(); }, [session, loadMenuBar]);
+  React.useEffect(() => settingsApi.onMenuBarUpdated(() => { void loadMenuBar(); }), [loadMenuBar]);
+
+  /** 勾选框改一项：整份列表发给 Go，之后回读；读数全关时 Go 可能顺带取消了开机启动，所以也重读增长配置。 */
+  const saveMenuBar = async (items: string[]) => {
+    if (!menuBar || menuBarSavingRef.current) return;
+    menuBarSavingRef.current = true;
+    setMenuBarBusy(true);
+    const seq = ++menuBarSeqRef.current;
+    try { await settingsApi.saveMenuBar(items); } catch (e) { toast(errText(e), "err"); }
+    try {
+      const s = await settingsApi.menuBar();
+      if (seq === menuBarSeqRef.current) setMenuBar(s.supported ? s : null);
+    } catch { /* 读不到时保留原值 */ }
+    menuBarSavingRef.current = false;
+    setMenuBarBusy(false);
+    void loadGrowth();
+  };
+
+  // 「菜单栏设置…」进来：等「菜单栏」一节出现，滚过去并高亮一下；同一个请求只滚一次。
+  const menuBarShown = !!menuBar && !isWindows();
+  React.useEffect(() => {
+    if (!focus || focus.id !== "menubar" || !menuBarShown || focusedRef.current === focus.nonce) return;
+    const nonce = focus.nonce;
+    const raf = requestAnimationFrame(() => {
+      focusedRef.current = nonce;
+      document.getElementById("settings-menubar")?.scrollIntoView({ block: "start", behavior: scrollBehavior() });
+      setSectionHl(true);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focus, menuBarShown]);
+  React.useEffect(() => {
+    if (!sectionHl) return;
+    const id = window.setTimeout(() => setSectionHl(false), 900);
+    return () => window.clearTimeout(id);
+  }, [sectionHl]);
 
   // 窗口重新聚焦时重新检查权限（仅本页可见时）。
   React.useEffect(() => {
@@ -410,6 +471,42 @@ export function SettingsPage({ callbacks, session }: Props) {
         </div>
       </section>
 
+      {menuBar && !isWindows() && (
+        <section className="settings-section" id="settings-menubar">
+          <h3>{t("settings.menubar")}</h3>
+          <div className={cn("setting-block card", sectionHl && "settings-hl")}>
+            <div className="setting-row setting-stack">
+              <div className="settings-groups">
+                {menuBar.available.map((it) => (
+                  <label key={it} className="check">
+                    <Checkbox
+                      checked={menuBar.items.includes(it)}
+                      disabled={menuBarBusy}
+                      onCheckedChange={(v) => void saveMenuBar(toggleMenuBarItem(menuBar.items, it, v === true))}
+                    />
+                    <span>{t(`settings.menubar.item.${it}` as DictKey)}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="muted small">{t("settings.menubar.note")}</p>
+            </div>
+            {growth && (
+              <div className="setting-row setting-stack">
+                <label className="check">
+                  <Checkbox
+                    checked={growth.openAtLogin}
+                    disabled={growthBusy || menuBarBusy || !(growth.enabled || menuBar.items.length > 0)}
+                    onCheckedChange={(v) => void saveGrowth({ openAtLogin: v === true })}
+                  />
+                  <span>{t("settings.menubar.login")}</span>
+                </label>
+                {!(growth.enabled || menuBar.items.length > 0) && <p className="muted small">{t("settings.menubar.loginOff")}</p>}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {growth && !isWindows() && (
         <section className="settings-section">
           <h3>{t("settings.growth")}</h3>
@@ -420,10 +517,6 @@ export function SettingsPage({ callbacks, session }: Props) {
                 <span>{t("settings.growth.enable")}</span>
               </label>
               <p className="muted small">{t("settings.growth.enableNote")}</p>
-              <label className="check">
-                <Checkbox checked={growth.openAtLogin} disabled={growthBusy || !growth.enabled} onCheckedChange={(v) => void saveGrowth({ openAtLogin: v === true })} />
-                <span>{t("settings.growth.login")}</span>
-              </label>
             </div>
             <div className="setting-row">
               <label className="setting-label" htmlFor="growth-daily">{t("settings.growth.daily")}</label>
