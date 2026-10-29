@@ -122,6 +122,17 @@ setProcessHandlers({
 });
 // 通知 / 菜单栏点进来：打开进程页的磁盘占用标签并定位那一行。
 if (window.mygo) events.growthFocus.on((key) => { openReactProcess("disk", key); switchView("process"); });
+// 菜单栏面板的链接、Cleanzo 图标菜单的「菜单栏设置…」：切到那一页；进程页按标签打开，key 是要定位的行。
+if (window.mygo) events.menuBarGo.on((g) => {
+  if (g.page === "process") {
+    openReactProcess(g.tab === "mem" || g.tab === "disk" ? g.tab : "cpu", g.key || null);
+    switchView("process");
+  } else if (g.page === "clean" || g.page === "settings") {
+    switchView(g.page);
+  } else {
+    switchView("status");
+  }
+});
 // 进程页第一版只做 macOS：Windows 上隐藏入口。
 if (isWindows()) document.querySelector<HTMLElement>('.nav-item[data-view="process"]')?.classList.add("hidden");
 // 版本号以应用自己为准，不写死在页面里

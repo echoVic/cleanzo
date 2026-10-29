@@ -329,7 +329,7 @@ export interface GrowthApp {
 export interface GrowthConfig {
   /** measure in the background, show the menu bar icon, stay open without windows */
   enabled: boolean;
-  /** only together with Enabled */
+  /** only while monitoring is on or the menu bar shows a reading */
   openAtLogin: boolean;
   /** a day's growth that alerts */
   dailyGB: number;
@@ -585,6 +585,29 @@ export interface MemoryStatus {
   swapUsed: number;
   /** = disk space the swap files take */
   swapTotal: number;
+}
+
+/** MenuBarState is what Settings shows of the menu bar. */
+export interface MenuBarState {
+  /** false on Windows */
+  supported: boolean;
+  /** the readings shown, in menuBarItems' order */
+  items: string[];
+  /** the readings this Mac can show: no battery without one */
+  available: string[];
+}
+
+/**
+ * MenuBarTarget is a page of the main window that the menu bar opens:
+ *   - "status", the home page;
+ *   - "process", with Tab "cpu", "mem" or "disk" and Key the row to show;
+ *   - "clean";
+ *   - "settings", with Tab "menubar" for its menu bar section.
+ */
+export interface MenuBarTarget {
+  page: string;
+  tab: string;
+  key: string;
 }
 
 /** OrphanItem is a leftover directory or file not owned by an installed app. */
@@ -1152,6 +1175,10 @@ export const Cleaner = {
   machineInfo(): Promise<MachineInfo> {
     return call("Cleaner.MachineInfo");
   },
+  /** MenuBar returns the readings the menu bar shows and those it can. */
+  menuBar(): Promise<MenuBarState> {
+    return call("Cleaner.MenuBar");
+  },
   /**
    * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
    * System Settings, where the user can let Cleanzo read protected folders
@@ -1200,6 +1227,16 @@ export const Cleaner = {
    */
   saveGrowthConfig(p: GrowthConfigPatch): Promise<void> {
     return call("Cleaner.SaveGrowthConfig", p);
+  },
+  /**
+   * SaveMenuBar shows the readings in items, which Settings sends whole, and
+   * keeps them for the next launch; names it does not know, and the battery on a
+   * Mac without one, are dropped. Turning the last reading off while monitoring
+   * is off turns opening at login off too (spec §七.3). Pages hear
+   * MenuBarUpdated, and GrowthUpdated when the login item changed.
+   */
+  saveMenuBar(items: string[]): Promise<void> {
+    return call("Cleaner.SaveMenuBar", items);
   },
   /** SaveSettings validates and persists the settings. */
   saveSettings(s: Settings): Promise<void> {
@@ -1310,4 +1347,11 @@ export const events = {
    * menu item was clicked.
    */
   growthFocus: event<string>("growth:focus"),
+  /** MenuBarUpdated tells pages that the readings shown changed. */
+  menuBarUpdated: event<MenuBarState>("menuBar:updated"),
+  /**
+   * MenuBarGo asks the main window to show a page: a link of a menu bar panel or
+   * a line of the Cleanzo icon's menu was clicked.
+   */
+  menuBarGo: event<MenuBarTarget>("menuBar:go"),
 } as const;

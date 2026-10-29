@@ -1926,8 +1926,8 @@ func main() {
 			go offerWebView()
 			return
 		}
-		if startGrowthResident() {
-			return // opened at login with monitoring on: menu bar icon only (spec §六)
+		if startResident() {
+			return // opened at login with monitoring or readings on: the menu bar only (menubar spec §七.3)
 		}
 		mainWindow = newMainWindow()
 	})

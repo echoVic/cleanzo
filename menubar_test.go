@@ -1,0 +1,228 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+	"time"
+)
+
+// noMenuBar turns every reading off for the test, as Settings would.
+func noMenuBar(t *testing.T) {
+	t.Helper()
+	if err := saveMenuBarConfig(menuBarPath(), menuBarConfig{Items: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// withBattery gives the test's Mac a battery, or none.
+func withBattery(t *testing.T, has bool) {
+	t.Helper()
+	old := menuBarBattery
+	t.Cleanup(func() { menuBarBattery = old })
+	menuBarBattery = func() bool { return has }
+}
+
+// stubResident records what SaveMenuBar applies instead of applying it.
+func stubResident(t *testing.T) *[]menuBarConfig {
+	t.Helper()
+	old := residentApply
+	t.Cleanup(func() { residentApply = old })
+	var applied []menuBarConfig
+	residentApply = func(_ GrowthConfig, mb menuBarConfig) error {
+		applied = append(applied, mb)
+		return nil
+	}
+	return &applied
+}
+
+func TestMenuBarConfigDefaultsAndNormalizes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "menubar.json")
+	if c := loadMenuBarConfig(path, true); !slices.Equal(c.Items, []string{"cpu", "mem"}) || c.Layout != 0 {
+		t.Errorf("no file: %+v, want CPU and memory", c)
+	}
+	if got := normalizeMenuBarItems([]string{"battery", "net", "bogus", "cpu", "net"}, true); !slices.Equal(got, []string{"cpu", "net", "battery"}) {
+		t.Errorf("normalized %v", got)
+	}
+	if got := normalizeMenuBarItems([]string{"battery"}, false); got == nil || len(got) != 0 {
+		t.Errorf("a Mac without a battery shows %v", got)
+	}
+	if got := menuBarAvailable(false); slices.Contains(got, "battery") || len(got) != 6 {
+		t.Errorf("available without a battery: %v", got)
+	}
+	if err := saveMenuBarConfig(path, menuBarConfig{Items: []string{}, Layout: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if c := loadMenuBarConfig(path, true); c.Items == nil || len(c.Items) != 0 || c.Layout != 3 {
+		t.Errorf("all off: %+v, want none and layout 3", c)
+	}
+	for _, broken := range []string{`{`, `{"layout": 2}`, `{"items": null}`} {
+		if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if c := loadMenuBarConfig(path, true); !slices.Equal(c.Items, menuBarDefault) {
+			t.Errorf("%s: %+v, want the defaults", broken, c)
+		}
+	}
+}
+
+func TestMenuBarNames(t *testing.T) {
+	if got := menuBarIconName(0); got != "growth" {
+		t.Errorf("layout 0: %q, want the icon's old name", got)
+	}
+	if got := menuBarIconName(3); got != "cleanzo.3" {
+		t.Errorf("layout 3: %q", got)
+	}
+	if got := menuBarItemName(2, "cpu"); got != "cleanzo.2.cpu" {
+		t.Errorf("item name %q", got)
+	}
+}
+
+func TestMenuBarTooltipsAreTranslated(t *testing.T) {
+	for _, item := range menuBarItems {
+		for _, locale := range []string{"zh-Hans", "en"} {
+			if nativeTextFor(locale, "menubar.tip."+item, nil) == "" {
+				t.Errorf("no %s tooltip for %s", locale, item)
+			}
+		}
+	}
+	if got := nativeTextFor("zh-Hans", "menubar.tray.settings", nil); got != "菜单栏设置…" {
+		t.Errorf("settings line %q", got)
+	}
+}
+
+func TestMenuBarOnFollowsTheSavedReadings(t *testing.T) {
+	if !menuBarSupported() {
+		t.Skip("the menu bar readings are macOS only")
+	}
+	setHome(t, t.TempDir())
+	withBattery(t, false)
+	if !menuBarOn() {
+		t.Error("the defaults show CPU and memory")
+	}
+	if err := saveMenuBarConfig(menuBarPath(), menuBarConfig{Items: []string{"battery"}}); err != nil {
+		t.Fatal(err)
+	}
+	if menuBarOn() {
+		t.Error("only the battery is chosen, and this Mac has none")
+	}
+	noMenuBar(t)
+	if menuBarOn() {
+		t.Error("all off")
+	}
+}
+
+func TestSaveMenuBarRenamesTheIconsOnlyWhenTheReadingsChange(t *testing.T) {
+	if !menuBarSupported() {
+		t.Skip("the menu bar readings are macOS only")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	withBattery(t, true)
+	applied := stubResident(t)
+	save := func(items ...string) menuBarConfig {
+		t.Helper()
+		if err := (Cleaner{}).SaveMenuBar(items); err != nil {
+			t.Fatal(err)
+		}
+		return loadMenuBarConfig(menuBarPath(), true)
+	}
+	if c := save("mem", "cpu", "cpu", "bogus"); !slices.Equal(c.Items, []string{"cpu", "mem"}) || c.Layout != 0 {
+		t.Errorf("the defaults again: %+v, want layout 0", c)
+	}
+	if c := save("gpu", "cpu"); !slices.Equal(c.Items, []string{"cpu", "gpu"}) || c.Layout != 1 {
+		t.Errorf("changed: %+v, want layout 1", c)
+	}
+	if c := save(); len(c.Items) != 0 || c.Layout != 1 {
+		t.Errorf("all off: %+v, want layout 1 kept", c)
+	}
+	if c := save("temp"); c.Layout != 2 {
+		t.Errorf("back on: %+v, want layout 2", c)
+	}
+	if len(*applied) != 4 || !slices.Equal((*applied)[3].Items, []string{"temp"}) {
+		t.Errorf("applied %+v", *applied)
+	}
+	if got := (Cleaner{}).MenuBar(); !got.Supported || !slices.Equal(got.Items, []string{"temp"}) || !slices.Contains(got.Available, "battery") {
+		t.Errorf("MenuBar() = %+v", got)
+	}
+}
+
+func TestSaveMenuBarTurnsTheLoginItemOffWithTheLastReading(t *testing.T) {
+	if !menuBarSupported() {
+		t.Skip("the menu bar readings are macOS only")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	withBattery(t, true)
+	old := growth
+	t.Cleanup(func() { growth = old })
+	growth = &growthMonitor{launched: t0, notifs: "unknown"}
+	told := 0
+	growthChanged = func(GrowthStatus) { told++ }
+	stubResident(t)
+	g := defaultGrowthConfig()
+	g.OpenAtLogin = true // monitoring off: the readings keep the login item
+	if err := saveGrowthConfig(growthDir(), g); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (Cleaner{}).SaveMenuBar([]string{"cpu"}); err != nil {
+		t.Fatal(err)
+	}
+	if !loadGrowthConfig(growthDir()).OpenAtLogin || told != 0 {
+		t.Fatal("a reading still shows, but the login item went")
+	}
+	if err := (Cleaner{}).SaveMenuBar(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadGrowthConfig(growthDir()); got.OpenAtLogin || told != 1 {
+		t.Errorf("the last reading went with monitoring off: login %v, pages told %d times, want off and once", got.OpenAtLogin, told)
+	}
+
+	g.Enabled, g.OpenAtLogin = true, true
+	if err := saveGrowthConfig(growthDir(), g); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Cleaner{}).SaveMenuBar([]string{"mem"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Cleaner{}).SaveMenuBar(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !loadGrowthConfig(growthDir()).OpenAtLogin {
+		t.Error("monitoring is on, but the login item went with the readings")
+	}
+}
+
+// With a reading in the menu bar, turning monitoring off from the menu keeps
+// the login item (menubar spec §七.3).
+func TestGrowthMenuOffKeepsTheLoginItemForTheReadings(t *testing.T) {
+	if !growthSupported() || !menuBarSupported() {
+		t.Skip("the growth monitor and the readings do not run on this platform")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	old, oldApply := growth, growthApply
+	t.Cleanup(func() { growth, growthApply = old, oldApply })
+	growth = &growthMonitor{launched: t0, notifs: "unknown", nextAt: t0.Add(5 * time.Hour)}
+	var applied []GrowthConfig
+	growthApply = func(c GrowthConfig) error { applied = append(applied, c); return nil }
+	on := defaultGrowthConfig()
+	on.Enabled, on.OpenAtLogin = true, true
+	if err := saveGrowthConfig(growthDir(), on); err != nil {
+		t.Fatal(err)
+	}
+
+	turnOffGrowth()
+
+	if got := loadGrowthConfig(growthDir()); got.Enabled || !got.OpenAtLogin {
+		t.Errorf("config %+v, want monitoring off and the login item kept", got)
+	}
+	if len(applied) != 1 || !applied[0].OpenAtLogin || applied[0].Enabled {
+		t.Errorf("applied %+v", applied)
+	}
+}

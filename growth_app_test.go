@@ -35,6 +35,7 @@ func TestGrowthMenuModel(t *testing.T) {
 		{label: "growth.tray.measure:", action: "measure"},
 		{label: "growth.tray.off:", action: "off"},
 		{},
+		{label: "menubar.tray.settings:", action: "settings"},
 		{label: "growth.tray.quit:", action: "quit"},
 	}
 	if len(items) != len(want) {
@@ -137,9 +138,27 @@ func TestGrowthMenuCommandsEndTheModel(t *testing.T) {
 		if running {
 			measure = "" // "measuring" cannot be clicked
 		}
-		if want := []string{"open", measure, "off", "", "quit"}; !slices.Equal(actions, want) {
+		if want := []string{"open", measure, "off", "", "settings", "quit"}; !slices.Equal(actions, want) {
 			t.Errorf("running %v: actions %v, want %v", running, actions, want)
 		}
+	}
+}
+
+// With monitoring off and a reading shown, the icon's menu opens, sets up and
+// quits; its last lines are the growth menu's last lines.
+func TestMenuBarOnlyMenu(t *testing.T) {
+	model := menuBarOnlyMenu(labelsOnly)
+	var actions []string
+	for _, it := range model {
+		actions = append(actions, it.action)
+	}
+	if want := []string{"open", "", "settings", "quit"}; !slices.Equal(actions, want) {
+		t.Errorf("actions %v, want %v", actions, want)
+	}
+	tail := menuBarMenuTail(labelsOnly)
+	commands := growthMenuCommands(false, labelsOnly)
+	if !slices.Equal(model[len(model)-len(tail):], tail) || !slices.Equal(commands[len(commands)-len(tail):], tail) {
+		t.Errorf("menus end %+v and %+v, want %+v", model, commands, tail)
 	}
 }
 
@@ -380,6 +399,7 @@ func TestGrowthMenuOffDoesNotHoldItsCaller(t *testing.T) {
 	now, size := t0, 10*gb
 	var sent []GrowthAlert
 	stubGrowth(t, &now, &size, &sent)
+	noMenuBar(t)
 	old := growth
 	t.Cleanup(func() { growth = old })
 	growth = &growthMonitor{launched: t0, notifs: "unknown", nextAt: t0.Add(5 * time.Hour)}
@@ -460,6 +480,7 @@ func TestGrowthMenuOffGoesOnAfterALoginError(t *testing.T) {
 	now, size := t0, 10*gb
 	var sent []GrowthAlert
 	stubGrowth(t, &now, &size, &sent)
+	noMenuBar(t)
 	old := growth
 	t.Cleanup(func() { growth = old })
 	growth = &growthMonitor{launched: t0, notifs: "unknown", nextAt: t0.Add(5 * time.Hour)}

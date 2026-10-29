@@ -26,7 +26,16 @@
     "menubar.label.disk": "磁盘",
     "menubar.label.temp": "温度",
     "menubar.label.battery": "电池",
-    "menubar.value.free": "{size} 可用"
+    "menubar.value.free": "{size} 可用",
+    "menubar.tip.cpu": "CPU 使用率",
+    "menubar.tip.mem": "内存：已用占总量",
+    "menubar.tip.gpu": "GPU 使用率",
+    "menubar.tip.net": "网络：下载和上传速度",
+    "menubar.tip.disk": "磁盘可用空间",
+    "menubar.tip.temp": "芯片温度",
+    "menubar.tip.battery": "电池电量",
+    "menubar.tray.tip": "Cleanzo",
+    "menubar.tray.settings": "菜单栏设置…"
   },
   "en": {
     "webview.title": "Cleanzo",
@@ -55,6 +64,15 @@
     "menubar.label.disk": "DISK",
     "menubar.label.temp": "TEMP",
     "menubar.label.battery": "BAT",
-    "menubar.value.free": "{size} free"
+    "menubar.value.free": "{size} free",
+    "menubar.tip.cpu": "CPU usage",
+    "menubar.tip.mem": "Memory used of total",
+    "menubar.tip.gpu": "GPU usage",
+    "menubar.tip.net": "Network download and upload",
+    "menubar.tip.disk": "Free disk space",
+    "menubar.tip.temp": "Chip temperature",
+    "menubar.tip.battery": "Battery charge",
+    "menubar.tray.tip": "Cleanzo",
+    "menubar.tray.settings": "Menu Bar Settings…"
   }
 }

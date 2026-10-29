@@ -140,7 +140,7 @@ func lastGrowthAt(dir string, now time.Time) time.Time {
 // GrowthConfig is what the user chose for the growth monitor (spec §五, §六).
 type GrowthConfig struct {
 	Enabled     bool     `json:"enabled"`     // measure in the background, show the menu bar icon, stay open without windows
-	OpenAtLogin bool     `json:"openAtLogin"` // only together with Enabled
+	OpenAtLogin bool     `json:"openAtLogin"` // only while monitoring is on or the menu bar shows a reading
 	DailyGB     float64  `json:"dailyGB"`     // a day's growth that alerts
 	WeeklyGB    float64  `json:"weeklyGB"`    // seven days' growth that alerts
 	Ignored     []string `json:"ignored"`     // owner keys that never alert
@@ -177,18 +177,18 @@ func loadGrowthConfig(dir string) GrowthConfig {
 	if c.Ignored == nil {
 		c.Ignored = []string{}
 	}
-	c.OpenAtLogin = c.Enabled && c.OpenAtLogin
 	return c
 }
 
-// validateGrowthConfig returns a normalized copy, or a translatable error
-// for thresholds outside the choices. Opening at login needs monitoring on.
-func validateGrowthConfig(c GrowthConfig) (GrowthConfig, error) {
+// validateGrowthConfig returns a normalized copy, or a translatable error for
+// thresholds outside the choices. Opening at login needs monitoring on or a
+// reading in the menu bar (menuBar; menubar spec §七.3).
+func validateGrowthConfig(c GrowthConfig, menuBar bool) (GrowthConfig, error) {
 	if !slices.Contains(growthDailyChoices, c.DailyGB) || !slices.Contains(growthWeeklyChoices, c.WeeklyGB) {
 		return GrowthConfig{}, codeError{Code: "growth-threshold"}
 	}
 	out := c
-	out.OpenAtLogin = c.Enabled && c.OpenAtLogin
+	out.OpenAtLogin = c.OpenAtLogin && (c.Enabled || menuBar)
 	out.Ignored = []string{}
 	for _, k := range c.Ignored {
 		k = strings.ToLower(strings.TrimSpace(k))

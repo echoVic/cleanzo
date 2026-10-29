@@ -99,12 +99,12 @@ func TestGrowthConfigDefaultsAndValidation(t *testing.T) {
 	if c := loadGrowthConfig(dir); c.Enabled || c.DailyGB != 2 || c.WeeklyGB != 10 || c.Ignored == nil {
 		t.Fatalf("defaults = %+v", c)
 	}
-	c, err := validateGrowthConfig(GrowthConfig{Enabled: false, OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20, Ignored: []string{" APP:X ", "app:x", ""}})
+	c, err := validateGrowthConfig(GrowthConfig{Enabled: false, OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20, Ignored: []string{" APP:X ", "app:x", ""}}, false)
 	if err != nil || c.OpenAtLogin || len(c.Ignored) != 1 || c.Ignored[0] != "app:x" {
 		t.Fatalf("validated = %+v, %v", c, err)
 	}
 	var ce codeError
-	if _, err := validateGrowthConfig(GrowthConfig{DailyGB: 3, WeeklyGB: 10}); !errors.As(err, &ce) || ce.Code != "growth-threshold" {
+	if _, err := validateGrowthConfig(GrowthConfig{DailyGB: 3, WeeklyGB: 10}, false); !errors.As(err, &ce) || ce.Code != "growth-threshold" {
 		t.Fatalf("bad threshold err = %v", err)
 	}
 	if err := saveGrowthConfig(dir, c); err != nil {
@@ -119,11 +119,21 @@ func TestGrowthConfigDefaultsAndValidation(t *testing.T) {
 	if got := loadGrowthConfig(dir); got.DailyGB != 2 {
 		t.Fatalf("an unknown threshold must fall back to the default: %+v", got)
 	}
+	if c, err := validateGrowthConfig(GrowthConfig{OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20}, true); err != nil || !c.OpenAtLogin {
+		t.Errorf("a reading in the menu bar keeps the login item with monitoring off: %+v, %v", c, err)
+	}
+	kept := GrowthConfig{OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20, Ignored: []string{}}
+	if err := saveGrowthConfig(dir, kept); err != nil {
+		t.Fatal(err)
+	}
+	if !loadGrowthConfig(dir).OpenAtLogin {
+		t.Error("loading cleared a login item saved for the readings")
+	}
 }
 
 func TestGrowthConfigRoundTripKeepsOpenAtLogin(t *testing.T) {
 	dir := t.TempDir()
-	c, err := validateGrowthConfig(GrowthConfig{Enabled: true, OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20, Ignored: []string{"app:x"}, Asked: true})
+	c, err := validateGrowthConfig(GrowthConfig{Enabled: true, OpenAtLogin: true, DailyGB: 5, WeeklyGB: 20, Ignored: []string{"app:x"}, Asked: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
