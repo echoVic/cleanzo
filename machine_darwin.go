@@ -241,7 +241,9 @@ func nvmeSMARTLog() ([512]byte, bool) {
 		if !busy {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		if try < 2 {
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 	if smartLast != nil {
 		return *smartLast, true

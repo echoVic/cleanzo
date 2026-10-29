@@ -73,6 +73,9 @@ const CalloutIcon = () => (
 
 // ---- 指标卡 ----
 
+/** 条里的一段：从 left% 起、宽 width%。用 transform 而不是 width，过渡由合成器做，不触发重排。 */
+const barSeg = (left: number, width: number) => `translateX(${left}%) scaleX(${width / 100})`;
+
 export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
   const badge = m.pressure === 2
     ? <em className="mbadge">{t("status.mem.pressureWarn")}</em>
@@ -100,9 +103,9 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
               role="img"
               aria-label={t("status.mem.barLabel", { used: fmtMem(m.used), app: fmtMem(m.app), wired: fmtMem(m.wired), comp: fmtMem(m.compressed) })}
             >
-              <i style={{ width: `${pct(m.app)}%`, background: "var(--seg-app)" }} />
-              <i style={{ width: `${pct(m.wired)}%`, background: "var(--seg-wired)" }} />
-              {(!isWindows() || m.compressed > 0) && <i style={{ width: `${pct(m.compressed)}%`, background: "var(--seg-compressed)" }} />}
+              <i style={{ transform: barSeg(0, pct(m.app)), background: "var(--seg-app)" }} />
+              <i style={{ transform: barSeg(pct(m.app), pct(m.wired)), background: "var(--seg-wired)" }} />
+              {(!isWindows() || m.compressed > 0) && <i style={{ transform: barSeg(pct(m.app) + pct(m.wired), pct(m.compressed)), background: "var(--seg-compressed)" }} />}
             </div>
           </div>
           <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
@@ -219,7 +222,7 @@ export function DiskCard({ d, t, onClean, ssd, live }: {
       </div>
       <div className="mhero num"><NumberTicker as="b" value={d.free} fps={15} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}{ssd?.model ? ` · ${ssd.model}` : ""}</div>
-      <div className="mviz"><div className="mbar"><i style={{ width: `${usedPct}%` }} /></div></div>
+      <div className="mviz"><div className="mbar"><i style={{ transform: barSeg(0, usedPct) }} /></div></div>
       <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
         <li><span>{t("status.disk.used")}</span><b>{usedPct}%</b></li>
         <li><span>{t("status.disk.avail")}</span><b>{fmtMem(d.free)}</b></li>
@@ -263,7 +266,7 @@ export function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
       <div className="mhero num"><NumberTicker as="b" value={b.percent} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{state}</div>
       <div className="mviz">
-        <div className={`mbar${healthPct > 0 && healthPct < 80 ? " low" : ""}`}><i style={{ width: `${healthPct}%` }} /></div>
+        <div className={`mbar${healthPct > 0 && healthPct < 80 ? " low" : ""}`}><i style={{ transform: barSeg(0, healthPct) }} /></div>
       </div>
       <ul className="mlegend num">
         <li><span>{t("status.battery.maxCap")}</span><b>{healthPct > 0 ? `${healthPct}%` : "—"}</b></li>

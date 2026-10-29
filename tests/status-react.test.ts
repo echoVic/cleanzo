@@ -242,6 +242,9 @@ test("Windows memory card hides zero compressed memory and uses page-file terms"
     const mac = renderToStaticMarkup(createElement(MemoryCard, { m, t }));
     expect(mac).toContain("Compressed");
     expect(mac).toContain("seg-compressed");
+    // 条用 transform 定位和缩放，不用 width（width 过渡每帧重排整页）
+    expect(mac).toContain("transform:translateX(0%) scaleX(");
+    expect(mac).not.toMatch(/<i style="width:/);
     expect(t("status.osVersion", { version: "26" })).toBe("macOS 26");
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });

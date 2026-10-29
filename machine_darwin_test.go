@@ -240,6 +240,9 @@ func TestNVMeSMARTLogSurvivesOverlappingReads(t *testing.T) {
 	if !iokitInit() {
 		t.Fatal("IOKit loads on a real Mac")
 	}
+	smartMu.Lock()
+	smartLast = nil // a cached page would hide a failed read
+	smartMu.Unlock()
 	var wg sync.WaitGroup
 	ok := make([]bool, 4)
 	for i := range ok {
