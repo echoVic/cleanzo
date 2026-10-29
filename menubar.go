@@ -7,11 +7,13 @@ package main
 // the icons and feeds them; elsewhere the readings are not supported.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"github.com/egoist/mygo"
 )
@@ -199,4 +201,88 @@ func menuBarGo(t MenuBarTarget) {
 	mygo.App.WhenReady(func() {
 		_ = MenuBarGo.Emit(openMainWindow(), t) // delivered once the page is ready
 	})
+}
+
+// WatchMenuBarPanel streams what a menu bar panel shows while it is open, as
+// the status page's samples: the first after about half a second, then one
+// every two seconds (spec §四, §六). It reads only what item's panel needs:
+//   - the machine's live readings, but not for the memory and battery panels;
+//   - the battery through system_profiler, once a minute, for its own panel
+//     only;
+//   - for the temperature panel, the battery's temperature alone.
+//
+// The panel closes the channel as it closes. It fails with "unsupported" off
+// macOS and "unknown-item" for a reading it does not know.
+func (Cleaner) WatchMenuBarPanel(ctx context.Context, item string, ch *mygo.Channel[StatusSample]) error {
+	if !menuBarSupported() {
+		return codeError{Code: "unsupported"}
+	}
+	if !slices.Contains(menuBarItems, item) {
+		return codeError{Code: "unknown-item"}
+	}
+	return watchStatusWith(ctx, ch.Send, menuBarPanelSource(realStatusSource(), item))
+}
+
+// menuBarPanelSource is base without the reads item's panel does not show.
+func menuBarPanelSource(base statusSource, item string) statusSource {
+	src := base
+	switch item {
+	case "battery": // system_profiler, as the home page: health and condition come only from it
+	case "temp":
+		src.battery = func(context.Context) *BatteryStatus { return menuBarBatteryTemp() }
+	default:
+		src.battery = func(context.Context) *BatteryStatus { return nil }
+	}
+	if item == "mem" || item == "battery" {
+		src.machine = nil
+	}
+	return src
+}
+
+// menuBarHolds are the panels a quit under way keeps open (spec §四.5).
+var menuBarHolds = struct {
+	sync.Mutex
+	held map[*mygo.Window]bool
+}{held: map[*mygo.Window]bool{}}
+
+// menuBarHeld tells whether a quit under way keeps w open.
+func menuBarHeld(w *mygo.Window) bool {
+	menuBarHolds.Lock()
+	defer menuBarHolds.Unlock()
+	return menuBarHolds.held[w]
+}
+
+// menuBarRelease lets w close again.
+func menuBarRelease(w *mygo.Window) {
+	menuBarHolds.Lock()
+	delete(menuBarHolds.held, w)
+	menuBarHolds.Unlock()
+}
+
+// MenuBarHold keeps the panel that calls it open while hold is true: a quit is
+// under way, and its result must show (spec §四.5). Clicking elsewhere, or on
+// the reading, leaves the panel open until the quit is done.
+func (Cleaner) MenuBarHold(ctx context.Context, hold bool) {
+	w := mygo.CallerWindow(ctx)
+	if w == nil {
+		return
+	}
+	if !hold {
+		menuBarRelease(w)
+		return
+	}
+	menuBarHolds.Lock()
+	menuBarHolds.held[w] = true
+	menuBarHolds.Unlock()
+}
+
+// MenuBarOpen closes the panel that calls it, held or not, and shows the page
+// t names in the main window, making the window again if it was closed
+// (spec §四.6).
+func (Cleaner) MenuBarOpen(ctx context.Context, t MenuBarTarget) {
+	if w := mygo.CallerWindow(ctx); w != nil && w.IsFlyout() {
+		menuBarRelease(w)
+		w.Destroy()
+	}
+	menuBarGo(t)
 }

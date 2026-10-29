@@ -73,14 +73,15 @@ func menuBarSupported() bool { return true }
 // menuBarController is the readings' icons. Only the main thread uses it; the
 // sampler's goroutine hands it each reading through mygo.RunOnMain.
 type menuBarController struct {
-	shown  bool                   // show has run
-	items  []string               // the readings shown, in menuBarItems' order
-	layout int                    // names the icons (menuBarItemName)
-	trays  map[string]*mygo.Tray  // by reading
-	drawn  map[string]menuBarText // what each icon shows
-	widths map[string]float64     // the room each icon keeps, in points, in the app's language
-	last   menuBarReading         // the latest reading, to draw again in another language
-	stop   context.CancelFunc     // ends the sampler; nil while none runs
+	shown  bool                    // show has run
+	items  []string                // the readings shown, in menuBarItems' order
+	layout int                     // names the icons (menuBarItemName)
+	trays  map[string]*mygo.Tray   // by reading
+	drawn  map[string]menuBarText  // what each icon shows
+	widths map[string]float64      // the room each icon keeps, in points, in the app's language
+	last   menuBarReading          // the latest reading, to draw again in another language
+	stop   context.CancelFunc      // ends the sampler; nil while none runs
+	panels map[string]*mygo.Window // open panels by reading; at most one
 }
 
 // menuBar is the app's controller.
@@ -102,6 +103,10 @@ func (m *menuBarController) show(items []string, layout int) {
 		return
 	}
 	m.shown = true
+	m.closePanels()
+	if m.panels == nil {
+		m.panels = map[string]*mygo.Window{}
+	}
 	if m.stop != nil {
 		m.stop()
 		m.stop = nil
@@ -131,6 +136,7 @@ func (m *menuBarController) show(items []string, layout int) {
 			continue
 		}
 		t.OnAppearanceChange(func() { m.repaint(item) })
+		t.OnClick(func() { m.toggle(item) })
 		m.trays[item] = t
 		m.drawn[item] = text
 	}
@@ -212,4 +218,77 @@ func (m *menuBarController) relabel() {
 		tray.SetToolTip(nativeText("menubar.tip."+item, nil))
 		m.paint(item, tray, menuBarTextFor(item, m.last, nativeText))
 	}
+}
+
+// The panels' size in points (spec §九): as wide as the mockup's, as tall as
+// their content up to most of a laptop's screen.
+const (
+	menuBarPanelWidth     = 320
+	menuBarPanelMaxHeight = 640
+)
+
+// toggle opens item's panel below its icon and closes any other; a click on the
+// icon while its panel is open closes it (spec §四). The panel is the app's
+// page panel.html in the system's popover, which closes when the user clicks
+// elsewhere. A quit under way keeps it open (MenuBarHold). It runs on the main
+// thread.
+func (m *menuBarController) toggle(item string) {
+	if w := m.panels[item]; w != nil {
+		w.Close()
+		return
+	}
+	m.closePanels()
+	t := m.trays[item]
+	if t == nil {
+		return
+	}
+	w := mygo.NewFlyout(mygo.FlyoutOptions{
+		Tray:       t,
+		Placement:  mygo.PlacementBottom,
+		Popover:    true,
+		Focusable:  true,
+		Width:      menuBarPanelWidth,
+		Height:     360,
+		FitContent: true,
+		MinWidth:   menuBarPanelWidth,
+		MaxWidth:   menuBarPanelWidth,
+		MaxHeight:  menuBarPanelMaxHeight,
+		URL:        "/panel.html?item=" + item,
+	})
+	m.panels[item] = w
+	w.OnClose(func(e *mygo.CloseEvent) {
+		if menuBarHeld(w) {
+			e.PreventDefault()
+		}
+	})
+	w.OnClosed(func() {
+		menuBarRelease(w)
+		mygo.RunOnMain(func() {
+			if m.panels[item] == w {
+				delete(m.panels, item)
+			}
+		})
+	})
+}
+
+// closePanels closes every open panel, held or not, as before its icon goes.
+func (m *menuBarController) closePanels() {
+	for item, w := range m.panels {
+		menuBarRelease(w)
+		w.Destroy()
+		delete(m.panels, item)
+	}
+}
+
+// menuBarBatteryTemp is the battery's temperature for the temperature panel,
+// read from AppleSmartBattery without system_profiler; nil without a battery
+// or when it cannot be read.
+func menuBarBatteryTemp() *BatteryStatus {
+	if !menuBarBattery() {
+		return nil
+	}
+	if c, _ := smartBatteryExtras(false); c > 0 {
+		return &BatteryStatus{Temperature: c}
+	}
+	return nil
 }

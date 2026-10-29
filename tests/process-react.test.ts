@@ -214,6 +214,11 @@ test("rows: an app row shows its icon once known; other rows keep the letter", a
   } finally { resetIconsForTest(async () => ""); }
 });
 
+test("rows: a row a menu bar panel named is highlighted", async () => {
+  expect(await rowHtml({ row: chrome, hl: true })).toContain('class="pr-item pr-hl"');
+  expect(await rowHtml({ row: chrome })).not.toContain("pr-hl");
+});
+
 test("sortRows compares the numbers the page shows; equal ones keep name order", () => {
   const MB = 2 ** 20;
   const a = row({ key: "a", name: "a", cpu: 0.2, memory: 512.2 * MB });

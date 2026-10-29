@@ -48,6 +48,8 @@ export interface ProcessRowViewProps {
   stuck: boolean;
   /** 已经退出：置灰、去掉按钮。 */
   done: boolean;
+  /** 菜单栏面板点名字进来：高亮这一行 900ms。 */
+  hl?: boolean;
   t: T;
   onToggle: () => void;
   onQuit: () => void;
@@ -56,7 +58,7 @@ export interface ProcessRowViewProps {
 }
 
 /** 一行：App、命令行程序或系统程序；有不止一个进程时能展开，同名的合成一条。 */
-export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, t, onToggle, onQuit, onForce, onTag }: ProcessRowViewProps) {
+export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, t, onToggle, onQuit, onForce, onTag }: ProcessRowViewProps) {
   const expandable = row.children.length > 1 || (row.children[0]?.count ?? 0) > 1;
   const num = (estimated: boolean) => `st-col num${estimated ? " pr-est" : ""}`;
   const label = (
@@ -73,7 +75,7 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, t, o
     </>
   );
   return (
-    <div className={`pr-item${done ? " quitted" : ""}`} data-key={row.key}>
+    <div className={`pr-item${done ? " quitted" : ""}${hl ? " pr-hl" : ""}`} data-key={row.key}>
       <div className="st-row pr-row">
         <div className="pr-app">
           {expandable ? (
@@ -143,6 +145,9 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   const [forceTarget, setForceTarget] = React.useState<ProcessRow | null>(null);
   const [growth, setGrowth] = React.useState<GrowthSummary | null>(null);
   const [focus, setFocus] = React.useState<{ key: string | null; nonce: number }>({ key: null, nonce: 0 });
+  /** CPU、内存标签里要定位的行（菜单栏面板点名字进来）；hl 是正在高亮的行。 */
+  const [rowFocus, setRowFocus] = React.useState<string | null>(null);
+  const [hl, setHl] = React.useState<string | null>(null);
   const [seen, setSeen] = React.useState({ visit: -1, nonce: 0 });
   const frozenRef = React.useRef<ProcessRow[]>([]);
   const segRef = React.useRef<HTMLDivElement>(null);
@@ -162,9 +167,13 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setQuitTarget(null);
     setForceTarget(null);
     frozenRef.current = [];
+    setRowFocus(null);
+    setHl(null);
     if (fresh && request.focusKey) {
       const key = request.focusKey;
-      setFocus((f) => ({ key, nonce: f.nonce + 1 }));
+      // 磁盘占用标签交给 GrowthPanel 定位；CPU、内存标签等这一行出现在表里再定位。
+      if (request.tab === "disk") setFocus((f) => ({ key, nonce: f.nonce + 1 }));
+      else setRowFocus(key);
     }
   }
 
@@ -302,6 +311,24 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setTab("disk");
   };
 
+  // 菜单栏面板点名字进来：等这一行出现在表里，滚到中间、高亮 900ms，只定位一次。
+  const rowReady = rowFocus !== null && rows.some((r) => r.key === rowFocus);
+  React.useEffect(() => {
+    if (!rowReady || rowFocus === null) return;
+    const key = rowFocus;
+    const raf = requestAnimationFrame(() => {
+      document.querySelector(`.pr-item[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" });
+      setHl(key);
+      setRowFocus(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [rowFocus, rowReady]);
+  React.useEffect(() => {
+    if (!hl) return;
+    const id = window.setTimeout(() => setHl(null), 900);
+    return () => window.clearTimeout(id);
+  }, [hl]);
+
   if (isWindows()) {
     return (
       <div className="cz-react">
@@ -397,6 +424,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   busy={quit.busy.has(r.path)}
                   stuck={stuck.has(r.path)}
                   done={quit.done.has(r.key)}
+                  hl={hl === r.key}
                   t={t}
                   onToggle={() => setOpen((o) => (o === r.key ? null : r.key))}
                   onQuit={() => setQuitTarget(r)}

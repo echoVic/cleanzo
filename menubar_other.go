@@ -10,3 +10,5 @@ func menuBarHasBattery() bool   { return false }
 func menuBarShow([]string, int) {}
 func menuBarLayout() int        { return 0 }
 func menuBarRelabel()           {}
+
+func menuBarBatteryTemp() *BatteryStatus { return nil }

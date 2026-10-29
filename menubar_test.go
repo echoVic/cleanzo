@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 // noMenuBar turns every reading off for the test, as Settings would.
@@ -257,5 +261,66 @@ func TestSaveGrowthConfigKeepsTheLoginItemForTheReadings(t *testing.T) {
 	}
 	if loadGrowthConfig(growthDir()).OpenAtLogin {
 		t.Error("no reading and monitoring off, but the login item stayed")
+	}
+}
+
+func TestMenuBarPanelSourceReadsWhatThePanelShows(t *testing.T) {
+	profiled := 0
+	base := statusSource{
+		battery: func(context.Context) *BatteryStatus { profiled++; return &BatteryStatus{Percent: 80} },
+		machine: func() machineSampler { return nil },
+	}
+	for _, tc := range []struct {
+		item              string
+		machine, profiler bool
+	}{
+		{"cpu", true, false}, {"mem", false, false}, {"gpu", true, false}, {"net", true, false},
+		{"disk", true, false}, {"temp", true, false}, {"battery", false, true},
+	} {
+		profiled = 0
+		src := menuBarPanelSource(base, tc.item)
+		if (src.machine != nil) != tc.machine {
+			t.Errorf("%s: machine reader %v, want %v", tc.item, src.machine != nil, tc.machine)
+		}
+		b := src.battery(context.Background())
+		if (profiled == 1) != tc.profiler {
+			t.Errorf("%s: system_profiler ran %d times", tc.item, profiled)
+		}
+		if tc.item != "battery" && tc.item != "temp" && b != nil {
+			t.Errorf("%s: read the battery %+v", tc.item, b)
+		}
+	}
+}
+
+func TestWatchMenuBarPanelRefusesAnUnknownReading(t *testing.T) {
+	want := "unknown-item"
+	if !menuBarSupported() {
+		want = "unsupported"
+	}
+	var ce codeError
+	if err := (Cleaner{}).WatchMenuBarPanel(context.Background(), "fans", nil); !errors.As(err, &ce) || ce.Code != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
+func TestMenuBarHolds(t *testing.T) {
+	w := &mygo.Window{}
+	if menuBarHeld(w) {
+		t.Fatal("held before anything asked")
+	}
+	(Cleaner{}).MenuBarHold(context.Background(), true) // no calling window: nothing to hold
+	menuBarHolds.Lock()
+	n := len(menuBarHolds.held)
+	menuBarHolds.held[w] = true
+	menuBarHolds.Unlock()
+	if n != 0 {
+		t.Errorf("%d panels held without a caller", n)
+	}
+	if !menuBarHeld(w) {
+		t.Error("not held")
+	}
+	menuBarRelease(w)
+	if menuBarHeld(w) {
+		t.Error("still held after release")
 	}
 }
