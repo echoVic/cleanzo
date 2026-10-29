@@ -73,7 +73,7 @@ func TestSampleMenuBarReadsOnlyWhatShows(t *testing.T) {
 			return busy, total
 		},
 		memory:  func() MemoryStatus { mem++; return MemoryStatus{Used: 24 << 30, Total: 32 << 30, Pressure: 2} },
-		disk:    func() DiskStat { disk++; return DiskStat{Free: 26 << 30} },
+		disk:    func() DiskStat { disk++; return DiskStat{Total: 500 << 30, Free: 26 << 30} },
 		machine: func() menuBarMachine { machine++; return nil },
 		battery: func() int { battery++; return 80 },
 	}
@@ -85,7 +85,7 @@ func TestSampleMenuBarReadsOnlyWhatShows(t *testing.T) {
 	if r.CPU != 30 || r.MemUsed != 24<<30 || r.MemTotal != 32<<30 || r.Pressure != 2 {
 		t.Errorf("first reading %+v, want CPU 30%% and the memory", r)
 	}
-	if r.GPU != -1 || r.NetDown != -1 || r.NetUp != -1 || r.Free != 0 || r.ChipTemp != 0 || r.Battery != -1 {
+	if r.GPU != -1 || r.NetDown != -1 || r.NetUp != -1 || r.Free != 0 || r.DiskKnown || r.ChipTemp != 0 || r.Battery != -1 {
 		t.Errorf("read what does not show: %+v", r)
 	}
 	if disk != 0 || machine != 0 || battery != 0 {
@@ -103,7 +103,7 @@ func TestSampleMenuBarOpensTheMachineOnlyForItsReadings(t *testing.T) {
 	src := menuBarSource{
 		cpu:     func() (uint64, uint64) { return 0, 0 },
 		memory:  func() MemoryStatus { return MemoryStatus{} },
-		disk:    func() DiskStat { return DiskStat{Free: 5 << 30} },
+		disk:    func() DiskStat { return DiskStat{Total: 500 << 30, Free: 5 << 30} },
 		machine: func() menuBarMachine { opened++; return fake },
 		battery: func() int { return 55 },
 	}
@@ -115,7 +115,7 @@ func TestSampleMenuBarOpensTheMachineOnlyForItsReadings(t *testing.T) {
 	if len(fake.asks) != 3 || slices.ContainsFunc(fake.asks, func(a [3]bool) bool { return a != [3]bool{false, false, true} }) {
 		t.Errorf("asked %v, want the temperature alone, three times", fake.asks)
 	}
-	if r := got[1]; r.ChipTemp != 43 || r.Free != 5<<30 || r.Battery != 55 || r.GPU != -1 || r.NetDown != -1 || r.CPU != -1 {
+	if r := got[1]; r.ChipTemp != 43 || r.Free != 5<<30 || !r.DiskKnown || r.Battery != 55 || r.GPU != -1 || r.NetDown != -1 || r.CPU != -1 {
 		t.Errorf("reading %+v", r)
 	}
 	opened = 0

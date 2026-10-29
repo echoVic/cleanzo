@@ -15,18 +15,19 @@ import (
 
 // menuBarReading is one sample of what the readings show. A reading that does
 // not show is not read and stays unknown: CPU, GPU, NetDown, NetUp and
-// Battery -1; MemTotal, Free and ChipTemp 0.
+// Battery -1; MemTotal and ChipTemp 0; DiskKnown false.
 type menuBarReading struct {
-	CPU      float64 // % busy, the whole CPU, as the home page's CPU card
-	MemUsed  uint64  // bytes, the home page's memory used
-	MemTotal uint64  // bytes
-	Pressure uint64  // kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical
-	GPU      float64 // % device utilization
-	NetDown  float64 // bytes/s over Wi-Fi and Ethernet
-	NetUp    float64 // bytes/s
-	Free     int64   // bytes free on the startup disk
-	ChipTemp float64 // °C, the hottest SoC die sensor
-	Battery  int     // % charge
+	CPU       float64 // % busy, the whole CPU, as the home page's CPU card
+	MemUsed   uint64  // bytes, the home page's memory used
+	MemTotal  uint64  // bytes
+	Pressure  uint64  // kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical
+	GPU       float64 // % device utilization
+	NetDown   float64 // bytes/s over Wi-Fi and Ethernet
+	NetUp     float64 // bytes/s
+	Free      int64   // bytes free on the startup disk
+	DiskKnown bool    // the startup disk was read; Free counts only then
+	ChipTemp  float64 // °C, the hottest SoC die sensor
+	Battery   int     // % charge
 }
 
 // unknownMenuBarReading is a reading before anything is read.
@@ -121,10 +122,14 @@ func menuBarTextFor(item string, r menuBarReading, text func(string, map[string]
 	case "net":
 		return menuBarText{Top: "↓" + menuBarRate(r.NetDown), Bottom: "↑" + menuBarRate(r.NetUp)}
 	case "disk":
-		if r.Free <= 0 {
+		if !r.DiskKnown {
 			return label("—")
 		}
-		return label(text("menubar.value.free", map[string]string{"size": menuBarSize(r.Free)}))
+		size := "0 MB" // a full disk, as its panel shows it
+		if r.Free > 0 {
+			size = menuBarSize(r.Free)
+		}
+		return label(text("menubar.value.free", map[string]string{"size": size}))
 	case "temp":
 		if r.ChipTemp <= 0 {
 			return label("—")

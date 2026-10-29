@@ -70,7 +70,8 @@ func sampleMenuBar(ctx context.Context, items []string, src menuBarSource, show 
 			r.MemUsed, r.MemTotal, r.Pressure = m.Used, m.Total, m.Pressure
 		}
 		if has("disk") {
-			r.Free = src.disk().Free
+			d := src.disk()
+			r.Free, r.DiskKnown = d.Free, d.Total > 0
 		}
 		if machine != nil {
 			s := machine.readSome(time.Now(), gpu, net, temp)

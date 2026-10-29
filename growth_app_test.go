@@ -243,6 +243,32 @@ func TestGrowthKeepRunning(t *testing.T) {
 	}
 }
 
+// Closing the window keeps Cleanzo in the menu bar while a reading shows or
+// monitoring is on, and quits otherwise (menubar spec §七.1).
+func TestResidentOnFollowsTheReadingsAndMonitoring(t *testing.T) {
+	if !growthSupported() || !menuBarSupported() {
+		t.Skip("the growth monitor and the readings do not run on this platform")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	if !residentOn() {
+		t.Error("the default readings must keep Cleanzo in the menu bar")
+	}
+	noMenuBar(t)
+	if residentOn() {
+		t.Error("no reading and monitoring off: closing the window must quit")
+	}
+	on := defaultGrowthConfig()
+	on.Enabled = true
+	if err := saveGrowthConfig(growthDir(), on); err != nil {
+		t.Fatal(err)
+	}
+	if !residentOn() {
+		t.Error("monitoring on must keep Cleanzo in the menu bar")
+	}
+}
+
 // Before the app runs, as in a test or while the bindings are generated,
 // there is no main thread to wait for, so applying the settings must return
 // at once. The tests of SaveGrowthConfig, which applies them, rely on that.

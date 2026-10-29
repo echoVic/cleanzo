@@ -42,7 +42,7 @@ func TestMenuBarNumbers(t *testing.T) {
 
 func TestMenuBarTextFor(t *testing.T) {
 	r := menuBarReading{CPU: 51.2, MemUsed: 27_500 << 20, MemTotal: 32 << 30, Pressure: 1, GPU: 14,
-		NetDown: 156_000, NetUp: 55_400, Free: 28_669_603_840, ChipTemp: 43.4, Battery: 100}
+		NetDown: 156_000, NetUp: 55_400, Free: 28_669_603_840, DiskKnown: true, ChipTemp: 43.4, Battery: 100}
 	for item, want := range map[string]menuBarText{
 		"cpu":     {Top: "menubar.label.cpu", Bottom: "51%", Label: true},
 		"mem":     {Top: "menubar.label.mem", Bottom: "84%", Label: true},
@@ -55,6 +55,9 @@ func TestMenuBarTextFor(t *testing.T) {
 		if got := menuBarTextFor(item, r, readoutText); got != want {
 			t.Errorf("%s: %+v, want %+v", item, got, want)
 		}
+	}
+	if got := menuBarTextFor("disk", menuBarReading{DiskKnown: true}, readoutText).Bottom; got != "0 MB free" {
+		t.Errorf("a full disk reads %q, want 0 MB free", got)
 	}
 	for pressure, tone := range map[uint64]string{0: "", 1: "", 2: "warn", 4: "crit"} {
 		r.Pressure = pressure

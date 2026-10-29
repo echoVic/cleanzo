@@ -118,6 +118,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
   const [sys, setSys] = React.useState<SystemInfo | null>(null);
   const [growth, setGrowth] = React.useState<GrowthState | null>(null);
   const [failed, setFailed] = React.useState(false);
+  const [samples, setSamples] = React.useState(0);
   const [procFailed, setProcFailed] = React.useState(false);
   const [hover, setHover] = React.useState(false);
   const [book, setBook] = React.useState<QuitBook>(emptyBook);
@@ -134,6 +135,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
         for await (const v of ch) {
           if (!live) continue;
           setS(v);
+          setSamples((n) => n + 1);
           const p = chartPoint(item, v);
           if (p !== null) setHist((h) => trimSpark(h, p));
           const gpu = v.machine?.gpu ?? -1;
@@ -245,11 +247,12 @@ export function PanelApp({ item }: { item: PanelItem }) {
         <span className="mb-hero"><b>{h.value}</b>{h.unit && <small>{h.unit}</small>}</span>
       </header>
       {sub && <p className="mb-sub">{sub}</p>}
+      {/* 读数到了 3 次还没有诊断，说明这一项读不到：不再占位 */}
       {failed || (listed && procFailed)
         ? <p className="mb-diag crit" role="alert">{t("menubar.panel.error")}</p>
         : diag
           ? <p className={`mb-diag ${diag.tone}`}>{diag.text}</p>
-          : <div className="mb-diag mb-skel" aria-hidden="true" />}
+          : samples < 3 ? <div className="mb-diag mb-skel" aria-hidden="true" /> : null}
       <div className="mb-chart"><SparkSvg hist={hist} max={chartMax(item, hist)} tone={chartTone(item, s)} /></div>
       {shares && (
         <div className="mb-stack" aria-hidden="true">

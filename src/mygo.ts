@@ -1182,7 +1182,9 @@ export const Cleaner = {
   /**
    * MenuBarHold keeps the panel that calls it open while hold is true: a quit is
    * under way, and its result must show (spec §四.5). Clicking elsewhere, or on
-   * the reading, leaves the panel open until the quit is done.
+   * the reading, leaves the panel open until the quit is done, or menuBarHoldMax
+   * at most; quitting Cleanzo releases it. Only a panel can be held, and a call
+   * from a page that has gone releases.
    */
   menuBarHold(hold: boolean): Promise<void> {
     return call("Cleaner.MenuBarHold", hold);
