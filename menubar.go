@@ -130,13 +130,10 @@ func menuBarState(c menuBarConfig) MenuBarState {
 	return MenuBarState{Supported: true, Items: c.Items, Available: menuBarAvailable(menuBarBattery())}
 }
 
-// menuBarIconName names the Cleanzo icon for layout: "growth", its name from
-// before the readings, until the readings first change, so that it keeps the
-// place the user gave it.
+// menuBarIconName names the Cleanzo icon for layout. Every layout gets new
+// names: macOS keeps each named icon's place, and an old name would put the
+// icon back where it was, right of readings made after it.
 func menuBarIconName(layout int) string {
-	if layout == 0 {
-		return "growth"
-	}
 	return fmt.Sprintf("cleanzo.%d", layout)
 }
 
@@ -178,16 +175,20 @@ func (Cleaner) SaveMenuBar(items []string) error {
 	}
 	g := withSystemLoginItem(loadGrowthConfig(growthDir()))
 	loginOff := len(next.Items) == 0 && !g.Enabled && g.OpenAtLogin
+	var saveErr error
 	if loginOff {
 		g.OpenAtLogin = false
-		if err := saveGrowthConfig(growthDir(), g); err != nil {
-			return err
-		}
+		saveErr = saveGrowthConfig(growthDir(), g)
 	}
+	// Applied even when that save failed: with nothing keeping Cleanzo in the
+	// menu bar, the login item goes, whatever the file says.
 	applyErr := residentApply(g, next)
 	_ = MenuBarUpdated.Broadcast(menuBarState(next))
-	if loginOff {
+	if loginOff && saveErr == nil {
 		growth.changed() // Settings shows the login switch off
+	}
+	if saveErr != nil {
+		return saveErr
 	}
 	return applyErr
 }

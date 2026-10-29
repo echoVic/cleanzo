@@ -36,7 +36,7 @@ const (
 // The lines' baselines, in points above the image's bottom edge.
 const (
 	readoutLabelBase = 11.4
-	readoutValueBase = 1.6
+	readoutValueBase = 1.1
 	readoutDuoTop    = 10.0
 	readoutDuoBottom = 1.3
 )
@@ -186,9 +186,9 @@ func drawReadout(t menuBarText, w float64, ink readoutInk) []byte {
 				return
 			}
 			// Without NSStringDrawingUsesLineFragmentOrigin, the rectangle's
-			// origin is the line's baseline.
-			nsString(s).Send(nsSel("drawWithRect:options:attributes:"),
-				nsRect{readoutPad, base, w, readoutHeight}, uint64(0), textAttributes(font, c))
+			// origin is the line's baseline; no drawing context is needed.
+			nsString(s).Send(nsSel("drawWithRect:options:attributes:context:"),
+				nsRect{readoutPad, base, w, readoutHeight}, uint64(0), textAttributes(font, c), objc.ID(0))
 		}
 		line(t.Top, topFont, topColor, topBase)
 		line(t.Bottom, bottomFont, value, bottomBase)

@@ -12,6 +12,7 @@ package main
 import (
 	"encoding/binary"
 	"math/bits"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -366,8 +367,12 @@ func appKitInit() bool {
 	return poolPush != 0 && objc.GetClass("NSWorkspace") != 0
 }
 
-// withPool runs fn inside an autorelease pool on the current thread.
+// withPool runs fn inside an autorelease pool on the current thread. The
+// goroutine stays on that thread until the pool is popped: a pool popped on
+// another thread than it was pushed on crashes the app.
 func withPool(fn func()) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	pool, _, _ := purego.SyscallN(poolPush)
 	defer purego.SyscallN(poolPop, pool)
 	fn()

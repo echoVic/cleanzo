@@ -44,8 +44,9 @@ type menuBarText struct {
 	Tone        string
 }
 
-// oneDecimal writes v with one decimal, halves rounded up as toFixed(1) rounds
-// them on the page.
+// oneDecimal writes v with one decimal, rounding v×10 half up. For the exact
+// halves a byte count divided by a power of two gives, that is what toFixed(1)
+// does on the page.
 func oneDecimal(v float64) string {
 	return strconv.FormatFloat(math.Round(v*10)/10, 'f', 1, 64)
 }
@@ -140,10 +141,10 @@ func menuBarTextFor(item string, r menuBarReading, text func(string, map[string]
 
 // menuBarWidest is the text item's icon keeps room for, so that it does not
 // change width with its value (spec §三.1): its widest usual value. The digits
-// all have one width, so 0 stands for any digit.
+// all have one width, so 0 stands for any digit, and M is the widest unit.
 func menuBarWidest(item string, text func(string, map[string]string) string) menuBarText {
 	if item == "net" {
-		return menuBarText{Top: "↓000K", Bottom: "↑000K"}
+		return menuBarText{Top: "↓000M", Bottom: "↑000M"} // M is the widest of K, M and G
 	}
 	w := menuBarTextFor(item, menuBarReading{}, text)
 	w.Tone = ""

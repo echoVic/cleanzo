@@ -79,11 +79,17 @@ func sampleMenuBar(ctx context.Context, items []string, src menuBarSource, show 
 		if has("battery") {
 			r.Battery = src.battery()
 		}
+		if ctx.Err() != nil {
+			return
+		}
 		show(r)
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			if ctx.Err() != nil { // both were ready and select picked the tick
+				return
+			}
 		}
 	}
 }

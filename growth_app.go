@@ -24,6 +24,12 @@ var growthTray atomic.Pointer[mygo.Tray]
 // thread reads or writes it.
 var growthMenuShown []growthMenuItem
 
+// growthMenuOn tells whether the icon's menu was last applied with monitoring
+// on. Only the main thread reads or writes it: refreshGrowthTray drops a menu
+// built for the other state, which a slow read of the records can deliver after
+// monitoring was turned on or off.
+var growthMenuOn bool
+
 // growthApply is applyGrowthLifecycle, for the callers that tests must be able
 // to replace. Its default is set in init, not in its declaration: the menu that
 // applyGrowthLifecycle builds reaches turnOffGrowth, which calls growthApply,
@@ -105,6 +111,7 @@ func startResident() bool {
 		if cfg.Enabled {
 			model, tip = growthMenuCommands(false, nativeText), nativeText("growth.tray.tip", nil)
 		}
+		growthMenuOn = cfg.Enabled
 		showGrowthTray(model, tip)
 		go refreshGrowthTray()
 	}
@@ -190,6 +197,7 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 	mygo.RunOnMain(func() { // runs inline when already on the main thread
 		menuBarShow(mb.Items, mb.Layout)
 		if resident {
+			growthMenuOn = g.Enabled
 			showGrowthTray(model, tip)
 		} else {
 			hideGrowthTray()
@@ -249,14 +257,16 @@ func showGrowthMenu(t growthMenuSetter, model []growthMenuItem) {
 
 // refreshGrowthTray rebuilds the menu, if the icon shows, and sets the
 // tooltip, which follows the language. The menu is only replaced when it
-// changed.
+// changed. A menu built for the other monitoring state than the one last
+// applied is dropped.
 func refreshGrowthTray() {
 	if growthTray.Load() == nil {
 		return
 	}
-	model, tip := residentMenu(loadGrowthConfig(growthDir()).Enabled)
+	on := loadGrowthConfig(growthDir()).Enabled
+	model, tip := residentMenu(on)
 	mygo.RunOnMain(func() {
-		if t := growthTray.Load(); t != nil {
+		if t := growthTray.Load(); t != nil && on == growthMenuOn {
 			t.SetToolTip(tip)
 			showGrowthMenu(t, model)
 		}

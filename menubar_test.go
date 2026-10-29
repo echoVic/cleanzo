@@ -68,8 +68,8 @@ func TestMenuBarConfigDefaultsAndNormalizes(t *testing.T) {
 }
 
 func TestMenuBarNames(t *testing.T) {
-	if got := menuBarIconName(0); got != "growth" {
-		t.Errorf("layout 0: %q, want the icon's old name", got)
+	if got := menuBarIconName(0); got != "cleanzo.0" {
+		t.Errorf("layout 0: %q", got)
 	}
 	if got := menuBarIconName(3); got != "cleanzo.3" {
 		t.Errorf("layout 3: %q", got)
@@ -224,5 +224,38 @@ func TestGrowthMenuOffKeepsTheLoginItemForTheReadings(t *testing.T) {
 	}
 	if len(applied) != 1 || !applied[0].OpenAtLogin || applied[0].Enabled {
 		t.Errorf("applied %+v", applied)
+	}
+}
+
+// Turning monitoring off from Settings keeps the login item while a reading
+// shows, and a later save without readings lets it go (menubar spec §七.3).
+func TestSaveGrowthConfigKeepsTheLoginItemForTheReadings(t *testing.T) {
+	if !growthSupported() || !menuBarSupported() {
+		t.Skip("the growth monitor and the readings do not run on this platform")
+	}
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	old, oldApply := growth, growthApply
+	t.Cleanup(func() { growth, growthApply = old, oldApply })
+	growth = &growthMonitor{launched: t0, notifs: "unknown"}
+	growthApply = func(GrowthConfig) error { return nil }
+	on := defaultGrowthConfig()
+	on.Enabled, on.OpenAtLogin = true, true
+	if err := saveGrowthConfig(growthDir(), on); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{Enabled: new(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadGrowthConfig(growthDir()); got.Enabled || !got.OpenAtLogin {
+		t.Errorf("readings on, monitoring turned off: %+v, want the login item kept", got)
+	}
+	noMenuBar(t)
+	if err := (Cleaner{}).SaveGrowthConfig(GrowthConfigPatch{DailyGB: new(5.0)}); err != nil {
+		t.Fatal(err)
+	}
+	if loadGrowthConfig(growthDir()).OpenAtLogin {
+		t.Error("no reading and monitoring off, but the login item stayed")
 	}
 }

@@ -62,7 +62,7 @@ func TestDrawReadoutKeepsTheLinesApart(t *testing.T) {
 	if labelFirst < 0 || valueFirst < 0 || zhFirst < 0 {
 		t.Fatal("a line drew nothing")
 	}
-	if labelLast >= valueFirst || zhLast >= valueFirst {
+	if labelLast+1 >= valueFirst || zhLast+1 >= valueFirst { // at least one clear row
 		t.Errorf("the labels reach pixel rows %d and %d; the value starts at %d", labelLast, zhLast, valueFirst)
 	}
 	if labelFirst > 12 || valueLast < 24 {
@@ -121,7 +121,7 @@ func TestReadoutWidthHoldsTheWidest(t *testing.T) {
 	}
 	for _, tc := range []struct{ widest, actual menuBarText }{
 		{menuBarText{Top: "CPU", Bottom: "100%", Label: true}, menuBarText{Top: "CPU", Bottom: "5%", Label: true}},
-		{menuBarText{Top: "↓000K", Bottom: "↑000K"}, menuBarText{Top: "↓1.2M", Bottom: "↑55K"}},
+		{menuBarText{Top: "↓000M", Bottom: "↑000M"}, menuBarText{Top: "↓123M", Bottom: "↑123G"}},
 		{menuBarText{Top: "磁盘", Bottom: "000.0 GB 可用", Label: true}, menuBarText{Top: "磁盘", Bottom: "26.7 GB 可用", Label: true}},
 	} {
 		if w, a := readoutWidth(tc.widest), readoutWidth(tc.actual); w <= 0 || a > w {

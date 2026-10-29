@@ -77,7 +77,7 @@ func TestMenuBarWidest(t *testing.T) {
 	for item, want := range map[string]menuBarText{
 		"cpu":  {Top: "menubar.label.cpu", Bottom: "100%", Label: true},
 		"mem":  {Top: "menubar.label.mem", Bottom: "100%", Label: true},
-		"net":  {Top: "↓000K", Bottom: "↑000K"},
+		"net":  {Top: "↓000M", Bottom: "↑000M"},
 		"disk": {Top: "menubar.label.disk", Bottom: "000.0 GB free", Label: true},
 		"temp": {Top: "menubar.label.temp", Bottom: "100°", Label: true},
 	} {

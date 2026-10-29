@@ -153,10 +153,13 @@ func (m *menuBarController) measure() {
 	}
 }
 
-// width is the room item's icon takes for t: its widest usual text's, or t's
-// when that is wider, as for a disk with a thousand gigabytes free.
+// width is the room item's icon takes for t: its widest usual text's, or the
+// widest text it has shown since, so that it widens at most once, as for a
+// disk with a thousand gigabytes free, and never narrows back.
 func (m *menuBarController) width(item string, t menuBarText) float64 {
-	return max(m.widths[item], readoutWidth(t))
+	w := max(m.widths[item], readoutWidth(t))
+	m.widths[item] = w
+	return w
 }
 
 // draw shows reading r, drawing again only the icons whose text changed.
