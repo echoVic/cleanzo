@@ -175,6 +175,25 @@ func TestMachineReaderLive(t *testing.T) {
 	}
 }
 
+// The menu bar's partial read reads what it is asked and nothing else.
+func TestMachineReadSomeLive(t *testing.T) {
+	r, _ := newMachineReader().(*machineReader)
+	if r == nil {
+		t.Skip("IOKit is not available")
+	}
+	defer r.close()
+	r.readSome(time.Now(), false, true, true)
+	time.Sleep(300 * time.Millisecond)
+	s := r.readSome(time.Now(), false, true, true)
+	t.Logf("%+v", *s)
+	if s.GPU != -1 || s.GPUMemory != 0 || s.PerfCPU != -1 || s.DiskRead != -1 || s.FanCount != -1 || s.Thermal != -1 || s.Power != 0 {
+		t.Errorf("read more than asked: %+v", *s)
+	}
+	if onThisMac() && (s.NetDown < 0 || s.ChipTemp <= 0) {
+		t.Errorf("network %v B/s, chip %v °C: want both read on this Mac", s.NetDown, s.ChipTemp)
+	}
+}
+
 func TestSmartBatteryExtrasLive(t *testing.T) {
 	temp, watts := smartBatteryExtras(true)
 	t.Logf("battery %.1f °C, adapter %d W", temp, watts)

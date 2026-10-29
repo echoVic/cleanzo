@@ -48,22 +48,27 @@ func nativeAppIcon(path string, px int) []byte {
 		img.Send(nsSel("drawInRect:fromRect:operation:fraction:"),
 			nsRect{0, 0, side, side}, nsRect{}, uint64(2) /* NSCompositingOperationSourceOver */, 1.0)
 		gc.Send(nsSel("restoreGraphicsState"))
-		dict := objc.ID(objc.GetClass("NSDictionary")).Send(nsSel("dictionary"))
-		data := rep.Send(nsSel("representationUsingType:properties:"), uint64(4) /* NSBitmapImageFileTypePNG */, dict)
-		if data == 0 {
-			return
-		}
-		n := objc.Send[uint64](data, nsSel("length"))
-		b := uintptr(data.Send(nsSel("bytes")))
-		if n == 0 || b == 0 {
-			return
-		}
-		// Taking the address and dereferencing keeps go vet from flagging
-		// the uintptr→pointer conversion, as in nsGoString.
-		ptr := *(*unsafe.Pointer)(unsafe.Pointer(&b))
-		out = append([]byte(nil), unsafe.Slice((*byte)(ptr), n)...)
+		out = bitmapPNG(rep)
 	})
 	return out
+}
+
+// bitmapPNG encodes rep as PNG; nil when it cannot.
+func bitmapPNG(rep objc.ID) []byte {
+	dict := objc.ID(objc.GetClass("NSDictionary")).Send(nsSel("dictionary"))
+	data := rep.Send(nsSel("representationUsingType:properties:"), uint64(4) /* NSBitmapImageFileTypePNG */, dict)
+	if data == 0 {
+		return nil
+	}
+	n := objc.Send[uint64](data, nsSel("length"))
+	b := uintptr(data.Send(nsSel("bytes")))
+	if n == 0 || b == 0 {
+		return nil
+	}
+	// Taking the address and dereferencing keeps go vet from flagging the
+	// uintptr→pointer conversion, as in nsGoString.
+	ptr := *(*unsafe.Pointer)(unsafe.Pointer(&b))
+	return append([]byte(nil), unsafe.Slice((*byte)(ptr), n)...)
 }
 
 // nsString makes an autoreleased NSString of s; purego passes s as a C

@@ -19,7 +19,14 @@
     "growth.tray.measure": "现在量一次",
     "growth.tray.measuring": "正在量…",
     "growth.tray.off": "关闭后台监控",
-    "growth.tray.quit": "退出 Cleanzo"
+    "growth.tray.quit": "退出 Cleanzo",
+    "menubar.label.cpu": "CPU",
+    "menubar.label.mem": "内存",
+    "menubar.label.gpu": "GPU",
+    "menubar.label.disk": "磁盘",
+    "menubar.label.temp": "温度",
+    "menubar.label.battery": "电池",
+    "menubar.value.free": "{size} 可用"
   },
   "en": {
     "webview.title": "Cleanzo",
@@ -41,6 +48,13 @@
     "growth.tray.measure": "Measure Now",
     "growth.tray.measuring": "Measuring…",
     "growth.tray.off": "Turn Off Background Monitoring",
-    "growth.tray.quit": "Quit Cleanzo"
+    "growth.tray.quit": "Quit Cleanzo",
+    "menubar.label.cpu": "CPU",
+    "menubar.label.mem": "MEM",
+    "menubar.label.gpu": "GPU",
+    "menubar.label.disk": "DISK",
+    "menubar.label.temp": "TEMP",
+    "menubar.label.battery": "BAT",
+    "menubar.value.free": "{size} free"
   }
 }

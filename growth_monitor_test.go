@@ -287,7 +287,7 @@ func TestNativeTexts(t *testing.T) {
 	}
 	for _, pair := range [][2]string{{"zh", "en"}, {"en", "zh"}} {
 		for key := range m[pair[0]] {
-			if strings.HasPrefix(key, "growth.") && m[pair[1]][key] == "" {
+			if (strings.HasPrefix(key, "growth.") || strings.HasPrefix(key, "menubar.")) && m[pair[1]][key] == "" {
 				t.Errorf("%s has a %s text but no %s text", key, pair[0], pair[1])
 			}
 		}

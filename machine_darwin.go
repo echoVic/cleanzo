@@ -347,6 +347,7 @@ type machineReader struct {
 	dies             []uintptr // SoC die sensors
 	nand             uintptr   // the SSD's NAND sensor
 	rot              sensorRotation
+	primed           bool // readSome has read every die sensor once
 
 	displaySig string
 }
@@ -412,6 +413,37 @@ func (r *machineReader) read(now time.Time) *MachineSample {
 	}
 	s.DisplaySig = r.displaySig
 	r.reads++
+	return s
+}
+
+// readSome takes only the live readings the menu bar shows (menubar spec §六):
+// the GPU's use, the network's rates and kind, and the chip's temperature,
+// each when asked. Rates are over the time since the last call. The first call
+// that reads the temperature reads every die sensor, as read does, so the
+// maximum starts right.
+func (r *machineReader) readSome(now time.Time, gpu, net, temp bool) *MachineSample {
+	s := newMachineSample()
+	var elapsed time.Duration
+	if !r.prevAt.IsZero() {
+		elapsed = now.Sub(r.prevAt)
+	}
+	r.prevAt = now
+	if gpu {
+		s.GPU, s.GPUMemory = r.gpuStats()
+	}
+	if net {
+		r.readNetwork(s, elapsed)
+	}
+	if temp {
+		k := dieSensorsPerRead
+		if !r.primed {
+			k, r.primed = len(r.dies), true
+		}
+		for _, i := range r.rot.pick(k) {
+			r.rot.record(i, sensorCelsius(r.dies[i]))
+		}
+		s.ChipTemp = r.rot.highest()
+	}
 	return s
 }
 
