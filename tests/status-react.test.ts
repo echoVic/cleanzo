@@ -542,3 +542,18 @@ test("English machine strings", async () => {
     expect(t("status.ssd.warn.spare")).toBe("Low spare blocks");
   } finally { setPref("system"); }
 });
+
+test("macOS home numbers change in place; Windows keeps the rolling number", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { CpuCard } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const props = { cpu: sample().cpu, cores: 12, hist: [10], t };
+  try {
+    setPlatformForTest("darwin");
+    expect(renderToStaticMarkup(createElement(CpuCard, props))).toContain('<div class="mhero num"><b>23</b><i>%</i></div>');
+    setPlatformForTest("win32");
+    expect(renderToStaticMarkup(createElement(CpuCard, props))).toContain("<b>23</b>");
+  } finally { setPlatformForTest(undefined); }
+});

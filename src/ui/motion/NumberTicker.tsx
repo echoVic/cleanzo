@@ -8,12 +8,10 @@ export interface NumberTickerProps {
   from?: number;
   as?: "span" | "b";
   className?: string;
-  /** 滚动时每秒最多改几次数字；默认每帧都改。每改一次网页都要重排重画，每 2 秒刷新一次的读数用 15 就够了。 */
-  fps?: number;
 }
 
 /** 数字滚动：数值变化时在 dur("tick") 内滚到新值，中途可改目标；减弱动态效果时直接显示。 */
-export function NumberTicker({ value, format, from, as = "span", className, fps }: NumberTickerProps) {
+export function NumberTicker({ value, format, from, as = "span", className }: NumberTickerProps) {
   const ref = React.useRef<HTMLElement | null>(null);
   const shown = React.useRef(from ?? value);
   const fmt = React.useRef(format);
@@ -31,20 +29,15 @@ export function NumberTicker({ value, format, from, as = "span", className, fps 
       return;
     }
     let raf = 0;
-    let timer = 0;
-    const gap = fps && fps > 0 ? 1000 / fps : 0;
     const t0 = performance.now();
     const step = (now: number) => {
       const p = Math.min(1, (now - t0) / ms);
       shown.current = p < 1 ? start + (value - start) * (1 - Math.pow(1 - p, 4)) : value;
       node.nodeValue = fmt.current(shown.current);
-      if (p >= 1) return;
-      // 限速时用定时器隔开，中间不排帧，网页也就不用重画
-      if (gap > 0) timer = window.setTimeout(() => { raf = requestAnimationFrame(step); }, gap);
-      else raf = requestAnimationFrame(step);
+      if (p < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
-    return () => { cancelAnimationFrame(raf); window.clearTimeout(timer); };
-  }, [value, fps]);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
   return React.createElement(as, { ref, className }, initial);
 }

@@ -73,6 +73,14 @@ const CalloutIcon = () => (
 
 // ---- 指标卡 ----
 
+/**
+ * 卡片的大数字。macOS 首页每 2 秒直接换成新值：滚动每一帧都让网页重画，真机测下来超出首页的开销上限，
+ * 2026-10-29 维护者选了直接换。Windows 首页照旧滚动。
+ */
+function HeroNumber({ value, format }: { value: number; format: (v: number) => string }) {
+  return isWindows() ? <NumberTicker as="b" value={value} format={format} /> : <b>{format(value)}</b>;
+}
+
 /** 条里的一段：从 left% 起、宽 width%。用 transform 而不是 width，过渡由合成器做，不触发重排。 */
 const barSeg = (left: number, width: number) => `translateX(${left}%) scaleX(${width / 100})`;
 
@@ -90,7 +98,7 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
       {m.total
         ? (
           <div className="mhero num">
-            <NumberTicker as="b" value={m.used} fps={15} format={(v) => splitMem(v)[0]} /><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
+            <HeroNumber value={m.used} format={(v) => splitMem(v)[0]} /><i>{usedUnit}</i><span className="mctx">/ {fmtMem(m.total)}</span>
           </div>
         )
         : <div className="mhero num"><b className="ph">—</b></div>}
@@ -184,7 +192,7 @@ export function CpuCard({ cpu, cores, hist, t, m, split }: {
   return (
     <article className="mcard cz-fade-in">
       <div className="mhead"><CpuIcon /><span>{t("status.card.cpu")}</span></div>
-      <div className="mhero num"><NumberTicker as="b" value={cpu.usage} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
+      <div className="mhero num"><HeroNumber value={cpu.usage} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{t("status.cpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} /></div>
       {!isWindows() && <div className="mloads num">
@@ -220,7 +228,7 @@ export function DiskCard({ d, t, onClean, ssd, live }: {
         <DiskIcon /><span>{t("status.card.disk")}</span>
         {warns.length > 0 && <em className="mbadge crit" title={warns.map((k) => t(k)).join(currentLang() === "zh" ? "、" : ", ")}>{t("status.ssd.attention")}</em>}
       </div>
-      <div className="mhero num"><NumberTicker as="b" value={d.free} fps={15} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
+      <div className="mhero num"><HeroNumber value={d.free} format={(v) => (v > 0 ? splitMem(v)[0] : "—")} /><i>{freeUnit}</i><span className="mctx">{t("status.disk.avail")}</span></div>
       <div className="mhcapt">{t("status.disk.totalOnly", { total: fmtMem(d.total) })}{ssd?.model ? ` · ${ssd.model}` : ""}</div>
       <div className="mviz"><div className="mbar"><i style={{ transform: barSeg(0, usedPct) }} /></div></div>
       <ul className={isWindows() ? "mlegend num mlegend-win" : "mlegend num"}>
@@ -263,7 +271,7 @@ export function BatteryCard({ b, t }: { b: BatteryStatus; t: T }) {
   return (
     <article className="mcard cz-fade-in">
       <div className="mhead"><BatteryIcon /><span>{t("status.card.battery")}</span>{badge}</div>
-      <div className="mhero num"><NumberTicker as="b" value={b.percent} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
+      <div className="mhero num"><HeroNumber value={b.percent} format={(v) => String(Math.round(v))} /><i>%</i></div>
       <div className="mhcapt">{state}</div>
       <div className="mviz">
         <div className={`mbar${healthPct > 0 && healthPct < 80 ? " low" : ""}`}><i style={{ transform: barSeg(0, healthPct) }} /></div>
@@ -284,7 +292,7 @@ export function GpuCard({ m, cores, displays, hist, t }: { m: MachineSample; cor
     <article className="mcard cz-fade-in">
       <div className="mhead"><GpuIcon /><span>{t("status.card.gpu")}</span></div>
       {m.gpu >= 0
-        ? <div className="mhero num"><NumberTicker as="b" value={m.gpu} fps={15} format={(v) => String(Math.round(v))} /><i>%</i></div>
+        ? <div className="mhero num"><HeroNumber value={m.gpu} format={(v) => String(Math.round(v))} /><i>%</i></div>
         : <div className="mhero num"><b className="ph">—</b></div>}
       <div className="mhcapt">{t("status.gpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} tone="gpu" /></div>
