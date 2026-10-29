@@ -237,6 +237,13 @@ func (m *menuBarController) toggle(item string) {
 		w.Close()
 		return
 	}
+	// A quit under way keeps its panel open (spec §四.5): another reading
+	// does not open until that quit is done.
+	for _, open := range m.panels {
+		if menuBarHeld(open) {
+			return
+		}
+	}
 	m.closePanels()
 	t := m.trays[item]
 	if t == nil {

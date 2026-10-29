@@ -311,18 +311,21 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setTab("disk");
   };
 
-  // 菜单栏面板点名字进来：等这一行出现在表里，滚到中间、高亮 900ms，只定位一次。
-  const rowReady = rowFocus !== null && rows.some((r) => r.key === rowFocus);
+  // 菜单栏面板点名字进来：等这一行画在 CPU 或内存表里，滚到中间、高亮 900ms，只定位一次；
+  // 先切到了磁盘占用标签就等着，回到 CPU、内存标签再定位。
+  const rowReady = rowFocus !== null && tab !== "disk" && rows.some((r) => r.key === rowFocus);
   React.useEffect(() => {
     if (!rowReady || rowFocus === null) return;
     const key = rowFocus;
     const raf = requestAnimationFrame(() => {
-      document.querySelector(`.pr-item[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" });
+      const el = document.querySelector(`.pr-item[data-key="${CSS.escape(key)}"]`);
+      if (!el) return; // 这一行还没画出来：下一次渲染再试
+      el.scrollIntoView({ block: "center" });
       setHl(key);
       setRowFocus(null);
     });
     return () => cancelAnimationFrame(raf);
-  }, [rowFocus, rowReady]);
+  }, [rowFocus, rowReady, rows]);
   React.useEffect(() => {
     if (!hl) return;
     const id = window.setTimeout(() => setHl(null), 900);
