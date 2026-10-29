@@ -118,6 +118,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
   const [sys, setSys] = React.useState<SystemInfo | null>(null);
   const [growth, setGrowth] = React.useState<GrowthState | null>(null);
   const [failed, setFailed] = React.useState(false);
+  const [procFailed, setProcFailed] = React.useState(false);
   const [hover, setHover] = React.useState(false);
   const [book, setBook] = React.useState<QuitBook>(emptyBook);
   const shownRef = React.useRef<ProcessRow[]>([]);
@@ -151,6 +152,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
     if (!listed) return;
     let live = true;
     const ch = new Channel<ProcessSample>();
+    setProcFailed(false);
     void (async () => {
       try {
         const done = panelApi.watchProcesses(ch);
@@ -161,7 +163,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
           setBook((b) => syncBook(b, v.rows));
         }
         await done;
-      } catch { /* 读不到进程：诊断和列表留着占位 */ }
+      } catch { if (live) setProcFailed(true); }
     })();
     return () => { live = false; ch.close(); };
   }, [listed]);
@@ -243,7 +245,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
         <span className="mb-hero"><b>{h.value}</b>{h.unit && <small>{h.unit}</small>}</span>
       </header>
       {sub && <p className="mb-sub">{sub}</p>}
-      {failed
+      {failed || (listed && procFailed)
         ? <p className="mb-diag crit" role="alert">{t("menubar.panel.error")}</p>
         : diag
           ? <p className={`mb-diag ${diag.tone}`}>{diag.text}</p>
@@ -286,7 +288,9 @@ export function PanelApp({ item }: { item: PanelItem }) {
                 onForce={() => void force(r)}
               />
             ))
-            : Array.from({ length: 3 }, (_, i) => <div key={i} className="mb-skel-row" aria-hidden="true" />)}
+            : procFailed
+              ? <p className="mb-sub">{t("menubar.panel.error")}</p>
+              : Array.from({ length: 3 }, (_, i) => <div key={i} className="mb-skel-row" aria-hidden="true" />)}
         </section>
       )}
       {grown.length > 0 && (

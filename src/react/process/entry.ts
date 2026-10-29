@@ -16,7 +16,7 @@ export function showReactProcess(active: boolean) {
   if (el) mountProcess(el, handlers, active);
 }
 
-/** 下次进入时打开哪个标签；focusKey 是磁盘占用标签里要定位的行。调用方随后切到本视图。 */
+/** 下次进入时打开哪个标签；focusKey 是要定位的行（磁盘占用标签里的 App，或 CPU、内存标签里的一行）。调用方随后切到本视图。 */
 export function openReactProcess(tab: ProcessTab, focusKey: string | null = null) {
   requestProcess(tab, focusKey);
 }

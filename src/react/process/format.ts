@@ -5,7 +5,7 @@ import { GiB, MiB } from "../status/format";
 /** 三个标签：CPU、内存是实时的进程表，磁盘占用是占用增长的列表。 */
 export type ProcessTab = "cpu" | "mem" | "disk";
 
-/** main.ts 的打开请求：tab 为 null 时按默认（CPU）；focusKey 是磁盘占用标签里要定位的行；nonce 变了才执行。 */
+/** main.ts 的打开请求：tab 为 null 时按默认（CPU）；focusKey 是要定位的行（磁盘占用标签里的 App，或 CPU、内存标签里的一行）；nonce 变了才执行。 */
 export interface ProcessRequest {
   tab: ProcessTab | null;
   focusKey: string | null;

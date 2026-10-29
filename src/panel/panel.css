@@ -1,7 +1,7 @@
 /* 菜单栏面板（设计 2026-10-29 §四）：系统弹出框里的网页，底色是弹出框自己的材质，页面不画底色。
    style.css 给主窗口的 html、body 定了满屏高度：这里改回按内容的高度，弹出框才能跟着内容伸缩。 */
 html:root { height: auto; background: transparent; }
-body.mb-body { height: auto; overflow: hidden; margin: 0; background: transparent; font-size: 12px; }
+body.mb-body { height: auto; overflow-x: hidden; overflow-y: auto; margin: 0; background: transparent; font-size: 12px; }
 
 .mb-panel { width: 320px; padding: 12px 0 0; color: var(--fg); }
 .mb-head { display: flex; align-items: baseline; gap: 8px; padding: 0 14px; }
@@ -42,8 +42,8 @@ body.mb-body { height: auto; overflow: hidden; margin: 0; background: transparen
 .mb-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-name em { font-style: normal; font-size: 10px; color: var(--muted); }
 .mb-name:hover span { text-decoration: underline; }
-.mb-quit { flex: none; visibility: hidden; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--btn-bg); font: inherit; font-size: 10.5px; color: var(--accent); cursor: pointer; }
-.mb-app:hover .mb-quit, .mb-quit.on, .mb-quit:focus-visible { visibility: visible; }
+.mb-quit { flex: none; opacity: 0; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--btn-bg); font: inherit; font-size: 10.5px; color: var(--accent); cursor: pointer; }
+.mb-app:hover .mb-quit, .mb-quit.on, .mb-quit:focus-visible { opacity: 1; }
 .mb-quit.danger { color: var(--danger); }
 .mb-quit:disabled { opacity: 0.6; cursor: default; }
 .mb-state { flex: none; font-size: 10.5px; color: var(--muted); }

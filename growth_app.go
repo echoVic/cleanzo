@@ -63,6 +63,9 @@ func registerGrowthLifecycle() {
 			focusGrowth(key)
 		}
 	})
+	// Quitting closes every window first: a panel held open for a quit under
+	// way must not cancel it, nor the logout it may be part of.
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { menuBarReleaseAll() })
 	// The menu's labels, the tooltips and the readings' labels follow the
 	// app's language. mygo calls this on the main thread.
 	mygo.App.OnLocaleChanged(func(string) {

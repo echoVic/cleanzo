@@ -75,7 +75,8 @@ export function hero(item: PanelItem, s: StatusSample | null): { value: string; 
       return { value, unit };
     }
     case "disk": {
-      if (!(s.disk.free > 0)) return none;
+      if (!(s.disk.total > 0)) return none;
+      if (!(s.disk.free > 0)) return { value: "0", unit: "MB" };
       const [value, unit] = splitMem(s.disk.free);
       return { value, unit };
     }
@@ -148,6 +149,14 @@ function busy(hist: readonly number[]): boolean {
   return hist.length >= PROCESS_DIAG.cpuSamples && hist.slice(-PROCESS_DIAG.cpuSamples).every((v) => v >= PROCESS_DIAG.cpuBusy);
 }
 
+/** 「不忙」的门槛：最近 3 次都在 50% 以下才这么说。 */
+const IDLE_BELOW = 50;
+
+/** 最近 3 次都在 50% 以下。读数不到 3 次、或在 50% 到 80% 之间时只点名占得最多的，不下结论。 */
+function idle(hist: readonly number[]): boolean {
+  return hist.length >= PROCESS_DIAG.cpuSamples && hist.slice(-PROCESS_DIAG.cpuSamples).every((v) => v < IDLE_BELOW);
+}
+
 /** 一句话诊断（设计 §四的表，Cleanzo 的特色）：读数还没到时为 null，面板画一条占位。 */
 export function diagnosis(item: PanelItem, d: DiagInput, t: T): PanelDiag | null {
   const s = d.s;
@@ -157,7 +166,8 @@ export function diagnosis(item: PanelItem, d: DiagInput, t: T): PanelDiag | null
       const top = d.proc ? sortRows(d.proc.rows, "cpu")[0] : undefined;
       if (!top) return null;
       const vars = { name: top.name, pct: est(fmtPct(top.cpu), top.estimated) };
-      return busy(d.cpuHist) ? { tone: "warn", text: t("process.diag.cpu", vars) } : { tone: "ok", text: t("menubar.diag.cpuIdle", vars) };
+      if (busy(d.cpuHist)) return { tone: "warn", text: t("process.diag.cpu", vars) };
+      return { tone: "ok", text: t(idle(d.cpuHist) ? "menubar.diag.cpuIdle" : "menubar.diag.cpuTop", vars) };
     }
     case "mem": {
       const top = d.proc ? sortRows(d.proc.rows, "mem")[0] : undefined;
@@ -171,8 +181,9 @@ export function diagnosis(item: PanelItem, d: DiagInput, t: T): PanelDiag | null
       return { tone: "ok", text: t("menubar.diag.memOk", vars) + swap };
     }
     case "gpu":
-      if (!m || m.gpu < 0) return null;
-      return busy(d.gpuHist) ? { tone: "warn", text: t("menubar.diag.gpuBusy") } : { tone: "ok", text: t("menubar.diag.gpuIdle") };
+      if (!m || m.gpu < 0 || d.gpuHist.length < PROCESS_DIAG.cpuSamples) return null;
+      if (busy(d.gpuHist)) return { tone: "warn", text: t("menubar.diag.gpuBusy") };
+      return { tone: "ok", text: t(idle(d.gpuHist) ? "menubar.diag.gpuIdle" : "menubar.diag.gpuSome") };
     case "net":
       if (!m) return null;
       return {
@@ -180,9 +191,10 @@ export function diagnosis(item: PanelItem, d: DiagInput, t: T): PanelDiag | null
         text: t(m.netKind === "wifi" ? "menubar.diag.netWifi" : m.netKind === "ethernet" ? "menubar.diag.netEthernet" : "menubar.diag.netNone"),
       };
     case "disk": {
-      if (!s || !(s.disk.free > 0)) return null;
-      const low = s.disk.free < STATUS_ALERT.diskFreeWarnGB * GiB;
-      let text = t(low ? "status.alert.diskLow" : "menubar.diag.diskOk", { size: fmtMem(s.disk.free) });
+      if (!s || !(s.disk.total > 0)) return null;
+      const free = Math.max(0, s.disk.free);
+      const low = free < STATUS_ALERT.diskFreeWarnGB * GiB;
+      let text = t(low ? "status.alert.diskLow" : "menubar.diag.diskOk", { size: free > 0 ? fmtMem(free) : "0 MB" });
       const a = growthHint(d.growth, []);
       if (a) {
         const size = a.atLeast ? t("growth.atLeast", { size: human(a.bytes) }) : human(a.bytes);
@@ -317,7 +329,7 @@ export function detailRows(item: PanelItem, s: StatusSample | null, info: Machin
     case "disk": {
       const ssd = info?.ssd ?? null;
       const smart = ssd?.smart ? ssd : null;
-      if (s.disk.total > 0) add({ key: "space", label: t("menubar.panel.freeTotal"), value: `${fmtMem(s.disk.free)} / ${fmtMem(s.disk.total)}` });
+      if (s.disk.total > 0) add({ key: "space", label: t("menubar.panel.freeTotal"), value: `${s.disk.free > 0 ? fmtMem(s.disk.free) : "0 MB"} / ${fmtMem(s.disk.total)}` });
       if (ssd?.model) add({ key: "model", label: t("menubar.panel.ssdModel"), value: ssd.model });
       if (smart) {
         const warns = ssdWarnings(smart.warning);

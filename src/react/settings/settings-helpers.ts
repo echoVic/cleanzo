@@ -63,10 +63,10 @@ export class SaveQueue {
 /** 菜单栏读数的固定顺序，和 Go 的 menuBarItems 一样（设计 2026-10-29 §三.3）。 */
 export const MENUBAR_ITEMS = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"] as const;
 
-/** 勾上或取消一项后的整份列表，按固定顺序；不认识的名字去掉。 */
-export function toggleMenuBarItem(items: readonly string[], item: string, on: boolean): string[] {
+/** 勾上或取消一项后的整份列表，按 order 的顺序（页面传 Go 给的 available，默认是固定顺序）；不在 order 里的名字去掉。 */
+export function toggleMenuBarItem(items: readonly string[], item: string, on: boolean, order: readonly string[] = MENUBAR_ITEMS): string[] {
   const chosen = new Set(items);
   if (on) chosen.add(item);
   else chosen.delete(item);
-  return MENUBAR_ITEMS.filter((it) => chosen.has(it));
+  return order.filter((it) => chosen.has(it));
 }

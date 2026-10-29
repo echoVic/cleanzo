@@ -526,6 +526,7 @@ test("增长设置：每次进入重新读取，不支持、Windows 或读取失
     page.reenter(state({}));
     await page.settle();
     expect(page.headings()).not.toContain(t("settings.growth"));
+    expect(page.headings()).not.toContain(t("settings.menubar"));
     expect(page.reads).toBe(2);
     setPlatformForTest("darwin");
     page.failRead();

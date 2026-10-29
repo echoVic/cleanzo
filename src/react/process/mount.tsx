@@ -9,7 +9,7 @@ let root: Root | null = null;
 let visit = 0;
 let request: ProcessRequest = { tab: null, focusKey: null, nonce: 0 };
 
-/** 记下下次进入时要打开的标签和磁盘占用里要定位的行。 */
+/** 记下下次进入时要打开的标签和要定位的行。 */
 export function requestProcess(tab: ProcessTab, focusKey: string | null) {
   request = { tab, focusKey, nonce: request.nonce + 1 };
 }

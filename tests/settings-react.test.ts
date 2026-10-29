@@ -75,4 +75,5 @@ test("toggleMenuBarItem keeps the menu bar's order and drops names it doesn't kn
   expect(toggleMenuBarItem(["cpu", "mem"], "cpu", false)).toEqual(["mem"]);
   expect(toggleMenuBarItem(["cpu"], "cpu", true)).toEqual(["cpu"]);
   expect(toggleMenuBarItem(["cpu", "bogus"], "battery", true)).toEqual(["cpu", "battery"]);
+  expect(toggleMenuBarItem(["cpu"], "fan", true, ["cpu", "fan"])).toEqual(["cpu", "fan"]);
 });

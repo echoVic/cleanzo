@@ -227,7 +227,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   // 「菜单栏设置…」进来：等「菜单栏」一节出现，滚过去并高亮一下；同一个请求只滚一次。
   const menuBarShown = !!menuBar && !isWindows();
   React.useEffect(() => {
-    if (!focus || focus.id !== "menubar" || !menuBarShown || focusedRef.current === focus.nonce) return;
+    if (!focus || focus.id !== "menubar" || !menuBarShown || loading || focusedRef.current === focus.nonce) return;
     const nonce = focus.nonce;
     const raf = requestAnimationFrame(() => {
       focusedRef.current = nonce;
@@ -235,7 +235,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
       setSectionHl(true);
     });
     return () => cancelAnimationFrame(raf);
-  }, [focus, menuBarShown]);
+  }, [focus, menuBarShown, loading]);
   React.useEffect(() => {
     if (!sectionHl) return;
     const id = window.setTimeout(() => setSectionHl(false), 900);
@@ -482,7 +482,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
                     <Checkbox
                       checked={menuBar.items.includes(it)}
                       disabled={menuBarBusy}
-                      onCheckedChange={(v) => void saveMenuBar(toggleMenuBarItem(menuBar.items, it, v === true))}
+                      onCheckedChange={(v) => void saveMenuBar(toggleMenuBarItem(menuBar.items, it, v === true, menuBar.available))}
                     />
                     <span>{t(`settings.menubar.item.${it}` as DictKey)}</span>
                   </label>

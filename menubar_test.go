@@ -311,7 +311,7 @@ func TestMenuBarHolds(t *testing.T) {
 	(Cleaner{}).MenuBarHold(context.Background(), true) // no calling window: nothing to hold
 	menuBarHolds.Lock()
 	n := len(menuBarHolds.held)
-	menuBarHolds.held[w] = true
+	menuBarHolds.held[w] = time.Now()
 	menuBarHolds.Unlock()
 	if n != 0 {
 		t.Errorf("%d panels held without a caller", n)
@@ -322,5 +322,18 @@ func TestMenuBarHolds(t *testing.T) {
 	menuBarRelease(w)
 	if menuBarHeld(w) {
 		t.Error("still held after release")
+	}
+	menuBarHolds.Lock()
+	menuBarHolds.held[w] = time.Now().Add(-menuBarHoldMax)
+	menuBarHolds.Unlock()
+	if menuBarHeld(w) {
+		t.Error("a hold older than menuBarHoldMax still holds")
+	}
+	menuBarHolds.Lock()
+	menuBarHolds.held[w] = time.Now()
+	menuBarHolds.Unlock()
+	menuBarReleaseAll()
+	if menuBarHeld(w) {
+		t.Error("quitting did not release the hold")
 	}
 }

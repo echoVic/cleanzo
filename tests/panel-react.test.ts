@@ -96,7 +96,9 @@ test("diagnosis: CPU busy only after three readings at 80% or more, naming the t
   const proc = procSample({ rows: [node, chrome, ws] });
   const vars = { name: "Google Chrome", pct: "54%" };
   expect(F.diagnosis("cpu", input({ proc, cpuHist: [85, 90, 81] }), t)).toEqual({ tone: "warn", text: t("process.diag.cpu", vars) });
-  expect(F.diagnosis("cpu", input({ proc, cpuHist: [85, 70, 90] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.cpuIdle", vars) });
+  expect(F.diagnosis("cpu", input({ proc, cpuHist: [85, 70, 90] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.cpuTop", vars) });
+  expect(F.diagnosis("cpu", input({ proc, cpuHist: [30, 40, 20] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.cpuIdle", vars) });
+  expect(F.diagnosis("cpu", input({ proc, cpuHist: [95] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.cpuTop", vars) });
   expect(F.diagnosis("cpu", input(), t)).toBeNull();
 });
 
@@ -111,7 +113,9 @@ test("diagnosis: memory pressure uses the 进程 page's sentence; swap of 1 GB o
 
 test("diagnosis: GPU, network, temperature and battery", () => {
   expect(F.diagnosis("gpu", input({ gpuHist: [90, 95, 88] }), t)).toEqual({ tone: "warn", text: t("menubar.diag.gpuBusy") });
-  expect(F.diagnosis("gpu", input({ gpuHist: [10] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.gpuIdle") });
+  expect(F.diagnosis("gpu", input({ gpuHist: [10] }), t)).toBeNull();
+  expect(F.diagnosis("gpu", input({ gpuHist: [10, 20, 30] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.gpuIdle") });
+  expect(F.diagnosis("gpu", input({ gpuHist: [60, 70, 90] }), t)).toEqual({ tone: "ok", text: t("menubar.diag.gpuSome") });
   expect(F.diagnosis("gpu", input({ s: sample({ machine: machine({ gpu: -1 }) }) }), t)).toBeNull();
   expect(F.diagnosis("net", input(), t)?.text).toBe(t("menubar.diag.netWifi"));
   expect(F.diagnosis("net", input({ s: sample({ machine: machine({ netKind: "" }) }) }), t)?.text).toBe(t("menubar.diag.netNone"));
@@ -129,6 +133,11 @@ test("diagnosis: disk space, and the biggest growth alert while monitoring is on
   expect(alerted?.tone).toBe("warn");
   expect(alerted?.text).toContain("ToDesk");
   expect(F.diagnosis("disk", input({ growth: growth(false) }), t)?.text).not.toContain("ToDesk");
+  const full = sample({ disk: { total: 494 * GB, used: 494 * GB, free: 0 } });
+  expect(F.hero("disk", full)).toEqual({ value: "0", unit: "MB" });
+  expect(F.diagnosis("disk", input({ s: full }), t)).toEqual({ tone: "warn", text: t("status.alert.diskLow", { size: "0 MB" }) });
+  expect(F.hero("disk", sample({ disk: { total: 0, used: 0, free: 0 } }))).toEqual({ value: "—", unit: "" });
+  expect(F.diagnosis("disk", input({ s: sample({ disk: { total: 0, used: 0, free: 0 } }) }), t)).toBeNull();
 });
 
 test("chart: one point per reading, scaled to its range; memory colored by pressure", () => {
@@ -257,6 +266,7 @@ test("panel strings exist in Chinese and English", () => {
     "menubar.panel.cpu", "menubar.panel.battery", "menubar.panel.every", "menubar.panel.openProcess", "menubar.panel.openHome",
     "menubar.panel.confirmQuit", "menubar.panel.confirmForce", "menubar.panel.quitted", "menubar.panel.swapValue",
     "menubar.diag.cpuIdle", "menubar.diag.memOk", "menubar.diag.diskOk", "menubar.diag.growth", "menubar.diag.thermal3",
+    "menubar.diag.cpuTop", "menubar.diag.gpuSome",
   ] as const;
   try {
     for (const lang of ["zh", "en"]) {

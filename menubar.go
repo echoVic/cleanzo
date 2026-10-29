@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 )
@@ -239,17 +240,24 @@ func menuBarPanelSource(base statusSource, item string) statusSource {
 	return src
 }
 
-// menuBarHolds are the panels a quit under way keeps open (spec §四.5).
+// menuBarHolds are the panels a quit under way keeps open (spec §四.5), with
+// when each hold began.
 var menuBarHolds = struct {
 	sync.Mutex
-	held map[*mygo.Window]bool
-}{held: map[*mygo.Window]bool{}}
+	held map[*mygo.Window]time.Time
+}{held: map[*mygo.Window]time.Time{}}
+
+// menuBarHoldMax bounds a hold. A quit gives up after five seconds, so a hold
+// older than this is one whose page went away or whose release was lost, and
+// the panel closes as usual again.
+const menuBarHoldMax = 15 * time.Second
 
 // menuBarHeld tells whether a quit under way keeps w open.
 func menuBarHeld(w *mygo.Window) bool {
 	menuBarHolds.Lock()
 	defer menuBarHolds.Unlock()
-	return menuBarHolds.held[w]
+	at, ok := menuBarHolds.held[w]
+	return ok && time.Since(at) < menuBarHoldMax
 }
 
 // menuBarRelease lets w close again.
@@ -259,21 +267,31 @@ func menuBarRelease(w *mygo.Window) {
 	menuBarHolds.Unlock()
 }
 
+// menuBarReleaseAll lets every panel close, as quitting needs: a held panel
+// would cancel the quit, and a logout with it.
+func menuBarReleaseAll() {
+	menuBarHolds.Lock()
+	clear(menuBarHolds.held)
+	menuBarHolds.Unlock()
+}
+
 // MenuBarHold keeps the panel that calls it open while hold is true: a quit is
 // under way, and its result must show (spec §四.5). Clicking elsewhere, or on
-// the reading, leaves the panel open until the quit is done.
+// the reading, leaves the panel open until the quit is done, or menuBarHoldMax
+// at most; quitting Cleanzo releases it. Only a panel can be held, and a call
+// from a page that has gone releases.
 func (Cleaner) MenuBarHold(ctx context.Context, hold bool) {
 	w := mygo.CallerWindow(ctx)
-	if w == nil {
-		return
-	}
-	if !hold {
-		menuBarRelease(w)
+	if w == nil || !w.IsFlyout() {
 		return
 	}
 	menuBarHolds.Lock()
-	menuBarHolds.held[w] = true
-	menuBarHolds.Unlock()
+	defer menuBarHolds.Unlock()
+	if !hold || ctx.Err() != nil {
+		delete(menuBarHolds.held, w)
+		return
+	}
+	menuBarHolds.held[w] = time.Now()
 }
 
 // MenuBarOpen closes the panel that calls it, held or not, and shows the page
