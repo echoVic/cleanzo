@@ -1,0 +1,56 @@
+/* 菜单栏面板（设计 2026-10-29 §四）：系统弹出框里的网页，底色是弹出框自己的材质，页面不画底色。
+   style.css 给主窗口的 html、body 定了满屏高度：这里改回按内容的高度，弹出框才能跟着内容伸缩。 */
+html:root { height: auto; background: transparent; }
+body.mb-body { height: auto; overflow: hidden; margin: 0; background: transparent; font-size: 12px; }
+
+.mb-panel { width: 320px; padding: 12px 0 0; color: var(--fg); }
+.mb-head { display: flex; align-items: baseline; gap: 8px; padding: 0 14px; }
+.mb-head h1 { margin: 0; font-size: 13px; font-weight: 600; }
+.mb-badge { font-style: normal; font-size: 10px; padding: 1px 7px; border-radius: 999px; color: var(--warn-text); background: var(--warn-soft); }
+.mb-badge.crit { color: var(--danger); background: var(--danger-soft); }
+.mb-hero { margin-left: auto; font-size: 26px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mb-hero small { margin-left: 2px; font-size: 13px; font-weight: 400; color: var(--muted); }
+.mb-sub { margin: 2px 14px 0; font-size: 11px; color: var(--muted); }
+
+.mb-diag { margin: 8px 10px 4px; padding: 8px 10px; border-radius: 8px; line-height: 1.45; background: var(--accent-soft); }
+.mb-diag.warn { color: var(--warn-text); background: var(--warn-soft); }
+.mb-diag.crit { color: var(--danger); background: var(--danger-soft); }
+.mb-skel { height: 34px; background: var(--skeleton); }
+
+.mb-chart { display: flex; align-items: flex-end; height: 40px; margin: 6px 14px; border-radius: 6px; overflow: hidden; background: var(--bg-subtle); }
+.mb-chart .st-spark svg { height: 40px; }
+.mb-stack { position: relative; height: 8px; margin: 2px 14px 4px; border-radius: 4px; overflow: hidden; background: var(--bg-subtle); }
+.mb-stack i { position: absolute; inset: 0; transform-origin: 0 0; }
+
+.mb-rows { list-style: none; margin: 0; padding: 0 14px 4px; }
+.mb-rows li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--border); }
+.mb-rows li:first-child { border-top: 0; }
+.mb-rows .k { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.mb-rows .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.mb-rows b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mb-bar { position: relative; flex: 0 0 90px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg-subtle); }
+.mb-bar i { position: absolute; inset: 0; transform-origin: 0 0; background: var(--accent); transition: transform 0.3s ease; }
+
+.mb-list { padding: 2px 0 4px; }
+.mb-sec { display: flex; justify-content: space-between; padding: 8px 14px 2px; font-size: 11px; color: var(--muted); }
+.mb-app { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 14px; }
+.mb-app:hover { background: var(--hover); }
+.mb-app.done { opacity: 0.45; }
+.mb-ico { flex: none; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; color: #fff; font-size: 10px; font-weight: 600; }
+.mb-ico.sys { color: var(--muted); background: var(--bg-subtle); }
+.mb-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.mb-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-name em { font-style: normal; font-size: 10px; color: var(--muted); }
+.mb-name:hover span { text-decoration: underline; }
+.mb-quit { flex: none; visibility: hidden; padding: 1px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--btn-bg); font: inherit; font-size: 10.5px; color: var(--accent); cursor: pointer; }
+.mb-app:hover .mb-quit, .mb-quit.on, .mb-quit:focus-visible { visibility: visible; }
+.mb-quit.danger { color: var(--danger); }
+.mb-quit:disabled { opacity: 0.6; cursor: default; }
+.mb-state { flex: none; font-size: 10.5px; color: var(--muted); }
+.mb-val { flex: none; min-width: 52px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mb-skel-row { height: 22px; margin: 4px 14px; border-radius: 5px; background: var(--skeleton); }
+
+.mb-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; padding: 8px 14px 10px; border-top: 1px solid var(--border); }
+.mb-links { display: flex; gap: 12px; }
+.mb-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
+.mb-every { font-size: 11px; color: var(--muted); }

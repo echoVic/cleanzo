@@ -14,18 +14,19 @@ import { Collapse } from "../../ui/motion/Collapse";
 import { NumberTicker } from "../../ui/motion/NumberTicker";
 import { useFlip } from "../../ui/motion/flip";
 import { useIndicator } from "../../ui/motion/indicator";
-import { dur, EASE, play, scrollBehavior } from "../../ui/motion/motion";
+import { scrollBehavior } from "../../ui/motion/motion";
 import { Leave, usePresence } from "../../ui/motion/presence";
 import { errText, human, toast } from "../../shared";
 import { statusApi } from "./api";
+import { SparkSvg } from "./Spark";
 import { crashDumps, oversized } from "../list/crash-dumps";
 import { growthApi } from "../growth/api";
 import { growthHint } from "../growth/hint";
 import type { ProcessTab } from "../process/format";
 import type { CrashDumpSummary } from "../../mygo";
 import {
-  GiB, MiB, SPARK_POINTS, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText, fmtTemp, iconColor,
-  isSparkShift, modelLabel, netSparkMax, pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem, ssdWarnings,
+  GiB, MiB, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText, fmtTemp, iconColor,
+  modelLabel, netSparkMax, pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem, ssdWarnings,
   syncQuitRows, trimSpark, uptimeParts,
   type QuitState, type SortBy,
 } from "./format";
@@ -128,52 +129,6 @@ export function MemoryCard({ m, t }: { m: StatusSample["memory"]; t: T }) {
         {m.swapUsed > 0.1 * GiB ? t("status.mem.swap", { used: fmtMem(m.swapUsed), size: fmtMem(m.swapTotal) }) : ""}
       </div>
     </article>
-  );
-}
-
-const SPARK_STEP = 120 / (SPARK_POINTS - 1);
-/** 平移时 svg 多画一格：宽 120 + 一格，平移一格占 svg 自身宽度的百分比。 */
-const SPARK_WIDE = 120 + SPARK_STEP;
-const SPARK_SHIFT_PCT = (SPARK_STEP / SPARK_WIDE) * 100;
-/** 曲线配色：CPU 用主题色，GPU 紫、网络蓝（与内存条的联动、App 两色一致）。 */
-const SPARK_TONE = {
-  accent: { stroke: "var(--accent)", fill: "var(--accent-soft)", fillOpacity: undefined },
-  gpu: { stroke: "var(--seg-wired)", fill: "var(--seg-wired)", fillOpacity: 0.14 },
-  net: { stroke: "var(--seg-app)", fill: "var(--seg-app)", fillOpacity: 0.14 },
-} as const;
-
-/** 30 点面积曲线，纵轴 0–max（默认 0–100%）；重开采样时缓冲清空，不足 2 点不画。 */
-function SparkSvg({ hist, max = 100, tone = "accent" }: { hist: number[]; max?: number; tone?: keyof typeof SPARK_TONE }) {
-  const svg = React.useRef<SVGSVGElement>(null);
-  const prev = React.useRef<number[]>(hist);
-  const ms = dur("spark");
-  // 同一次采样保留同一组点，悬停等重渲染不打断平移。
-  const { shift, pts } = React.useMemo(() => {
-    const shift = ms > 0 && isSparkShift(prev.current, hist);
-    // 平移：多画最左边那个旧点，整组左移一格后正好接上（设计 6.3）
-    return { shift, pts: shift ? [prev.current[0]!, ...hist] : hist };
-  }, [hist, ms]);
-  React.useLayoutEffect(() => {
-    prev.current = hist;
-    const el = svg.current;
-    if (!el) return;
-    el.getAnimations().forEach((a) => a.cancel());
-    // 移动整张 svg 而不是里面的 <g>：WebKit 把它交给合成器，平移时网页不用每帧重排重画
-    if (shift) void play(el, [{ transform: "translateX(0)" }, { transform: `translateX(-${SPARK_SHIFT_PCT}%)` }], dur("spark"), EASE.out, { fill: "forwards" });
-  }, [hist, shift]);
-  if (pts.length < 2) return null;
-  const top = max > 0 ? max : 100;
-  const y = (v: number) => (28 - (Math.max(0, Math.min(top, v)) / top) * 26).toFixed(1);
-  const c = SPARK_TONE[tone];
-  const line = `M${pts.map((v, i) => `${(i * SPARK_STEP).toFixed(1)},${y(v)}`).join(" L")}`;
-  const area = `${line} L${((pts.length - 1) * SPARK_STEP).toFixed(1)},28 L0,28 Z`;
-  return (
-    <div className="st-spark" aria-hidden="true">
-      <svg ref={svg} viewBox={`0 0 ${SPARK_WIDE.toFixed(2)} 28`} preserveAspectRatio="none" style={{ width: `${((SPARK_WIDE / 120) * 100).toFixed(3)}%` }}>
-        <path fill={c.fill} fillOpacity={c.fillOpacity} d={area} />
-        <path fill="none" stroke={c.stroke} strokeWidth={1.5} strokeLinejoin="round" d={line} />
-      </svg>
-    </div>
   );
 }
 

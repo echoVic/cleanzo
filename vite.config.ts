@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
@@ -20,5 +21,14 @@ export default defineConfig({
     strictPort: true,
     // The development app and the packaged builds are not the page's.
     watch: { ignored: ["**/.mygo/**", "**/build/**"] },
+  },
+  // 两个页面：主窗口 index.html，菜单栏读数的面板 panel.html（Go 打开 /panel.html?item=cpu）。
+  build: {
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        panel: fileURLToPath(new URL("./panel.html", import.meta.url)),
+      },
+    },
   },
 });
