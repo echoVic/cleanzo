@@ -1393,7 +1393,7 @@ export const events = {
   menuBarUpdated: event<MenuBarState>("menuBar:updated"),
   /**
    * MenuBarGo asks the main window to show a page: a link of a menu bar panel or
-   * a line of the Cleanzo icon's menu was clicked.
+   * a line of Cleanzo's menu was clicked.
    */
   menuBarGo: event<MenuBarTarget>("menuBar:go"),
 } as const;
