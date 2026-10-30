@@ -43,7 +43,7 @@ func stubResident(t *testing.T) *[]menuBarConfig {
 
 func TestMenuBarConfigDefaultsAndNormalizes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "menubar.json")
-	if c := loadMenuBarConfig(path, true); !slices.Equal(c.Items, []string{"cpu", "mem"}) || c.Layout != 0 {
+	if c := loadMenuBarConfig(path, true); !slices.Equal(c.Items, []string{"cpu", "mem"}) {
 		t.Errorf("no file: %+v, want CPU and memory", c)
 	}
 	if got := normalizeMenuBarItems([]string{"battery", "net", "bogus", "cpu", "net"}, true); !slices.Equal(got, []string{"cpu", "net", "battery"}) {
@@ -55,11 +55,11 @@ func TestMenuBarConfigDefaultsAndNormalizes(t *testing.T) {
 	if got := menuBarAvailable(false); slices.Contains(got, "battery") || len(got) != 6 {
 		t.Errorf("available without a battery: %v", got)
 	}
-	if err := saveMenuBarConfig(path, menuBarConfig{Items: []string{}, Layout: 3}); err != nil {
+	if err := saveMenuBarConfig(path, menuBarConfig{Items: []string{}}); err != nil {
 		t.Fatal(err)
 	}
-	if c := loadMenuBarConfig(path, true); c.Items == nil || len(c.Items) != 0 || c.Layout != 3 {
-		t.Errorf("all off: %+v, want none and layout 3", c)
+	if c := loadMenuBarConfig(path, true); c.Items == nil || len(c.Items) != 0 {
+		t.Errorf("all off: %+v, want none", c)
 	}
 	for _, broken := range []string{`{`, `{"layout": 2}`, `{"items": null}`} {
 		if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
@@ -68,18 +68,6 @@ func TestMenuBarConfigDefaultsAndNormalizes(t *testing.T) {
 		if c := loadMenuBarConfig(path, true); !slices.Equal(c.Items, menuBarDefault) {
 			t.Errorf("%s: %+v, want the defaults", broken, c)
 		}
-	}
-}
-
-func TestMenuBarNames(t *testing.T) {
-	if got := menuBarIconName(0); got != "cleanzo.0" {
-		t.Errorf("layout 0: %q", got)
-	}
-	if got := menuBarIconName(3); got != "cleanzo.3" {
-		t.Errorf("layout 3: %q", got)
-	}
-	if got := menuBarItemName(2, "cpu"); got != "cleanzo.2.cpu" {
-		t.Errorf("item name %q", got)
 	}
 }
 
@@ -117,7 +105,7 @@ func TestMenuBarOnFollowsTheSavedReadings(t *testing.T) {
 	}
 }
 
-func TestSaveMenuBarRenamesTheIconsOnlyWhenTheReadingsChange(t *testing.T) {
+func TestSaveMenuBarKeepsAndAppliesTheReadings(t *testing.T) {
 	if !menuBarSupported() {
 		t.Skip("the menu bar readings are macOS only")
 	}
@@ -133,17 +121,18 @@ func TestSaveMenuBarRenamesTheIconsOnlyWhenTheReadingsChange(t *testing.T) {
 		}
 		return loadMenuBarConfig(menuBarPath(), true)
 	}
-	if c := save("mem", "cpu", "cpu", "bogus"); !slices.Equal(c.Items, []string{"cpu", "mem"}) || c.Layout != 0 {
-		t.Errorf("the defaults again: %+v, want layout 0", c)
-	}
-	if c := save("gpu", "cpu"); !slices.Equal(c.Items, []string{"cpu", "gpu"}) || c.Layout != 1 {
-		t.Errorf("changed: %+v, want layout 1", c)
-	}
-	if c := save(); len(c.Items) != 0 || c.Layout != 1 {
-		t.Errorf("all off: %+v, want layout 1 kept", c)
-	}
-	if c := save("temp"); c.Layout != 2 {
-		t.Errorf("back on: %+v, want layout 2", c)
+	for _, tc := range []struct {
+		save []string
+		want []string
+	}{
+		{[]string{"mem", "cpu", "cpu", "bogus"}, []string{"cpu", "mem"}},
+		{[]string{"gpu", "cpu"}, []string{"cpu", "gpu"}},
+		{nil, []string{}},
+		{[]string{"temp"}, []string{"temp"}},
+	} {
+		if c := save(tc.save...); !slices.Equal(c.Items, tc.want) {
+			t.Errorf("save %v: kept %v, want %v", tc.save, c.Items, tc.want)
+		}
 	}
 	if len(*applied) != 4 || !slices.Equal((*applied)[3].Items, []string{"temp"}) {
 		t.Errorf("applied %+v", *applied)

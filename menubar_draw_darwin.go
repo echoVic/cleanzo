@@ -1,7 +1,7 @@
 package main
 
-// menubar_draw_darwin.go draws a reading's two lines into the image its menu
-// bar icon shows, with AppKit, as appicon_darwin.go draws app icons
+// menubar_draw_darwin.go draws the readings' two lines into the one image
+// their menu bar item shows, with AppKit, as appicon_darwin.go draws app icons
 // (menubar spec §三.1, §九).
 
 import (
@@ -45,8 +45,8 @@ const (
 // its value.
 const readoutLabelAlpha = 0.55
 
-// readoutInk says how an icon is colored. A template is black with a lighter
-// label, and macOS tints it for the menu bar and its highlight. An icon in
+// readoutInk says how a reading is colored. A template is black with a lighter
+// label, and macOS tints it for the menu bar and its highlight. A reading in
 // color is drawn in the menu bar's ink, light on a dark bar and dark on a light
 // one, with its value in its tone: the page's --warn and --danger on a light
 // bar, --warn-text and --danger-strong of its dark theme on a dark one.
@@ -112,7 +112,7 @@ func textAttributes(font objc.ID, c rgba) objc.ID {
 	return objc.ID(objc.GetClass("NSDictionary")).Send(nsSel("dictionaryWithObjects:forKeys:"), values, keys)
 }
 
-// readoutWidth is the width in points an icon needs for t: its wider line and
+// readoutWidth is the width in points a reading needs for t: its wider line and
 // the room on each side, rounded up to a whole pixel; 0 when AppKit cannot
 // say.
 func readoutWidth(t menuBarText) float64 {
@@ -144,12 +144,30 @@ func readoutWidth(t menuBarText) float64 {
 	return math.Ceil((w+2*readoutPad)*readoutScale) / readoutScale
 }
 
-// drawReadout draws t into an image w points wide and 18 tall, at twice that
-// in pixels, and encodes it as PNG; nil when it cannot. Each line sits on a
-// fixed baseline, so a label in another script, or a value without
-// descenders, sits where every other does. It locks the calling goroutine to
-// its thread for the autorelease pool and the current graphics context.
-func drawReadout(t menuBarText, w float64, ink readoutInk) []byte {
+// readoutSlot is one reading in the readings' image: its two lines and the
+// room it keeps, in points.
+type readoutSlot struct {
+	text  menuBarText
+	width float64
+}
+
+// drawReadouts draws slots into one image, left to right with readoutGap
+// between two, 18 points tall at twice that in pixels, and encodes it as PNG;
+// nil when it cannot. A template draws every reading black, for macOS to tint;
+// otherwise each reading is in the menu bar's ink, light on a dark bar, with
+// its value in its tone. Each line sits on a fixed baseline, so a label in
+// another script, or a value without descenders, sits where every other does.
+// It locks the calling goroutine to its thread for the autorelease pool and
+// the current graphics context.
+func drawReadouts(slots []readoutSlot, template, dark bool) []byte {
+	widths := make([]float64, len(slots))
+	for i, s := range slots {
+		if s.width <= 0 {
+			return nil
+		}
+		widths[i] = s.width
+	}
+	w := readoutsWidth(widths)
 	if w <= 0 || !appKitInit() {
 		return nil
 	}
@@ -157,9 +175,13 @@ func drawReadout(t menuBarText, w float64, ink readoutInk) []byte {
 	defer runtime.UnlockOSThread()
 	var out []byte
 	withPool(func() {
-		topFont, bottomFont := readoutFonts(t)
-		if topFont == 0 || bottomFont == 0 {
-			return
+		fonts := make([][2]objc.ID, len(slots))
+		for i, s := range slots {
+			top, bottom := readoutFonts(s.text)
+			if top == 0 || bottom == 0 {
+				return
+			}
+			fonts[i] = [2]objc.ID{top, bottom}
 		}
 		rep := objc.ID(objc.GetClass("NSBitmapImageRep")).Send(nsSel("alloc")).Send(
 			nsSel("initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bytesPerRow:bitsPerPixel:"),
@@ -176,22 +198,27 @@ func drawReadout(t menuBarText, w float64, ink readoutInk) []byte {
 		gc := objc.ID(objc.GetClass("NSGraphicsContext"))
 		gc.Send(nsSel("saveGraphicsState"))
 		gc.Send(nsSel("setCurrentContext:"), ctx)
-		label, value := ink.colors()
-		topColor, topBase, bottomBase := value, readoutDuoTop, readoutDuoBottom
-		if t.Label {
-			topColor, topBase, bottomBase = label, readoutLabelBase, readoutValueBase
-		}
-		line := func(s string, font objc.ID, c rgba, base float64) {
-			if s == "" {
-				return
+		x := 0.0
+		for i, s := range slots {
+			t := s.text
+			label, value := readoutInk{template: template, dark: dark, tone: t.Tone}.colors()
+			topColor, topBase, bottomBase := value, readoutDuoTop, readoutDuoBottom
+			if t.Label {
+				topColor, topBase, bottomBase = label, readoutLabelBase, readoutValueBase
 			}
-			// Without NSStringDrawingUsesLineFragmentOrigin, the rectangle's
-			// origin is the line's baseline; no drawing context is needed.
-			nsString(s).Send(nsSel("drawWithRect:options:attributes:context:"),
-				nsRect{readoutPad, base, w, readoutHeight}, uint64(0), textAttributes(font, c), objc.ID(0))
+			line := func(str string, font objc.ID, c rgba, base float64) {
+				if str == "" {
+					return
+				}
+				// Without NSStringDrawingUsesLineFragmentOrigin, the rectangle's
+				// origin is the line's baseline; no drawing context is needed.
+				nsString(str).Send(nsSel("drawWithRect:options:attributes:context:"),
+					nsRect{x + readoutPad, base, s.width, readoutHeight}, uint64(0), textAttributes(font, c), objc.ID(0))
+			}
+			line(t.Top, fonts[i][0], topColor, topBase)
+			line(t.Bottom, fonts[i][1], value, bottomBase)
+			x += s.width + readoutGap
 		}
-		line(t.Top, topFont, topColor, topBase)
-		line(t.Bottom, bottomFont, value, bottomBase)
 		gc.Send(nsSel("restoreGraphicsState"))
 		out = bitmapPNG(rep)
 	})

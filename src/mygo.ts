@@ -1190,6 +1190,15 @@ export const Cleaner = {
     return call("Cleaner.MenuBarHold", hold);
   },
   /**
+   * MenuBarMenu shows Cleanzo's menu at x, y in the panel that calls it, in
+   * points from the top left of its page: the lines of the Cleanzo icon, which
+   * does not show while a reading does (spec §三.4). mygo runs the line chosen
+   * before the menu returns; a line chosen then closes the panel, held or not.
+   */
+  menuBarMenu(x: number, y: number): Promise<void> {
+    return call("Cleaner.MenuBarMenu", x, y);
+  },
+  /**
    * MenuBarOpen closes the panel that calls it, held or not, and shows the page
    * t names in the main window, making the window again if it was closed
    * (spec §四.6).

@@ -9,8 +9,10 @@ import (
 	"log"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 
+	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo"
 )
 
@@ -70,15 +72,19 @@ var menuBarHasBattery = sync.OnceValue(func() bool {
 // menuBarSupported: the readings are macOS only (spec §二).
 func menuBarSupported() bool { return true }
 
-// menuBarController is the readings' icons. Only the main thread uses it; the
-// sampler's goroutine hands it each reading through mygo.RunOnMain.
+// menuBarController is the readings' item: one menu bar item that draws every
+// reading shown, side by side (spec §三.1), so that macOS cannot move them
+// apart or change their order. While a reading shows it is Cleanzo's place in
+// the menu bar: a right-click on it shows Cleanzo's menu, and no Cleanzo icon
+// shows (spec §三.4). Only the main thread uses it; the sampler's goroutine
+// hands it each reading through mygo.RunOnMain.
 type menuBarController struct {
 	shown  bool                    // show has run
 	items  []string                // the readings shown, in menuBarItems' order
-	layout int                     // names the icons (menuBarItemName)
-	trays  map[string]*mygo.Tray   // by reading
-	drawn  map[string]menuBarText  // what each icon shows
-	widths map[string]float64      // the room each icon keeps, in points, in the app's language
+	tray   *mygo.Tray              // the readings' item; nil while none shows
+	drawn  []menuBarText           // what the item shows: a text per reading, in items' order
+	slots  []float64               // each reading's room in the drawn image, in points
+	widths map[string]float64      // the room each reading keeps, in points, in the app's language
 	last   menuBarReading          // the latest reading, to draw again in another language
 	stop   context.CancelFunc      // ends the sampler; nil while none runs
 	panels map[string]*mygo.Window // open panels by reading; at most one
@@ -87,19 +93,21 @@ type menuBarController struct {
 // menuBar is the app's controller.
 var menuBar = &menuBarController{}
 
-// menuBarShow, menuBarLayout and menuBarRelabel are what growth_app.go asks of
-// the readings, on the main thread.
-func menuBarShow(items []string, layout int) { menuBar.show(items, layout) }
-func menuBarLayout() int                     { return menuBar.layout }
-func menuBarRelabel()                        { mygo.RunOnMain(menuBar.relabel) }
+// menuBarShow, menuBarShowing and menuBarRelabel are what growth_app.go asks
+// of the readings, on the main thread.
+func menuBarShow(items []string) { menuBar.show(items) }
+func menuBarShowing() bool       { return menuBar.tray != nil }
+func menuBarRelabel()            { mygo.RunOnMain(menuBar.relabel) }
 
-// show makes the icons of items, named for layout, unless they show already,
-// and starts their sampler (spec §三). To put them in menuBarItems' order left
-// of whatever the menu bar shows, it removes the Cleanzo icon too, which the
-// caller makes again after them (showGrowthTray), and makes them from right to
-// left: each new icon goes left of the one made before it.
-func (m *menuBarController) show(items []string, layout int) {
-	if m.shown && slices.Equal(items, m.items) && layout == m.layout {
+// show shows the readings in items in one item and starts their sampler
+// (spec §三). The first reading makes the item, under menuBarItemID. It
+// removes the Cleanzo icon first, which shares that name and must not show
+// with it (spec §三.4), so the item comes where the icon was. A change of
+// readings keeps the item, and the place the user dragged it to with ⌘: it
+// draws the new readings, wider or narrower, and its sampler starts again for
+// them. No reading removes the item.
+func (m *menuBarController) show(items []string) {
+	if m.shown && slices.Equal(items, m.items) {
 		return
 	}
 	m.shown = true
@@ -111,47 +119,54 @@ func (m *menuBarController) show(items []string, layout int) {
 		m.stop()
 		m.stop = nil
 	}
-	for _, t := range m.trays {
-		t.Destroy()
-	}
-	m.items, m.layout = slices.Clone(items), layout
-	m.trays, m.drawn = map[string]*mygo.Tray{}, map[string]menuBarText{}
-	m.last = unknownMenuBarReading()
+	m.items = slices.Clone(items)
+	m.drawn, m.slots = nil, nil
 	if len(items) == 0 {
+		if m.tray != nil {
+			m.tray.Destroy()
+			m.tray = nil
+		}
+		m.last = unknownMenuBarReading()
 		return
 	}
-	hideGrowthTray()
 	m.measure()
-	for i := len(items) - 1; i >= 0; i-- {
-		item := items[i]
-		text := menuBarTextFor(item, m.last, nativeText)
-		t, err := mygo.NewTray(mygo.TrayOptions{
-			ID:             menuBarItemName(layout, item),
-			Icon:           drawReadout(text, m.width(item, text), readoutInk{template: true}),
-			IconIsTemplate: true,
-			ToolTip:        nativeText("menubar.tip."+item, nil),
-		})
+	if m.tray == nil {
+		m.last = unknownMenuBarReading()
+		hideGrowthTray()
+		t, err := mygo.NewTray(mygo.TrayOptions{ID: menuBarItemID, ToolTip: m.tip()})
 		if err != nil {
 			log.Println("menubar:", err)
-			continue
+			return
 		}
-		t.OnAppearanceChange(func() { m.repaint(item) })
-		t.OnClick(func() { m.toggle(item) })
-		m.trays[item] = t
-		m.drawn[item] = text
+		t.OnAppearanceChange(m.repaint)
+		t.OnClick(m.click)
+		t.OnRightClick(m.menu)
+		m.tray = t
+	} else {
+		m.tray.SetToolTip(m.tip())
 	}
+	m.paint(m.texts(m.last))
 	ctx, stop := context.WithCancel(context.Background())
 	m.stop = stop
 	go sampleMenuBar(ctx, m.items, realMenuBarSource(), func(r menuBarReading) {
 		mygo.RunOnMain(func() {
-			if ctx.Err() == nil { // not for icons made again since
+			if ctx.Err() == nil { // not for readings changed since
 				m.draw(r)
 			}
 		})
 	})
 }
 
-// measure finds the room each icon keeps, in the app's language.
+// tip is the item's tooltip: what each reading is, in items' order.
+func (m *menuBarController) tip() string {
+	tips := make([]string, len(m.items))
+	for i, item := range m.items {
+		tips[i] = nativeText("menubar.tip."+item, nil)
+	}
+	return strings.Join(tips, " · ")
+}
+
+// measure finds the room each reading keeps, in the app's language.
 func (m *menuBarController) measure() {
 	m.widths = map[string]float64{}
 	for _, item := range m.items {
@@ -159,65 +174,161 @@ func (m *menuBarController) measure() {
 	}
 }
 
-// width is the room item's icon takes for t: its widest usual text's, or the
-// widest text it has shown since, so that it widens at most once, as for a
-// disk with a thousand gigabytes free, and never narrows back.
+// width is the room item takes for t: its widest usual text's, or the widest
+// text it has shown since, so that it widens at most once, as for a disk with
+// a thousand gigabytes free, and never narrows back.
 func (m *menuBarController) width(item string, t menuBarText) float64 {
 	w := max(m.widths[item], readoutWidth(t))
 	m.widths[item] = w
 	return w
 }
 
-// draw shows reading r, drawing again only the icons whose text changed.
+// texts is what each reading shows for r, in items' order.
+func (m *menuBarController) texts(r menuBarReading) []menuBarText {
+	out := make([]menuBarText, len(m.items))
+	for i, item := range m.items {
+		out[i] = menuBarTextFor(item, r, nativeText)
+	}
+	return out
+}
+
+// draw shows reading r, drawing the item again only when a reading's text
+// changed.
 func (m *menuBarController) draw(r menuBarReading) {
 	m.last = r
-	for item, tray := range m.trays {
-		text := menuBarTextFor(item, r, nativeText)
-		if prev, ok := m.drawn[item]; ok && prev == text {
-			continue
-		}
-		m.paint(item, tray, text)
+	if texts := m.texts(r); !slices.Equal(texts, m.drawn) {
+		m.paint(texts)
 	}
 }
 
-// paint draws t into item's icon: a template, or in the menu bar's ink when it
-// has a tone.
-func (m *menuBarController) paint(item string, tray *mygo.Tray, t menuBarText) {
-	ink := readoutInk{template: t.Tone == "", tone: t.Tone}
-	if !ink.template {
-		ink.dark = tray.Dark()
+// paint draws texts into the item, a reading per slot: a template, or in the
+// menu bar's ink when a reading has a tone.
+func (m *menuBarController) paint(texts []menuBarText) {
+	if m.tray == nil || len(texts) != len(m.items) {
+		return
 	}
-	png := drawReadout(t, m.width(item, t), ink)
+	template := !slices.ContainsFunc(texts, func(t menuBarText) bool { return t.Tone != "" })
+	dark := !template && m.tray.Dark()
+	slots := make([]readoutSlot, len(texts))
+	widths := make([]float64, len(texts))
+	for i, t := range texts {
+		widths[i] = m.width(m.items[i], t)
+		slots[i] = readoutSlot{text: t, width: widths[i]}
+	}
+	png := drawReadouts(slots, template, dark)
 	if png == nil {
 		return
 	}
-	if err := tray.SetIcon(png, ink.template); err != nil {
+	if err := m.tray.SetIcon(png, template); err != nil {
 		log.Println("menubar:", err)
 		return
 	}
-	m.drawn[item] = t
+	m.drawn, m.slots = texts, widths
 }
 
-// repaint draws item's icon again for the menu bar's new appearance. Only an
-// icon in color needs it: macOS tints the templates itself.
-func (m *menuBarController) repaint(item string) {
-	if t, ok := m.drawn[item]; ok && t.Tone != "" {
-		if tray := m.trays[item]; tray != nil {
-			m.paint(item, tray, t)
-		}
+// repaint draws the item again for the menu bar's new appearance. Only an
+// item in color needs it: macOS tints a template itself.
+func (m *menuBarController) repaint() {
+	if slices.ContainsFunc(m.drawn, func(t menuBarText) bool { return t.Tone != "" }) {
+		m.paint(m.drawn)
 	}
 }
 
-// relabel draws every icon again in the app's new language, with its tooltip.
+// relabel draws the item again in the app's new language, with its tooltip.
 func (m *menuBarController) relabel() {
-	if len(m.trays) == 0 {
+	if m.tray == nil {
 		return
 	}
 	m.measure()
-	for item, tray := range m.trays {
-		tray.SetToolTip(nativeText("menubar.tip."+item, nil))
-		m.paint(item, tray, menuBarTextFor(item, m.last, nativeText))
+	m.tray.SetToolTip(m.tip())
+	m.paint(m.texts(m.last))
+}
+
+// click opens the panel of the reading clicked (spec §四): menuBarHit finds it
+// from where in the item the click was. A click with Control held shows
+// Cleanzo's menu, as a right-click does. A press that is no click, as
+// VoiceOver's, opens the first reading's panel.
+func (m *menuBarController) click() {
+	if m.tray == nil || len(m.items) == 0 {
+		return
 	}
+	i := 0
+	if x, control, ok := menuBarClickAt(float64(m.tray.Bounds().Width), readoutsWidth(m.slots)); ok {
+		if control {
+			m.menu()
+			return
+		}
+		i = menuBarHit(x, m.slots)
+	}
+	if i < len(m.items) {
+		m.toggle(m.items[i])
+	}
+}
+
+// menu shows Cleanzo's menu below the item (spec §三.4): the lines of the
+// Cleanzo icon, which does not show while a reading does. It closes an open
+// panel first: the user asked for something else. While a quit under way holds
+// a panel open, no menu shows, as no other reading's panel opens then (spec
+// §四.5). The item has no menu of its own, so that a click reaches OnClick: it
+// is given one only while it shows it.
+func (m *menuBarController) menu() {
+	t := m.tray
+	if t == nil {
+		return
+	}
+	for _, open := range m.panels {
+		if menuBarHeld(open) {
+			return
+		}
+	}
+	m.closePanels()
+	t.SetMenu(growthTrayMenu(residentModelNow(), growthMenuAction))
+	t.PopUpMenu()
+	t.SetMenu(nil)
+}
+
+// nsPoint is NSPoint, returned by value.
+type nsPoint struct{ X, Y float64 }
+
+// menuBarClickAt reads the click being handled in the readings' item. x is
+// where it is in the item's image, in points from its left edge: its place in
+// the item's window less the room macOS leaves on each side of the image, which
+// it centers. control tells whether Control was held. itemWidth is the item's
+// width, imageWidth the image's. ok is false when the event being handled is no
+// click, or an old one, as for VoiceOver's press. It runs on the main thread,
+// in the click's action: mygo calls OnClick from it, so the current event is
+// the click.
+func menuBarClickAt(itemWidth, imageWidth float64) (x float64, control, ok bool) {
+	if !appKitInit() {
+		return 0, false, false
+	}
+	withPool(func() {
+		app := objc.ID(objc.GetClass("NSApplication")).Send(nsSel("sharedApplication"))
+		ev := app.Send(nsSel("currentEvent"))
+		if ev == 0 {
+			return
+		}
+		switch objc.Send[uint64](ev, nsSel("type")) {
+		case 1, 2: // NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp
+		default:
+			return
+		}
+		if ev.Send(nsSel("window")) == 0 {
+			return
+		}
+		// A press that no click sent, as VoiceOver's, leaves the app's last
+		// event current, which may be an old click in another window: the
+		// click this action is for happened a moment ago.
+		info := objc.ID(objc.GetClass("NSProcessInfo")).Send(nsSel("processInfo"))
+		if objc.Send[float64](info, nsSel("systemUptime"))-objc.Send[float64](ev, nsSel("timestamp")) > 1 {
+			return
+		}
+		p := objc.Send[nsPoint](ev, nsSel("locationInWindow"))
+		x = p.X - (itemWidth-imageWidth)/2
+		control = objc.Send[uint64](ev, nsSel("modifierFlags"))&(1<<18) != 0 // NSEventModifierFlagControl
+		ok = true
+	})
+	return x, control, ok
 }
 
 // The panels' size in points (spec §九): as wide as the mockup's, as tall as
@@ -227,15 +338,15 @@ const (
 	menuBarPanelMaxHeight = 640
 )
 
-// toggle opens item's panel below its icon and closes any other; a click on the
-// icon while its panel is open closes it (spec §四). The panel is the app's page
-// panel.html in the system's popover, which AppKit anchors to the icon on
-// whichever display the user clicked: a floating panel placed from the icon's
-// frame lands on the wrong display of a Mac with two, where macOS 26 keeps a
-// hidden copy of every menu bar item. The popover takes the menu bar's
-// appearance, which can be dark while the app is light, so the page is told
-// which it is and draws an opaque card in that theme. A quit under way keeps
-// the panel open (MenuBarHold). It runs on the main thread.
+// toggle opens item's panel below the readings' item and closes any other; a
+// click on that reading while its panel is open closes it (spec §四). The panel
+// is the app's page panel.html in the system's popover, which AppKit anchors to
+// the readings' item on whichever display the user clicked: a floating panel
+// placed from the item's frame lands on the wrong display of a Mac with two,
+// where macOS 26 keeps a hidden copy of every menu bar item. The popover takes
+// the menu bar's appearance, which can be dark while the app is light, so the
+// page is told which it is and draws an opaque card in that theme. A quit under
+// way keeps the panel open (MenuBarHold). It runs on the main thread.
 func (m *menuBarController) toggle(item string) {
 	if w := m.panels[item]; w != nil {
 		w.Close()
@@ -249,7 +360,7 @@ func (m *menuBarController) toggle(item string) {
 		}
 	}
 	m.closePanels()
-	t := m.trays[item]
+	t := m.tray
 	if t == nil {
 		return
 	}
@@ -286,7 +397,8 @@ func (m *menuBarController) toggle(item string) {
 	})
 }
 
-// closePanels closes every open panel, held or not, as before its icon goes.
+// closePanels closes every open panel, held or not, as before the item goes or
+// its menu shows.
 func (m *menuBarController) closePanels() {
 	for item, w := range m.panels {
 		menuBarRelease(w)

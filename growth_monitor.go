@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/i18n"
 )
 
 // Seams. Tests replace these; the app uses them as they are.
@@ -421,7 +422,7 @@ func nativeTextFor(locale, key string, vars map[string]string) string {
 
 // nativeText translates key for the app's language.
 func nativeText(key string, vars map[string]string) string {
-	return nativeTextFor(mygo.App.Locale(), key, vars)
+	return nativeTextFor(i18n.Locale(), key, vars)
 }
 
 // growthSize writes a size like the page's human() in src/shared.ts:

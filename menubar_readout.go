@@ -1,10 +1,11 @@
 package main
 
-// menubar_readout.go turns what the menu bar readings read into the text their
-// icons show (design: docs/superpowers/specs/2026-10-29-menubar-design.md
-// §三.1): a small label above a value or, for the network, the download rate
-// above the upload rate. The rules are pure, so they test on any platform;
-// menubar_draw_darwin.go draws the text.
+// menubar_readout.go turns what the menu bar readings read into the text each
+// shows in the readings' item (design:
+// docs/superpowers/specs/2026-10-29-menubar-design.md §三.1): a small label
+// above a value or, for the network, the download rate above the upload rate.
+// The rules are pure, so they test on any platform; menubar_draw_darwin.go
+// draws the text.
 
 import (
 	"fmt"
@@ -35,10 +36,10 @@ func unknownMenuBarReading() menuBarReading {
 	return menuBarReading{CPU: -1, GPU: -1, NetDown: -1, NetUp: -1, Battery: -1}
 }
 
-// menuBarText is what one icon shows, Top above Bottom. With Label, Top is the
-// reading's small name and Bottom its value; without, as for the network, both
-// lines are values. Tone colors the value: "" as the menu bar's text, "warn"
-// orange and "crit" red, for memory under pressure (spec §三.1).
+// menuBarText is what one reading shows, Top above Bottom. With Label, Top is
+// the reading's small name and Bottom its value; without, as for the network,
+// both lines are values. Tone colors the value: "" as the menu bar's text,
+// "warn" orange and "crit" red, for memory under pressure (spec §三.1).
 type menuBarText struct {
 	Top, Bottom string
 	Label       bool
@@ -95,7 +96,7 @@ func menuBarSize(n int64) string {
 	}
 }
 
-// menuBarTextFor is what item's icon shows for reading r (spec §三.1). text
+// menuBarTextFor is what reading item shows for r (spec §三.1). text
 // translates: nativeText, or a stand-in in tests.
 func menuBarTextFor(item string, r menuBarReading, text func(string, map[string]string) string) menuBarText {
 	label := func(value string) menuBarText {
@@ -144,7 +145,7 @@ func menuBarTextFor(item string, r menuBarReading, text func(string, map[string]
 	return menuBarText{}
 }
 
-// menuBarWidest is the text item's icon keeps room for, so that it does not
+// menuBarWidest is the text reading item keeps room for, so that it does not
 // change width with its value (spec §三.1): its widest usual value. The digits
 // all have one width, so 0 stands for any digit, and M is the widest unit.
 func menuBarWidest(item string, text func(string, map[string]string) string) menuBarText {
@@ -162,4 +163,38 @@ func menuBarWidest(item string, text func(string, map[string]string) string) men
 		w.Bottom = "100%"
 	}
 	return w
+}
+
+// readoutGap is the room between two readings in the readings' item, in
+// points, on top of each reading's own pad: less than macOS leaves between two
+// items, so that the readings read as one group (spec §三.1).
+const readoutGap = 8.0
+
+// readoutsWidth is the width of the readings' image for readings that keep
+// widths, in points: side by side, readoutGap between two.
+func readoutsWidth(widths []float64) float64 {
+	w := 0.0
+	for i, s := range widths {
+		if i > 0 {
+			w += readoutGap
+		}
+		w += s
+	}
+	return w
+}
+
+// menuBarHit is the reading a click at x, in points from the left edge of the
+// readings' image, is on (spec §四): the one under it, the gap between two
+// split at its middle, the first left of it and the last right of it. It is 0
+// without readings.
+func menuBarHit(x float64, widths []float64) int {
+	right := 0.0
+	for i, w := range widths {
+		right += w
+		if i == len(widths)-1 || x < right+readoutGap/2 {
+			return i
+		}
+		right += readoutGap
+	}
+	return 0
 }

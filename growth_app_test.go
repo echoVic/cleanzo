@@ -543,3 +543,23 @@ func TestGrowthMenuOffGoesOnAfterALoginError(t *testing.T) {
 		t.Errorf("monitoring is off but the plan says %d", next)
 	}
 }
+
+// The readings' item shows the menu last built for the icon or for itself;
+// before one is built, the lines that act for the monitoring state applied.
+func TestResidentModelNow(t *testing.T) {
+	shown, on := growthMenuShown, growthMenuOn
+	t.Cleanup(func() { growthMenuShown, growthMenuOn = shown, on })
+	growthMenuShown, growthMenuOn = nil, false
+	if got, want := residentModelNow(), menuBarOnlyMenu(nativeText); !slices.Equal(got, want) {
+		t.Errorf("readings only: %+v, want %+v", got, want)
+	}
+	growthMenuOn = true
+	if got, want := residentModelNow(), growthMenuCommands(false, nativeText); !slices.Equal(got, want) {
+		t.Errorf("monitoring on, nothing built: %+v, want %+v", got, want)
+	}
+	built := growthMenuModel(nil, true, labelsOnly)
+	growthMenuShown = built
+	if got := residentModelNow(); !slices.Equal(got, built) {
+		t.Errorf("built: %+v, want %+v", got, built)
+	}
+}

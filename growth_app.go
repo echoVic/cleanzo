@@ -16,15 +16,16 @@ import (
 )
 
 // growthTray is the Cleanzo icon in the menu bar, shown while monitoring is on
-// or a reading shows (menubar spec §三.4). The main thread makes and removes
-// it; refreshGrowthTray looks at it from other goroutines.
+// and no reading shows: with readings, their item carries Cleanzo's menu
+// instead (menubar spec §三.4). The main thread makes and removes it.
 var growthTray atomic.Pointer[mygo.Tray]
 
-// growthMenuShown is the model of the menu the icon shows. Only the main
-// thread reads or writes it.
+// growthMenuShown is the model of Cleanzo's menu as last built: the icon's
+// menu, or what the readings' item shows on a right-click and in its panels.
+// Only the main thread reads or writes it.
 var growthMenuShown []growthMenuItem
 
-// growthMenuOn tells whether the icon's menu was last applied with monitoring
+// growthMenuOn tells whether Cleanzo's menu was last applied with monitoring
 // on. Only the main thread reads or writes it: refreshGrowthTray drops a menu
 // built for the other state, which a slow read of the records can deliver after
 // monitoring was turned on or off.
@@ -87,13 +88,13 @@ func growthKeepRunning(supported bool, resident func() bool) bool {
 
 // startResident runs in WhenReady, on the main thread, so it reads no records:
 // they would hold up the first window. It starts the monitor's loop and shows
-// the menu bar: the readings chosen, then the Cleanzo icon while monitoring is
-// on or a reading shows, with the lines that act and no more, which
+// the menu bar: the readings chosen, in one item, or else the Cleanzo icon
+// while monitoring is on, with the lines that act and no more, which
 // refreshGrowthTray completes on another goroutine. It reports true when the
-// app was opened at login and the icon is there: then no window opens, and the
-// Dock icon is dropped before anything else is made. Without the icon nothing
-// would show that Cleanzo runs, so the window opens after all, with its Dock
-// icon.
+// app was opened at login and Cleanzo shows in the menu bar: then no window
+// opens, and the Dock icon is dropped before anything else is made. Without
+// either, nothing would show that Cleanzo runs, so the window opens after all,
+// with its Dock icon.
 //
 // It leaves the login item alone: only SaveGrowthConfig, SaveMenuBar and the
 // menu's "turn off" change it, so what the user set in System Settings stays.
@@ -108,7 +109,7 @@ func startResident() bool {
 	if atLogin {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	}
-	menuBarShow(mb.Items, mb.Layout) // before the icon, which goes left of them
+	menuBarShow(mb.Items) // first: with a reading, its item carries the menu and no icon shows
 	if resident {
 		model, tip := menuBarOnlyMenu(nativeText), nativeText("menubar.tray.tip", nil)
 		if cfg.Enabled {
@@ -119,7 +120,7 @@ func startResident() bool {
 		go refreshGrowthTray()
 	}
 	growth.start()
-	if atLogin && growthTray.Load() == nil {
+	if atLogin && growthTray.Load() == nil && !menuBarShowing() {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular) // the window comes with its Dock icon
 		return false
 	}
@@ -177,8 +178,8 @@ func applyGrowthLifecycle(cfg GrowthConfig) error {
 
 // applyResident puts the app in the state the two settings ask for (growth
 // spec §六, menubar spec §三, §七):
-//   - the readings in mb, made again in their order when they changed;
-//   - the Cleanzo icon while monitoring is on or a reading shows;
+//   - the readings in mb, in one item, which carries Cleanzo's menu;
+//   - the Cleanzo icon while monitoring is on and no reading shows;
 //   - opening at login as chosen, only while one of them is on;
 //   - quitting when neither is on and no window is open, a minimized or
 //     hidden one included.
@@ -198,7 +199,7 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 	}
 	var loginErr error
 	mygo.RunOnMain(func() { // runs inline when already on the main thread
-		menuBarShow(mb.Items, mb.Layout)
+		menuBarShow(mb.Items)
 		if resident {
 			growthMenuOn = g.Enabled
 			showGrowthTray(model, tip)
@@ -218,16 +219,22 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 	return nil
 }
 
-// showGrowthTray makes the Cleanzo icon with the menu for model and the tooltip
-// tip, or gives the existing icon those. It is named for the readings' layout,
-// so that, made after them, it goes left of them. It runs on the main thread.
+// showGrowthTray shows Cleanzo's menu for model (menubar spec §三.4). While a
+// reading shows, the readings' item carries it, on a right-click and in its
+// panels, and the Cleanzo icon goes. Otherwise it goes on the icon, made if
+// missing, with the tooltip tip. It runs on the main thread.
 func showGrowthTray(model []growthMenuItem, tip string) {
+	if menuBarShowing() {
+		hideGrowthTray()
+		growthMenuShown = slices.Clone(model)
+		return
+	}
 	if t := growthTray.Load(); t != nil {
 		t.SetToolTip(tip)
 		showGrowthMenu(t, model)
 		return
 	}
-	t, err := mygo.NewTray(mygo.TrayOptions{ID: menuBarIconName(menuBarLayout()), Icon: growthIconPNG(), IconIsTemplate: true, ToolTip: tip, Menu: growthTrayMenu(model, growthMenuAction)})
+	t, err := mygo.NewTray(mygo.TrayOptions{ID: menuBarItemID, Icon: growthIconPNG(), IconIsTemplate: true, ToolTip: tip, Menu: growthTrayMenu(model, growthMenuAction)})
 	if err != nil {
 		log.Println("tray:", err)
 		return
@@ -258,25 +265,46 @@ func showGrowthMenu(t growthMenuSetter, model []growthMenuItem) {
 	growthMenuShown = slices.Clone(model)
 }
 
-// refreshGrowthTray rebuilds the menu, if the icon shows, and sets the
-// tooltip, which follows the language. The menu is only replaced when it
-// changed. A menu built for the other monitoring state than the one last
-// applied is dropped.
+// refreshGrowthTray rebuilds Cleanzo's menu while Cleanzo is in the menu bar,
+// and the icon's tooltip; both follow the language. The icon's menu is only
+// replaced when it changed. A menu built for the other monitoring state than
+// the one last applied is dropped.
 func refreshGrowthTray() {
-	if growthTray.Load() == nil {
+	if !mygo.App.IsReady() {
 		return
 	}
 	on := loadGrowthConfig(growthDir()).Enabled
+	if !on && !menuBarOn() {
+		return
+	}
 	model, tip := residentMenu(on)
 	mygo.RunOnMain(func() {
-		if t := growthTray.Load(); t != nil && on == growthMenuOn {
+		if on != growthMenuOn {
+			return
+		}
+		if t := growthTray.Load(); t != nil {
 			t.SetToolTip(tip)
 			showGrowthMenu(t, model)
+		} else if menuBarShowing() {
+			growthMenuShown = slices.Clone(model)
 		}
 	})
 }
 
-// residentMenu is the Cleanzo icon's menu and tooltip: the growth menu while
+// residentModelNow is Cleanzo's menu as last built, for the readings' item to
+// show. Before one is built, it is the lines that act, as startResident first
+// shows them. It runs on the main thread.
+func residentModelNow() []growthMenuItem {
+	if growthMenuShown != nil {
+		return growthMenuShown
+	}
+	if growthMenuOn {
+		return growthMenuCommands(false, nativeText)
+	}
+	return menuBarOnlyMenu(nativeText)
+}
+
+// residentMenu is Cleanzo's menu and the icon's tooltip: the growth menu while
 // monitoring is on, which reads the records, so not on the main thread;
 // otherwise the lines that open, set up and quit (menubar spec §三.4).
 func residentMenu(growthOn bool) ([]growthMenuItem, string) {
@@ -337,13 +365,13 @@ func growthMenuCommands(running bool, text func(string, map[string]string) strin
 	}, menuBarMenuTail(text)...)
 }
 
-// menuBarOnlyMenu is the Cleanzo icon's menu while monitoring is off and a
-// reading shows: open, then menuBarMenuTail.
+// menuBarOnlyMenu is Cleanzo's menu while monitoring is off and a reading
+// shows: open, then menuBarMenuTail.
 func menuBarOnlyMenu(text func(string, map[string]string) string) []growthMenuItem {
 	return append([]growthMenuItem{{label: text("growth.tray.open", nil), action: "open"}}, menuBarMenuTail(text)...)
 }
 
-// menuBarMenuTail ends every menu of the Cleanzo icon: the menu bar's settings
+// menuBarMenuTail ends every menu of Cleanzo: the menu bar's settings
 // and quitting (menubar spec §三.4).
 func menuBarMenuTail(text func(string, map[string]string) string) []growthMenuItem {
 	return []growthMenuItem{

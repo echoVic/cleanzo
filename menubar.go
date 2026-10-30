@@ -4,12 +4,11 @@ package main
 // docs/superpowers/specs/2026-10-29-menubar-design.md §三, §五, §七): which
 // readings show, where that choice is kept, and the bound methods Settings
 // calls. menubar_readout.go turns readings into text; menubar_darwin.go makes
-// the icons and feeds them; elsewhere the readings are not supported.
+// the readings' item and feeds it; elsewhere the readings are not supported.
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,21 +18,16 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// menuBarItems are the readings in their order in the menu bar, left to right
-// after the Cleanzo icon (spec §三.3).
+// menuBarItems are the readings in their order in the readings' item, left to
+// right (spec §三.3).
 var menuBarItems = []string{"cpu", "mem", "gpu", "net", "disk", "temp", "battery"}
 
 // menuBarDefault are the readings shown until the user chooses (spec §三.2).
 var menuBarDefault = []string{"cpu", "mem"}
 
-// menuBarConfig is what menubar.json keeps. Layout numbers the icons'
-// arrangement: it changes when the readings shown change, and the icons, named
-// after it, are made again in menuBarItems' order instead of where macOS kept
-// the old names (spec §三.3). While it stays, each icon keeps the place the user
-// dragged it to with ⌘.
+// menuBarConfig is what menubar.json keeps: the readings shown.
 type menuBarConfig struct {
-	Items  []string `json:"items"`
-	Layout int      `json:"layout"`
+	Items []string `json:"items"`
 }
 
 // MenuBarState is what Settings shows of the menu bar.
@@ -58,7 +52,7 @@ type MenuBarTarget struct {
 }
 
 // MenuBarGo asks the main window to show a page: a link of a menu bar panel or
-// a line of the Cleanzo icon's menu was clicked.
+// a line of Cleanzo's menu was clicked.
 var MenuBarGo = mygo.NewEvent[MenuBarTarget]("menuBar:go")
 
 // menuBarBattery tells whether this Mac has a battery; tests replace it.
@@ -133,17 +127,11 @@ func menuBarState(c menuBarConfig) MenuBarState {
 	return MenuBarState{Supported: true, Items: c.Items, Available: menuBarAvailable(menuBarBattery())}
 }
 
-// menuBarIconName names the Cleanzo icon for layout. Every layout gets new
-// names: macOS keeps each named icon's place, and an old name would put the
-// icon back where it was, right of readings made after it.
-func menuBarIconName(layout int) string {
-	return fmt.Sprintf("cleanzo.%d", layout)
-}
-
-// menuBarItemName names item's icon for layout.
-func menuBarItemName(layout int, item string) string {
-	return fmt.Sprintf("cleanzo.%d.%s", layout, item)
-}
+// menuBarItemID names Cleanzo's place in the menu bar: the readings' item, or
+// the Cleanzo icon while monitoring is on and no reading shows (spec §三.4).
+// The two never show together, so they share it: each comes where the other
+// was, or where the user dragged it with ⌘.
+const menuBarItemID = "cleanzo"
 
 // MenuBar returns the readings the menu bar shows and those it can.
 func (Cleaner) MenuBar() MenuBarState { return menuBarState(menuBarConfigNow()) }
@@ -168,11 +156,7 @@ func (Cleaner) SaveMenuBar(items []string) error {
 	growthConfigMu.Lock()
 	defer growthConfigMu.Unlock()
 	battery := menuBarBattery()
-	cur := loadMenuBarConfig(menuBarPath(), battery)
-	next := menuBarConfig{Items: normalizeMenuBarItems(items, battery), Layout: cur.Layout}
-	if len(next.Items) > 0 && !slices.Equal(next.Items, cur.Items) {
-		next.Layout++ // made again in their order (spec §三.3)
-	}
+	next := menuBarConfig{Items: normalizeMenuBarItems(items, battery)}
 	if err := saveMenuBarConfig(menuBarPath(), next); err != nil {
 		return err
 	}
@@ -303,4 +287,31 @@ func (Cleaner) MenuBarOpen(ctx context.Context, t MenuBarTarget) {
 		w.Destroy()
 	}
 	menuBarGo(t)
+}
+
+// MenuBarMenu shows Cleanzo's menu at x, y in the panel that calls it, in
+// points from the top left of its page: the lines of the Cleanzo icon, which
+// does not show while a reading does (spec §三.4). mygo runs the line chosen
+// before the menu returns; a line chosen then closes the panel, held or not.
+func (Cleaner) MenuBarMenu(ctx context.Context, x, y int) {
+	if !menuBarSupported() {
+		return
+	}
+	w := mygo.CallerWindow(ctx)
+	if w == nil || !w.IsFlyout() {
+		return
+	}
+	var menu *mygo.Menu
+	chosen := false
+	mygo.RunOnMain(func() { // the model is the main thread's
+		menu = growthTrayMenu(residentModelNow(), func(it growthMenuItem) {
+			chosen = true
+			growthMenuAction(it)
+		})
+	})
+	menu.PopupAt(w, x, y)
+	if chosen {
+		menuBarRelease(w)
+		w.Destroy()
+	}
 }
