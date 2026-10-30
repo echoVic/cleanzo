@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { t } from "../src/i18n";
+import { beforeEach, expect, test } from "bun:test";
+import { setPref, t } from "../src/i18n";
 import type { AppUsage, MachineSample, SSDInfo, StatusSample } from "../src/mygo";
 import {
   NET_SPARK_FLOOR, SPARK_POINTS, STATUS_ALERT, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText,
@@ -15,6 +15,8 @@ Object.assign(globalThis, {
     setItem: (k: string, v: string) => storage.set(k, v),
   },
 });
+
+beforeEach(() => setPref("zh"));
 
 const GB = 2 ** 30;
 const MB = 2 ** 20;
@@ -210,14 +212,14 @@ test("iconColor is stable per name and stays in the palette", () => {
 });
 
 test("English interface renders the paired status strings", () => {
-  storage.set("cleanzo.lang", "en");
+  setPref("en");
   expect(t("status.mem.appMem")).toBe("App Memory");
   expect(t("status.mem.wired")).toBe("Wired Memory");
   expect(t("status.apps.procs", { n: 62 })).toBe("62 processes");
   expect(t("status.mem.swap", { used: "21.5 GB", size: "22 GB" })).toBe("Swap in use 21.5 GB · 22 GB of disk");
   expect(t("status.alert.memWarn")).toContain("Memory is under pressure");
   expect(t("status.footnote", { n: 740 })).toContain("Counting 740 processes");
-  storage.set("cleanzo.lang", "zh");
+  setPref("zh");
   expect(t("status.mem.appMem")).toBe("App 内存");
 });
 

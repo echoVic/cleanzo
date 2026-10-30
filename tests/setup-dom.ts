@@ -1,4 +1,6 @@
 // 被测试文件最先 import：先于 shared.ts 的顶层 querySelector 装好最小 DOM 环境。
+import { setPref, type Lang } from "../src/i18n";
+
 class Element {
   textContent = "";
   disabled = false;
@@ -21,6 +23,7 @@ Object.assign(globalThis, {
   },
 });
 
-export function setLang(lang: string) {
+export function setLang(lang: Lang) {
   storage.set("cleanzo.lang", lang);
+  setPref(lang);
 }

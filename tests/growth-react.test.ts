@@ -1,12 +1,14 @@
-import { expect, spyOn, test } from "bun:test";
+import { beforeEach, expect, spyOn, test } from "bun:test";
 import type { GrowthApp, GrowthConfig, GrowthConfigPatch, GrowthState, MenuBarState, UninstallDetail } from "../src/mygo";
-import { t } from "../src/i18n";
+import { setPref, t } from "../src/i18n";
 
 const storage = new Map([["cleanzo.lang", "zh"]]);
 Object.assign(globalThis, {
   document: { querySelectorAll: () => [] },
   localStorage: { getItem: (k: string) => storage.get(k), setItem: (k: string, v: string) => storage.set(k, v) },
 });
+
+beforeEach(() => setPref("zh"));
 
 const { fmtDelta, growthBanner, growthView, sortApps, sparkPath, uninstallGap } = await import("../src/react/growth/format");
 
@@ -70,9 +72,9 @@ test("卸载能移走多少、另外剩多少（不算 App 本身）", () => {
 
 test("新文案中英文都有", () => {
   for (const key of ["growth.optin.body", "growth.uninstallGap", "growth.outside", "growth.badge.unknown"] as const) {
-    storage.set("cleanzo.lang", "en");
+    setPref("en");
     expect(t(key)).not.toBe(key);
-    storage.set("cleanzo.lang", "zh");
+    setPref("zh");
     expect(t(key)).not.toBe(key);
   }
 });
@@ -326,11 +328,11 @@ test("增长设置错误码：开机启动错误带名称，阈值错误有中�
       ["zh", "无法设置开机启动：系统拒绝", "提醒阈值无效"],
       ["en", "Couldn't set Open at Login: 系统拒绝", "Invalid alert threshold"],
     ] as const) {
-      storage.set("cleanzo.lang", lang);
+      setPref(lang);
       expect(errText(new Error(JSON.stringify({ code: "growth-login", args: ["系统拒绝"] })))).toBe(login);
       expect(errText(JSON.stringify({ code: "growth-threshold" }))).toBe(threshold);
     }
-  } finally { storage.set("cleanzo.lang", "zh"); }
+  } finally { setPref("zh"); }
 });
 
 // 执行设置页实际的 effect 和保存回调，验证后端回读、禁用状态及失败回退。

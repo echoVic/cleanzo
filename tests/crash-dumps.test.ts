@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { ruleDesc, ruleName, t } from "../src/i18n";
+import { beforeEach, expect, test } from "bun:test";
+import { ruleDesc, ruleName, setPref, t } from "../src/i18n";
 import type { CrashDumpSummary } from "../src/mygo";
 import { CRASH_RULE_ID, codexSize, oversized } from "../src/react/list/crash-dumps";
 
@@ -10,6 +10,8 @@ Object.assign(globalThis, {
     setItem: (k: string, v: string) => storage.set(k, v),
   },
 });
+
+beforeEach(() => setPref("zh"));
 
 const GB = 2 ** 30;
 
@@ -47,8 +49,8 @@ test("规则与提示文案中英文都有", () => {
   expect(ruleDesc(CRASH_RULE_ID)).toContain("不进废纸篓");
   expect(t("status.alert.crashDumps", { app: "Codex", size: "323 GB" })).toContain("Codex");
   expect(t("junk.crashFiles", { n: "4,040,000" })).toBe("4,040,000 个文件");
-  storage.set("cleanzo.lang", "en");
+  setPref("en");
   expect(ruleName(CRASH_RULE_ID)).toBe("App Crash Dumps");
   expect(t("ai.crash.big", { size: "323 GB" })).toContain("323 GB");
-  storage.set("cleanzo.lang", "zh");
+  setPref("zh");
 });
