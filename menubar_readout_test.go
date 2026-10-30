@@ -112,36 +112,3 @@ func TestMenuBarLabelsAreTranslated(t *testing.T) {
 		}
 	}
 }
-
-func TestReadoutsWidthAndHit(t *testing.T) {
-	for _, tc := range []struct {
-		widths []float64
-		want   float64
-	}{{nil, 0}, {[]float64{30}, 30}, {[]float64{30, 40}, 30 + readoutGap + 40}} {
-		if got := readoutsWidth(tc.widths); got != tc.want {
-			t.Errorf("readoutsWidth(%v) = %v, want %v", tc.widths, got, tc.want)
-		}
-	}
-	two := []float64{30, 40}
-	mid := 30 + readoutGap/2 // the gap splits at its middle
-	for _, tc := range []struct {
-		x    float64
-		want int
-	}{
-		{-5, 0}, {0, 0}, {29, 0}, {mid - 0.1, 0},
-		{mid, 1}, {50, 1}, {30 + readoutGap + 40, 1}, {500, 1},
-	} {
-		if got := menuBarHit(tc.x, two); got != tc.want {
-			t.Errorf("menuBarHit(%v) = %d, want %d", tc.x, got, tc.want)
-		}
-	}
-	if got := menuBarHit(12, []float64{30}); got != 0 {
-		t.Errorf("one reading: %d", got)
-	}
-	if got := menuBarHit(12, nil); got != 0 {
-		t.Errorf("no reading: %d", got)
-	}
-	if got := menuBarHit(30+readoutGap+40+readoutGap/2, []float64{30, 40, 20}); got != 2 {
-		t.Errorf("third reading: %d", got)
-	}
-}

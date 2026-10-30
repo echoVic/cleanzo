@@ -53,7 +53,7 @@ func TestDrawReadoutKeepsTheLinesApart(t *testing.T) {
 		t.Fatalf("width %v points", w)
 	}
 	draw := func(text menuBarText) image.Image {
-		return decodeReadout(t, drawReadouts([]readoutSlot{{text, w}}, true, false), w)
+		return decodeReadout(t, drawReadout(text, w, readoutInk{template: true}), w)
 	}
 	labelFirst, labelLast, labelAlpha := inkRows(draw(menuBarText{Top: "CPU", Label: true}))
 	valueFirst, valueLast, valueAlpha := inkRows(draw(menuBarText{Bottom: "51%", Label: true}))
@@ -79,7 +79,7 @@ func TestDrawReadoutTemplateIsBlack(t *testing.T) {
 	}
 	text := menuBarText{Top: "MEM", Bottom: "86%", Label: true}
 	w := readoutWidth(text)
-	img := decodeReadout(t, drawReadouts([]readoutSlot{{text, w}}, true, false), w)
+	img := decodeReadout(t, drawReadout(text, w, readoutInk{template: true}), w)
 	b := img.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
@@ -96,7 +96,7 @@ func TestDrawReadoutColorsTheValueOnADarkBar(t *testing.T) {
 	}
 	text := menuBarText{Top: "MEM", Bottom: "86%", Label: true, Tone: "warn"}
 	w := readoutWidth(text)
-	img := decodeReadout(t, drawReadouts([]readoutSlot{{text, w}}, false, true), w)
+	img := decodeReadout(t, drawReadout(text, w, readoutInk{dark: true, tone: "warn"}), w)
 	var orange, light bool
 	b := img.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
@@ -127,67 +127,5 @@ func TestReadoutWidthHoldsTheWidest(t *testing.T) {
 		if w, a := readoutWidth(tc.widest), readoutWidth(tc.actual); w <= 0 || a > w {
 			t.Errorf("%+v: width %v, but %+v needs %v", tc.widest, w, tc.actual, a)
 		}
-	}
-}
-
-// inkIn tells whether any pixel in columns [x0, x1) has more than
-// antialiasing's faint edge.
-func inkIn(img image.Image, x0, x1 int) bool {
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X + x0; x < b.Min.X+x1 && x < b.Max.X; x++ {
-			if _, _, _, a := img.At(x, y).RGBA(); a > 0x2000 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func TestDrawReadoutsPutsEachReadingInItsSlot(t *testing.T) {
-	if !appKitInit() {
-		t.Skip("AppKit is not available")
-	}
-	cpu := menuBarText{Top: "CPU", Bottom: "100%", Label: true}
-	mem := menuBarText{Top: "内存", Bottom: "86%", Label: true}
-	w1, w2 := readoutWidth(cpu), readoutWidth(mem)
-	total := readoutsWidth([]float64{w1, w2})
-	img := decodeReadout(t, drawReadouts([]readoutSlot{{cpu, w1}, {mem, w2}}, true, false), total)
-	px := func(p float64) int { return int(math.Round(p * readoutScale)) }
-	if !inkIn(img, 0, px(w1)) || !inkIn(img, px(w1+readoutGap), px(total)) {
-		t.Error("a reading drew nothing in its slot")
-	}
-	if inkIn(img, px(w1), px(w1+readoutGap)) {
-		t.Errorf("ink in the gap, pixel columns %d–%d", px(w1), px(w1+readoutGap))
-	}
-}
-
-func TestDrawReadoutsColorsOnlyTheTonedValue(t *testing.T) {
-	if !appKitInit() {
-		t.Skip("AppKit is not available")
-	}
-	cpu := menuBarText{Top: "CPU", Bottom: "43%", Label: true}
-	mem := menuBarText{Top: "MEM", Bottom: "86%", Label: true, Tone: "warn"}
-	w1, w2 := readoutWidth(cpu), readoutWidth(mem)
-	img := decodeReadout(t, drawReadouts([]readoutSlot{{cpu, w1}, {mem, w2}}, false, true), readoutsWidth([]float64{w1, w2}))
-	split := int(math.Round((w1 + readoutGap/2) * readoutScale))
-	find := func(x0, x1 int, match func(color.NRGBA) bool) bool {
-		b := img.Bounds()
-		for y := b.Min.Y; y < b.Max.Y; y++ {
-			for x := b.Min.X + x0; x < b.Min.X+x1 && x < b.Max.X; x++ {
-				if match(color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	orange := func(c color.NRGBA) bool { return c.A > 200 && c.R > 220 && c.G > 150 && c.G < 230 && c.B < 140 } // #FFC35A
-	white := func(c color.NRGBA) bool { return c.A > 200 && c.R > 220 && c.G > 220 && c.B > 220 }
-	if find(0, split, orange) || !find(0, split, white) {
-		t.Error("CPU's value: want the dark bar's light ink, not orange")
-	}
-	if !find(split, img.Bounds().Dx(), orange) {
-		t.Error("memory's value is not orange")
 	}
 }

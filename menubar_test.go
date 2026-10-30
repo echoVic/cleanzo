@@ -326,3 +326,16 @@ func TestMenuBarHolds(t *testing.T) {
 		t.Error("quitting did not release the hold")
 	}
 }
+
+// The items' names never change: macOS keeps under each where the user
+// dragged it with ⌘, and a new name would lose that place.
+func TestMenuBarNamesStay(t *testing.T) {
+	if menuBarIconID != "cleanzo" {
+		t.Errorf("icon %q", menuBarIconID)
+	}
+	for item, want := range map[string]string{"cpu": "cleanzo.cpu", "mem": "cleanzo.mem", "battery": "cleanzo.battery"} {
+		if got := menuBarReadingID(item); got != want {
+			t.Errorf("%s: %q, want %q", item, got, want)
+		}
+	}
+}

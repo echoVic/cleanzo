@@ -4,7 +4,7 @@ package main
 // docs/superpowers/specs/2026-10-29-menubar-design.md §三, §五, §七): which
 // readings show, where that choice is kept, and the bound methods Settings
 // calls. menubar_readout.go turns readings into text; menubar_darwin.go makes
-// the readings' item and feeds it; elsewhere the readings are not supported.
+// the readings' items and feeds them; elsewhere the readings are not supported.
 
 import (
 	"context"
@@ -18,8 +18,8 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// menuBarItems are the readings in their order in the readings' item, left to
-// right (spec §三.3).
+// menuBarItems are the readings in the order they first show in the menu bar,
+// left to right (spec §三.3).
 var menuBarItems = []string{"cpu", "mem", "gpu", "net", "disk", "temp", "battery"}
 
 // menuBarDefault are the readings shown until the user chooses (spec §三.2).
@@ -127,11 +127,14 @@ func menuBarState(c menuBarConfig) MenuBarState {
 	return MenuBarState{Supported: true, Items: c.Items, Available: menuBarAvailable(menuBarBattery())}
 }
 
-// menuBarItemID names Cleanzo's place in the menu bar: the readings' item, or
-// the Cleanzo icon while monitoring is on and no reading shows (spec §三.4).
-// The two never show together, so they share it: each comes where the other
-// was, or where the user dragged it with ⌘.
-const menuBarItemID = "cleanzo"
+// menuBarIconID names the Cleanzo icon, which shows while monitoring is on and
+// no reading shows (spec §三.4).
+const menuBarIconID = "cleanzo"
+
+// menuBarReadingID names item's menu bar item. macOS keeps under the name
+// where the user dragged the item with ⌘, and puts it back there whenever it
+// shows again (spec §三.3), so the names never change.
+func menuBarReadingID(item string) string { return "cleanzo." + item }
 
 // MenuBar returns the readings the menu bar shows and those it can.
 func (Cleaner) MenuBar() MenuBarState { return menuBarState(menuBarConfigNow()) }

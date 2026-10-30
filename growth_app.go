@@ -16,13 +16,13 @@ import (
 )
 
 // growthTray is the Cleanzo icon in the menu bar, shown while monitoring is on
-// and no reading shows: with readings, their item carries Cleanzo's menu
-// instead (menubar spec §三.4). The main thread makes and removes it.
+// and no reading shows: with readings, their items carry Cleanzo's menu instead
+// (menubar spec §三.4). The main thread makes and removes it.
 var growthTray atomic.Pointer[mygo.Tray]
 
 // growthMenuShown is the model of Cleanzo's menu as last built: the icon's
-// menu, or what the readings' item shows on a right-click and in its panels.
-// Only the main thread reads or writes it.
+// menu, or what the readings show on a right-click and in their panels. Only
+// the main thread reads or writes it.
 var growthMenuShown []growthMenuItem
 
 // growthMenuOn tells whether Cleanzo's menu was last applied with monitoring
@@ -88,7 +88,7 @@ func growthKeepRunning(supported bool, resident func() bool) bool {
 
 // startResident runs in WhenReady, on the main thread, so it reads no records:
 // they would hold up the first window. It starts the monitor's loop and shows
-// the menu bar: the readings chosen, in one item, or else the Cleanzo icon
+// the menu bar: the readings chosen, an item each, or else the Cleanzo icon
 // while monitoring is on, with the lines that act and no more, which
 // refreshGrowthTray completes on another goroutine. It reports true when the
 // app was opened at login and Cleanzo shows in the menu bar: then no window
@@ -109,7 +109,7 @@ func startResident() bool {
 	if atLogin {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	}
-	menuBarShow(mb.Items) // first: with a reading, its item carries the menu and no icon shows
+	menuBarShow(mb.Items) // first: with a reading, the readings carry the menu and no icon shows
 	if resident {
 		model, tip := menuBarOnlyMenu(nativeText), nativeText("menubar.tray.tip", nil)
 		if cfg.Enabled {
@@ -178,7 +178,7 @@ func applyGrowthLifecycle(cfg GrowthConfig) error {
 
 // applyResident puts the app in the state the two settings ask for (growth
 // spec §六, menubar spec §三, §七):
-//   - the readings in mb, in one item, which carries Cleanzo's menu;
+//   - the readings in mb, an item each, which carry Cleanzo's menu;
 //   - the Cleanzo icon while monitoring is on and no reading shows;
 //   - opening at login as chosen, only while one of them is on;
 //   - quitting when neither is on and no window is open, a minimized or
@@ -220,9 +220,9 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 }
 
 // showGrowthTray shows Cleanzo's menu for model (menubar spec §三.4). While a
-// reading shows, the readings' item carries it, on a right-click and in its
-// panels, and the Cleanzo icon goes. Otherwise it goes on the icon, made if
-// missing, with the tooltip tip. It runs on the main thread.
+// reading shows, the readings carry it, on a right-click and in their panels,
+// and the Cleanzo icon goes. Otherwise it goes on the icon, made if missing,
+// with the tooltip tip. It runs on the main thread.
 func showGrowthTray(model []growthMenuItem, tip string) {
 	if menuBarShowing() {
 		hideGrowthTray()
@@ -234,7 +234,7 @@ func showGrowthTray(model []growthMenuItem, tip string) {
 		showGrowthMenu(t, model)
 		return
 	}
-	t, err := mygo.NewTray(mygo.TrayOptions{ID: menuBarItemID, Icon: growthIconPNG(), IconIsTemplate: true, ToolTip: tip, Menu: growthTrayMenu(model, growthMenuAction)})
+	t, err := mygo.NewTray(mygo.TrayOptions{ID: menuBarIconID, Icon: growthIconPNG(), IconIsTemplate: true, ToolTip: tip, Menu: growthTrayMenu(model, growthMenuAction)})
 	if err != nil {
 		log.Println("tray:", err)
 		return
@@ -291,9 +291,9 @@ func refreshGrowthTray() {
 	})
 }
 
-// residentModelNow is Cleanzo's menu as last built, for the readings' item to
-// show. Before one is built, it is the lines that act, as startResident first
-// shows them. It runs on the main thread.
+// residentModelNow is Cleanzo's menu as last built, for the readings to show.
+// Before one is built, it is the lines that act, as startResident first shows
+// them. It runs on the main thread.
 func residentModelNow() []growthMenuItem {
 	if growthMenuShown != nil {
 		return growthMenuShown
