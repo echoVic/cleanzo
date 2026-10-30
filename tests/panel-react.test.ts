@@ -275,3 +275,27 @@ test("panel strings exist in Chinese and English", () => {
     }
   } finally { setLang("zh"); }
 });
+
+test("the panel's colors for each theme are style.css's light and dark tokens", async () => {
+  const { readFileSync } = await import("node:fs");
+  const style = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../src/panel/panel.css", import.meta.url), "utf8");
+  const darkAt = style.indexOf("@media (prefers-color-scheme: dark)");
+  const light = style.slice(style.indexOf(":root {"), darkAt);
+  const dark = style.slice(darkAt, style.indexOf("\n}\n", darkAt));
+  const token = (block: string, name: string) => block.match(new RegExp(`--${name}:\\s*([^;]+);`))?.[1]?.trim();
+  const pairs = [...panel.matchAll(/--([a-z-]+): light-dark\((.*)\);/g)];
+  expect(pairs.length).toBe(18);
+  for (const [, name, args] of pairs) {
+    let depth = 0;
+    let cut = -1;
+    for (let i = 0; i < args!.length && cut < 0; i++) {
+      const c = args![i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === "," && depth === 0) cut = i;
+    }
+    expect([name, args!.slice(0, cut).trim()]).toEqual([name, token(light, name!)]);
+    expect([name, args!.slice(cut + 1).trim()]).toEqual([name, token(dark, name!)]);
+  }
+});

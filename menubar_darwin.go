@@ -228,10 +228,14 @@ const (
 )
 
 // toggle opens item's panel below its icon and closes any other; a click on the
-// icon while its panel is open closes it (spec §四). The panel is the app's
-// page panel.html in the system's popover, which closes when the user clicks
-// elsewhere. A quit under way keeps it open (MenuBarHold). It runs on the main
-// thread.
+// icon while its panel is open closes it (spec §四). The panel is the app's page
+// panel.html in the system's popover, which AppKit anchors to the icon on
+// whichever display the user clicked: a floating panel placed from the icon's
+// frame lands on the wrong display of a Mac with two, where macOS 26 keeps a
+// hidden copy of every menu bar item. The popover takes the menu bar's
+// appearance, which can be dark while the app is light, so the page is told
+// which it is and draws an opaque card in that theme. A quit under way keeps
+// the panel open (MenuBarHold). It runs on the main thread.
 func (m *menuBarController) toggle(item string) {
 	if w := m.panels[item]; w != nil {
 		w.Close()
@@ -249,6 +253,10 @@ func (m *menuBarController) toggle(item string) {
 	if t == nil {
 		return
 	}
+	dark := "0"
+	if t.Dark() {
+		dark = "1"
+	}
 	w := mygo.NewFlyout(mygo.FlyoutOptions{
 		Tray:       t,
 		Placement:  mygo.PlacementBottom,
@@ -260,7 +268,7 @@ func (m *menuBarController) toggle(item string) {
 		MinWidth:   menuBarPanelWidth,
 		MaxWidth:   menuBarPanelWidth,
 		MaxHeight:  menuBarPanelMaxHeight,
-		URL:        "/panel.html?item=" + item,
+		URL:        "/panel.html?item=" + item + "&dark=" + dark,
 	})
 	m.panels[item] = w
 	w.OnClose(func(e *mygo.CloseEvent) {

@@ -1,7 +1,33 @@
-/* 菜单栏面板（设计 2026-10-29 §四）：系统弹出框里的网页，底色是弹出框自己的材质，页面不画底色。
+/* 菜单栏面板（设计 2026-10-29 §四）：系统弹出框里的网页，自己画不透明的卡片底色，弹出框的材质不会透出来。
    style.css 给主窗口的 html、body 定了满屏高度：这里改回按内容的高度，弹出框才能跟着内容伸缩。 */
-html:root { height: auto; background: transparent; }
-body.mb-body { height: auto; overflow-x: hidden; overflow-y: auto; margin: 0; background: transparent; font-size: 12px; }
+html:root { height: auto; background: var(--card); }
+body.mb-body { height: auto; overflow-x: hidden; overflow-y: auto; margin: 0; background: var(--card); font-size: 12px; }
+
+/* 系统弹出框跟着菜单栏用浅色或深色，不一定和应用一样（浅色模式下菜单栏也可能是深色）。
+   Go 用 ?dark=1 或 0 说明，main.tsx 记在 data-theme 上；这里按它重新定义面板用到的颜色，
+   取值和 style.css 的浅色、深色一样（tests/panel-react.test.ts 核对）。 */
+:root[data-theme] {
+  --fg: light-dark(#1a1c20, #e9ebef);
+  --muted: light-dark(#6B7280, #9AA3AF);
+  --card: light-dark(#ffffff, #22252a);
+  --accent: light-dark(#1FA355, #30D158);
+  --accent-soft: light-dark(rgba(31, 163, 85, 0.10), rgba(48, 209, 88, 0.14));
+  --warn: light-dark(#b45309, #f59e0b);
+  --warn-soft: light-dark(rgba(217, 119, 6, 0.12), rgba(245, 158, 11, 0.16));
+  --warn-text: light-dark(#9A6100, #FFC35A);
+  --danger: light-dark(#d92d20, #e5484d);
+  --danger-soft: light-dark(rgba(217, 45, 32, 0.09), rgba(229, 72, 77, 0.14));
+  --border: light-dark(rgba(20, 24, 31, 0.09), rgba(255, 255, 255, 0.085));
+  --bg-subtle: light-dark(rgba(120, 128, 140, 0.055), rgba(255, 255, 255, 0.045));
+  --hover: light-dark(rgba(120, 128, 140, 0.08), rgba(255, 255, 255, 0.055));
+  --skeleton: light-dark(rgba(127, 132, 140, 0.12), rgba(255, 255, 255, 0.07));
+  --btn-bg: light-dark(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.06));
+  --seg-app: light-dark(#3b82f6, #60a5fa);
+  --seg-wired: light-dark(#8b5cf6, #a78bfa);
+  --seg-compressed: light-dark(#D97706, #fbbf24);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 .mb-panel { width: 320px; padding: 12px 0 0; color: var(--fg); }
 .mb-head { display: flex; align-items: baseline; gap: 8px; padding: 0 14px; }
