@@ -80,3 +80,6 @@ body.mb-body { height: auto; overflow-x: hidden; overflow-y: auto; margin: 0; ba
 .mb-links { display: flex; gap: 12px; }
 .mb-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
 .mb-every { font-size: 11px; color: var(--muted); }
+.mb-end { display: flex; align-items: center; gap: 6px; }
+.mb-more { padding: 0 5px; border: 0; border-radius: 5px; background: none; font: inherit; font-size: 15px; line-height: 18px; color: var(--muted); cursor: pointer; }
+.mb-more:hover, .mb-more:focus-visible { background: var(--hover); color: var(--fg); }

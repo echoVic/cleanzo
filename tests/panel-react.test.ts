@@ -263,7 +263,7 @@ test("rows: quit in two clicks, force quit in two more; system rows are estimate
 
 test("panel strings exist in Chinese and English", () => {
   const keys = [
-    "menubar.panel.cpu", "menubar.panel.battery", "menubar.panel.every", "menubar.panel.openProcess", "menubar.panel.openHome",
+    "menubar.panel.cpu", "menubar.panel.battery", "menubar.panel.every", "menubar.panel.more", "menubar.panel.openProcess", "menubar.panel.openHome",
     "menubar.panel.confirmQuit", "menubar.panel.confirmForce", "menubar.panel.quitted", "menubar.panel.swapValue",
     "menubar.diag.cpuIdle", "menubar.diag.memOk", "menubar.diag.diskOk", "menubar.diag.growth", "menubar.diag.thermal3",
     "menubar.diag.cpuTop", "menubar.diag.gpuSome",
@@ -298,4 +298,16 @@ test("the panel's colors for each theme are style.css's light and dark tokens", 
     expect([name, args!.slice(0, cut).trim()]).toEqual([name, token(light, name!)]);
     expect([name, args!.slice(cut + 1).trim()]).toEqual([name, token(dark, name!)]);
   }
+});
+
+test("footer: the panel's links, the update interval and the 「⋯」 that opens Cleanzo's menu", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { PanelFoot } = await import("../src/panel/PanelApp");
+  const { PANEL } = await import("../src/panel/format");
+  const html = renderToStaticMarkup(createElement(PanelFoot, { links: PANEL.cpu.links, t, onOpen() {}, onMenu() {} }));
+  expect(html).toContain(t("menubar.panel.openProcess"));
+  expect(html).toContain(t("menubar.panel.every"));
+  expect(html).toContain('class="mb-more"');
+  expect(html).toContain(`aria-label="${t("menubar.panel.more")}"`);
 });

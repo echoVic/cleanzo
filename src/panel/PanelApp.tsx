@@ -12,7 +12,7 @@ import { panelApi } from "./api";
 import {
   PANEL, QUIT_CONFIRM_MS, chartMax, chartPoint, chartTone, confirming, detailRows, diagnosis, emptyBook, growthTop, hero,
   listFrozen, memShares, quitPending, revertConfirms, subLine, syncBook, topRows, withStep,
-  type PanelItem, type QuitBook, type QuitStep,
+  type PanelItem, type PanelLink, type QuitBook, type QuitStep,
 } from "./format";
 
 type T = ReturnType<typeof useT>;
@@ -102,6 +102,36 @@ export function PanelGrowthRow({ app, onName }: { app: GrowthApp; onName: () => 
       <button type="button" className="mb-name" title={app.name} onClick={onName}><span>{app.name}</span></button>
       <b className="mb-val">{`${week.atLeast ? "≥ " : "+"}${human(week.bytes)}`}</b>
     </div>
+  );
+}
+
+export interface PanelFootProps { links: PanelLink[]; t: T; onOpen: (target: MenuBarTarget) => void; onMenu: (x: number, y: number) => void }
+
+/** 面板底部：去主窗口的链接，更新间隔，和打开 Cleanzo 菜单的「⋯」（有读数时菜单栏里没有 Cleanzo 图标，设计 §三.4）。 */
+export function PanelFoot({ links, t, onOpen, onMenu }: PanelFootProps) {
+  return (
+    <footer className="mb-foot">
+      <span className="mb-links">
+        {links.map((l) => (
+          <button key={l.key} type="button" className="mb-link" onClick={() => onOpen(l.target)}>{t(l.key)} ›</button>
+        ))}
+      </span>
+      <span className="mb-end">
+        <span className="mb-every">{t("menubar.panel.every")}</span>
+        <button
+          type="button"
+          className="mb-more"
+          aria-label={t("menubar.panel.more")}
+          title={t("menubar.panel.more")}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onMenu(Math.round(r.left), Math.round(r.bottom));
+          }}
+        >
+          ⋯
+        </button>
+      </span>
+    </footer>
   );
 }
 
@@ -302,14 +332,7 @@ export function PanelApp({ item }: { item: PanelItem }) {
           {grown.map((a) => <PanelGrowthRow key={a.key} app={a} onName={() => open({ page: "process", tab: "disk", key: a.key })} />)}
         </section>
       )}
-      <footer className="mb-foot">
-        <span className="mb-links">
-          {PANEL[item].links.map((l) => (
-            <button key={l.key} type="button" className="mb-link" onClick={() => open(l.target)}>{t(l.key)} ›</button>
-          ))}
-        </span>
-        <span className="mb-every">{t("menubar.panel.every")}</span>
-      </footer>
+      <PanelFoot links={PANEL[item].links} t={t} onOpen={open} onMenu={(x, y) => { void panelApi.menu(x, y).catch(() => {}); }} />
     </main>
   );
 }

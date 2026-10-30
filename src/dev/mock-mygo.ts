@@ -315,6 +315,7 @@ function createRuntime(): Runtime {
     }),
     "Cleaner.MenuBarHold": async () => {},
     "Cleaner.MenuBarOpen": async () => {},
+    "Cleaner.MenuBarMenu": async () => {},
     "Cleaner.QuitApp": async (path) => {
       // DoubaoWork 正常退出退不掉，用来看进程页的「强制退出」。
       if (path === "/Applications/DoubaoWork.app") { await wait(5000); return false; }

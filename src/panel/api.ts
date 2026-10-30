@@ -21,4 +21,6 @@ export const panelApi = {
   hold: (on: boolean): Promise<void> => Cleaner.menuBarHold(on),
   /** 关上面板，在主窗口打开 target 那一页。 */
   open: (target: MenuBarTarget): Promise<void> => Cleaner.menuBarOpen(target),
+  /** 在面板里 x、y 处（页面左上角起的点）弹出 Cleanzo 的菜单；选了一行，面板随后关上。 */
+  menu: (x: number, y: number): Promise<void> => Cleaner.menuBarMenu(x, y),
 };
