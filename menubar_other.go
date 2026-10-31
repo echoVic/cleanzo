@@ -12,3 +12,5 @@ func menuBarShowing() bool    { return false }
 func menuBarRelabel()         {}
 
 func menuBarBatteryTemp() *BatteryStatus { return nil }
+
+func menuBarGrowthChanged() {}

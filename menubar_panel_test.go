@@ -85,6 +85,9 @@ func panelTestGrowth(enabled bool) *GrowthState {
 	}
 }
 
+// panelTestViewKeys visits the native views where they are supported.
+var panelTestViewKeys func(panelText)
+
 func TestPanelConstantsAndLinks(t *testing.T) {
 	panelEqual(t, panelTop, 5)
 	panelEqual(t, panelQuitConfirm, 3*time.Second)
@@ -230,6 +233,9 @@ func TestPanelNativeTextKeys(t *testing.T) {
 	g.Config.Ignored = []string{g.Alerts[0].Key}
 	visit(panelTestSample(), panelTestInfo(), sys, panelDiagInput{Growth: g})
 	panelDiagnosis("unknown", panelDiagInput{}, record)
+	if panelTestViewKeys != nil {
+		panelTestViewKeys(record)
+	}
 	if len(keys) == 0 {
 		t.Fatal("panel functions recorded no translation keys")
 	}

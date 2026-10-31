@@ -279,23 +279,14 @@ func menuBarControlHeld() bool {
 	return held
 }
 
-// The panels' size in points (spec §九): as wide as the mockup's, as tall as
-// their content up to most of a laptop's screen.
-const (
-	menuBarPanelWidth     = 320
-	menuBarPanelMaxHeight = 640
-)
+// menuBarPanelWidth is the mockup's width in points (spec §九).
+const menuBarPanelWidth = 320
 
-// toggle opens item's panel below its item and closes any other; a click on the
-// item while its panel is open closes it (spec §四). The panel is the app's page
-// panel.html in the system's popover, anchored to the item's own window. macOS
-// 26 shows each menu bar item on every display and keeps that window on one of
-// them, so on a Mac with two displays the panel can open on the other display
-// than the one clicked; mygo's plain flyout has the same problem until mygo
-// places it from the copy clicked. The popover takes the menu bar's appearance,
-// which can be dark while the app is light, so the page is told which it is and
-// draws an opaque card in that theme. A quit under way keeps the panel open
-// (MenuBarHold). It runs on the main thread.
+// toggle opens item's native panel below its item and closes any other;
+// clicking the item again closes it (spec §四). The system popover anchors
+// to the item's own window; on macOS 26 that can be on another display than
+// the copy clicked, until mygo places flyouts from that copy. A quit under
+// way keeps the panel open (spec §四.5). It runs on the main thread.
 func (m *menuBarController) toggle(item string) {
 	if w := m.panels[item]; w != nil {
 		w.Close()
@@ -313,23 +304,7 @@ func (m *menuBarController) toggle(item string) {
 	if t == nil {
 		return
 	}
-	dark := "0"
-	if t.Dark() {
-		dark = "1"
-	}
-	w := mygo.NewFlyout(mygo.FlyoutOptions{
-		Tray:       t,
-		Placement:  mygo.PlacementBottom,
-		Popover:    true,
-		Focusable:  true,
-		Width:      menuBarPanelWidth,
-		Height:     360,
-		FitContent: true,
-		MinWidth:   menuBarPanelWidth,
-		MaxWidth:   menuBarPanelWidth,
-		MaxHeight:  menuBarPanelMaxHeight,
-		URL:        "/panel.html?item=" + item + "&dark=" + dark,
-	})
+	w := openMenuBarPanel(t, item)
 	m.panels[item] = w
 	w.OnClose(func(e *mygo.CloseEvent) {
 		if menuBarHeld(w) {

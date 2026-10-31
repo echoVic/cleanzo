@@ -47,6 +47,7 @@ func init() {
 	growthChanged = func(s GrowthStatus) {
 		GrowthUpdated.Broadcast(s)
 		go refreshGrowthTray()
+		go menuBarGrowthChanged()
 	}
 }
 
