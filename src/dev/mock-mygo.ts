@@ -90,7 +90,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.2.4", os: "darwin", arch: "arm64", goVersion: "go1.27.1",
+    version: "0.3.0", os: "darwin", arch: "arm64", goVersion: "go1.27.1",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
@@ -306,7 +306,7 @@ function createRuntime(): Runtime {
     },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
       await emit(sample());
-      for (;;) { await wait(2000); await emit(sample()); }
+      for (;;) { await wait(200); await emit(sample()); }
     }),
     "Cleaner.QuitApp": async (path) => {
       // DoubaoWork 正常退出退不掉，用来看进程页的「强制退出」。
@@ -316,7 +316,7 @@ function createRuntime(): Runtime {
     "Cleaner.ForceQuitApp": async (path) => { await wait(500); quitted.add(path); return true; },
     "Cleaner.WatchProcesses": async (ch) => stream(ch, async (emit) => {
       await wait(1000);
-      for (;;) { await emit(processSample()); await wait(2000); }
+      for (;;) { await emit(processSample()); await wait(200); }
     }),
     "Cleaner.CrashDumps": async () => ({ total: 0, threshold: GB, dirs: [] }),
     "Cleaner.ScanJunk": async (ch) => stream(ch, async (emit) => {
