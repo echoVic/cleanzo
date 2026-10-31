@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -281,30 +280,14 @@ func TestMenuBarPanelSourceReadsWhatThePanelShows(t *testing.T) {
 	}
 }
 
-func TestWatchMenuBarPanelRefusesAnUnknownReading(t *testing.T) {
-	want := "unknown-item"
-	if !menuBarSupported() {
-		want = "unsupported"
-	}
-	var ce codeError
-	if err := (Cleaner{}).WatchMenuBarPanel(context.Background(), "fans", nil); !errors.As(err, &ce) || ce.Code != want {
-		t.Errorf("err = %v, want %s", err, want)
-	}
-}
-
 func TestMenuBarHolds(t *testing.T) {
 	w := &mygo.Window{}
 	if menuBarHeld(w) {
 		t.Fatal("held before anything asked")
 	}
-	(Cleaner{}).MenuBarHold(context.Background(), true) // no calling window: nothing to hold
 	menuBarHolds.Lock()
-	n := len(menuBarHolds.held)
 	menuBarHolds.held[w] = time.Now()
 	menuBarHolds.Unlock()
-	if n != 0 {
-		t.Errorf("%d panels held without a caller", n)
-	}
 	if !menuBarHeld(w) {
 		t.Error("not held")
 	}

@@ -1180,33 +1180,6 @@ export const Cleaner = {
     return call("Cleaner.MenuBar");
   },
   /**
-   * MenuBarHold keeps the panel that calls it open while hold is true: a quit is
-   * under way, and its result must show (spec §四.5). Clicking elsewhere, or on
-   * the reading, leaves the panel open until the quit is done, or menuBarHoldMax
-   * at most; quitting Cleanzo releases it. Only a panel can be held, and a call
-   * from a page that has gone releases.
-   */
-  menuBarHold(hold: boolean): Promise<void> {
-    return call("Cleaner.MenuBarHold", hold);
-  },
-  /**
-   * MenuBarMenu shows Cleanzo's menu at x, y in the panel that calls it, in
-   * points from the top left of its page: the lines of the Cleanzo icon, which
-   * does not show while a reading does (spec §三.4). mygo runs the line chosen
-   * before the menu returns; a line chosen then closes the panel, held or not.
-   */
-  menuBarMenu(x: number, y: number): Promise<void> {
-    return call("Cleaner.MenuBarMenu", x, y);
-  },
-  /**
-   * MenuBarOpen closes the panel that calls it, held or not, and shows the page
-   * t names in the main window, making the window again if it was closed
-   * (spec §四.6).
-   */
-  menuBarOpen(t: MenuBarTarget): Promise<void> {
-    return call("Cleaner.MenuBarOpen", t);
-  },
-  /**
    * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
    * System Settings, where the user can let Cleanzo read protected folders
    * such as the Trash.
@@ -1324,21 +1297,6 @@ export const Cleaner = {
    */
   upgradeSkills(reqs: SkillUpgradeRequest[]): Promise<SkillUpgradeResult[]> {
     return call("Cleaner.UpgradeSkills", reqs);
-  },
-  /**
-   * WatchMenuBarPanel streams what a menu bar panel shows while it is open, as
-   * the status page's samples: the first after about half a second, then one
-   * every two seconds (spec §四, §六). It reads only what item's panel needs:
-   *   - the machine's live readings, but not for the memory and battery panels;
-   *   - the battery through system_profiler, once a minute, for its own panel
-   *     only;
-   *   - for the temperature panel, the battery's temperature alone.
-   *
-   * The panel closes the channel as it closes. It fails with "unsupported" off
-   * macOS and "unknown-item" for a reading it does not know.
-   */
-  watchMenuBarPanel(item: string, ch: Channel<StatusSample>): Promise<void> {
-    return call("Cleaner.WatchMenuBarPanel", item, ch);
   },
   /**
    * WatchProcesses streams one ProcessSample every two seconds while the

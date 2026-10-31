@@ -191,26 +191,6 @@ func menuBarGo(t MenuBarTarget) {
 	})
 }
 
-// WatchMenuBarPanel streams what a menu bar panel shows while it is open, as
-// the status page's samples: the first after about half a second, then one
-// every two seconds (spec §四, §六). It reads only what item's panel needs:
-//   - the machine's live readings, but not for the memory and battery panels;
-//   - the battery through system_profiler, once a minute, for its own panel
-//     only;
-//   - for the temperature panel, the battery's temperature alone.
-//
-// The panel closes the channel as it closes. It fails with "unsupported" off
-// macOS and "unknown-item" for a reading it does not know.
-func (Cleaner) WatchMenuBarPanel(ctx context.Context, item string, ch *mygo.Channel[StatusSample]) error {
-	if !menuBarSupported() {
-		return codeError{Code: "unsupported"}
-	}
-	if !slices.Contains(menuBarItems, item) {
-		return codeError{Code: "unknown-item"}
-	}
-	return watchStatusWith(ctx, ch.Send, menuBarPanelSource(realStatusSource(), item))
-}
-
 // menuBarPanelSource is base without the reads item's panel does not show.
 func menuBarPanelSource(base statusSource, item string) statusSource {
 	src := base
@@ -260,61 +240,4 @@ func menuBarReleaseAll() {
 	menuBarHolds.Lock()
 	clear(menuBarHolds.held)
 	menuBarHolds.Unlock()
-}
-
-// MenuBarHold keeps the panel that calls it open while hold is true: a quit is
-// under way, and its result must show (spec §四.5). Clicking elsewhere, or on
-// the reading, leaves the panel open until the quit is done, or menuBarHoldMax
-// at most; quitting Cleanzo releases it. Only a panel can be held, and a call
-// from a page that has gone releases.
-func (Cleaner) MenuBarHold(ctx context.Context, hold bool) {
-	w := mygo.CallerWindow(ctx)
-	if w == nil || !w.IsFlyout() {
-		return
-	}
-	menuBarHolds.Lock()
-	defer menuBarHolds.Unlock()
-	if !hold || ctx.Err() != nil {
-		delete(menuBarHolds.held, w)
-		return
-	}
-	menuBarHolds.held[w] = time.Now()
-}
-
-// MenuBarOpen closes the panel that calls it, held or not, and shows the page
-// t names in the main window, making the window again if it was closed
-// (spec §四.6).
-func (Cleaner) MenuBarOpen(ctx context.Context, t MenuBarTarget) {
-	if w := mygo.CallerWindow(ctx); w != nil && w.IsFlyout() {
-		menuBarRelease(w)
-		w.Destroy()
-	}
-	menuBarGo(t)
-}
-
-// MenuBarMenu shows Cleanzo's menu at x, y in the panel that calls it, in
-// points from the top left of its page: the lines of the Cleanzo icon, which
-// does not show while a reading does (spec §三.4). mygo runs the line chosen
-// before the menu returns; a line chosen then closes the panel, held or not.
-func (Cleaner) MenuBarMenu(ctx context.Context, x, y int) {
-	if !menuBarSupported() {
-		return
-	}
-	w := mygo.CallerWindow(ctx)
-	if w == nil || !w.IsFlyout() {
-		return
-	}
-	var menu *mygo.Menu
-	chosen := false
-	mygo.RunOnMain(func() { // the model is the main thread's
-		menu = growthTrayMenu(residentModelNow(), func(it growthMenuItem) {
-			chosen = true
-			growthMenuAction(it)
-		})
-	})
-	menu.PopupAt(w, x, y)
-	if chosen {
-		menuBarRelease(w)
-		w.Destroy()
-	}
 }

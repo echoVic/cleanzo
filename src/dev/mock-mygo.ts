@@ -308,14 +308,6 @@ function createRuntime(): Runtime {
       await emit(sample());
       for (;;) { await wait(2000); await emit(sample()); }
     }),
-    // 菜单栏面板：和首页同一条状态读数，第一条半秒后到。
-    "Cleaner.WatchMenuBarPanel": async (_item, ch) => stream(ch, async (emit) => {
-      await emit(sample(), 500);
-      for (;;) { await wait(2000); await emit(sample()); }
-    }),
-    "Cleaner.MenuBarHold": async () => {},
-    "Cleaner.MenuBarOpen": async () => {},
-    "Cleaner.MenuBarMenu": async () => {},
     "Cleaner.QuitApp": async (path) => {
       // DoubaoWork 正常退出退不掉，用来看进程页的「强制退出」。
       if (path === "/Applications/DoubaoWork.app") { await wait(5000); return false; }
