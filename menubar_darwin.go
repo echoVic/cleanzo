@@ -77,23 +77,33 @@ func menuBarSupported() bool { return true }
 // the menu bar: a right-click on any shows Cleanzo's menu, and no Cleanzo icon
 // shows (spec §三.4). Only the main thread uses it; the sampler's goroutine
 // hands it each reading through mygo.RunOnMain.
+// menuBarPaintKey is what uniquely determines how an item's icon looks:
+// the text, the width it is drawn at, and the ink.
+type menuBarPaintKey struct {
+	text  menuBarText
+	width float64
+	ink   readoutInk
+}
+
 type menuBarController struct {
-	shown  bool                    // show has run
-	items  []string                // the readings shown, in menuBarItems' order
-	trays  map[string]*mygo.Tray   // by reading
-	drawn  map[string]menuBarText  // what each item shows
-	widths map[string]float64      // the room each item keeps, in points, in the app's language
-	last   menuBarReading          // the latest reading, to draw again in another language
-	stop   context.CancelFunc      // ends the sampler; nil while none runs
-	panels map[string]*mygo.Window // open panels by reading; at most one
+	shown     bool                       // show has run
+	items     []string                   // the readings shown, in menuBarItems' order
+	trays     map[string]*mygo.Tray      // by reading
+	drawn     map[string]menuBarText     // what each item shows
+	paintKeys map[string]menuBarPaintKey // the key last sent to SetIcon, to skip unchanged repaints
+	widths    map[string]float64         // the room each item keeps, in points, in the app's language
+	last      menuBarReading             // the latest reading, to draw again in another language
+	stop      context.CancelFunc         // ends the sampler; nil while none runs
+	panels    map[string]*mygo.Window    // open panels by reading; at most one
 }
 
 // menuBar is the app's controller.
 var menuBar = &menuBarController{
-	trays:  map[string]*mygo.Tray{},
-	drawn:  map[string]menuBarText{},
-	widths: map[string]float64{},
-	panels: map[string]*mygo.Window{},
+	trays:     map[string]*mygo.Tray{},
+	drawn:     map[string]menuBarText{},
+	paintKeys: map[string]menuBarPaintKey{},
+	widths:    map[string]float64{},
+	panels:    map[string]*mygo.Window{},
 }
 
 // menuBarShow, menuBarShowing and menuBarRelabel are what growth_app.go asks
@@ -197,13 +207,20 @@ func (m *menuBarController) draw(r menuBarReading) {
 }
 
 // paint draws t into item's item: a template, or in the menu bar's ink when it
-// has a tone.
+// has a tone. It skips the draw and SetIcon call when neither the text, the
+// width, nor the ink has changed since the last call: only color-tone readings
+// such as memory under pressure can cause a repaint without a text change.
 func (m *menuBarController) paint(item string, tray *mygo.Tray, t menuBarText) {
 	ink := readoutInk{template: t.Tone == "", tone: t.Tone}
 	if !ink.template {
 		ink.dark = tray.Dark()
 	}
-	png := drawReadout(t, m.width(item, t), ink)
+	w := m.width(item, t)
+	key := menuBarPaintKey{text: t, width: w, ink: ink}
+	if m.paintKeys[item] == key {
+		return // same image as last time; macOS already shows it
+	}
+	png := drawReadout(t, w, ink)
 	if png == nil {
 		return
 	}
@@ -212,6 +229,7 @@ func (m *menuBarController) paint(item string, tray *mygo.Tray, t menuBarText) {
 		return
 	}
 	m.drawn[item] = t
+	m.paintKeys[item] = key
 }
 
 // repaint draws item's item again for the menu bar's new appearance. Only an
