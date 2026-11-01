@@ -295,7 +295,7 @@ test("Windows memory legend keeps three full label/value rows in zh/en", async (
       const legend = match![1]!;
       const rows = [...legend.matchAll(/<li>(.*?)<\/li>/g)].map((match) => match[1]!);
       expect(rows).toHaveLength(3);
-      const labels = lang === "zh" ? ["App 内存", "内核", "已缓存文件"] : ["App Memory", "Kernel", "Cached files"];
+      const labels = lang === "zh" ? ["App 内存", "内核", "已缓存文件"] : ["App Memory", "Kernel", "Cached Files"];
       rows.forEach((row, i) => expect(row).toContain(`<span>${labels[i]}</span><b>`));
       expect(rows[2]).toContain("<b>19.9 GB</b>");
       expect(legend).not.toMatch(/…|\.\.\./);
@@ -540,7 +540,7 @@ test("English machine strings", async () => {
     setPref("en");
     expect(t("status.spec.cpuSplit", { n: 12, p: 8, e: 4 })).toBe("12-core CPU (8P + 4E)");
     expect(t("status.health.noFans")).toBe("No fans");
-    expect(t("status.alert.viewInProcess")).toBe("See what's using memory");
+    expect(t("status.alert.viewInProcess")).toBe("See What's Using Memory");
     expect(t("status.ssd.warn.spare")).toBe("Low spare blocks");
   } finally { setPref("system"); }
 });
