@@ -270,6 +270,17 @@ export function FullScanPage() {
   const showEmptyScanned = !scanning && !error && !stopped && sorted.length === 0 && tried;
   const showStoppedEmpty = !scanning && stopped && sorted.length === 0;
 
+  // 读屏里程碑：只播报开始 / 完成 / 停止粗粒度状态；当前路径与计数抖动仅视觉呈现。
+  const liveMsg = error
+    ? ""
+    : scanning
+      ? t("scan.busy")
+      : stopped
+        ? t("scan.stopped")
+        : result
+          ? t("large.foot", { n: result.scanned.toLocaleString(), t: (result.elapsedMs / 1000).toFixed(1), s: result.skipped.toLocaleString() })
+          : "";
+
   return (
     <div className="cz-react">
       <header className="view-head">
@@ -290,6 +301,8 @@ export function FullScanPage() {
         <strong>{t("fs.actionErrors")}</strong>
         <ul>{actionErrors.map((message, i) => <li key={i}>{message}</li>)}</ul>
       </div>}
+
+      <span className="sr-only" role="status">{liveMsg}</span>
 
       <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>

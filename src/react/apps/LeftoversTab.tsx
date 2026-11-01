@@ -280,6 +280,17 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     ? orphanFootAfterRemoval(visible, doneMs / 1000)
     : null;
 
+  // 读屏里程碑：只播报开始 / 完成 / 停止粗粒度状态；计数抖动仅视觉呈现。
+  const liveMsg = error
+    ? ""
+    : scanning
+      ? t("scan.busy")
+      : stopped
+        ? t("scan.stopped")
+        : summary
+          ? t("orphans.foot", { n: summary.n.toLocaleString(), size: human(summary.size), t: summary.t.toFixed(1) })
+          : "";
+
   return (
     <div className="flex flex-col gap-4">
       <div className="leftovers-head">
@@ -289,6 +300,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
           {scanButtonLabel}
         </Button>
       </div>
+
+      <span className="sr-only" role="status">{liveMsg}</span>
 
       <Collapse open={scanning}>
         <div className="fs-progress" style={{ display: "flex" }}>
