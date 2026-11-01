@@ -2042,6 +2042,20 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 @media (max-width: 880px) {
   .cz-growth-row { grid-template-columns: minmax(0, 1fr) 84px 92px 92px; }
   .cz-growth-month, .cz-growth-spark { display: none; }
+  /* 展开明细：路径独占一行（省略号），大小/周增量/显示第二行右排，
+     读不了或主目录外的说明整行另起——否则长说明会把路径列压成 0 */
+  .cz-growth-folder { grid-template-columns: minmax(0, 1fr) auto auto auto; row-gap: 2px; }
+  .cz-growth-path { grid-column: 1 / -1; }
+  .cz-growth-fsize { grid-column: 2; grid-row: 2; }
+  .cz-growth-fweek { grid-column: 3; grid-row: 2; }
+  .cz-growth-reveal { grid-column: 4; grid-row: 2; }
+  .cz-growth-folder > .muted { grid-column: 1 / -1; grid-row: 3; }
+}
+/* 主窗口下限（560px 视口 ≈ 内容宽 290px）：列表四列固定轨道要 292px，名字列会被压成 0。
+   再收起次级的「今天」列（排序只按 7 天/占用），保住图标和应用名；拉宽窗口即恢复 */
+@container content (max-width: 420px) {
+  .cz-growth-row { grid-template-columns: minmax(0, 1fr) 84px 92px; }
+  .cz-growth-row > :nth-child(3) { display: none; }
 }
 
 /* 进程页（spec 2026-10-26）：沿用系统状态的 st-* 列表 */
