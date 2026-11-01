@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
@@ -46,7 +46,7 @@ function RevealButton({ path, onReveal }: { path: string; onReveal: (path: strin
       type="button"
       title={t("fs.reveal")}
       aria-label={t("fs.reveal")}
-      className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[8px] border border-border bg-btn-bg p-0 text-[12px] font-[590] leading-[18px] text-muted transition-colors hover:bg-hover hover:text-foreground"
+      className="fs-reveal grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[8px] border border-border bg-btn-bg p-0 text-[12px] font-[590] leading-[18px] text-muted transition-colors hover:bg-hover hover:text-foreground"
       onClick={() => onReveal(path)}
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -82,6 +82,7 @@ function ChildRow({ parent, item, selection, busy, callbacks, leaving, index }: 
         checked={selection.sel.has(item.path)}
         disabled={busy || !item.trashable}
         onCheckedChange={(v) => callbacks.onToggleChild(parent, item.path, v === true)}
+        aria-label={item.path}
         className="box-content h-[15px] w-[15px] p-1"
       />
       <span className="fs-child-name" title={item.path}>
@@ -99,11 +100,13 @@ function ChildRow({ parent, item, selection, busy, callbacks, leaving, index }: 
         <Button
           variant="destructive"
           size="sm"
+          className="fs-trash"
+          aria-label={t("fs.trash")}
           disabled={busy}
           onClick={() => callbacks.onTrashRow(item.path, item.size, item.isDir)}
         >
-          {busy ? <span className="spin" /> : null}
-          {busy ? t("fs.moving") : t("fs.trash")}
+          {busy ? <span className="spin" /> : <Trash2 className="fs-trash-ico h-[15px] w-[15px]" aria-hidden="true" />}
+          <span className="fs-trash-label">{busy ? t("fs.moving") : t("fs.trash")}</span>
         </Button>
       )}
     </div>
@@ -146,6 +149,7 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
           checked={checked ? true : indeterminate ? "indeterminate" : false}
           disabled={busy || !row.trashable}
           onCheckedChange={(v) => cb.onToggleRow(row.path, v === true)}
+          aria-label={row.path}
           className="box-content p-1"
         />
         {row.rank && <div className="fs-rank"><span key={row.rank} className={rankChanged ? "cz-roll" : undefined}>{row.rank}</span></div>}
@@ -164,6 +168,7 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
             size="sm"
             disabled={busy}
             className="fs-expand"
+            aria-expanded={open}
             onClick={() => cb.onExpand(row.path)}
           >
             {open ? t("fs.collapse") : t("fs.expand")}
@@ -175,11 +180,13 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
           <Button
             variant="destructive"
             size="sm"
+            className="fs-trash"
+            aria-label={t("fs.trash")}
             disabled={busy}
             onClick={() => cb.onTrashRow(row.path, row.size, row.expandable ?? false)}
           >
-            {busy ? <span className="spin" /> : null}
-            {busy ? t("fs.moving") : t("fs.trash")}
+            {busy ? <span className="spin" /> : <Trash2 className="fs-trash-ico h-[15px] w-[15px]" aria-hidden="true" />}
+            <span className="fs-trash-label">{busy ? t("fs.moving") : t("fs.trash")}</span>
           </Button>
         )}
       </div>
@@ -259,6 +266,7 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
         checked={all ? true : some ? "indeterminate" : false}
         disabled={busy || selectableRows.length === 0}
         onCheckedChange={(v) => onToggleAll(v === true)}
+        aria-label={t("fs.selectAll")}
         className="box-content p-1"
       />
       <span className="fs-toolbar-count" aria-live="polite"><span key={label} className="cz-fade-in">{label}</span></span>

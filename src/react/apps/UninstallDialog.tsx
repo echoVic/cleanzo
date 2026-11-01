@@ -2,6 +2,7 @@ import { isWindows } from "../../platform";
 import { Loader2 } from "lucide-react";
 import type { UninstallDetail } from "../../mygo";
 import { Button } from "../../ui/components/button";
+import { PathText } from "../../ui/components/path-text";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -93,7 +94,7 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
             {detail.items.map((it) => (
               <div className="detail-item" key={it.path}>
                 <span className="kind">{kindLabel(it.kind)}</span>
-                <span className="path" title={it.path}>{displayPath(it.path)}</span>
+                <span className="path" title={it.path}><PathText path={displayPath(it.path)} /></span>
                 <span className="size">{human(it.size)}</span>
               </div>
             ))}

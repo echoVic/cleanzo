@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose,
 } from "../../ui/components/dialog";
 import { IdleHero } from "../../ui/components/idle-hero";
+import { PathText } from "../../ui/components/path-text";
 import { Collapse } from "../../ui/motion/Collapse";
 import { NumberTicker } from "../../ui/motion/NumberTicker";
 import { usePresence, Leave } from "../../ui/motion/presence";
@@ -161,12 +162,21 @@ export function CleanPage() {
   }, [phase]);
 
   // 行菜单：开关、失焦、Escape、方向键导航（行为对齐旧 document 级监听）。
+  const closeRowMenu = (focusTrigger: boolean) => {
+    const trigger = focusTrigger
+      ? document.querySelector<HTMLElement>(".junk-menu:not([data-leaving])")
+        ?.closest(".junk-item")?.querySelector<HTMLElement>("[data-action='menu']")
+      : undefined;
+    setMenuID(null);
+    // 忽略操作会让整行离场；此时 trigger 已脱离文档，focus() 静默无效，焦点退回 body。
+    trigger?.focus();
+  };
   React.useEffect(() => {
     if (menuID === null) return;
     const menu = document.querySelector<HTMLElement>(".junk-menu:not([data-leaving])");
     menu?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setMenuID(null); return; }
+      if (e.key === "Escape") { closeRowMenu(true); return; }
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       const buttons = [...document.querySelectorAll<HTMLButtonElement>(".junk-menu:not([data-leaving]) button:not(:disabled)")];
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -350,7 +360,7 @@ export function CleanPage() {
   // ---- 行动作 ----
 
   const reveal = (it: JunkItem) => {
-    setMenuID(null);
+    closeRowMenu(true);
     if (!it.paths?.[0]) return;
     cleanApi.reveal(it.paths[0]).catch((e) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
   };
@@ -358,7 +368,7 @@ export function CleanPage() {
   const ignore = async (it: JunkItem) => {
     if (phaseRef.current !== "scanned" || ignoringRef.current) return;
     setIgnoring(true);
-    setMenuID(null);
+    closeRowMenu(true);
     try {
       const settings = await cleanApi.getSettings();
       await cleanApi.saveSettings(withIgnored(settings, it.id));
@@ -540,7 +550,7 @@ export function CleanPage() {
               {it.denied ? <Tag text={t("junk.denied")} kind="warn" /> : null}
               {it.trash ? <Tag text={t("cat.toTrash")} /> : null}
             </div>
-            <div className="cat-desc muted">{rowDesc(it)}</div>
+            <div className="cat-desc muted"><PathText path={rowDesc(it)} /></div>
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
             {it.size >= 0 && !it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
@@ -551,6 +561,7 @@ export function CleanPage() {
               className="junk-icon-btn"
               type="button"
               data-action="menu"
+              aria-haspopup="menu"
               aria-label={t("junk.menu", { name: itemTitle(it, ruleName) })}
               title={t("junk.menu", { name: itemTitle(it, ruleName) })}
               aria-expanded={menuID === it.id}
@@ -602,7 +613,7 @@ export function CleanPage() {
                 <div className="junk-sub-info">
                   <span>{s.name}</span>
                   {keepLatestVisible(it, s, st.sel) ? <Tag text={t("junk.keepLatest")} /> : null}
-                  <div className="muted small">{it.id === CRASH_RULE_ID && s.files ? `${t("junk.crashFiles", { n: s.files.toLocaleString() })} · ` : ""}{s.detail}{it.id === "review.installers" && s.ageDays != null ? ` · ${s.ageDays === 0 ? t("junk.installerAgeToday") : t("junk.installerAge", { n: s.ageDays })}` : ""}</div>
+                  <div className="muted small">{it.id === CRASH_RULE_ID && s.files ? `${t("junk.crashFiles", { n: s.files.toLocaleString() })} · ` : ""}<PathText path={s.detail} />{it.id === "review.installers" && s.ageDays != null ? ` · ${s.ageDays === 0 ? t("junk.installerAgeToday") : t("junk.installerAge", { n: s.ageDays })}` : ""}</div>
                 </div>
                 <span className="junk-size">{human(s.size)}</span>
               </div>
@@ -610,7 +621,7 @@ export function CleanPage() {
               <div className="junk-top-row" key={top.path}>
                 <div>
                   <div>{top.name}</div>
-                  <div className="muted small junk-path">{displayPath(top.path)}</div>
+                  <div className="muted small junk-path"><PathText path={displayPath(top.path)} /></div>
                 </div>
                 <span className="junk-size">{human(top.size)}</span>
               </div>
@@ -619,7 +630,7 @@ export function CleanPage() {
               <div className="junk-top-row" key={`${detail.path}:${i}`}>
                 <div>
                   <div>{t(`junk.reason.${detail.reason}` as DictKey)}</div>
-                  <div className="muted small junk-path">{displayPath(detail.path)}</div>
+                  <div className="muted small junk-path"><PathText path={displayPath(detail.path)} /></div>
                 </div>
                 <span className="junk-size">{detail.reason === "boundary" || (detail.reason === "too-new" && detail.size === 0) ? "--" : `${detail.reason === "read-error" ? "≥ " : ""}${human(detail.size)}`}</span>
               </div>
@@ -691,7 +702,7 @@ export function CleanPage() {
                 )}
               </span>
             </div>
-            <div className="hero-sub" title={phase === "scanning" && scanningPath ? displayPath(scanningPath) : undefined}>{heroSub}</div>
+            <div className={`hero-sub${phase === "scanning" ? "" : " hero-sub-wrap"}`} title={phase === "scanning" && scanningPath ? displayPath(scanningPath) : undefined}>{heroSub}</div>
             <Collapse open={barShown}>
               <div className="hero-prog-row">
                 <div className="hero-progress"><div className="hero-bar" style={{ width: `${barWidth}%` }} /></div>

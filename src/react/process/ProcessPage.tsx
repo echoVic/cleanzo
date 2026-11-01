@@ -91,10 +91,10 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
           {row.quit && !done && (stuck ? (
             <>
               <span className="pr-stuck">{t("process.stuck")}</span>
-              <button type="button" className="pr-force" disabled={busy} onClick={onForce}>{t("process.force")}</button>
+              <button type="button" className="pr-force" disabled={busy} onClick={onForce} aria-label={t("process.forceName", { name: row.name })}>{t("process.force")}</button>
             </>
           ) : (
-            <button type="button" className="st-quit" disabled={busy} onClick={onQuit}>
+            <button type="button" className="st-quit" disabled={busy} onClick={onQuit} aria-label={t("status.apps.quitName", { name: row.name })}>
               {busy ? t("status.apps.quitting") : t("status.apps.quit")}
             </button>
           ))}
@@ -354,7 +354,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
         </div>
         <div className="head-actions pr-head-actions">
           {tab !== "disk" && (
-            <Button variant="ghost" size="sm" onClick={() => setRunning((r) => !r)}>
+            <Button variant="ghost" size="sm" aria-pressed={!running} onClick={() => setRunning((r) => !r)}>
               {running ? <Pause size={14} /> : <Play size={14} />}
               {running ? t("process.pause") : t("process.resume")}
             </Button>

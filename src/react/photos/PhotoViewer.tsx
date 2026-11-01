@@ -230,6 +230,9 @@ export function PhotoViewer({
       <div className="photo-viewer-panel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="pv-name" aria-describedby="pv-meta">
         <header className="photo-viewer-head">
           <h2 id="pv-name" title={it.path}>{baseName(it.path)}</h2>
+          <span className="muted small shrink-0 tabular-nums" aria-live="polite">
+            {t("photos.position", { i: index + 1, n: items.length })}
+          </span>
           <button
             id="pv-close"
             ref={closeRef}

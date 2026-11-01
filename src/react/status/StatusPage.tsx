@@ -693,7 +693,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
           </button>
         </div>
       ) : (
-        <section className={isWindows() ? "st-grid" : "st-grid st-grid-machine"} aria-label="指标卡">
+        <section className={isWindows() ? "st-grid" : "st-grid st-grid-machine"} aria-label={t("status.cards.label")}>
           {sample ? (
             isWindows() ? (
               <>
@@ -729,7 +729,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
             <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
               <TabsList
                 ref={segRef}
-                aria-label="排序方式"
+                aria-label={t("growth.sort.label")}
                 className="relative ml-auto flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
               >
                 <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
@@ -775,7 +775,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
                       <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
                       <span className="st-act">
                         {r.quit && !leaving && !quit.done.has(r.key) && (
-                          <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)}>
+                          <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)} aria-label={t("status.apps.quitName", { name: r.name })}>
                             {busy ? t("status.apps.quitting") : t("status.apps.quit")}
                           </button>
                         )}

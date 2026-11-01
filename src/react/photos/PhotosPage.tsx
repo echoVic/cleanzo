@@ -272,10 +272,11 @@ export function PhotosPage() {
               checked={all}
               ref={(el) => { if (el) el.indeterminate = !all && some; }}
               disabled={busy}
+              aria-label={t("fs.selectAll")}
               onChange={(e) => toggleAll(e.target.checked)}
             />
           </label>
-          <span className="fs-toolbar-count">
+          <span className="fs-toolbar-count" aria-live="polite">
             {picked.length > 0
               ? t("photos.checkedSize", { n: picked.length, size: human(selSize) })
               : t("photos.nothing")}

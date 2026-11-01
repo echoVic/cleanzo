@@ -10,6 +10,7 @@ import {
 } from "../../ui/components/dialog";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
+import { currentLang } from "../../i18n";
 import { errText, setNavBusy, toast } from "../../shared";
 import { human, displayPath } from "../ai/format";
 import {
@@ -132,7 +133,8 @@ export function SkillsPage() {
     }
     return next;
   });
-  const visiblePicked = visible.filter((s) => picked.has(s.name)).length;
+  const removableVisible = visible.filter((s) => s.copies.some((c) => c.removable));
+  const visiblePicked = removableVisible.filter((s) => picked.has(s.name)).length;
 
   const doTrash = async () => {
     setConfirmOpen(false);
@@ -260,12 +262,12 @@ export function SkillsPage() {
           </div>
 
           <Card className="overflow-hidden">
-            <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 text-xs text-muted">
+            <div className="sk-head flex items-center gap-3 border-b border-border px-4 py-2.5 text-xs text-muted">
               <Checkbox
-                checked={visiblePicked === 0 ? false : visiblePicked === visible.length ? true : "indeterminate"}
+                checked={visiblePicked === 0 ? false : visiblePicked === removableVisible.length ? true : "indeterminate"}
                 onCheckedChange={(v) => pickVisible(v === true)}
                 aria-label={t("skills.pickAll")}
-                disabled={visible.length === 0}
+                disabled={removableVisible.length === 0}
               />
               <span className="flex-1">{t("skills.col.name")}</span>
               <span className="w-[170px] text-right">{t("skills.col.last")}</span>
@@ -284,9 +286,9 @@ export function SkillsPage() {
             ))}
           </Card>
 
-          <div className="sticky bottom-0 mt-4 flex items-center justify-between gap-4 rounded-[12px] border border-border bg-card px-4 py-3 shadow-card">
-            <span className="text-xs text-muted">{t("skills.foot")}</span>
-            <Button variant="destructive" disabled={plan.paths.length === 0 || busy} onClick={() => setConfirmOpen(true)}>
+          <div className="sk-foot sticky bottom-0 mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[12px] border border-border bg-card px-4 py-3 shadow-card">
+            <span className="min-w-0 flex-1 text-xs text-muted">{t("skills.foot")}</span>
+            <Button className="ml-auto" variant="destructive" disabled={plan.paths.length === 0 || busy} onClick={() => setConfirmOpen(true)}>
               {t("skills.trash", { n: picked.size, size: human(plan.size) })}
             </Button>
           </div>
@@ -440,11 +442,11 @@ function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasChe
       <div className="mt-3 space-y-0.5 text-xs text-muted">
         {ok.length > 0 && (
           <div>{t("skills.sources.ok", {
-            list: ok.map((s) => t("skills.sources.item", { name: s.name, days: windowDays(s.since, data.scannedAt), n: s.records })).join("，"),
+            list: ok.map((s) => t("skills.sources.item", { name: s.name, days: windowDays(s.since, data.scannedAt), n: s.records })).join(currentLang() === "zh" ? "，" : "; "),
           })}</div>
         )}
         {missing.length > 0 && (
-          <div>{t("skills.sources.none", { list: missing.map((s) => s.name).join("、") })}</div>
+          <div>{t("skills.sources.none", { list: missing.map((s) => s.name).join(currentLang() === "zh" ? "、" : ", ") })}</div>
         )}
         {!hasCheck && <div>{t("skills.updates.hint")}</div>}
       </div>
@@ -477,10 +479,11 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
   const upstreamGone = ups.some((u) => u.status === "missing");
   return (
     <div className="border-b border-border last:border-b-0">
-      <div className="flex items-center gap-3 px-4 py-2.5">
+      <div className="sk-row flex items-center gap-3 px-4 py-2.5">
         <Checkbox checked={picked} disabled={!removable} onCheckedChange={(v) => onToggle(v === true)}
           aria-label={s.name} />
-        <button type="button" className="min-w-0 flex-1 cursor-pointer text-left" onClick={onExpand}>
+        <button type="button" className="sk-main min-w-0 flex-1 cursor-pointer text-left" onClick={onExpand}
+          aria-expanded={expanded}>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold">{s.name}</span>
             {updatable && <span className="tag safe">{t("skills.tag.update")}</span>}
@@ -494,10 +497,10 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
           </div>
           {s.description && <div className="mt-0.5 truncate text-xs text-muted">{s.description}</div>}
         </button>
-        <span className="w-[170px] whitespace-nowrap text-right text-xs tabular-nums">{lastText(t, s, now)}</span>
-        <span className="w-[70px] text-right text-xs tabular-nums text-muted">{human(s.size)}</span>
-        <button type="button" className="w-[24px] cursor-pointer text-muted" onClick={onExpand}
-          aria-label={t("skills.details")}>
+        <span className="sk-last w-[170px] whitespace-nowrap text-right text-xs tabular-nums">{lastText(t, s, now)}</span>
+        <span className="sk-size w-[70px] text-right text-xs tabular-nums text-muted">{human(s.size)}</span>
+        <button type="button" className="sk-chev w-[24px] cursor-pointer text-muted" onClick={onExpand}
+          aria-label={t("skills.details")} aria-expanded={expanded}>
           <ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} />
         </button>
       </div>
@@ -505,7 +508,7 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
         <div className="space-y-1.5 bg-muted-background/50 px-4 py-3 pl-[46px] text-xs">
           {s.uses.length > 0 && (
             <div className="text-muted">
-              {s.uses.map((u) => t("skills.use", { tool: toolName(u.tool), n: u.count, days: daysAgo(u.last, now) })).join("；")}
+              {s.uses.map((u) => t("skills.use", { tool: toolName(u.tool), n: u.count, days: daysAgo(u.last, now) })).join(currentLang() === "zh" ? "；" : "; ")}
             </div>
           )}
           {s.copies.map((c) => {

@@ -255,6 +255,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   font-size: 21px;
   font-weight: 700;
   letter-spacing: -0.25px;
+  text-wrap: balance;
 }
 .view-head p { margin: 3px 0 0; font-size: 13px; }
 .head-actions { display: flex; gap: 8px; }
@@ -357,6 +358,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 扫描结束后的汇总文案可以换行；扫描中的实时路径仍保持单行省略 */
+.hero-sub.hero-sub-wrap { overflow: visible; text-overflow: clip; white-space: normal; }
 .hero-progress {
   margin-top: 10px;
   height: 6px;
@@ -844,6 +847,44 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   letter-spacing: -0.2px;
 }
 .fs-foot { padding: 4px 2px; }
+/* 宽屏删除按钮只显示文字；窄窗切换为 30×30 图标按钮（见下方容器查询） */
+.fs-trash-ico { display: none; }
+
+/* 窄窗口：复选/序号/名称/箭头第一行，大小在第二行左侧，「在访达中显示」+「移到废纸篓」第二行右侧 */
+@container content (max-width: 560px) {
+  .fs-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) 30px;
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 10px 12px;
+  }
+  .fs-row > .cz-cbx-root { grid-area: 1 / 1; align-self: start; margin-top: 3px; }
+  .fs-rank { grid-area: 1 / 2; align-self: start; margin-top: 1px; }
+  .fs-main { grid-area: 1 / 3; min-width: 0; }
+  .fs-expand { grid-area: 1 / 4; width: 30px; height: 30px; padding: 0; font-size: 0; align-self: start; }
+  /* 大小与 reveal 同处第二行第三列：一个贴左一个贴右，互不重叠 */
+  .fs-size { grid-area: 2 / 3; justify-self: start; align-self: center; }
+  .fs-reveal { grid-area: 2 / 3; justify-self: end; align-self: center; }
+  .fs-row .fs-trash { grid-area: 2 / 4; justify-self: end; align-self: center; width: 30px; height: 30px; padding: 0; gap: 0; }
+  .fs-trash .fs-trash-label { display: none; }
+  .fs-trash .fs-trash-ico { display: block; }
+  .fs-children { padding-left: 44px; }
+  /* 子行与父行同构：复选+名称第一行，大小贴左、reveal+trash 贴右第二行 */
+  .fs-child {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 30px;
+    column-gap: 10px;
+    row-gap: 4px;
+  }
+  .fs-child > .cz-cbx-root { grid-area: 1 / 1; align-self: start; margin-top: 2px; }
+  .fs-child-name { grid-area: 1 / 2 / 1 / 4; }
+  .fs-child-size { grid-area: 2 / 2; justify-self: start; align-self: center; }
+  .fs-child .fs-reveal { grid-area: 2 / 2; justify-self: end; align-self: center; margin-left: 0; }
+  .fs-child .fs-trash { grid-area: 2 / 3; justify-self: end; align-self: center; width: 30px; height: 30px; padding: 0; gap: 0; }
+  /* 纯提示行（加载中 / 空 / 错误 /「仅显示最大的 N 项」）保持整行块级 */
+  .fs-child.muted, .fs-child.err-inline { display: block; }
+}
 
 /* ---- 应用卸载 ---- */
 .app-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -982,7 +1023,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 }
 .detail-item:nth-child(odd) { background: color-mix(in srgb, var(--card) 55%, transparent); }
 .detail-item .kind { color: var(--muted); }
-.detail-item .path { word-break: break-all; }
+.detail-item .path { overflow-wrap: anywhere; }
 .detail-item .size { font-weight: 620; font-variant-numeric: tabular-nums; }
 .warn-text { color: var(--danger) !important; font-weight: 550; }
 
@@ -1183,6 +1224,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .photo-actions { display: flex; justify-content: flex-end; gap: 4px; padding: 0 6px 6px; }
 @media (max-width: 720px) {
   .photo-cluster-head { flex-direction: row; flex-wrap: wrap; }
+  /* 标题与「Keep only」第一行（按钮贴右），统计信息整行落到第二行，避免被挤成逐词竖排 */
+  .photo-cluster-head > button { order: 2; margin-left: auto; }
+  .photo-cluster-meta { order: 3; flex-basis: 100%; }
   .photo-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 }
 
@@ -1263,7 +1307,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-row .cat-note .tag { display: inline-block; margin-left: 0; }
 .junk-item + .junk-item { border-top: 1px solid var(--border); }
 .junk-item.is-dim > .junk-row { opacity: 0.5; }
-.junk-row .cat-desc, .junk-row .cat-sub, .junk-path { overflow-wrap: anywhere; }
+.junk-row .cat-desc, .junk-row .cat-sub, .junk-path { overflow-wrap: break-word; }
 .junk-row .cat-desc { line-height: 1.6; }
 .junk-row-actions { display: flex; align-items: center; gap: 4px; }
 .junk-icon-btn, .junk-action-space { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; }
@@ -1280,7 +1324,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-icon-custom { --c: #64748b; }
 .junk-details { padding: 4px 16px 12px 74px; }
 .junk-sub-row { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; }
-.junk-sub-info { min-width: 0; overflow-wrap: anywhere; }
+.junk-sub-info { min-width: 0; overflow-wrap: break-word; }
 .junk-sub-info .tag { margin-left: 6px; }
 .junk-top-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 0; font-size: 12px; }
 .junk-size { white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -1312,6 +1356,18 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .junk-banner, .junk-stale, .junk-leftovers { flex-wrap: wrap; }
   .junk-leftovers { padding-left: 12px; }
   .junk-menu { right: 12px; }
+}
+
+/* Skills 窄窗口：固定 170+70px 的时间/大小列会把名称挤到重叠，折成两行 */
+@container content (max-width: 560px) {
+  .sk-head { display: none; }
+  .sk-row { flex-wrap: wrap; row-gap: 4px; }
+  /* 整行就是展开按钮，窄窗口隐藏右侧 chevron，避免把名称挤换行 */
+  .sk-main { order: 2; flex: 1 1 200px; }
+  .sk-chev { display: none; }
+  .sk-last { order: 4; width: auto; flex: 1 1 58%; padding-left: 27px; text-align: left; white-space: normal; }
+  .sk-size { order: 5; width: auto; text-align: right; }
+  .sk-foot > span { flex-basis: 100%; }
 }
 
 /* 导航分组与应用页签 */
@@ -1373,7 +1429,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 /* ---- 提示条（callout，语义色 10% 着色底）；窄窗口按钮自动换行 ---- */
 .st-callout {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   row-gap: 8px;
   gap: 12px;
@@ -1383,10 +1439,11 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   border: 1px solid rgba(255, 149, 0, 0.25);
 }
 .st-callout.crit { background: var(--callout-critical-bg); border-color: rgba(255, 59, 48, 0.25); }
-.st-callout-ico { flex: none; color: var(--status-warn); }
+.st-callout-ico { flex: none; margin-top: 2px; color: var(--status-warn); }
 .st-callout.crit .st-callout-ico { color: var(--status-critical); }
-.st-callout-body { flex: 1; min-width: 0; font-size: 13px; line-height: 1.55; }
+.st-callout-body { flex: 1 1 200px; min-width: 0; font-size: 13px; line-height: 1.55; }
 .st-callout-body .st-extra { display: block; color: var(--muted); margin-top: 2px; }
+.st-callout > .btn { flex: none; align-self: center; margin-left: auto; }
 @media (prefers-color-scheme: dark) {
   .st-callout { border-color: rgba(255, 159, 10, 0.28); }
   .st-callout.crit { border-color: rgba(255, 69, 58, 0.28); }
@@ -1442,7 +1499,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .mhcapt { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .mviz { height: 32px; display: flex; align-items: center; margin-top: 12px; }
 
-/* 内存三段堆叠条 + 2×2 图例（第 4 格无色点） */
+/* 内存三段堆叠条 + 图例（宽卡 2×2，窄卡降为整行） */
 .mstack { position: relative; width: 100%; height: 10px; border-radius: 5px; background: var(--bg-subtle); overflow: hidden; }
 /* 每段铺满整条，用 transform 定位和缩放：过渡由合成器做，不像 width 那样每帧重排整页 */
 .mstack i { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: left center; transition: transform var(--t-move) var(--e-out); }
@@ -1451,12 +1508,13 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   margin: 12px 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 宽卡两列、窄卡自动降为整行，避免英文长标签截断、数值折行 */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 6px 12px;
 }
 .mlegend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
 .mlegend li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mlegend li b { margin-left: auto; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+.mlegend li b { margin-left: auto; font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Full-width rows keep labels and units intact: the Windows memory and disk legends, and the macOS CPU split and GPU lists. */
 .mlegend.mlegend-win, .mlegend.mlegend-rows { grid-template-columns: minmax(0, 1fr); }
 .mlegend-win li > span, .mlegend-rows li > span { overflow: visible; text-overflow: clip; flex: none; }
@@ -1969,3 +2027,26 @@ div.pr-toggle { cursor: default; }
 .pr-children { margin: 0; padding: 4px 0; list-style: none; background: var(--bg-subtle); }
 .pr-child { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 20px 0 66px; color: var(--muted); font-size: 12px; }
 .pr-child-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 窄窗口：数值列（96×2）+ 操作列（168）放不下，名称与操作第一行、数值第二行右对齐。
+   grid 固定轨道，避免空操作列（系统进程）时数值挤上第一行压断进程名 */
+@container content (max-width: 560px) {
+  .pr-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 10px; row-gap: 2px; height: auto; min-height: 52px; padding: 6px 16px; }
+  .pr-app { grid-area: 1 / 1 / 2 / 3; min-width: 0; flex-wrap: wrap; column-gap: 8px; }
+  .pr-toggle { flex: 1 1 140px; flex-wrap: wrap; row-gap: 2px; }
+  .pr-toggle > .pr-sys, .pr-toggle > .st-procs { margin-left: 42px; }
+  .pr-act { grid-area: 1 / 3; width: auto; align-self: center; }
+  .pr-row > .num:nth-child(2) { grid-area: 2 / 2; width: auto; min-width: 72px; }
+  .pr-row > .num:nth-child(3) { grid-area: 2 / 3; width: auto; min-width: 72px; }
+  .pr-child { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 10px; height: auto; min-height: 28px; padding: 0 16px 0 40px; }
+  .pr-child .num { width: auto; white-space: nowrap; }
+  .pr-child .pr-act { display: none; }
+  .pr-diag { flex-wrap: wrap; row-gap: 6px; }
+  .pr-diag > span { flex-basis: 100%; }
+  .pr-diag button { margin-left: auto; }
+  /* 表头：列名隐藏后，CPU/Memory 靠右并跟随行内数值宽度 */
+  .pr-cols { padding: 0 16px; }
+  .pr-cols .c-act { display: none; }
+  .pr-cols .pr-sort { width: auto; min-width: 72px; }
+  .pr-cols .pr-sort:first-of-type { margin-left: auto; }
+}

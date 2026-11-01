@@ -5,6 +5,7 @@ import { useT } from "../../ui/i18n-react";
 import { useFlip } from "../../ui/motion/flip";
 import { Leave, useLeaveAnimation, usePresence } from "../../ui/motion/presence";
 import { baseName } from "../../shared";
+import { dirName, shortHome } from "../../platform";
 import { human } from "../ai/format";
 import type { ListSelection } from "../list/selection";
 
@@ -36,6 +37,15 @@ export function PhotoClusterCard({
   React.useLayoutEffect(() => { previousKeys.current = keys; });
   // 离场格仍占位，等 pop 完成、真正移除后再给剩余照片换位。
   useFlip(gridRef, cells.map((cell) => cell.key), !removing && !cells.some((cell) => cell.leaving));
+  // 同簇内可能有同名文件（完全相同的重复照片），读屏名需要带上父目录消歧。
+  const nameCounts = new Map<string, number>();
+  for (const it of items) nameCounts.set(baseName(it.path), (nameCounts.get(baseName(it.path)) ?? 0) + 1);
+  const a11yName = (path: string) => {
+    const name = baseName(path);
+    return (nameCounts.get(name) ?? 0) > 1
+      ? t("photos.nameInDir", { name, dir: shortHome(dirName(path)) })
+      : name;
+  };
 
   return (
     <div
@@ -76,6 +86,7 @@ export function PhotoClusterCard({
                       type="checkbox"
                       checked={selection.sel.has(it.path)}
                       disabled={busy}
+                      aria-label={a11yName(it.path)}
                       onChange={(e) => onToggle(it.path, e.target.checked)}
                     />
                   </span>
