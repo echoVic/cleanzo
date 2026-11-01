@@ -204,7 +204,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h1>{toolName}</h1>
+          <h1 translate="no">{toolName}</h1>
           <p className="muted">{headText.startsWith("ai.head.") ? "" : headText}</p>
         </div>
         <div className="head-actions">
@@ -303,6 +303,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                 <button
                   type="button"
                   className="flex w-full items-center justify-between border-t border-border px-4 py-3 text-sm text-muted hover:bg-muted-background"
+                  aria-expanded={showLocked}
                   onClick={() => setShowLocked((v) => !v)}
                 >
                   <span className="flex items-center gap-2">

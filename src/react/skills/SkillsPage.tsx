@@ -250,7 +250,7 @@ export function SkillsPage() {
             <div className="search-wrap ml-auto" style={{ maxWidth: 260 }}>
               <Search className="h-4 w-4" />
               <input className="search" name="skill-search" type="search" value={query} placeholder={t("skills.search")}
-                aria-label={t("skills.search")}
+                aria-label={t("skills.search")} autoComplete="off"
                 onChange={(e) => setQuery(e.target.value)} />
             </div>
             <select className="select" name="skill-sort" value={sort} onChange={(e) => setSort(e.target.value as SkillSort)}

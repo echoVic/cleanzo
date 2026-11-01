@@ -247,6 +247,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .content {
   flex: 1;
   overflow-y: auto;
+  /* 吸底工具条（.fs-toolbar sticky top:8）高约 44px：键盘 Tab 自动滚动聚焦项时留出避让空间 */
+  scroll-padding-top: 56px;
   /* 左右 26px：真实侧栏 218px（设计稿按 208px 推算 28px），此处收紧 2px 让 1280 窗口恰好 4 列 */
   padding: 24px 26px 84px;
   /* 容器查询基准：窄窗口降级规则按内容宽（而非视口）触发 */
