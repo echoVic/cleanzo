@@ -95,10 +95,16 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       const now = res.scannedAt;
       for (const p of s.parts) {
         if (p.level !== "safe" || (s.running && !p.runSafe)) continue;
-        np.add(p.id);
         if (p.groups.length > 0) {
-          ng.set(p.id, new Set(p.groups.filter((g) => groupSelectable(p, g, 30, now)).map((g) => g.key)));
+          // 分组部件（如旧版本）：没有可选分组时不勾，避免勾上一个 0 B 的空壳。
+          const keys = p.groups.filter((g) => groupSelectable(p, g, 30, now)).map((g) => g.key);
+          if (keys.length === 0) continue;
+          ng.set(p.id, new Set(keys));
+        } else if (p.size === 0) {
+          // 清理后重扫：已清空的缓存部件保持未勾，CTA 不会顶着 0 B 的对勾。
+          continue;
         }
+        np.add(p.id);
       }
       setPicked(np); setPickedGroups(ng);
       setPhase("scanned");

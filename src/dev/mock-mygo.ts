@@ -4,6 +4,8 @@ import type {
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample,
+  Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate,
+  AIGroup, AIPart, AIScanResult, AITool, AIToolInfo,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -262,6 +264,195 @@ function createRuntime(): Runtime {
   });
   for (const it of [...bigItems, ...installers, ...largeFiles, ...orphans, ...apps, ...photos.flatMap((cl) => cl.items)]) sizes.set(it.path, it.size);
   for (const it of xcodeChildren) sizes.set(it.path, it.size >= 0 ? it.size : it.name === "Archives" ? 8.2 * GB : 14.9 * GB);
+
+  // ── 技能页：常用、久未用、可合并重复、失效/缺文件、有更新、无记录，各状态都给到 ──
+  const DAY = 86400;
+  const skillPath = (tool: string, name: string) =>
+    home(`~/${tool === "agents" ? ".agents" : tool === "claude" ? ".claude" : ".codex"}/skills/${name}`);
+  const mkCopy = (name: string, c: Partial<SkillCopy> & Pick<SkillCopy, "tool" | "kind" | "size">): SkillCopy => {
+    const path = c.path ?? skillPath(c.tool, name);
+    const real = c.kind === "broken" ? "" : c.real ?? (c.kind === "link" ? (c.target ?? "") : path);
+    return {
+      path, tool: c.tool, kind: c.kind, size: c.size, real,
+      target: c.target ?? "", hash: c.hash ?? "", modified: c.modified ?? 0,
+      linkedBy: c.linkedBy ?? [], removable: c.removable ?? true,
+    };
+  };
+  const mkSkill = (s: Partial<Skill> & Pick<Skill, "name" | "description" | "copies">): Skill => ({
+    installed: now - 200 * DAY, uses: [], size: 0, last: 0, count: 0,
+    observed: true, since: 0, idle: false, issues: [], ...s,
+  });
+  const skills: Skill[] = [
+    mkSkill({
+      name: "commit-writer", description: "按仓库规范生成提交信息",
+      copies: [
+        mkCopy("commit-writer", { tool: "agents", kind: "dir", size: 1.4 * MB, hash: "cw-v2", modified: now - 30 * DAY, linkedBy: [skillPath("claude", "commit-writer")] }),
+        mkCopy("commit-writer", { tool: "claude", kind: "link", size: 0, target: skillPath("agents", "commit-writer") }),
+      ],
+      size: 1.4 * MB,
+      uses: [{ tool: "agents", count: 21, last: now - 2 * DAY }, { tool: "claude", count: 6, last: now - 5 * DAY }],
+      count: 27, last: now - 2 * DAY, observed: true, since: now - 120 * DAY,
+    }),
+    mkSkill({
+      name: "pr-reviewer", description: "审查 diff 并给出可执行的修改意见",
+      copies: [mkCopy("pr-reviewer", { tool: "agents", kind: "dir", size: 2.8 * MB, hash: "pr-v1", modified: now - 4 * DAY })],
+      size: 2.8 * MB,
+      uses: [{ tool: "agents", count: 9, last: now - 15 * DAY }],
+      count: 9, last: now - 15 * DAY, observed: true, since: now - 160 * DAY,
+    }),
+    mkSkill({
+      name: "db-migrate", description: "生成并核对数据库迁移脚本",
+      copies: [mkCopy("db-migrate", { tool: "claude", kind: "dir", size: 0.9 * MB, hash: "db-v1", modified: now - 170 * DAY })],
+      size: 0.9 * MB,
+      observed: true, since: now - 180 * DAY, count: 0, idle: true,
+    }),
+    mkSkill({
+      name: "api-scaffold", description: "按 OpenAPI 描述生成接口骨架",
+      copies: [
+        mkCopy("api-scaffold", { tool: "agents", kind: "dir", size: 1.1 * MB, hash: "as-v3" }),
+        mkCopy("api-scaffold", { tool: "codex", kind: "dir", size: 1.1 * MB, hash: "as-v3" }),
+      ],
+      size: 2.2 * MB,
+      uses: [{ tool: "agents", count: 4, last: now - 44 * DAY }],
+      count: 4, last: now - 44 * DAY, observed: true, since: now - 90 * DAY,
+    }),
+    mkSkill({
+      name: "deploy-helper", description: "整理发布步骤和回滚命令",
+      copies: [
+        mkCopy("deploy-helper", { tool: "agents", kind: "dir", size: 2.2 * MB, hash: "dh-a" }),
+        mkCopy("deploy-helper", { tool: "claude", kind: "dir", size: 2.6 * MB, hash: "dh-b" }),
+      ],
+      size: 4.8 * MB,
+      uses: [{ tool: "claude", count: 2, last: now - 80 * DAY }],
+      count: 2, last: now - 80 * DAY, observed: true, since: now - 150 * DAY, issues: ["duplicate", "diverged"],
+    }),
+    mkSkill({
+      name: "broken-sync", description: "同步会话到归档盘",
+      copies: [mkCopy("broken-sync", { tool: "claude", kind: "broken", size: 0, target: "/Volumes/Archive/skills/broken-sync" })],
+      size: 0, observed: false, count: 0, issues: ["broken"],
+    }),
+    mkSkill({
+      name: "draft-notes", description: "会议纪要草稿",
+      copies: [mkCopy("draft-notes", { tool: "agents", kind: "invalid", size: 0.3 * MB })],
+      size: 0.3 * MB, observed: false, count: 0, issues: ["invalid"],
+    }),
+  ];
+  for (const s of skills) for (const c of s.copies) sizes.set(c.real || c.path, c.kind === "dir" || c.kind === "invalid" ? c.size : 0);
+  const skillCopies = new Map<string, SkillCopy>();
+  for (const s of skills) for (const c of s.copies) skillCopies.set(c.path, c);
+  const skillRoots: SkillRoot[] = [
+    { tool: "agents", name: "~/.agents", path: home("~/.agents/skills"), count: 5 },
+    { tool: "claude", name: "Claude Code", path: home("~/.claude/skills"), count: 4 },
+    { tool: "codex", name: "Codex", path: home("~/.codex/skills"), count: 1 },
+  ];
+  const skillSources: SkillSource[] = [
+    { tool: "agents", name: "~/.agents", status: "ok", since: now - 120 * DAY, records: 132 },
+    { tool: "claude", name: "Claude Code", status: "ok", since: now - 180 * DAY, records: 84 },
+    { tool: "codex", name: "Codex", status: "none", since: 0, records: 0 },
+  ];
+  const scanSkills = (): SkillScanResult => ({
+    roots: skillRoots, skills: structuredClone(skills), sources: skillSources, scannedAt: nowSec(),
+  });
+  const origin = (o: Partial<SkillOrigin> & Pick<SkillOrigin, "kind">): SkillOrigin =>
+    ({ repo: "", ref: "", path: "", remote: "", tree: "", ...o });
+  const skillOrigins = (): SkillUpdate[] => [
+    { path: skillPath("agents", "pr-reviewer"), name: "pr-reviewer",
+      origin: origin({ kind: "git", repo: "acme/skill-pr-reviewer", remote: "git@github.com:acme/skill-pr-reviewer.git", tree: "t-pr-base" }),
+      local: "t-pr-local", remote: "", status: "unknown", modified: true, error: "", checkedAt: 0 },
+    { path: skillPath("agents", "commit-writer"), name: "commit-writer",
+      origin: origin({ kind: "skills-cli", repo: "cleanzo/skills", tree: "t-cw-base" }),
+      local: "t-cw", remote: "", status: "unknown", modified: false, error: "", checkedAt: 0 },
+    { path: skillPath("agents", "api-scaffold"), name: "api-scaffold",
+      origin: origin({ kind: "git", repo: "old/api-scaffold", remote: "git@github.com:old/api-scaffold.git", tree: "t-as-base" }),
+      local: "t-as", remote: "", status: "unknown", modified: false, error: "", checkedAt: 0 },
+  ];
+  const skillCheckUpdates = (): SkillUpdate[] => [
+    { ...skillOrigins()[0]!, status: "update", remote: "t-pr-new", checkedAt: nowSec() },
+    { ...skillOrigins()[1]!, status: "current", remote: "t-cw", checkedAt: nowSec() },
+    { ...skillOrigins()[2]!, status: "missing", remote: "", checkedAt: nowSec() },
+  ];
+
+  // ── AI 工具：Claude Code 未运行，部件覆盖安全/可选/敏感/受保护；Codex 正在运行演示「先退出」 ──
+  const mkGroup = (g: Partial<AIGroup> & Pick<AIGroup, "key" | "label" | "size" | "count"> & { ageDays: number }): AIGroup => {
+    const { ageDays, ...rest } = g;
+    return { recent: 0, gone: false, path: g.key, ...rest, last: now - ageDays * DAY };
+  };
+  const mkPart = (p: Partial<AIPart> & Pick<AIPart, "id" | "path" | "level" | "size">): AIPart => ({
+    name: "", files: 0, last: now - 10 * DAY, groups: [], top: [], more: 0, keep: "", runSafe: false, ...p,
+  });
+  const aiTools: AITool[] = [
+    {
+      id: "claude", name: "Claude Code", path: home("~/.claude"), installed: true, running: false,
+      size: 6.4 * GB,
+      parts: [
+        mkPart({
+          id: "claude.sessions", path: home("~/.claude/projects"), level: "sensitive", size: 1470 * MB, files: 94, runSafe: true,
+          groups: [
+            mkGroup({ key: home("~/Documents/Projects/web-shop"), label: home("~/Documents/Projects/web-shop"), size: 620 * MB, count: 34, ageDays: 65 }),
+            mkGroup({ key: home("~/Documents/Projects/cleanzo"), label: home("~/Documents/Projects/cleanzo"), size: 380 * MB, count: 21, ageDays: 41 }),
+            mkGroup({ key: home("~/Documents/Projects/api-gateway"), label: home("~/Documents/Projects/api-gateway"), size: 90 * MB, count: 9, ageDays: 1, recent: 9 }),
+            mkGroup({ key: home("~/Desktop/试验项目"), label: home("~/Desktop/试验项目"), size: 120 * MB, count: 12, ageDays: 8 }),
+            mkGroup({ key: home("~/Documents/Archive/old-site"), label: home("~/Documents/Archive/old-site"), size: 260 * MB, count: 18, ageDays: 120, gone: true }),
+          ],
+        }),
+        mkPart({
+          id: "claude.cache", path: home("~/.claude/Cache"), level: "safe", size: 880 * MB, files: 1240, runSafe: true,
+          top: [
+            { name: "Cache_Data", path: home("~/.claude/Cache/Cache_Data"), size: 420 * MB, isDir: true, last: now - 2 * DAY },
+            { name: "Code Cache", path: home("~/.claude/Cache/Code Cache"), size: 210 * MB, isDir: true, last: now - 3 * DAY },
+            { name: "GPUCache", path: home("~/.claude/Cache/GPUCache"), size: 90 * MB, isDir: true, last: now - 5 * DAY },
+          ],
+          more: 12,
+        }),
+        mkPart({ id: "claude.shellSnapshots", path: home("~/.claude/shell-snapshots"), level: "safe", size: 64 * MB, files: 320 }),
+        mkPart({ id: "claude.telemetry", path: home("~/.claude/telemetry"), level: "safe", size: 38 * MB, files: 56 }),
+        mkPart({
+          id: "claude.debug", path: home("~/.claude/debug"), level: "safe", size: 240 * MB, files: 41,
+          top: [{ name: "host-2026-09-12.log", path: home("~/.claude/debug/host-2026-09-12.log"), size: 88 * MB, isDir: false, last: now - 48 * DAY }],
+          more: 6,
+        }),
+        mkPart({ id: "claude.fileHistory", path: home("~/.claude/file-history"), level: "optional", size: 520 * MB, files: 870 }),
+        mkPart({ id: "claude.plugins", path: home("~/.claude/plugins"), level: "protected", size: 1.2 * GB, files: 210 }),
+        mkPart({ id: "claude.credentials", path: home("~/.claude/credentials"), level: "protected", size: 2 * MB, files: 4 }),
+        mkPart({ id: "unknown:legacy-cache", name: "legacy-cache", path: home("~/.claude/legacy"), level: "unknown", size: 70 * MB, files: 12 }),
+      ],
+    },
+    {
+      id: "codex", name: "Codex", path: home("~/.codex"), installed: true, running: true,
+      size: 3.7 * GB,
+      parts: [
+        mkPart({
+          id: "codex.sessions", path: home("~/.codex/sessions"), level: "sensitive", size: 1750 * MB, files: 140, runSafe: true,
+          groups: [
+            mkGroup({ key: "2026/05", label: "2026-05", path: home("~/.codex/sessions/2026/05"), size: 740 * MB, count: 52, ageDays: 150 }),
+            mkGroup({ key: "2026/07", label: "2026-07", path: home("~/.codex/sessions/2026/07"), size: 520 * MB, count: 40, ageDays: 95 }),
+            mkGroup({ key: "2026/09", label: "2026-09", path: home("~/.codex/sessions/2026/09"), size: 310 * MB, count: 26, ageDays: 40 }),
+            mkGroup({ key: "2026/10", label: "2026-10", path: home("~/.codex/sessions/2026/10"), size: 180 * MB, count: 22, ageDays: 12, recent: 4 }),
+          ],
+        }),
+        mkPart({
+          id: "codex.oldReleases", path: home("~/.codex/releases"), level: "safe", size: 860 * MB, files: 2, keep: "2.1.0", runSafe: true,
+          groups: [
+            mkGroup({ key: "1.9.0", label: "1.9.0", path: home("~/.codex/releases/1.9.0"), size: 420 * MB, count: 1, ageDays: 120 }),
+            mkGroup({ key: "2.0.0", label: "2.0.0", path: home("~/.codex/releases/2.0.0"), size: 440 * MB, count: 1, ageDays: 60 }),
+          ],
+        }),
+        mkPart({ id: "codex.cache", path: home("~/.codex/cache"), level: "safe", size: 640 * MB, files: 980, runSafe: true }),
+        mkPart({ id: "codex.tmp", path: home("~/.codex/tmp"), level: "safe", size: 96 * MB, files: 23, runSafe: true }),
+        mkPart({ id: "codex.logs", path: home("~/.codex/log"), level: "safe", size: 55 * MB, files: 18 }),
+        mkPart({ id: "codex.computerUse", path: home("~/.codex/computer-use"), level: "optional", size: 320 * MB, files: 260 }),
+        mkPart({ id: "codex.packages", path: home("~/.codex/packages"), level: "protected", size: 880 * MB, files: 90 }),
+      ],
+    },
+  ];
+  const aiToolInfos: AIToolInfo[] = aiTools.map(({ id, name, installed }) => ({ id, name, installed }));
+  const scanAITool = async (id: string): Promise<AIScanResult> => {
+    await wait(700);
+    const tool = aiTools.find((t) => t.id === id);
+    if (!tool) throw new Error(`mock: unknown AI tool ${id}`);
+    return { tools: [structuredClone(tool)], scannedAt: nowSec() };
+  };
+
   const detail = (path: string): UninstallDetail => {
     const a = apps.find((a) => a.path === path);
     if (!a) throw new Error("mock: app not found");
@@ -358,9 +549,56 @@ function createRuntime(): Runtime {
     "Cleaner.RevealInFinder": async (_path) => {},
     "Cleaner.PickFolder": async () => "",
     "Cleaner.CheckForUpdates": async () => {},
-    "Cleaner.ListAITools": async () => [],
-    // main.ts 启动时也会探测技能入口；没有示例目录时隐藏它。
-    "Cleaner.ListSkillRoots": async () => [],
+    "Cleaner.ListAITools": async () => aiToolInfos,
+    // main.ts 启动时也会探测技能入口；有示例目录时直接显示。
+    "Cleaner.ListSkillRoots": async () => skillRoots,
+    "Cleaner.ScanSkills": async () => { await wait(900); return scanSkills(); },
+    "Cleaner.ListSkillOrigins": async () => skillOrigins(),
+    "Cleaner.CheckSkillUpdates": async () => { await wait(800); return skillCheckUpdates(); },
+    "Cleaner.LinkSkillCopy": async (_path, _target) => { await wait(300); },
+    "Cleaner.UpgradeSkills": async (reqs) => {
+      await wait(700);
+      return reqs.map((r) => ({ path: r.path, tree: "t-new", error: "" }));
+    },
+    "Cleaner.TrashSkills": async (paths) => {
+      await wait(500);
+      let freed = 0;
+      const items = [...new Set(paths)].map((p) => {
+        const c = skillCopies.get(p);
+        const bytes = c && (c.kind === "dir" || c.kind === "invalid") ? c.size : 0;
+        freed += bytes;
+        return { path: p, error: "", freed: bytes };
+      });
+      freedDisk(freed);
+      return { items, moved: items.length, freed };
+    },
+    "Cleaner.ScanAITool": async (id) => scanAITool(id),
+    "Cleaner.CleanAITools": async (sels) => {
+      await wait(700);
+      let freed = 0;
+      const partsResult = sels.map((sel) => {
+        const tool = aiTools.find((t) => t.id === sel.tool);
+        const p = tool?.parts.find((x) => x.id === sel.part);
+        let bytes = 0, moved = 0, kept = 0;
+        if (tool && p) {
+          const keys = new Set(sel.groups);
+          const done = p.groups.filter((g) => keys.has(g.key));
+          for (const g of done) { bytes += g.size; moved += 1; p.size = Math.max(0, p.size - g.size); }
+          p.groups = p.groups.filter((g) => !keys.has(g.key));
+          kept = p.groups.reduce((n, g) => n + g.recent, 0);
+          if (sel.groups.length === 0) {
+            bytes = p.size; moved = p.files; p.size = 0; p.files = 0; p.top = []; p.more = 0; kept = 0;
+          }
+        }
+        freed += bytes;
+        return {
+          tool: sel.tool, part: sel.part, moved, freed: bytes, kept,
+          skipped: tool?.running && p && !p.runSafe ? "running" : "", failed: [] as string[],
+        };
+      });
+      freedDisk(freed);
+      return { parts: partsResult, freed };
+    },
     "Cleaner.Disk": async () => disk,
     "Cleaner.FullScan": async (ch) => stream(ch, async (emit) => {
       const items = bigItems.filter((it) => !isGone(it.path)).map((it) => ({ ...it, size: sizeOf(it.path) }));

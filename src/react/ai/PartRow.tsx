@@ -6,6 +6,7 @@ import { Checkbox } from "../../ui/components/checkbox";
 import { Badge } from "../../ui/components/badge";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
+import { currentLang } from "../../i18n";
 import { human, displayPath } from "./format";
 import { offered, isSessions, groupSelectable, type WindowDays } from "./types";
 
@@ -58,7 +59,7 @@ export function PartRow(p: Props) {
   const checked = p.picked;
   const indeterminate = part.groups.length > 0 && p.picked
     ? (() => {
-        const eligible = part.groups.filter((g) => groupSelectable(part, g, p.windowDays, p.tool ? 0 : 0));
+        const eligible = part.groups.filter((g) => groupSelectable(part, g, p.windowDays, p.scannedAt));
         return eligible.length > 0 && p.groups.size > 0 && p.groups.size < eligible.length;
       })()
     : false;
@@ -79,8 +80,10 @@ export function PartRow(p: Props) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5 text-[13.5px] font-semibold">
             <span>{name}</span>
-            <Badge variant={badge.variant}>{t(badge.label)}</Badge>
-            {blockedByRun && isOffered && <Badge variant="warn">{t("ai.quitFirst")}</Badge>}
+            {/* 运行中被锁住时只显示「先退出」，避免「可安全清理 · 先退出」两个矛盾徽标。 */}
+            {blockedByRun
+              ? <Badge variant="warn">{t("ai.quitFirst")}</Badge>
+              : <Badge variant={badge.variant}>{t(badge.label)}</Badge>}
           </div>
           {desc && <div className="mt-px truncate text-[12px] text-muted">{desc}</div>}
           {part.keep && (
@@ -245,6 +248,6 @@ function Groups({
 
 function fmtDateLike(sec: number): string {
   const d = new Date(sec * 1000);
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
+  return d.toLocaleDateString(currentLang() === "zh" ? "zh-CN" : "en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 const fmt = fmtDateLike;
