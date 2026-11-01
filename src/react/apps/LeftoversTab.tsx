@@ -21,8 +21,8 @@ import { barWidth, orphanFootAfterRemoval, parseDoneEv, sortOrphans } from "./he
 interface LeftoversTabProps {
   /** 该 tab 是否当前选中：首次激活时才懒启动扫描。 */
   active: boolean;
-  /** 向页脚汇报残留数量（tab 角标实时更新）。 */
-  onCountChange: (n: number) => void;
+  /** 向页脚汇报残留数量（tab 角标实时更新）；未扫描过时传 null，角标不显示数字。 */
+  onCountChange: (n: number | null) => void;
   /** 向页脚汇报繁忙态（导航 busy）。 */
   onBusyChange: (busy: boolean) => void;
 }
@@ -126,8 +126,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     chanRef.current?.close();
   }, []);
 
-  // tab 角标：残留数量实时更新。
-  React.useEffect(() => { onCountChange(items.length); }, [items.length, onCountChange]);
+  // tab 角标：首次扫描开始前不显示数字，扫描中/扫完实时更新数量。
+  React.useEffect(() => { onCountChange(tried ? items.length : null); }, [items.length, tried, onCountChange]);
   // 导航 busy：扫描或删除中。
   React.useEffect(() => { onBusyChange(scanning || busy); }, [scanning, busy, onBusyChange]);
 

@@ -22,7 +22,8 @@ export function AppsPage({ initialTab, nonce, uninstallPath = null, uninstallNon
   const t = useT();
   const requestedTab = isWindows() ? "installed" : initialTab;
   const [tab, setTab] = React.useState<AppsTab>(requestedTab);
-  const [orphanCount, setOrphanCount] = React.useState(0);
+  // null = 还没扫过：tab 只显示「残留」，不用 0 误导用户以为没有残留。
+  const [orphanCount, setOrphanCount] = React.useState<number | null>(null);
   const [installedBusy, setInstalledBusy] = React.useState(false);
   const [orphanBusy, setOrphanBusy] = React.useState(false);
 
@@ -53,7 +54,9 @@ export function AppsPage({ initialTab, nonce, uninstallPath = null, uninstallNon
         <TabsList>
           <TabsTrigger value="installed">{t("apps.tab.installed")}</TabsTrigger>
           {!isWindows() && <TabsTrigger value="leftovers">
-            {t("apps.tab.leftoversCount", { n: orphanCount })}
+            {orphanCount === null
+              ? t("apps.tab.leftovers")
+              : t("apps.tab.leftoversCount", { n: orphanCount })}
           </TabsTrigger>}
         </TabsList>
         {/* 两个面板都常驻挂载，切 tab 不卸载、不重扫（与旧显隐行为一致）。 */}
