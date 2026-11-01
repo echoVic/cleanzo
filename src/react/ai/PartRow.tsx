@@ -69,7 +69,7 @@ export function PartRow(p: Props) {
 
   return (
     <div className={cn("border-b border-border last:border-b-0", !isOffered && "opacity-90")}>
-      <div className="flex items-center gap-3 px-4 pb-[10px] pt-[9px] hover:bg-hover">
+      <div className="ai-part-head flex items-center gap-3 px-4 pb-[10px] pt-[9px] hover:bg-hover">
         {isOffered ? (
           <Checkbox
             checked={indeterminate ? "indeterminate" : checked}
@@ -95,29 +95,33 @@ export function PartRow(p: Props) {
             </div>
           )}
         </div>
-        <div className="shrink-0 text-[12.5px] font-[590] tabular-nums text-foreground">
-          {part.groups.length > 0 && p.picked ? `${human(p.chosenSize)} / ` : ""}{human(part.size)}
-        </div>
-        <button
-          type="button"
-          className="grid h-[30px] w-[30px] place-items-center rounded-[6px] text-muted hover:bg-bg-subtle hover:text-foreground"
-          title={t("fs.reveal")}
-          aria-label={t("fs.reveal")}
-          onClick={() => p.onReveal(part.path)}
-        >
-          <FolderOpen className="h-4 w-4" />
-        </button>
-        {hasDetails ? (
+        {/* 尺寸 + 显示/展开：窄窗口整体落到第二行右排（见 style.css 的 @container 规则），
+            给名称和徽标让出整行，避免长尺寸文案把名称列压成逐字竖排 */}
+        <div className="ai-part-meta flex shrink-0 items-center gap-3">
+          <div className="text-[12.5px] font-[590] tabular-nums text-foreground">
+            {part.groups.length > 0 && p.picked ? `${human(p.chosenSize)} / ` : ""}{human(part.size)}
+          </div>
           <button
             type="button"
             className="grid h-[30px] w-[30px] place-items-center rounded-[6px] text-muted hover:bg-bg-subtle hover:text-foreground"
-            onClick={p.onExpand}
-            aria-expanded={p.expanded}
-            aria-label={p.expanded ? t("fs.collapse") : t("fs.expand")}
+            title={t("fs.reveal")}
+            aria-label={t("fs.reveal")}
+            onClick={() => p.onReveal(part.path)}
           >
-            <ChevronRight className={cn("h-4 w-4 transition-transform", p.expanded && "rotate-90")} />
+            <FolderOpen className="h-4 w-4" />
           </button>
-        ) : <span className="h-[30px] w-[30px]" />}
+          {hasDetails ? (
+            <button
+              type="button"
+              className="grid h-[30px] w-[30px] place-items-center rounded-[6px] text-muted hover:bg-bg-subtle hover:text-foreground"
+              onClick={p.onExpand}
+              aria-expanded={p.expanded}
+              aria-label={p.expanded ? t("fs.collapse") : t("fs.expand")}
+            >
+              <ChevronRight className={cn("h-4 w-4 transition-transform", p.expanded && "rotate-90")} />
+            </button>
+          ) : <span className="h-[30px] w-[30px]" />}
+        </div>
       </div>
 
       {p.expanded && (

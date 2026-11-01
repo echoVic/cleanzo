@@ -1882,6 +1882,21 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
   .ai-groups { padding-left: 16px; }
 }
 
+/* React AI 工具页（AIToolPage + PartRow）窄窗口：主窗口下限 560px 视口时内容宽约 290px，
+   部件行选中态的「已选 / 总计」长尺寸会把部件名称压到单字宽、徽标拉成竖胶囊；
+   英雄卡的英文文案（Space Used / Move…）比中文更宽，700px 视口仍会内部折行，
+   故英雄卡断点放到 480px。信息与名称独占第一行，CTA 与尺寸/操作另起一行，拉宽即恢复 */
+@container content (max-width: 480px) {
+  .ai-hero { flex-direction: column; align-items: stretch; }
+  .ai-hero > button { width: 100%; }
+}
+@container content (max-width: 420px) {
+  .ai-part-head { flex-wrap: wrap; align-items: flex-start; row-gap: 4px; }
+  .ai-part-meta { flex-basis: 100%; justify-content: flex-end; }
+  /* 勾选框/锁图标对齐首行文字（首行文本行盒约 20px，16px 图标下沉 2px） */
+  .ai-part-head > :first-child { margin-top: 2px; }
+}
+
 /* ============================================================
    动效（设计：docs/superpowers/specs/2026-10-22-motion-design.md 第四节）
    时长按变化大小分档，曲线按出现 / 移动 / 离场选；减弱动态效果只保留淡入淡出。

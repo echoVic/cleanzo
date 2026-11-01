@@ -260,7 +260,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
 
       {(phase === "scanned" || phase === "cleaned") && tool && (
         <>
-          <Card className="mb-5 flex items-center justify-between gap-4 p-[18px] px-[22px]">
+          <Card className="ai-hero mb-5 flex items-center justify-between gap-4 p-[18px] px-[22px]">
             <div className="min-w-0">
               <div className="flex items-baseline gap-[10px]">
                 <span className="text-[13px] text-muted">{t("ai.occupied")}</span>
