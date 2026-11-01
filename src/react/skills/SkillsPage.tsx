@@ -45,11 +45,14 @@ export function SkillsPage() {
   const [checkedAt, setCheckedAt] = React.useState(0);
   const [upgradeOpen, setUpgradeOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  /** 最近一次扫描是否失败：失败由 assertive toast 播报，避免完成里程碑重复播报旧数据。 */
+  const [scanError, setScanError] = React.useState(false);
 
   React.useEffect(() => { setNavBusy("skills", phase === "scanning" || busy || checking); }, [phase, busy, checking]);
 
   const scan = React.useCallback(async () => {
     setPhase("scanning");
+    setScanError(false);
     try {
       const res = await skillsApi.scan();
       setData(res);
@@ -57,6 +60,7 @@ export function SkillsPage() {
       setPhase("scanned");
     } catch (e) {
       toast(t("skills.fail", { msg: errText(e) }), "err");
+      setScanError(true);
       setPhase(data ? "scanned" : "idle");
     }
   }, [t, data]);
@@ -112,6 +116,12 @@ export function SkillsPage() {
     unobserved: skills.filter((s) => !s.observed).length,
     updates: skills.filter(updateMatches).length,
   };
+  // 读屏里程碑：只播报扫描进行 / 完成；失败由 assertive toast 承担，计数细节仅视觉呈现。
+  const liveMsg = phase === "scanning"
+    ? t("skills.scanning")
+    : phase === "scanned" && data !== null && !scanError
+      ? t("skills.scanned", { n: counts.all.toLocaleString() })
+      : "";
   const plan = trashPlan(skills, picked);
   const linkable = skills.flatMap((s) => linkCandidates(s));
 
@@ -214,6 +224,8 @@ export function SkillsPage() {
           )}
         </div>
       </header>
+
+      <span className="sr-only" role="status">{liveMsg}</span>
 
       {phase === "idle" && !data && (
         <IdleHero

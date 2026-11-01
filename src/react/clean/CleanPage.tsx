@@ -472,6 +472,20 @@ export function CleanPage() {
     cleanBtnVariant = "default";
   }
 
+  // 读屏里程碑：只播报扫描 / 清理的开始、完成与停止摘要；当前路径与抖动数字仅视觉呈现。
+  // 扫描失败由内容区 role="alert" 面板承担，这里不重复播报。
+  const liveMsg = scanFailed !== null
+    ? ""
+    : phase === "scanning"
+      ? t("scan.busy")
+      : phase === "scanned"
+        ? t("junk.availableTotal", { size: human(totals.availableBytes) })
+        : phase === "cleaning"
+          ? t("clean.busy")
+          : phase === "cleaned"
+            ? [heroPrefix, heroSub].filter(Boolean).join(t("phrase.sep"))
+            : "";
+
   const barShown = (phase === "scanning" && prog.total > 0) || (phase === "scanned" && barHold) || phase === "cleaning" || phase === "cleaned";
   const barWidth = phase === "scanning" || (phase === "scanned" && barHold)
     ? (prog.total > 0 ? (prog.done / prog.total) * 100 : 0)
@@ -689,6 +703,8 @@ export function CleanPage() {
           </div>
         )}
       </header>
+
+      <span className="sr-only" role="status">{liveMsg}</span>
 
       {phase !== "idle" && (
         <div className="hero cz-enter" ref={heroRef}>
