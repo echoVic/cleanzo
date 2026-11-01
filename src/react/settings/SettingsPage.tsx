@@ -431,6 +431,9 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
                       <input
                         key={`${c.path}:${c.name}`}
                         defaultValue={c.name}
+                        name="custom-folder-name"
+                        autoComplete="off"
+                        spellCheck={false}
                         aria-label={t("settings.name")}
                         disabled={busy}
                         onBlur={(e) => onCustomNameBlur(c, e)}

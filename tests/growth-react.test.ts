@@ -367,7 +367,7 @@ async function growthSettingsHarness(snapshot: GrowthState, menuBarItems: string
   let readError = false;
   let updated = () => {};
   let gate: ReturnType<typeof deferred<void>> | null = null;
-  const toast = { textContent: "", className: "", classList: { remove() {} } };
+  const toast = { textContent: "", className: "", classList: { remove() {} }, setAttribute() {} };
   const previous = { document: globalThis.document, window: globalThis.window };
   const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
     !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));

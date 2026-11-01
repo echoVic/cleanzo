@@ -81,7 +81,17 @@ function toast(text: string, kind: "ok" | "err" = "ok") {
   if (!el) {
     el = document.createElement("div");
     el.id = "toast";
+    // 普通提示礼貌播报；错误用 alert 立即播报
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
     document.body.appendChild(el);
+  }
+  if (kind === "err") {
+    el.setAttribute("role", "alert");
+    el.setAttribute("aria-live", "assertive");
+  } else {
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
   }
   const showing = typeof el.className === "string" && el.className.split(" ").includes("show");
   if (typeof el.replaceChildren === "function") {

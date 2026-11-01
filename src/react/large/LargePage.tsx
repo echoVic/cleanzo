@@ -279,7 +279,9 @@ export function LargePage() {
         <span>{t("large.thresholdBefore")}</span>
         <select
           className="select"
+          name="large-threshold"
           title={t("large.minSize")}
+          aria-label={t("large.minSize")}
           value={threshold}
           onChange={(e) => onThresholdChange(e)}
         >

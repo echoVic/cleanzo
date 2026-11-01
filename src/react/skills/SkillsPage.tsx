@@ -247,10 +247,11 @@ export function SkillsPage() {
             ))}
             <div className="search-wrap ml-auto" style={{ maxWidth: 260 }}>
               <Search className="h-4 w-4" />
-              <input className="search" value={query} placeholder={t("skills.search")}
+              <input className="search" name="skill-search" type="search" value={query} placeholder={t("skills.search")}
+                aria-label={t("skills.search")}
                 onChange={(e) => setQuery(e.target.value)} />
             </div>
-            <select className="select" value={sort} onChange={(e) => setSort(e.target.value as SkillSort)}
+            <select className="select" name="skill-sort" value={sort} onChange={(e) => setSort(e.target.value as SkillSort)}
               aria-label={t("skills.sort")}>
               {(["last", "count", "size", "name"] as SkillSort[]).map((s) => (
                 <option key={s} value={s}>{t(`skills.sort.${s}` as DictKey)}</option>
@@ -425,7 +426,7 @@ function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasChe
         <Stat label={t("skills.stat.roots")} value={data.roots.length} />
         <div className="ml-auto flex gap-2">
           {updatable > 0 && (
-            <Button className="" size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
+            <Button size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
               <ArrowUpToLine className="h-3.5 w-3.5" />{t("skills.updateAll", { n: updatable })}
             </Button>
           )}

@@ -8,7 +8,7 @@ import { Collapse } from "../../ui/motion/Collapse";
 import { useT } from "../../ui/i18n-react";
 import { errText, human, toast } from "../../shared";
 import { shortHome } from "../../platform";
-import { t as translate } from "../../i18n";
+import { t as translate, currentLang } from "../../i18n";
 import { iconColor } from "../status/format";
 import { growthApi } from "./api";
 import { fmtDelta, growthBanner, growthView, sortApps, sparkPath, uninstallGap, type GrowthSort } from "./format";
@@ -105,7 +105,8 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   if (!state || view === "unsupported") return null;
   const banner = growthBanner(state);
   const atLeast = (s: string) => t("growth.atLeast", { size: s });
-  const fmtTime = (sec: number) => new Date(sec * 1000).toLocaleString();
+  const fmtTime = (sec: number) =>
+    new Date(sec * 1000).toLocaleString(currentLang() === "zh" ? "zh-CN" : "en-US");
 
   return (
     <div className="cz-growth-panel">
@@ -154,8 +155,8 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
         <>
           {view === "baseline" && <p className="cz-growth-note muted">{t("growth.baseline")}</p>}
           <div className="cz-growth-toolbar">
-            <select className="select" value={view === "baseline" ? "size" : sort} disabled={view === "baseline"}
-              onChange={(e) => setSort(e.target.value as GrowthSort)} aria-label={t("growth.sort.week")}>
+            <select className="select" name="growth-sort" value={view === "baseline" ? "size" : sort} disabled={view === "baseline"}
+              onChange={(e) => setSort(e.target.value as GrowthSort)} aria-label={t("growth.sort.label")}>
               <option value="week">{t("growth.sort.week")}</option>
               <option value="size">{t("growth.sort.size")}</option>
             </select>

@@ -183,13 +183,16 @@ export function InstalledTab({ active, onBusyChange, uninstallPath = null, unins
           <Search className="h-[14px] w-[14px]" aria-hidden="true" />
           <input
             className="search"
+            name="app-search"
+            type="search"
             placeholder={t("apps.search")}
+            aria-label={t("apps.search")}
             autoComplete="off"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <select className="select" title={t("apps.sort")} value={sortBy} onChange={onSortChange}>
+        <select className="select" name="app-sort" title={t("apps.sort")} aria-label={t("apps.sort")} value={sortBy} onChange={onSortChange}>
           <option value="name">{t("apps.sortName")}</option>
           <option value="size">{t("apps.sortSize")}</option>
           {!isWindows() && <option value="opened">{t("apps.sortOpened")}</option>}

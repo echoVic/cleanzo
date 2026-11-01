@@ -261,7 +261,7 @@ export function ListToolbar({ selectableRows, selection, busy, sizeOf, onToggleA
         onCheckedChange={(v) => onToggleAll(v === true)}
         className="box-content p-1"
       />
-      <span className="fs-toolbar-count"><span key={label} className="cz-fade-in">{label}</span></span>
+      <span className="fs-toolbar-count" aria-live="polite"><span key={label} className="cz-fade-in">{label}</span></span>
       <Button
         variant="destructive"
         size="sm"

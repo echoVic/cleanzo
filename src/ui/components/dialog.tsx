@@ -15,13 +15,43 @@ type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.
 const DialogPanel = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, animateHeight = false, ...props }, ref) => {
+>(({ className, children, animateHeight = false, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
   const outer = React.useRef<HTMLDivElement>(null);
   const inner = React.useRef<HTMLDivElement>(null);
+  // 所有弹窗都用受控 state + 普通按钮开启（没有 DialogTrigger），
+  // Radix 关闭时只还原 triggerRef，否则焦点会丢给 body，这里自己记住打开者。
+  const opener = React.useRef<HTMLElement | null>(null);
   useAnimatedHeight(outer, inner, animateHeight);
+
+  // 多阶段弹窗（如卸载详情：分析中只有 disabled 按钮）挂载时没有可聚焦项，
+  // Radix 会把焦点放在面板本身；等异步内容渲染出按钮后把焦点移入首个控件。
+  React.useEffect(() => {
+    const panel = outer.current;
+    if (!panel || typeof MutationObserver === "undefined") return;
+    const moveIntoPanel = () => {
+      if (document.activeElement !== panel) return;
+      const first = panel.querySelector<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      if (first && first.getClientRects().length > 0) first.focus({ preventScroll: true });
+    };
+    const observer = new MutationObserver(moveIntoPanel);
+    observer.observe(panel, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   return (
     <DialogPrimitive.Content
       ref={mergeRefs(outer, ref)}
+      onOpenAutoFocus={(e) => {
+        onOpenAutoFocus?.(e);
+        const el = document.activeElement as HTMLElement | null;
+        opener.current = el && el !== document.body && typeof el.focus === "function" ? el : null;
+      }}
+      onCloseAutoFocus={(e) => {
+        onCloseAutoFocus?.(e);
+        const node = opener.current;
+        if (!e.defaultPrevented && node && node.isConnected) node.focus({ preventScroll: true });
+      }}
       className={cn(
         "fixed left-1/2 top-1/2 z-50 w-[min(92vw,560px)] -translate-x-1/2 -translate-y-1/2 rounded-[16px] border border-border bg-card p-[22px] px-6 pb-5 shadow-[0_24px_64px_rgba(0,0,0,0.4)]",
         "cz-dialog focus:outline-none",
