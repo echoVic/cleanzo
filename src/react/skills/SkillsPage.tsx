@@ -478,7 +478,7 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
   const modified = ups.some((u) => u.modified);
   const upstreamGone = ups.some((u) => u.status === "missing");
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="sk-item border-b border-border last:border-b-0">
       <div className="sk-row flex items-center gap-3 px-4 py-2.5">
         <Checkbox checked={picked} disabled={!removable} onCheckedChange={(v) => onToggle(v === true)}
           aria-label={s.name} />

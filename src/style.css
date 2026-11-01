@@ -742,6 +742,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   overflow: hidden;
   box-shadow: var(--shadow);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  /* 全盘扫描真实结果可达成百上千行：屏外行跳过重排，auto 会记住展开后的真实高度避免滚动条跳动 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 76px;
 }
 .fs-row-wrap:has(.fs-row.open) {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
@@ -957,6 +960,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   padding: 11px 16px;
   border-radius: 12px;
   transition: box-shadow 0.15s ease;
+  /* 真实机器已装应用可上百个：屏外行跳过重排 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 62px;
 }
 @media (min-width: 1680px) {
   .app-row { padding: 12px 18px; }
@@ -1387,6 +1393,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .junk-leftovers { padding-left: 12px; }
   .junk-menu { right: 12px; }
 }
+
+/* Skills 列表：屏外行跳过重排（技能目录可达上百项），auto 记住展开后的真实高度 */
+.sk-item { content-visibility: auto; contain-intrinsic-size: auto 58px; }
 
 /* Skills 窄窗口：固定 170+70px 的时间/大小列会把名称挤到重叠，折成两行 */
 @container content (max-width: 560px) {
