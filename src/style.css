@@ -162,7 +162,12 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   transform: translateY(calc(-100% - 20px));
   transition: transform 0.18s ease;
 }
-.skip-link:focus-visible { transform: translateY(0); }
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: none;
+  /* 全局焦点环选择器不含 a，这里显式补上，并保留悬浮投影 */
+  box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow-lift);
+}
 @media (prefers-reduced-motion: reduce) {
   .skip-link { transition: none; }
 }
