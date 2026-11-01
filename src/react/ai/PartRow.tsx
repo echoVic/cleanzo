@@ -18,6 +18,9 @@ const levelBadge: Record<AIPart["level"], { label: DictKey; variant: "safe" | "o
   protected: { label: "ai.level.protected", variant: "protected" },
 };
 
+/** 会话保留窗口选项（顺序即界面从左到右的顺序，也是键盘漫游顺序）。 */
+const WINDOW_OPTIONS = [7, 30, 90] as const;
+
 interface Props {
   tool: AITool;
   part: AIPart;
@@ -173,19 +176,56 @@ function Groups({
 }) {
   const t = useT();
   const sessions = isSessions(part);
+  const optionRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const currentIndex = WINDOW_OPTIONS.indexOf(windowDays);
+
+  // WAI-ARIA radiogroup 模式：方向键在选项间循环移动焦点并选中，Home/End 跳到首尾。
+  const selectIndex = (i: number) => {
+    const d = WINDOW_OPTIONS[i];
+    if (d === undefined) return;
+    onWindowChange(d);
+    optionRefs.current[i]?.focus();
+  };
+  const onRadioKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (currentIndex === -1) return;
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = (currentIndex + 1) % WINDOW_OPTIONS.length;
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = (currentIndex - 1 + WINDOW_OPTIONS.length) % WINDOW_OPTIONS.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = WINDOW_OPTIONS.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    selectIndex(next);
+  };
+
   return (
     <div>
       {sessions && (
         <>
           <div className="ai-window">
             <span className="muted small">{t("ai.window.label")}</span>
-            <div className="seg" role="radiogroup" aria-label={t("ai.window.label")}>
-              {([7, 30, 90] as WindowDays[]).map((d) => (
+            <div className="seg" role="radiogroup" aria-label={t("ai.window.label")} onKeyDown={onRadioKeyDown}>
+              {WINDOW_OPTIONS.map((d, i) => (
                 <button
                   key={d}
+                  ref={(el) => { optionRefs.current[i] = el; }}
                   type="button"
                   role="radio"
                   aria-checked={windowDays === d}
+                  tabIndex={windowDays === d ? 0 : -1}
                   className={cn(windowDays === d && "on")}
                   onClick={() => onWindowChange(d)}
                 >
