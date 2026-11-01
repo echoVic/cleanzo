@@ -138,8 +138,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     path: o.path,
     name: (
       <>
-        {shortHome(o.path)}
-        <span className="tag dim"> {kindLabel(o.kind)}</span>
+        <span className="fs-path-text">{shortHome(o.path)}</span>
+        <span className="tag dim">{kindLabel(o.kind)}</span>
       </>
     ),
     size: o.size,

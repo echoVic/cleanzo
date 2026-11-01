@@ -846,13 +846,23 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 }
 
 .fs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* flex 行：路径文本可收缩省略，类型徽章永不被挤压裁切（窄窗口残留页） */
 .fs-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-weight: 600;
   font-size: 13px;
+  overflow: hidden;
+}
+.fs-path-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.fs-path .tag { flex: none; }
 .fs-sub { display: flex; align-items: center; gap: 10px; }
 .fs-track {
   flex: 1;

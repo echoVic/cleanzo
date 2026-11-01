@@ -155,8 +155,8 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
         {row.rank && <div className="fs-rank"><span key={row.rank} className={rankChanged ? "cz-roll" : undefined}>{row.rank}</span></div>}
         <div className="fs-main">
           <div className="fs-path" title={row.path}>
-            {row.name}
-            {!row.trashable && <span className="tag dim"> {t("fs.locked")}</span>}
+            {typeof row.name === "string" ? <span className="fs-path-text">{row.name}</span> : row.name}
+            {!row.trashable && <span className="tag dim">{t("fs.locked")}</span>}
           </div>
           {cb.typeHints && <PathTypeHint path={row.path} isDir={row.expandable ?? false} />}
           {row.sub && <div className="fs-sub">{row.sub}</div>}
