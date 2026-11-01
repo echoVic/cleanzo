@@ -31,7 +31,8 @@ export function NumberTicker({ value, format, from, as = "span", className }: Nu
     let raf = 0;
     const t0 = performance.now();
     const step = (now: number) => {
-      const p = Math.min(1, (now - t0) / ms);
+      // 首帧 rAF 时间戳可能早于 t0（effect 取时间点晚于帧起点），进度必须钳到非负。
+      const p = Math.max(0, Math.min(1, (now - t0) / ms));
       shown.current = p < 1 ? start + (value - start) * (1 - Math.pow(1 - p, 4)) : value;
       node.nodeValue = fmt.current(shown.current);
       if (p < 1) raf = requestAnimationFrame(step);
