@@ -2059,7 +2059,9 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 }
 
 /* 进程页（spec 2026-10-26）：沿用系统状态的 st-* 列表 */
-.pr-head-actions { align-items: center; }
+/* 暂停按钮 + CPU/内存/磁盘分段在极窄窗口（主窗口下限 560px）放不下时，
+   右对齐折成两行；放得下时仍是一行，无需断点、随文案长度自适应 */
+.pr-head-actions { align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .pr-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text); font-size: 10.5px; font-style: normal; font-weight: 700; }
 .pr-diag { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn-text); font-size: 13px; line-height: 1.5; }
 .pr-diag > span { flex: 1; min-width: 0; }
