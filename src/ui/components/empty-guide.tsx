@@ -27,8 +27,8 @@ export function EmptyGuide({ gradId, title, desc, ctaText, onCta, busy, children
         </g>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="24" y2="24">
-            <stop offset="0" stopColor="#0fb986" />
-            <stop offset="1" stopColor="#0a9e8e" />
+            <stop offset="0" style={{ stopColor: "var(--accent)" }} />
+            <stop offset="1" style={{ stopColor: "var(--accent-deep)" }} />
           </linearGradient>
         </defs>
       </svg>

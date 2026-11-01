@@ -70,22 +70,23 @@ export function PhotoClusterCard({
           <Leave key={key} leaving={leaving} kind="pop">
             <figure className={`photo-cell${it.keep ? " keep" : ""}`} data-key={it.path} data-photo={it.path}>
               <div className="photo-thumb-wrap">
-                <label className="fs-check" title={it.path}>
-                  <input
-                    type="checkbox"
-                    checked={selection.sel.has(it.path)}
-                    disabled={busy}
-                    onChange={(e) => onToggle(it.path, e.target.checked)}
+                <label className="photo-thumb-label" title={it.path}>
+                  <span className="fs-check">
+                    <input
+                      type="checkbox"
+                      checked={selection.sel.has(it.path)}
+                      disabled={busy}
+                      onChange={(e) => onToggle(it.path, e.target.checked)}
+                    />
+                  </span>
+                  <img
+                    className="photo-thumb"
+                    src={it.thumb}
+                    alt=""
+                    loading="lazy"
                   />
                 </label>
                 {it.keep && <span className="photo-keep-tag">{t("photos.keep")}</span>}
-                <img
-                  className="photo-thumb"
-                  src={it.thumb}
-                  alt=""
-                  loading="lazy"
-                  onClick={() => onToggle(it.path, !selection.sel.has(it.path))}
-                />
               </div>
               <figcaption className="photo-meta" title={it.path}>
                 <div className="photo-name">{baseName(it.path)}</div>

@@ -23,6 +23,8 @@
   --accent-deep: #0C7F3F;
   --accent-soft: rgba(31, 163, 85, 0.10);
   --accent-ring: rgba(31, 163, 85, 0.28);
+  /* 压在 accent 实底上的前景色（主按钮文字、保留标签等） */
+  --on-accent: #ffffff;
 
   --danger: #d92d20;
   --danger-strong: #b42318;
@@ -68,6 +70,7 @@
     --accent-deep: #30D158;
     --accent-soft: rgba(48, 209, 88, 0.14);
     --accent-ring: rgba(48, 209, 88, 0.32);
+    --on-accent: #062812;
 
     --danger: #e5484d;
     --danger-strong: #f0666a;
@@ -103,6 +106,11 @@
 
 html, body { height: 100%; }
 
+/* 桌面端（含触摸笔电的精确指针）禁止橡皮筋滚动穿透；触屏保留下拉刷新等默认行为 */
+@media (pointer: fine) {
+  html { overscroll-behavior: none; }
+}
+
 body {
   margin: 0;
   height: 100vh;
@@ -113,6 +121,12 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 可点元素去掉移动端双击缩放延迟与点按高亮 */
+button, a, summary, label, select, [role="button"], [role="tab"], [role="menuitem"] {
+  touch-action: manipulation;
 }
 
 /* 放入 @layer base：无 layer 规则会压过 Tailwind @layer utilities，导致 React 按钮上的
@@ -279,6 +293,13 @@ body {
 
 .btn.danger { background: var(--danger); color: #fff; }
 .btn.danger:hover:not(:disabled) { background: var(--danger-strong); }
+/* 禁用的危险按钮不再发红：中性底色，避免“可执行的危险操作”误导 */
+.btn.danger:disabled {
+  background: var(--btn-bg);
+  color: var(--muted);
+  border-color: var(--border);
+  opacity: 1;
+}
 
 .btn.small { padding: 4px 10px; font-size: 12px; border-radius: 7px; font-weight: 590; }
 .btn.small.ghost { color: var(--muted); }
@@ -933,6 +954,8 @@ body {
   -webkit-backdrop-filter: blur(10px) saturate(140%);
   display: grid;
   place-items: center;
+  /* 弹层内滚动不链到背后的页面 */
+  overscroll-behavior: contain;
 }
 .overlay.hidden { display: none; }
 
@@ -1033,10 +1056,9 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--t-state) linear, transform var(--t-state) var(--e-in);
-  max-width: 70vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: min(560px, 82vw);
+  line-height: 1.45;
+  text-align: center;
 }
 @media (prefers-color-scheme: dark) {
   .toast { color: #1a1c20; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
@@ -1107,8 +1129,8 @@ body {
   border-radius: 999px;
   letter-spacing: 0.2px;
 }
-.photo-badge.exact { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
-.photo-badge.similar { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+.photo-badge.exact { background: var(--danger-soft); color: var(--danger); }
+.photo-badge.similar { background: var(--warn-soft); color: var(--warn-text); }
 .photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1124,9 +1146,11 @@ body {
   display: flex;
   flex-direction: column;
 }
-.photo-cell.keep { outline: 2px solid #10b981; }
+.photo-cell.keep { outline: 2px solid var(--accent); }
 .photo-thumb-wrap { position: relative; aspect-ratio: 1 / 1; background: #0b0f17; }
-.photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
+/* 整张缩略图就是勾选框的命中区：原生 label 关联，键盘可达。 */
+.photo-thumb-label { position: absolute; inset: 0; display: block; cursor: pointer; }
+.photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .photo-thumb-wrap .fs-check {
   position: absolute;
   top: 6px;
@@ -1143,8 +1167,8 @@ body {
   z-index: 2;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
-  background: #10b981;
+  color: var(--on-accent);
+  background: var(--accent);
   padding: 2px 7px;
   border-radius: 999px;
 }
@@ -1820,6 +1844,12 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 /* 弹窗（设计第五节）：遮罩淡入 180ms；面板淡入并从 97% 放大、上移 8px；关闭 150ms，加速离开 */
 .cz-dialog-overlay[data-state="open"] { animation: cz-fade-in 180ms linear both; }
 .cz-dialog-overlay[data-state="closed"] { animation: cz-fade-out 150ms linear both; }
+/* 长弹窗：不超出视口、面板内滚动且不链到背景 */
+.cz-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .cz-dialog[data-state="open"] { animation: cz-dialog-in var(--t-layout) var(--e-out) both; }
 .cz-dialog[data-state="closed"] { animation: cz-dialog-out 150ms var(--e-in) both; }
 @media (prefers-reduced-motion: reduce) {
