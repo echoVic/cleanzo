@@ -1651,10 +1651,6 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .st-list-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; }
 .st-list-head h2 { font-size: 14px; font-weight: 600; flex: 1; margin: 0; min-width: 0; }
 .st-list-head.hl { border-radius: 8px; animation: cz-hl 900ms ease-out both; }
-/* 排序分段控件 */
-.st-list-head .seg { margin-left: auto; display: flex; flex: none; background: var(--bg-subtle); border-radius: 8px; padding: 2px; gap: 2px; }
-.st-list-head .seg button { padding: 4px 12px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; color: var(--muted); cursor: pointer; }
-.st-list-head .seg button.on { background: var(--card); color: var(--fg); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 
 /* 列头行：32px、12px、下边线；数值列定宽 96px 右对齐 */
 .st-cols {
