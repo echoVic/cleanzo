@@ -194,7 +194,7 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
         <div className="fs-children">
           {!childList && <span className="muted small">{t("fs.children")}</span>}
           {childList && "error" in childList && (
-            <div className="fs-child err-inline">{t("fs.childrenFail" as DictKey, { msg: childList.error })}</div>
+            <div className="fs-child err-inline" role="alert">{t("fs.childrenFail" as DictKey, { msg: childList.error })}</div>
           )}
           {childList && "items" in childList && kids.length === 0 && (
             <div className="fs-child muted small">{t("fs.childrenEmpty")}</div>
