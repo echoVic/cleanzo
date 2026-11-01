@@ -85,6 +85,6 @@ export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLD
 export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return <DialogPrimitive.Title className={cn("m-0 text-[16px] font-bold tracking-[-0.2px]", className)} {...props} />;
 }
-export function DialogDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
+export function DialogDescription({ className, ...props }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>) {
   return <DialogPrimitive.Description className={cn("text-[13px] leading-[1.6] text-muted", className)} {...props} />;
 }

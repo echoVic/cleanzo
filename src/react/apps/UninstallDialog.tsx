@@ -78,7 +78,7 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
           <DialogHeader>
             <DialogTitle>{t("apps.analyzing")}</DialogTitle>
           </DialogHeader>
-          <div className="err-inline">{t("apps.analyzeFail", { msg: failMsg ?? "" })}</div>
+          <DialogDescription className="err-inline">{t("apps.analyzeFail", { msg: failMsg ?? "" })}</DialogDescription>
           <div className="mt-4 flex justify-end">
             <DialogClose asChild><Button variant="ghost">{t("btn.close")}</Button></DialogClose>
           </div>
@@ -99,11 +99,11 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
               </div>
             ))}
           </div>}
-          <p className="warn-text">
+          <DialogDescription className="warn-text">
             {running
               ? t("apps.inUse", { name: detail.app.name })
               : t("apps.body", { n: detail.items.length, size: human(detail.totalSize) })}
-          </p>
+          </DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             {running ? (
               <DialogClose asChild><Button variant="ghost">{t("btn.close")}</Button></DialogClose>

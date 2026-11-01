@@ -4,7 +4,7 @@ import type { JunkItem, ScanSummary } from "../../mygo";
 import { ruleDesc, ruleName } from "../../i18n";
 import { Button } from "../../ui/components/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
 import { IdleHero } from "../../ui/components/idle-hero";
 import { PathText } from "../../ui/components/path-text";
@@ -848,7 +848,11 @@ export function CleanPage() {
           <DialogHeader>
             <DialogTitle>{t("clean.sel.title")}</DialogTitle>
           </DialogHeader>
-          {confirmLines.map((line, i) => <p key={i}>{line}</p>)}
+          <DialogDescription asChild>
+            <div>
+              {confirmLines.map((line, i) => <p key={i}>{line}</p>)}
+            </div>
+          </DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
             <Button variant="destructive" onClick={() => void doClean()}>{t("clean.confirm")}</Button>
