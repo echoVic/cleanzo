@@ -672,7 +672,7 @@ export function CleanPage() {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.clean")}</h2>
+          <h1>{t("nav.clean")}</h1>
           <p className="muted">{t("clean.sub")}</p>
         </div>
         {phase !== "idle" && (

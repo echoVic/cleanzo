@@ -617,13 +617,13 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       <header className="view-head">
         {label?.name ? (
           <div>
-            <h2 className="st-model">{label.name}{label.note && <span className="st-model-note">{label.note}</span>}</h2>
+            <h1 className="st-model">{label.name}{label.note && <span className="st-model-note">{label.note}</span>}</h1>
             {specParts.length > 0 && <p className="muted num">{specParts.join(" · ")}</p>}
             {hwParts.length > 0 && <p className="st-machine num">{hwParts.join(" · ")}</p>}
           </div>
         ) : (
           <div>
-            <h2>{t("nav.status")}</h2>
+            <h1>{t("nav.status")}</h1>
             <p className="muted">{t("status.sub")}</p>
             {machineParts.length > 0 && <p className="st-machine num">{machineParts.join(" · ")}</p>}
           </div>
@@ -725,7 +725,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       {isWindows() && <>
         <section className="st-listcard">
           <div ref={listHeadRef} className={`st-list-head${hl ? " hl" : ""}`}>
-            <h3>{t("status.apps.title")}</h3>
+            <h2>{t("status.apps.title")}</h2>
             <TabsRoot value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
               <TabsList
                 ref={segRef}

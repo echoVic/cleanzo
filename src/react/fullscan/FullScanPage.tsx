@@ -274,7 +274,7 @@ export function FullScanPage() {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.fullscan")}</h2>
+          <h1>{t("nav.fullscan")}</h1>
           <p className="muted">{t("fs.sub")}</p>
         </div>
         <div className="head-actions">

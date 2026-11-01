@@ -219,7 +219,7 @@ export function PhotosPage() {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.photos")}</h2>
+          <h1>{t("nav.photos")}</h1>
           <p className="muted">{t("photos.sub")}</p>
         </div>
         <div className="head-actions">

@@ -198,7 +198,7 @@ export function SkillsPage() {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.skills")}</h2>
+          <h1>{t("nav.skills")}</h1>
           <p className="muted">{t("skills.head")}</p>
         </div>
         <div className="head-actions">

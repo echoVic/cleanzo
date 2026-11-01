@@ -204,7 +204,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{toolName}</h2>
+          <h1>{toolName}</h1>
           <p className="muted">{headText.startsWith("ai.head.") ? "" : headText}</p>
         </div>
         <div className="head-actions">

@@ -441,7 +441,7 @@ async function growthSettingsHarness(snapshot: GrowthState, menuBarItems: string
       return row ? nodes(row).find((el) => "onCheckedChange" in el.props)?.props : undefined;
     },
     select(id: string) { return nodes(tree).find((el) => el.type === "select" && el.props.id === id)?.props; },
-    headings() { return nodes(tree).filter((el) => el.type === "h3").map((el) => el.props.children); },
+    headings() { return nodes(tree).filter((el) => el.type === "h2").map((el) => el.props.children); },
     hasText(text: string) { return nodes(tree).some((el) => el.props.children === text); },
     holdSave() { gate = deferred<void>(); return gate; },
     /** applied：像开机启动出错那样，设置已保存并生效后才返回错误。 */

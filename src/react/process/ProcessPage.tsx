@@ -337,7 +337,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
       <div className="cz-react">
         <header className="view-head">
           <div>
-            <h2>{t("nav.process")}</h2>
+            <h1>{t("nav.process")}</h1>
             <p className="muted">{t("process.unsupported")}</p>
           </div>
         </header>
@@ -349,7 +349,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.process")}</h2>
+          <h1>{t("nav.process")}</h1>
           <p className="muted">{t("process.sub")}</p>
         </div>
         <div className="head-actions pr-head-actions">

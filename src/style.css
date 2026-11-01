@@ -144,6 +144,29 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   border-radius: 6px;
 }
 
+/* 键盘跳转链接：默认视觉隐藏，首次 Tab 聚焦时从顶部滑入，层级高于所有弹窗 */
+.skip-link {
+  position: fixed;
+  left: 14px;
+  top: 12px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lift);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(calc(-100% - 20px));
+  transition: transform 0.18s ease;
+}
+.skip-link:focus-visible { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .skip-link { transition: none; }
+}
+
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
@@ -250,7 +273,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   flex-wrap: wrap;
   margin-bottom: 2px;
 }
-.view-head h2 {
+.view-head h1 {
   margin: 0;
   font-size: 21px;
   font-weight: 700;
@@ -1053,7 +1076,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   height: 88px;
   margin-bottom: 4px;
 }
-.empty-guide h3 {
+.empty-guide h2 {
   margin: 0;
   font-size: 19px;
   font-weight: 700;
@@ -1139,7 +1162,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 /* ---- 响应式 / 动效偏好 ---- */
 @media (min-width: 1500px) {
   .content { padding: 30px 44px 52px; }
-  .view-head h2 { font-size: 23px; }
+  .view-head h1 { font-size: 23px; }
   .hero-num { font-size: 38px; }
   .banner-title { font-size: 17px; }
   .empty-guide .eg-icon { width: 104px; height: 104px; }
@@ -1381,9 +1404,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 
 /* 设置即时保存 */
 .settings-section { display: flex; flex-direction: column; gap: 10px; }
-.settings-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.settings-section h2 { margin: 0; font-size: 14px; font-weight: 650; }
 .setting-stack { flex-direction: column; align-items: stretch; gap: 12px; padding: 16px 0; }
-.setting-stack h4 { margin: 0; }
+.setting-stack h3 { margin: 0; }
 .settings-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
 /* 「菜单栏设置…」进来时，菜单栏这一节闪一下主题色描边 */
 @keyframes settings-hl {
@@ -1561,7 +1584,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .st-spark { width: 100%; overflow: hidden; }
 .st-spark svg { display: block; width: 100%; height: 32px; overflow: hidden; }
 /* ---- macOS 首页：型号作标题、健康条（设计 2026-10-28 §三） ---- */
-.view-head h2.st-model { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 10px; }
+.view-head h1.st-model { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 10px; }
 .st-model-note { font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--muted); }
 #view-status .cz-react .st-health { margin-top: 20px; }
 #view-status .cz-react .st-health + .st-alerts:not(:empty) { margin-top: 16px; }
@@ -1610,7 +1633,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   overflow: hidden;
 }
 .st-list-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; }
-.st-list-head h3 { font-size: 14px; font-weight: 600; flex: 1; margin: 0; min-width: 0; }
+.st-list-head h2 { font-size: 14px; font-weight: 600; flex: 1; margin: 0; min-width: 0; }
 .st-list-head.hl { border-radius: 8px; animation: cz-hl 900ms ease-out both; }
 /* 排序分段控件 */
 .st-list-head .seg { margin-left: auto; display: flex; flex: none; background: var(--bg-subtle); border-radius: 8px; padding: 2px; gap: 2px; }

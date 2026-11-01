@@ -345,7 +345,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   return (
     <div className="cz-react">
       <header className="view-head">
-        <h2>{t("nav.settings")}</h2>
+        <h1>{t("nav.settings")}</h1>
       </header>
 
       {statusText && (
@@ -356,7 +356,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
 
       {/* 通用 */}
       <section className="settings-section">
-        <h3>{t("settings.general")}</h3>
+        <h2>{t("settings.general")}</h2>
         <div className="setting-block card">
           <div className="setting-row">
             <label className="setting-label" htmlFor="lang-select">{t("settings.lang")}</label>
@@ -377,10 +377,10 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
 
       {/* 垃圾清理 */}
       <section className="settings-section">
-        <h3>{t("nav.clean")}</h3>
+        <h2>{t("nav.clean")}</h2>
         <div className="setting-block card">
           <div className="setting-row setting-stack">
-            <h4 className="setting-label">{t("settings.scope")}</h4>
+            <h3 className="setting-label">{t("settings.scope")}</h3>
             <div className="settings-groups">
               {GROUPS.map((g) => (
                 <div key={g}>
@@ -401,7 +401,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
           </div>
 
           <div className="setting-row setting-stack">
-            <h4 className="setting-label">{t("settings.ignored")}</h4>
+            <h3 className="setting-label">{t("settings.ignored")}</h3>
             <div className="settings-list">
               {settings && settings.ignored.length > 0
                 ? settings.ignored.map((id) => (
@@ -422,7 +422,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
           </div>
 
           <div className="setting-row setting-stack">
-            <h4 className="setting-label">{t("settings.custom")}</h4>
+            <h3 className="setting-label">{t("settings.custom")}</h3>
             <div className="settings-list">
               {settings?.custom.map((c) => (
                 <div key={c.path} className="settings-item">
@@ -476,7 +476,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
 
       {menuBar && !isWindows() && (
         <section className="settings-section" id="settings-menubar">
-          <h3>{t("settings.menubar")}</h3>
+          <h2>{t("settings.menubar")}</h2>
           <div className={cn("setting-block card", sectionHl && "settings-hl")}>
             <div className="setting-row setting-stack">
               <div className="settings-groups">
@@ -512,7 +512,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
 
       {growth && !isWindows() && (
         <section className="settings-section">
-          <h3>{t("settings.growth")}</h3>
+          <h2>{t("settings.growth")}</h2>
           <div className="setting-block card">
             <div className="setting-row setting-stack">
               <label className="check">
@@ -544,7 +544,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
 
       {/* 关于 */}
       <section className="settings-section">
-        <h3>{t("settings.about")}</h3>
+        <h2>{t("settings.about")}</h2>
         <div className="setting-block card">
           <div className="setting-row">
             <span className="setting-label">{t("settings.version")}</span>
@@ -580,7 +580,7 @@ export function PermissionsSection({ access, permissionKey, permissionError, onO
   if (isWindows()) return null;
   return (
     <section className="settings-section">
-      <h3>{t("settings.permissions")}</h3>
+      <h2>{t("settings.permissions")}</h2>
       <div className="setting-block card">
         <div className="setting-row setting-permission">
           <div className="settings-permission-info">

@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
+    <a class="skip-link" href="#main-content" data-i18n="a11y.skipMain">跳到主内容</a>
     <div class="app">
       <aside class="sidebar">
         <div class="brand">
@@ -80,7 +81,7 @@
         <div id="app-version" class="sidebar-foot muted">Cleanzo</div>
       </aside>
 
-      <main class="content">
+      <main class="content" id="main-content" tabindex="-1">
         <!-- 系统状态（React 页面，内容由 React 挂载） -->
         <section id="view-status" class="view">
           <div id="status-react-root"></div>

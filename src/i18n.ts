@@ -284,6 +284,8 @@ export const dict = {
     "rule.review.partial-downloads.desc": "下载目录里 1 天未改动且未使用的下载临时文件",
     "rule.review.mail-downloads.name": "邮件附件下载",
     "rule.review.mail-downloads.desc": "邮件下载的附件，移到废纸篓后可恢复",
+    // a11y
+    "a11y.skipMain": "跳到主内容",
     // nav
     "nav.clean": "垃圾清理",
     "nav.status": "系统状态",
@@ -1297,6 +1299,8 @@ export const dict = {
     "rule.review.partial-downloads.desc": "Unused partial downloads untouched for 1 day",
     "rule.review.mail-downloads.name": "Mail Attachment Downloads",
     "rule.review.mail-downloads.desc": "Downloaded attachments; recoverable from the Trash",
+    // a11y
+    "a11y.skipMain": "Skip to main content",
     "nav.clean": "Cleaner",
     "nav.status": "System Status",
     "nav.fullscan": "Space Analysis",

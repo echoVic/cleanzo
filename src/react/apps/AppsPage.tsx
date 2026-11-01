@@ -45,7 +45,7 @@ export function AppsPage({ initialTab, nonce, uninstallPath = null, uninstallNon
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.apps")}</h2>
+          <h1>{t("nav.apps")}</h1>
           <p className="muted">{t("apps.sub")}</p>
         </div>
       </header>

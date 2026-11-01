@@ -264,7 +264,7 @@ export function LargePage() {
     <div className="cz-react">
       <header className="view-head">
         <div>
-          <h2>{t("nav.large")}</h2>
+          <h1>{t("nav.large")}</h1>
           <p className="muted">{t("large.sub")}</p>
         </div>
         <div className="head-actions">

@@ -32,7 +32,7 @@ export function EmptyGuide({ gradId, title, desc, ctaText, onCta, busy, children
           </linearGradient>
         </defs>
       </svg>
-      <h3>{title}</h3>
+      <h2>{title}</h2>
       <p>{desc}</p>
       <button className="btn primary big" type="button" onClick={onCta} disabled={busy}>
         {busy && <span className="spin" />}
