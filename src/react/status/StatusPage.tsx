@@ -681,7 +681,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       </div>
 
       {error ? (
-        <div className="empty err">
+        <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
           <div>{t("status.error")}</div>
           <button

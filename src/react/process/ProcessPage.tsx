@@ -409,7 +409,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
             </div>
             <div className="st-list pr-list">
               {error ? (
-                <div className="st-empty">
+                <div className="st-empty" role="alert">
                   {t("status.error")}{" "}
                   <Button variant="ghost" size="sm" onClick={() => { setRunning(true); setRetry((n) => n + 1); }}>{t("btn.retry")}</Button>
                 </div>

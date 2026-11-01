@@ -65,7 +65,7 @@ export function InstalledTab({ active, onBusyChange, uninstallPath = null, unins
     } catch (e) {
       setApps([]);
       setLoadError(e instanceof Error ? e.message : String(e));
-      toast(t("apps.loadFail", { msg: errText(e) }), "err");
+      // 失败反馈由内容区 role="alert" 错误面板（含重试）承担，不再重复弹 toast。
     } finally {
       setLoading(false);
     }
@@ -206,7 +206,7 @@ export function InstalledTab({ active, onBusyChange, uninstallPath = null, unins
       )}
 
       {!loading && loadError && (
-        <div className="empty err">
+        <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
           <div>{t("apps.loadFail", { msg: loadError })}</div>
           <button className="btn ghost retry-btn" type="button" onClick={() => void loadApps()}>

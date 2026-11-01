@@ -91,7 +91,7 @@ export function PhotosPage() {
       if (!stoppedRef.current) {
         setError(e instanceof Error ? e.message : String(e));
         setClusters([]);
-        toast(t("photos.fail", { msg: errText(e) }), "err");
+        // 失败反馈由内容区 role="alert" 错误面板（含重试）承担，不再重复弹 toast。
       }
     } finally {
       if (runRef.current !== myRun) return;
@@ -252,7 +252,7 @@ export function PhotosPage() {
       </Collapse>
 
       {!scanning && error && (
-        <div className="empty err">
+        <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
           <div>{t("photos.fail", { msg: errText(error) })}</div>
           <button className="btn ghost retry-btn" type="button" onClick={() => void startScan()}>
