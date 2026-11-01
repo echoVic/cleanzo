@@ -9,7 +9,7 @@ import {
 } from "../../ui/components/dialog";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
-import { toast } from "../../shared";
+import { errText, toast } from "../../shared";
 import { human } from "./format";
 import { offered, groupSelectable, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
@@ -193,7 +193,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       setPhase("cleaned");
       setLastClean({ freed: res.freed, kept, skipped });
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), "err");
+      toast(errText(e), "err");
     }
   };
 
@@ -228,7 +228,16 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
         </div>
       )}
 
-      {phase === "idle" && (
+      {phase === "idle" && error !== null && (
+        <div className="empty err" role="alert">
+          <div className="err-icon">⚠</div>
+          <div>{t("scan.error", { msg: errText(error) })}</div>
+          <button className="btn ghost retry-btn" type="button" onClick={() => void scan()}>
+            {t("btn.retry")}
+          </button>
+        </div>
+      )}
+      {phase === "idle" && error === null && (
         <IdleHero
           label={t("hero.ready")}
           value="--"
