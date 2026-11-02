@@ -1,6 +1,6 @@
 import type { Runtime, Channel } from "mygo-runtime";
 import type {
-  Cleaner, LanguageSettings, AppInfo, BigItem, CleanResult, DirItem,
+  Cleaner, LanguageSettings, AppInfo, AppUpdate, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample,
@@ -196,6 +196,18 @@ function createRuntime(): Runtime {
     app("微信", "com.tencent.xinWeChat", 980 * MB, "4.1", 0, true, "WeChat"),
     app("OBS Studio", "com.obsproject.obs-studio", 720 * MB, "31.1", -1, false, "OBS"),
   ];
+  // 应用页：每个来源一个、每种状态一个；Xcode 走 brew 且会失败（看「复制命令」），Docker 升级成功。
+  const appUpdates: Record<string, Omit<AppUpdate, "id">> = {
+    "/Applications/Docker.app": { source: "brew", current: "4.43.1", latest: "4.44.0", state: "update", reason: "", notesUrl: "", action: "brew" },
+    "/Applications/Xcode.app": { source: "brew", current: "26.0", latest: "26.1", state: "update", reason: "", notesUrl: "", action: "brew" },
+    "/Applications/IINA.app": { source: "sparkle", current: "1.4", latest: "1.4.1", state: "update", reason: "", notesUrl: "https://iina.io/release-note/", action: "open-app" },
+    "/Applications/WeChat.app": { source: "mas", current: "4.1", latest: "4.2.0", state: "update", reason: "", notesUrl: "https://apps.apple.com/cn/app/id836500024", action: "open-store" },
+    "/Applications/Visual Studio Code.app": { source: "electron", current: "1.105", latest: "1.105", state: "current", reason: "", notesUrl: "", action: "" },
+    "/Applications/Lark.app": { source: "electron", current: "7.52", latest: "", state: "unknown", reason: "bad-url", notesUrl: "", action: "" },
+    "/Applications/ToDesk.app": { source: "sparkle", current: "4.8", latest: "", state: "error", reason: "network", notesUrl: "", action: "" },
+    "/Applications/Blender.app": { source: "", current: "4.5", latest: "", state: "unknown", reason: "no-source", notesUrl: "", action: "" },
+    "/Applications/OBS.app": { source: "brew", current: "31.1", latest: "31.1", state: "current", reason: "", notesUrl: "", action: "" },
+  };
   const quitted = new Set<string>();
   // 进程页：数字每次抖一点；ToDesk 的 bundle ID 对上 growthSummary 里的提醒，挂「磁盘一天」小标签；系统进程是估算值。
   const jitter = (v: number) => Math.max(0, v * (0.85 + Math.random() * 0.3));
@@ -463,7 +475,7 @@ function createRuntime(): Runtime {
       { path: home(`~/Library/Containers/${a.bundleId}`), kind: "container", size: 1.3 * GB },
       { path: home(`~/Library/Application Support/${a.name}`), kind: "support", size: 580 * MB },
       { path: home(`~/Library/Logs/${a.name}`), kind: "logs", size: 24 * MB },
-    ];
+    ].filter((it) => !isGone(it.path));
     items.forEach((it) => sizes.set(it.path, it.size));
     return { app: a, items, totalSize: sum(items) };
   };
@@ -637,6 +649,28 @@ function createRuntime(): Runtime {
       return svg(cl.id, cl.kind === "exact" ? 0 : cl.items.findIndex((it) => it.path === path), 1200, 900);
     },
     "Cleaner.ListApps": async () => apps.filter((a) => !isGone(a.path)),
+    "Cleaner.CheckAppUpdates": async (ids, ch) => stream(ch, async (emit) => {
+      for (const id of ids) {
+        const u = appUpdates[id];
+        await emit(u ? { id, ...u } : { id, source: "", current: "", latest: "", state: "unknown", reason: "no-source", notesUrl: "", action: "" }, 260);
+      }
+      await emit({ id: "__done", source: "", current: "", latest: "", state: "", reason: "", notesUrl: "", action: "" });
+    }),
+    "Cleaner.UpgradeApp": async (id) => {
+      await wait(1500);
+      const u = appUpdates[id];
+      if (!u || u.state !== "update") return { id, done: false, version: "", code: "not-checked", detail: "", command: "" };
+      if (id === "/Applications/Xcode.app") return { id, done: false, version: "26.0", code: "brew-failed", detail: "sudo: a terminal is required to read the password", command: "brew upgrade --cask xcodes" };
+      if (u.action === "brew") { appUpdates[id] = { ...u, current: u.latest, state: "current", action: "" }; const a = apps.find((x) => x.id === id); if (a) a.version = u.latest; }
+      return { id, done: true, version: u.action === "brew" ? u.latest : "", code: "", detail: "", command: "" };
+    },
+    "Cleaner.CleanAppCache": async (path) => {
+      await wait(600);
+      const d = detail(path);
+      const caches = d.items.filter((it) => it.kind === "cache");
+      const r = remove(caches.map((it) => it.path));
+      return { launched: false, path, moved: r.removed.length, freed: r.freed, failed: [] };
+    },
     "Cleaner.AppUninstallDetail": async (path) => { await wait(800); return detail(path); },
     "Cleaner.UninstallApp": async (path) => {
       await wait(700);
