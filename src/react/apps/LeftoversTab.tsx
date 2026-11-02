@@ -126,8 +126,11 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     chanRef.current?.close();
   }, []);
 
-  // tab 角标：首次扫描开始前不显示数字，扫描中/扫完实时更新数量。
-  React.useEffect(() => { onCountChange(tried ? items.length : null); }, [items.length, tried, onCountChange]);
+  // tab 角标：首次扫描开始前或扫描失败（数量未知）时不显示数字，不用 0 误导用户；
+  // 扫描中 / 扫完实时更新数量。
+  React.useEffect(() => {
+    onCountChange(error || !tried ? null : items.length);
+  }, [items.length, tried, error, onCountChange]);
   // 导航 busy：扫描或删除中。
   React.useEffect(() => { onBusyChange(scanning || busy); }, [scanning, busy, onBusyChange]);
 

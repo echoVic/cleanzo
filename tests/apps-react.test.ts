@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { AppInfo, OrphanItem, UninstallResult } from "../src/mygo";
 import {
   barWidth, bundleFailed, classifyUninstall, filterApps, orphanFootAfterRemoval,
@@ -285,4 +285,143 @@ test("installed app row shows the app's icon once known", async () => {
     await loadIcon("/Applications/Acme.app");
     expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('class="app-icon cz-app-img"');
   } finally { resetIconsForTest(async () => ""); }
+});
+
+// 无浏览器的 effect 测试：手动驱动 LeftoversTab 的 hooks，注入受控的流式扫描结果，
+// 校验 tab 角标 onCountChange 在「扫描失败 / 扫描成功」两种终态下的上报值。
+async function leftoversHarness() {
+  await import("./setup-dom");
+  const React = await import("react");
+  const { LeftoversTab } = await import("../src/react/apps/LeftoversTab");
+  const { appsApi } = await import("../src/react/apps/api");
+  const { setPref } = await import("../src/i18n");
+  setPref("zh");
+
+  const previous = {
+    document: globalThis.document, window: globalThis.window, storage: globalThis.localStorage,
+    raf: globalThis.requestAnimationFrame, cancelRaf: globalThis.cancelAnimationFrame, css: globalThis.CSS,
+  };
+  const store = new Map<string, string>([["cleanzo.lang", "zh"]]);
+  Object.assign(globalThis, {
+    window: {
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() {},
+      matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+      setTimeout, clearTimeout,
+    },
+    localStorage: { getItem: (k: string) => (store.has(k) ? store.get(k)! : null), setItem: (k: string, v: string) => { store.set(k, v); } },
+    requestAnimationFrame: (fn: FrameRequestCallback) => setTimeout(() => fn(0), 0),
+    cancelAnimationFrame: (id: number) => clearTimeout(id),
+    CSS: { escape: (k: string) => k },
+  });
+
+  const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
+  const pending: (() => void)[] = [];
+  let cursor = 0;
+  let dirty = true;
+  let tree: React.ReactNode;
+  const counts: (number | null)[] = [];
+  let scan: { evs: unknown[]; fail: Error | null } = { evs: [], fail: null };
+  const changed = (b: readonly unknown[] | undefined, a: readonly unknown[] | undefined) =>
+    !b || !a || b.length !== a.length || b.some((v, i) => !Object.is(v, a[i]));
+
+  const spies = [
+    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+      const slot = slots[cursor++] ??= { value: typeof initial === "function" ? (initial as () => unknown)() : initial };
+      return [slot.value, (value: unknown) => {
+        const next = typeof value === "function" ? (value as (p: unknown) => unknown)(slot.value) : value;
+        if (!Object.is(next, slot.value)) { slot.value = next; dirty = true; }
+      }] as never;
+    }),
+    spyOn(React, "useRef").mockImplementation((initial: unknown) => {
+      const slot = slots[cursor++] ??= { value: { current: initial } };
+      return slot.value as never;
+    }),
+    spyOn(React, "useCallback").mockImplementation((fn: unknown, deps: readonly unknown[]) => {
+      const slot = slots[cursor++] ??= {};
+      if (changed(slot.deps, deps)) { slot.value = fn; slot.deps = deps; }
+      return slot.value as never;
+    }),
+    spyOn(React, "useEffect").mockImplementation((effect, deps) => {
+      const slot = slots[cursor++] ??= {};
+      if (changed(slot.deps, deps)) {
+        slot.deps = deps;
+        pending.push(() => { slot.cleanup?.(); slot.cleanup = effect() || undefined; });
+      }
+    }),
+    spyOn(React, "useSyncExternalStore").mockImplementation((_subscribe: unknown, snapshot: () => unknown) => snapshot()),
+    spyOn(appsApi, "startOrphanScan").mockImplementation(() => {
+      let i = 0;
+      const evs = scan.evs;
+      const ch = {
+        [Symbol.asyncIterator]() {
+          return { next: () => {
+            if (i < evs.length) return Promise.resolve({ value: evs[i++], done: false });
+            return Promise.resolve({ value: undefined, done: true });
+          } };
+        },
+      };
+      const done = scan.fail ? Promise.reject(scan.fail) : Promise.resolve();
+      if (scan.fail) done.catch(() => {}); // 组件内部会 await 并接住；这里仅防无处理器告警
+      return { ch: ch as never, done };
+    }),
+  ];
+
+  function nodes(node: React.ReactNode): React.ReactElement<Record<string, unknown>>[] {
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    if (!React.isValidElement<Record<string, unknown>>(node)) return [];
+    return [node, ...nodes(node.props.children)];
+  }
+  const textOf = (node: React.ReactNode): string => Array.isArray(node) ? node.map(textOf).join("") :
+    React.isValidElement<{ children?: React.ReactNode }>(node) ? textOf(node.props.children) :
+    typeof node === "string" || typeof node === "number" ? String(node) : "";
+
+  return {
+    counts,
+    configure(setup: { evs?: unknown[]; fail?: Error | null }) { scan = { evs: setup.evs ?? [], fail: setup.fail ?? null }; },
+    async settle() {
+      for (let i = 0; i < 40; i++) {
+        if (dirty) {
+          dirty = false;
+          cursor = 0;
+          tree = LeftoversTab({ active: true, onCountChange: (n: number | null) => counts.push(n), onBusyChange() {} });
+          for (const effect of pending.splice(0)) effect();
+        }
+        await Promise.resolve();
+      }
+    },
+    text() { return textOf(tree); },
+    hasAlert() { return nodes(tree).some((el) => el.props.role === "alert"); },
+    close() {
+      for (const slot of slots) slot.cleanup?.();
+      for (const spy of spies) spy.mockRestore();
+      Object.assign(globalThis, {
+        document: previous.document, window: previous.window, localStorage: previous.storage,
+        requestAnimationFrame: previous.raf, cancelAnimationFrame: previous.cancelRaf, CSS: previous.css,
+      });
+    },
+  };
+}
+
+test("残留扫描失败：tab 角标回退为未知 null（不用 0 误导），内容区给 role=alert", async () => {
+  const h = await leftoversHarness();
+  try {
+    h.configure({ fail: new Error("disk denied") });
+    await h.settle();
+    expect(h.counts.at(-1)).toBeNull();
+    expect(h.hasAlert()).toBe(true);
+  } finally { h.close(); }
+});
+
+test("残留扫描成功：tab 角标实时为残留数量", async () => {
+  const h = await leftoversHarness();
+  try {
+    h.configure({ evs: [
+      orphan({ path: "/a", size: 10 }),
+      orphan({ path: "/b", size: 20 }),
+      { kind: "__done", path: "900", size: 30, trashable: false, isDir: false },
+    ] });
+    await h.settle();
+    expect(h.counts.at(-1)).toBe(2);
+    expect(h.hasAlert()).toBe(false);
+  } finally { h.close(); }
 });
