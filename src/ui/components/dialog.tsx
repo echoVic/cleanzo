@@ -23,6 +23,15 @@ const DialogPanel = React.forwardRef<
   const opener = React.useRef<HTMLElement | null>(null);
   useAnimatedHeight(outer, inner, animateHeight);
 
+  // 所有弹窗都用受控 state + 普通按钮开启（没有 DialogTrigger）。
+  // Radix 的 onOpenAutoFocus 在焦点已移入弹窗后才触发，那时 document.activeElement
+  // 已是弹窗内控件，无法拿到真正的开启者。所以在弹窗挂载的 layout 阶段（Radix 移焦前）
+  // 记住当前焦点，关闭时还给它，避免键盘用户丢位置。
+  React.useLayoutEffect(() => {
+    const el = document.activeElement as HTMLElement | null;
+    opener.current = el && el !== document.body && typeof el.focus === "function" ? el : null;
+  }, []);
+
   // 多阶段弹窗（如卸载详情：分析中只有 disabled 按钮）挂载时没有可聚焦项，
   // Radix 会把焦点放在面板本身；等异步内容渲染出按钮后把焦点移入首个控件。
   React.useEffect(() => {
@@ -44,8 +53,8 @@ const DialogPanel = React.forwardRef<
       ref={mergeRefs(outer, ref)}
       onOpenAutoFocus={(e) => {
         onOpenAutoFocus?.(e);
-        const el = document.activeElement as HTMLElement | null;
-        opener.current = el && el !== document.body && typeof el.focus === "function" ? el : null;
+        // 不要在这里重新抓 opener：Radix 移焦后 activeElement 已是弹窗内控件，
+        // 真正的开启者已由上方 useLayoutEffect 在移焦前记住。
       }}
       onCloseAutoFocus={(e) => {
         onCloseAutoFocus?.(e);
