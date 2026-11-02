@@ -1404,6 +1404,15 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .junk-menu { right: 12px; }
 }
 
+/* 560px 窗口下限：内容轨仅约 280px，64px 操作列会把长描述压成逐字竖排。
+   描述占满第一行，尺寸与操作按钮共享第二行；700px（内容轨约 470px）不受影响。 */
+@container content (max-width: 340px) {
+  .junk-row { grid-template-columns: 16px 30px minmax(0, 1fr); }
+  .junk-row .cat-info { grid-column: 3; grid-row: 1; }
+  .junk-row .cat-note { grid-column: 3 / -1; grid-row: 2; max-width: none; padding-right: 72px; }
+  .junk-row-actions { grid-column: 3 / -1; grid-row: 2; justify-self: end; align-self: center; }
+}
+
 /* Skills 列表：屏外行跳过重排（技能目录可达上百项），auto 记住展开后的真实高度 */
 .sk-item { content-visibility: auto; contain-intrinsic-size: auto 58px; }
 
