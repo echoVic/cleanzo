@@ -4,6 +4,38 @@ import { cn } from "../cn";
 import { useAnimatedHeight } from "../motion/height";
 import { mergeRefs } from "../motion/refs";
 
+const FOCUSABLE_SEL =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/** 元素是否真的可聚焦：在 DOM 中、无 inert 祖先、未禁用、非 aria-hidden、有可见尺寸。 */
+function isFocusable(el: HTMLElement | null): el is HTMLElement {
+  if (!el || !el.isConnected) return false;
+  let node: HTMLElement | null = el;
+  while (node) {
+    if (node.hasAttribute("inert")) return false;
+    node = node.parentElement;
+  }
+  if (el.hasAttribute("disabled")) return false;
+  if (el.getAttribute("aria-hidden") === "true") return false;
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return false;
+  return true;
+}
+
+/** opener 不可聚焦时，在 <main> 里找 opener 之后最近的可聚焦元素作为回退。 */
+function findFallbackFocus(opener: HTMLElement | null): HTMLElement | null {
+  const main = document.querySelector("main");
+  if (!main) return null;
+  const list = Array.from(main.querySelectorAll<HTMLElement>(FOCUSABLE_SEL)).filter(
+    (el) => isFocusable(el) && el.getClientRects().length > 0,
+  );
+  if (list.length === 0) return null;
+  if (!opener) return list[0] ?? null;
+  const top = opener.getBoundingClientRect().top;
+  const after = list.find((el) => el.getBoundingClientRect().top >= top);
+  return after ?? list[0] ?? null;
+}
+
 /** 对齐原生 .modal：16px 圆角、padding 22/24/20、大投影；遮罩 var(--overlay) + 模糊。 */
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -39,9 +71,7 @@ const DialogPanel = React.forwardRef<
     if (!panel || typeof MutationObserver === "undefined") return;
     const moveIntoPanel = () => {
       if (document.activeElement !== panel) return;
-      const first = panel.querySelector<HTMLElement>(
-        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-      );
+      const first = panel.querySelector<HTMLElement>(FOCUSABLE_SEL);
       if (first && first.getClientRects().length > 0) first.focus({ preventScroll: true });
     };
     const observer = new MutationObserver(moveIntoPanel);
@@ -58,8 +88,15 @@ const DialogPanel = React.forwardRef<
       }}
       onCloseAutoFocus={(e) => {
         onCloseAutoFocus?.(e);
+        if (e.defaultPrevented) return;
         const node = opener.current;
-        if (!e.defaultPrevented && node && node.isConnected) node.focus({ preventScroll: true });
+        if (isFocusable(node)) {
+          node.focus({ preventScroll: true });
+        } else {
+          // opener 可能已被移除或在离场动画中被设为 inert（如卸载后行消失），
+          // 回退到 <main> 中 opener 之后最近的可聚焦元素，避免焦点丢给 body。
+          findFallbackFocus(node)?.focus({ preventScroll: true });
+        }
       }}
       className={cn(
         "fixed left-1/2 top-1/2 z-50 w-[min(92vw,560px)] -translate-x-1/2 -translate-y-1/2 rounded-[16px] border border-border bg-card p-[22px] px-6 pb-5 shadow-[0_24px_64px_rgba(0,0,0,0.4)]",
