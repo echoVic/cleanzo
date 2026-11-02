@@ -384,3 +384,99 @@ test("每个来源和原因都有中英文文案（不会把键名显示出来�
     }
   } finally { setPref("system"); }
 });
+
+test("收起的行：有新版本显示版本标签和独立的「更新」按钮；展开状态写在 aria-expanded", async () => {
+  await import("./setup-dom");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { AppRow } = await import("../src/react/apps/AppRow");
+  const { setPref } = await import("../src/i18n");
+  setPref("zh");
+  const a = app({ id: "/Applications/Arc.app", name: "Arc", path: "/Applications/Arc.app", version: "1.170.0", running: true });
+  const u = upd({ id: a.id, state: "update", current: "1.170.0", latest: "1.171.0", source: "brew", action: "brew" });
+  const base = { app: a, update: u, growthTag: { key: "app:x", window: "week" as const, bytes: 3 * 2 ** 30, atLeast: false }, open: false, busy: null, brewBusy: false, onToggle() {}, onUpgrade() {} };
+  const html = renderToStaticMarkup(createElement(AppRow, base));
+  expect(html).toContain("1.170.0 → 1.171.0");
+  expect(html).toContain("运行中");
+  expect(html).not.toContain("磁盘 7 天"); // 最多两个标签：版本、运行中优先
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).toMatch(/<button[^>]*app-upgrade[^>]*>更新<\/button>/);
+  expect(html).not.toMatch(/<button[^>]*app-row[^>]*>(?:(?!<\/button>).)*<button/); // 不能按钮套按钮
+  const busy = renderToStaticMarkup(createElement(AppRow, { ...base, busy: "upgrade" }));
+  expect(busy).toContain("正在更新…");
+  const cur = renderToStaticMarkup(createElement(AppRow, { ...base, update: upd({ id: a.id, state: "current" }), app: { ...a, running: false } }));
+  expect(cur).not.toContain("app-upgrade");
+  expect(cur).toContain("磁盘 7 天 +3.0 GB");
+  expect(cur).toContain("1.170.0"); // 灰色版本号
+  setPref("system");
+});
+
+test("展开的三栏：版本原因、缓存可清、运行中禁用清理、卸载按钮", async () => {
+  await import("./setup-dom");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { AppRowExpanded } = await import("../src/react/apps/AppRowExpanded");
+  const { setPref } = await import("../src/i18n");
+  setPref("zh");
+  const a = app({ id: "/Applications/ima.app", name: "ima", path: "/Applications/ima.app", running: false });
+  const noop = () => {};
+  const props = {
+    app: a, update: upd({ id: a.id, source: "sparkle", state: "unknown", reason: "bad-url" }), checking: false,
+    usage: { app: 800, data: 2000, cache: 400, cachePaths: ["/c"] }, usageError: null, week: { bytes: 3 * 2 ** 30, atLeast: false, days: 7 }, month: null,
+    busy: null, brewBusy: false, stuck: false, upgradeFail: null,
+    onUpgrade: noop, onCleanCache: noop, onQuit: noop, onForceQuit: noop, onUninstall: noop, onCopy: noop,
+  };
+  const html = renderToStaticMarkup(createElement(AppRowExpanded, props));
+  expect(html).toContain("更新地址无效");
+  expect(html).toContain("App 本体");
+  expect(html).toMatch(/<button[^>]*>清理<\/button>/);
+  expect(html).not.toMatch(/<button[^>]* disabled=""[^>]*>清理<\/button>/);
+  expect(html).toContain("没有在运行");
+  expect(html).toContain("卸载…");
+  expect(html).toContain("+3.0 GB");
+
+  const running = renderToStaticMarkup(createElement(AppRowExpanded, { ...props, app: { ...a, running: true }, stuck: true }));
+  expect(running).toMatch(/<button[^>]* disabled=""[^>]*>清理<\/button>/);
+  expect(running).toContain("先退出它");
+  expect(running).toMatch(/<button[^>]*>退出<\/button>/);
+  expect(running).toMatch(/<button[^>]*>强制退出<\/button>/);
+
+  const failed = renderToStaticMarkup(createElement(AppRowExpanded, {
+    ...props, update: upd({ id: a.id, source: "brew", state: "update", current: "1", latest: "2", action: "brew" }),
+    upgradeFail: { detail: "sudo: a terminal is required", command: "brew upgrade --cask x" },
+  }));
+  expect(failed).toContain("sudo: a terminal is required");
+  expect(failed).toContain("复制命令");
+  const notes = renderToStaticMarkup(createElement(AppRowExpanded, { ...props, update: upd({ id: a.id, source: "sparkle", state: "update", current: "1", latest: "2", action: "open-app", notesUrl: "https://x.example.com/notes" }) }));
+  expect(notes).toContain('href="https://x.example.com/notes"');
+  expect(notes).toContain("请在它的菜单里选择「检查更新…」");
+  setPref("system");
+});
+
+test("Windows 行和展开：没有更新、缓存、增长，只剩大小和卸载", async () => {
+  await import("./setup-dom");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { AppRow } = await import("../src/react/apps/AppRow");
+  const { AppRowExpanded } = await import("../src/react/apps/AppRowExpanded");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref } = await import("../src/i18n");
+  const a = app({ id: "hkcu:x", name: "Acme", path: "", publisher: "Acme Inc", version: "2.4", size: 1024 });
+  const noop = () => {};
+  try {
+    setPlatformForTest("win32");
+    setPref("en");
+    const row = renderToStaticMarkup(createElement(AppRow, { app: a, update: upd({ id: a.id, state: "update", current: "1", latest: "2" }), growthTag: null, open: true, busy: null, brewBusy: false, onToggle: noop, onUpgrade: noop }));
+    expect(row).not.toContain("app-upgrade");
+    expect(row).toContain("Acme Inc");
+    const ex = renderToStaticMarkup(createElement(AppRowExpanded, {
+      app: a, update: undefined, checking: false, usage: { app: 1024, data: 0, cache: 0, cachePaths: [] }, usageError: null, week: null, month: null,
+      busy: null, brewBusy: false, stuck: false, upgradeFail: null,
+      onUpgrade: noop, onCleanCache: noop, onQuit: noop, onForceQuit: noop, onUninstall: noop, onCopy: noop,
+    }));
+    expect(ex).not.toContain("Version");
+    expect(ex).not.toContain("Cache");
+    expect(ex).toContain("1.0 KB");
+    expect(ex).toContain("Uninstall…");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});

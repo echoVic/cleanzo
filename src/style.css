@@ -1023,6 +1023,25 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .app-used { font-size: 11.5px; }
 .ver { font-size: 11.5px; font-weight: 450; }
 
+/* 应用页：一行 = 卡片；收起时是可点的行，展开后三栏 */
+.app-item { border-radius: 12px; content-visibility: auto; contain-intrinsic-size: auto 62px; }
+.app-item:hover { box-shadow: var(--shadow-lift); }
+.app-item > .app-head { display: flex; align-items: center; gap: 8px; padding-right: 12px; }
+.app-item .app-row { flex: 1; min-width: 0; background: none; border: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; box-shadow: none; }
+.app-item .app-row:hover { box-shadow: none; }
+.app-item .app-row:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: -2px; border-radius: 12px; }
+.app-chev { flex: none; color: var(--muted); transition: transform 0.15s ease; }
+.app-row[aria-expanded="true"] .app-chev { transform: rotate(90deg); }
+.tag.grow { background: var(--warn-soft); color: var(--warn-text); }
+.app-name .tag { margin-left: 6px; }
+.app-expand { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 4px 16px 14px 67px; }
+.app-expand h4 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.app-expand .kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 26px; font-size: 12.5px; }
+.app-expand .kv .num { font-variant-numeric: tabular-nums; }
+.app-expand .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+@media (max-width: 760px) { .app-expand { grid-template-columns: 1fr; padding-left: 16px; } }
+.app-filters .cz-apps-seg { margin-right: auto; }
+
 /* ---- 设置 ---- */
 .setting-block { padding: 6px 16px; margin-bottom: 0; }
 .setting-row {
