@@ -3,14 +3,14 @@
 // 的过滤、排序、卸载结果分类与残留汇总。
 import type { AppInfo, OrphanItem, UninstallResult } from "../../mygo";
 
-export type AppSortBy = "name" | "size" | "opened";
+export type AppSortBy = "name" | "size" | "opened" | "growth";
 
 const APP_SORT_KEY = "cleanzo.appSort";
 
 export function readAppSort(fallback: AppSortBy = "name"): AppSortBy {
   try {
     const v = localStorage.getItem(APP_SORT_KEY);
-    if (v === "name" || v === "size" || v === "opened") return v;
+    if (v === "name" || v === "size" || v === "opened" || v === "growth") return v;
   } catch { /* 忽略 */ }
   return fallback;
 }
@@ -31,9 +31,18 @@ export function filterApps(apps: readonly AppInfo[], qRaw: string): AppInfo[] {
 const byNameCompare = (a: AppInfo, b: AppInfo, lang: string) =>
   a.name.localeCompare(b.name, lang === "zh" ? "zh-CN" : "en");
 
-/** 三种排序：name 名称（localeCompare）、size 大小降序、opened 上次打开降序；大小/打开相同按名称。 */
-export function sortApps(apps: readonly AppInfo[], by: AppSortBy, lang: string): AppInfo[] {
+/** 四种排序：name 名称、size 大小降序、opened 上次打开降序、growth 7 天增长降序（没数据的排后面再按大小）。 */
+export function sortApps(apps: readonly AppInfo[], by: AppSortBy, lang: string, weekGrowth?: ReadonlyMap<string, number>): AppInfo[] {
   return [...apps].sort((a, b) => {
+    if (by === "growth") {
+      const ga = weekGrowth?.get(a.id), gb = weekGrowth?.get(b.id);
+      if (ga !== undefined || gb !== undefined) {
+        if (ga === undefined) return 1;
+        if (gb === undefined) return -1;
+        if (gb !== ga) return gb - ga;
+      }
+      return b.size - a.size || byNameCompare(a, b, lang);
+    }
     if (by === "size") return b.size - a.size || byNameCompare(a, b, lang);
     if (by === "opened") return b.lastOpened - a.lastOpened || byNameCompare(a, b, lang);
     return byNameCompare(a, b, lang);

@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
-import type { AppInfo, OrphanItem, UninstallResult } from "../src/mygo";
+import type { AppInfo, AppUpdate, GrowthApp, GrowthSummary, OrphanItem, UninstallDetail, UninstallResult } from "../src/mygo";
 import {
   barWidth, bundleFailed, classifyUninstall, filterApps, orphanFootAfterRemoval,
-  parseDoneEv, sortApps, sortOrphans,
+  parseDoneEv, readAppSort, sortApps, sortOrphans,
 } from "../src/react/apps/helpers";
 import { appsRequest, requestAppsTab, requestAppsUninstall } from "../src/react/apps/requests";
+import {
+  filterByKind, growthFor, growthTagFor, isIdle, reasonKey, sourceKey, splitUsage, updateCount, versionTag,
+} from "../src/react/apps/updates";
 
 function app(p: Partial<AppInfo> & { name: string; path: string }): AppInfo {
   return { id: p.path, publisher: "", bundleId: "", version: "", size: 0, lastOpened: 0, running: false, ...p };
@@ -285,4 +288,99 @@ test("installed app row shows the app's icon once known", async () => {
     await loadIcon("/Applications/Acme.app");
     expect(renderToStaticMarkup(InstalledAppRow({ app: a, moving: false, onDetail() {} }))).toContain('class="app-icon cz-app-img"');
   } finally { resetIconsForTest(async () => ""); }
+});
+
+function upd(p: Partial<AppUpdate> & { id: string }): AppUpdate {
+  return { source: "", current: "", latest: "", state: "unknown", reason: "", notesUrl: "", action: "", ...p };
+}
+
+const NOW = 1_800_000_000;
+
+test("「很久没用」：90 天以前或从未打开", () => {
+  expect(isIdle(app({ name: "A", path: "/a", lastOpened: 0 }), NOW)).toBe(true);
+  expect(isIdle(app({ name: "A", path: "/a", lastOpened: NOW - 91 * 86400 }), NOW)).toBe(true);
+  expect(isIdle(app({ name: "A", path: "/a", lastOpened: NOW - 89 * 86400 }), NOW)).toBe(false);
+});
+
+test("筛选：有更新只看 state=update；残留不列已装 App", () => {
+  const apps = [
+    app({ name: "Arc", path: "/Applications/Arc.app", lastOpened: NOW }),
+    app({ name: "Old", path: "/Applications/Old.app", lastOpened: 0 }),
+    app({ name: "Cur", path: "/Applications/Cur.app", lastOpened: NOW }),
+  ];
+  const updates = new Map([
+    ["/Applications/Arc.app", upd({ id: "/Applications/Arc.app", state: "update", current: "1.170.0", latest: "1.171.0" })],
+    ["/Applications/Cur.app", upd({ id: "/Applications/Cur.app", state: "current" })],
+    ["/Applications/Old.app", upd({ id: "/Applications/Old.app", state: "unknown", reason: "uncomparable" })],
+  ]);
+  expect(filterByKind(apps, "all", updates, NOW).map((a) => a.name)).toEqual(["Arc", "Old", "Cur"]);
+  expect(filterByKind(apps, "updates", updates, NOW).map((a) => a.name)).toEqual(["Arc"]);
+  expect(filterByKind(apps, "idle", updates, NOW).map((a) => a.name)).toEqual(["Old"]);
+  expect(filterByKind(apps, "leftovers", updates, NOW)).toEqual([]);
+  expect(updateCount(updates)).toBe(1);
+});
+
+test("版本标签和来源、原因文案键", () => {
+  expect(versionTag(upd({ id: "x", state: "update", current: "1.170.0", latest: "1.171.0 (89666)" }))).toBe("1.170.0 → 1.171.0 (89666)");
+  expect(versionTag(upd({ id: "x", state: "current", current: "1", latest: "1" }))).toBeNull();
+  expect(versionTag(undefined)).toBeNull();
+  expect(sourceKey("brew")).toBe("apps.src.brew");
+  expect(sourceKey("")).toBeNull();
+  expect(reasonKey("bad-url")).toBe("apps.reason.bad-url");
+  expect(reasonKey("something-new")).toBe("apps.reason.network");
+});
+
+test("占用拆成本体、数据、缓存", () => {
+  const d: UninstallDetail = {
+    app: app({ name: "Arc", path: "/Applications/Arc.app" }),
+    items: [
+      { path: "/Applications/Arc.app", kind: "app", size: 800 },
+      { path: "~/Library/Caches/a", kind: "cache", size: 300 },
+      { path: "~/Library/Caches/Arc", kind: "cache", size: 100 },
+      { path: "~/Library/Application Support/Arc", kind: "support", size: 2000 },
+      { path: "~/Library/Preferences/a.plist", kind: "prefs", size: 5 },
+    ],
+    totalSize: 3205,
+  };
+  expect(splitUsage(d)).toEqual({ app: 800, data: 2005, cache: 400, cachePaths: ["~/Library/Caches/a", "~/Library/Caches/Arc"] });
+});
+
+test("增长按 appPath 对上；小标签按 bundle ID", () => {
+  const a = app({ name: "Arc", path: "/Applications/Arc.app", bundleId: "company.thebrowser.Browser" });
+  const g = { key: "app:company.thebrowser.Browser", appPath: "/Applications/Arc.app", week: { bytes: 3 * 2 ** 30, atLeast: false, days: 7 } } as GrowthApp;
+  expect(growthFor(a, [g])).toBe(g);
+  expect(growthFor(app({ name: "B", path: "/Applications/B.app" }), [g])).toBeNull();
+  const summary = {
+    supported: true, status: {} as never,
+    config: { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [], asked: true },
+    alerts: [{ key: "app:company.thebrowser.Browser", name: "Arc", window: "week", days: 7, bytes: 11 * 2 ** 30, atLeast: false, folder: "", total: 0, at: 0 }],
+  } as GrowthSummary;
+  expect(growthTagFor(a, summary)?.bytes).toBe(11 * 2 ** 30);
+  expect(growthTagFor(a, { ...summary, config: { ...summary.config, enabled: false } })).toBeNull();
+});
+
+test("按 7 天增长排序：有数据的在前，没数据的按大小", () => {
+  const apps = [
+    app({ name: "A", path: "/a", size: 10 }),
+    app({ name: "B", path: "/b", size: 30 }),
+    app({ name: "C", path: "/c", size: 20 }),
+  ];
+  const week = new Map([["/a", 5], ["/c", 9]]);
+  expect(sortApps(apps, "growth", "en", week).map((a) => a.name)).toEqual(["C", "A", "B"]);
+  localStorage.setItem("cleanzo.appSort", "growth");
+  expect(readAppSort()).toBe("growth");
+  localStorage.setItem("cleanzo.appSort", "name");
+});
+
+test("每个来源和原因都有中英文文案（不会把键名显示出来）", async () => {
+  const { setPref, t } = await import("../src/i18n");
+  const sources = ["mas", "brew", "sparkle", "electron"];
+  const reasons = ["no-source", "bad-url", "network", "rate-limited", "bad-feed", "uncomparable", "not-found"];
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      for (const s of sources) expect(t(sourceKey(s)!)).not.toContain("apps.src.");
+      for (const r of reasons) expect(t(reasonKey(r))).not.toContain("apps.reason.");
+    }
+  } finally { setPref("system"); }
 });
