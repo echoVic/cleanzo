@@ -195,6 +195,11 @@ async function pageHarness(focusKey: string | null = null) {
     text() { return textOf(tree); },
     /** 有没有 className 正好是 cls 的元素。 */
     has(cls: string) { return nodes(tree).some((el) => el.props.className === cls); },
+    /** 读屏里程碑节点（sr-only role=status）：角色与文案。 */
+    live() {
+      const el = nodes(tree).find((n) => n.props.className === "sr-only" && n.props.role === "status");
+      return el ? textOf(el) : null;
+    },
     /** 状态那一行的文字（含「现在量一次」）。 */
     statusLine() {
       const el = nodes(tree).find((n) => n.props.className === "cz-growth-statusline");
@@ -771,6 +776,37 @@ test("没有记录时「现在量一次」只在空状态里，量的时候转�
     await page.settle();
     expect(page.guide()).toBeNull();
     expect(page.text()).toContain(t("growth.measureNow"));
+  } finally { page.close(); }
+});
+
+test("读屏里程碑：进入静默，列表态量盘开始/完成各播一次；空状态不重复播「正在量」", async () => {
+  const page = await pageHarness();
+  try {
+    await page.settle();
+    page.requests[0]!.resolve(state({ records: 2, apps: [app({})] }));
+    await page.settle();
+    expect(page.live()).toBe(""); // 进入面板静默
+    page.updated();
+    page.requests[1]!.resolve(state({ records: 2, apps: [app({})], status: { ...state({}).status, running: true } }));
+    await page.settle();
+    expect(page.live()).toBe(t("growth.measuring"));
+    const lastAt = 1_700_000_000;
+    page.updated();
+    page.requests[2]!.resolve(state({ records: 2, apps: [app({})], status: { ...state({}).status, lastAt } }));
+    await page.settle();
+    expect(page.live()).toBe(t("growth.status.last", { time: new Date(lastAt * 1000).toLocaleString("zh-CN") }));
+
+    // 空状态量盘：sr-only 不播「正在量」，由 EmptyGuide 忙态 CTA 承担
+    page.show(false);
+    await page.settle();
+    page.show(true);
+    await page.settle();
+    page.requests[3]!.resolve(state({ records: 0 }));
+    await page.settle();
+    page.updated();
+    page.requests[4]!.resolve(state({ records: 0, status: { ...state({}).status, running: true } }));
+    await page.settle();
+    expect(page.live()).not.toContain(t("growth.measuring")); // 忙态只由 CTA 播报
   } finally { page.close(); }
 });
 

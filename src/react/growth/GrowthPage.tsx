@@ -39,9 +39,13 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   const [open, setOpen] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState<Record<string, UninstallDetail | null>>({});
   const [hl, setHl] = React.useState<string | null>(null);
+  /** 读屏里程碑文案：进入面板静默，仅播报量盘开始 / 完成，与其它扫描页一致。 */
+  const [liveMsg, setLiveMsg] = React.useState("");
   const focused = React.useRef<{ key: string; nonce: number } | null>(null);
   /** 上次核对卸载明细时的记录（时间、条数）。 */
   const measured = React.useRef<{ lastAt: number; records: number } | null>(null);
+  /** 上一帧的 running：仅在 true→false（手动或后台量完）时补一条完成播报。 */
+  const prevRunning = React.useRef<boolean | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -59,6 +63,21 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   React.useEffect(() => { if (active) void load(); }, [load, visit, active]);
   // 只在显示时跟着 growthUpdated 刷新：隐藏的页面不拉状态，也不在别的页面弹读取失败。
   React.useEffect(() => active ? growthApi.onUpdated(() => { void load(); }) : undefined, [load, active]);
+
+  // running 边沿才更新文案：挂载时静默；开始量播「正在量」，量完播上次量盘时间。
+  // 空状态例外：「正在量」只由 EmptyGuide 的忙态 CTA 承担，不重复播报。
+  // translate 直接取当前语言（load 回调同此约定），避免 useT 每帧新函数导致 effect 重复跑。
+  React.useEffect(() => {
+    if (!state) return;
+    const running = !!state.status.running;
+    if (running && growthView(state) !== "empty") {
+      setLiveMsg(translate("growth.measuring"));
+    } else if (prevRunning.current === true && state.status.lastAt) {
+      const time = new Date(state.status.lastAt * 1000).toLocaleString(currentLang() === "zh" ? "zh-CN" : "en-US");
+      setLiveMsg(translate("growth.status.last", { time }));
+    }
+    prevRunning.current = running;
+  }, [state]);
 
   const focusReady = !!state?.supported && state.records > 0 && state.apps.some((a) => a.key === focusKey);
   // 通知 / 菜单栏定位：等目标行加载后展开、滚到中间，高亮 900ms。
@@ -110,6 +129,7 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
 
   return (
     <div className="cz-growth-panel">
+      <span className="sr-only" role="status">{liveMsg}</span>
       {banner === "optin" && (
         <div className="cz-growth-banner">
           <strong>{t("growth.optin.title")}</strong>
@@ -183,7 +203,7 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
                           {(a.name.replace(/^\.+/, "") || a.name).charAt(0).toUpperCase()}
                         </span>
                       </AppIcon>
-                      <span className="cz-growth-label">{a.name}</span>
+                      <span className="cz-growth-label" title={a.name}>{a.name}</span>
                       {a.kind === "macos" && <Badge variant="optional">{t("growth.badge.macos")}</Badge>}
                       {a.kind === "unknown" && <Badge variant="optional">{t("growth.badge.unknown")}</Badge>}
                       {a.ignored && <Badge variant="optional">{t("growth.badge.ignored")}</Badge>}
