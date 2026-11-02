@@ -307,7 +307,7 @@ type usageGuard struct {
 }
 
 // probeUsage takes a snapshot of the open files and the running apps.
-func probeUsage() *usageGuard { return platformUsage() }
+func probeUsage() *usageGuard { return probeUsageFn() }
 
 // probeFileUsage keeps the Darwin lsof and app probes unchanged.
 func probeFileUsage() *usageGuard {

@@ -396,3 +396,219 @@ func TestFeedMatchesApp(t *testing.T) {
 		t.Fatal("a feed without files must not hide updates")
 	}
 }
+
+func stubOpen(t *testing.T) *[]string {
+	t.Helper()
+	var opened []string
+	saved := openURLCommand
+	openURLCommand = func(target string) error { opened = append(opened, target); return nil }
+	t.Cleanup(func() { openURLCommand = saved })
+	return &opened
+}
+
+func stubUsage(t *testing.T, g *usageGuard) {
+	t.Helper()
+	saved := probeUsageFn
+	probeUsageFn = func() *usageGuard { return g }
+	t.Cleanup(func() { probeUsageFn = saved })
+}
+
+func TestUpgradeAppOnlyActsOnCheckedApps(t *testing.T) {
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	opened := stubOpen(t)
+	res, err := Cleaner{}.UpgradeApp(context.Background(), "/Applications/Evil.app")
+	if err != nil || res.Code != "not-checked" || len(*opened) != 0 {
+		t.Fatalf("%+v %v %v", res, err, *opened)
+	}
+	rememberAppAction("/Applications/WeChat.app", appUpdateAction{kind: "open-store", url: "macappstore://apps.apple.com/app/id836500024"})
+	rememberAppAction("/Applications/iTerm.app", appUpdateAction{kind: "open-app", path: "/Applications/iTerm.app"})
+	for _, id := range []string{"/Applications/WeChat.app", "/Applications/iTerm.app"} {
+		if res, _ := (Cleaner{}).UpgradeApp(context.Background(), id); !res.Done {
+			t.Fatalf("%s: %+v", id, res)
+		}
+	}
+	if strings.Join(*opened, "|") != "macappstore://apps.apple.com/app/id836500024|/Applications/iTerm.app" {
+		t.Fatalf("opened %v", *opened)
+	}
+}
+
+func TestUpgradeAppBrew(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Ghostty", map[string]string{"CFBundleIdentifier": "com.mitchellh.ghostty", "CFBundleShortVersionString": "1.3.1"}, false, "")
+	bin := t.TempDir()
+	log := filepath.Join(bin, "log")
+	plist := filepath.Join(app, "Contents", "Info.plist")
+	// The fake brew records arguments and upgrades the bundle to 1.4.0.
+	fakeTool(t, bin, "brew", `echo "$@" >> `+shellPath(log)+`
+sed -i '' 's/1.3.1/1.4.0/' `+shellPath(plist)+`
+echo "==> Upgrading ghostty"`)
+	savedDirs := toolDirs
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs = savedDirs })
+
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	stubUsage(t, &usageGuard{running: map[string]bool{"com.mitchellh.ghostty": true}})
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "ghostty", path: app, latest: "1.4.0"})
+	if res, _ := (Cleaner{}).UpgradeApp(context.Background(), app); res.Code != "in-use" {
+		t.Fatalf("running: %+v", res)
+	}
+	if data, _ := os.ReadFile(log); len(data) != 0 {
+		t.Fatalf("brew ran while app was running: %q", data)
+	}
+	stubUsage(t, &usageGuard{failed: true})
+	if res, _ := (Cleaner{}).UpgradeApp(context.Background(), app); res.Code != "in-use" {
+		t.Fatalf("probe failed: %+v", res)
+	}
+
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	res, err := Cleaner{}.UpgradeApp(context.Background(), app)
+	data, _ := os.ReadFile(log)
+	if err != nil || !res.Done || res.Version != "1.4.0" || string(data) != "upgrade --cask ghostty\n" {
+		t.Fatalf("%+v %v %q", res, err, data)
+	}
+	if _, ok := appActionFor(app); ok {
+		t.Fatal("done action still cached")
+	}
+
+	// A failed brew returns its last output line and the full command.
+	fakeTool(t, bin, "brew", `echo "==> Upgrading x"; echo "sudo: a terminal is required" >&2; exit 1`)
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "x", path: app, latest: "9.0"})
+	res, _ = Cleaner{}.UpgradeApp(context.Background(), app)
+	if res.Done || res.Code != "brew-failed" || res.Detail != "sudo: a terminal is required" || res.Command != "brew upgrade --cask x" {
+		t.Fatalf("failed: %+v", res)
+	}
+
+	// Only one brew upgrade may run at a time.
+	appUpgradeMu.Lock()
+	res, _ = Cleaner{}.UpgradeApp(context.Background(), app)
+	appUpgradeMu.Unlock()
+	if res.Code != "busy" {
+		t.Fatalf("busy: %+v", res)
+	}
+}
+
+func TestCleanAppCacheOnlyMovesCaches(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	cache := filepath.Join(home, "Library", "Caches", "com.example.testapp")
+	cacheByName := filepath.Join(home, "Library", "Caches", "TestApp")
+	support := filepath.Join(home, "Library", "Application Support", "TestApp")
+	prefs := filepath.Join(home, "Library", "Preferences", "com.example.testapp.plist")
+	writeFile(t, filepath.Join(cache, "a"), 1000)
+	writeFile(t, filepath.Join(cacheByName, "b"), 500)
+	writeFile(t, filepath.Join(support, "c"), 100)
+	writeFile(t, prefs, 10)
+
+	stubUsage(t, &usageGuard{running: map[string]bool{"com.example.testapp": true}})
+	res := Cleaner{}.CleanAppCache(app)
+	if res.Moved != 0 || len(res.Failed) != 1 || res.Failed[0] != app+": in-use" || !exists(cache) {
+		t.Fatalf("running: %+v", res)
+	}
+
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	res = Cleaner{}.CleanAppCache(app)
+	if res.Moved != 2 || res.Freed < 1500 || len(res.Failed) != 0 {
+		t.Fatalf("%+v", res)
+	}
+	if exists(cache) || exists(cacheByName) || !exists(support) || !exists(prefs) || !exists(app) {
+		t.Fatal("moved the wrong things")
+	}
+
+	if res := (Cleaner{}).CleanAppCache(filepath.Join(home, "Desktop", "X.app")); len(res.Failed) != 1 || !strings.HasSuffix(res.Failed[0], ": not-app") {
+		t.Fatalf("outside: %+v", res)
+	}
+}
+
+func TestUpgradeAppOpenFailure(t *testing.T) {
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	stubOpen(t)
+	openURLCommand = func(string) error { return errors.New("cannot open") }
+	rememberAppAction("/Applications/iTerm.app", appUpdateAction{kind: "open-app", path: "/Applications/iTerm.app"})
+	res, err := Cleaner{}.UpgradeApp(context.Background(), "/Applications/iTerm.app")
+	if err != nil || res.Done || res.Code != "open-failed" || res.Detail != "cannot open" {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestUpgradeAppBrewRefusesOpenBundleAndMissingTool(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "testapp", path: app, latest: "2.0"})
+	savedDirs := toolDirs
+	toolDirs = func() []string { return nil }
+	t.Cleanup(func() { toolDirs = savedDirs })
+
+	stubUsage(t, &usageGuard{open: []string{strings.ToLower(resolvePath(filepath.Join(app, "Contents", "Info.plist")))}})
+	res, _ := Cleaner{}.UpgradeApp(context.Background(), app)
+	if res.Code != "in-use" || res.Done {
+		t.Fatalf("open bundle: %+v", res)
+	}
+
+	stubUsage(t, &usageGuard{})
+	res, _ = Cleaner{}.UpgradeApp(context.Background(), app)
+	if res.Done || res.Code != "brew-failed" || res.Detail != "no-tool" || res.Command != "brew upgrade --cask testapp" {
+		t.Fatalf("missing tool: %+v", res)
+	}
+}
+
+func TestCleanAppCacheRefusesUsageAndSkipsBusyCache(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	cache := filepath.Join(home, "Library", "Caches", "com.example.testapp")
+	cacheByName := filepath.Join(home, "Library", "Caches", "TestApp")
+	writeFile(t, filepath.Join(cache, "a"), 1000)
+	writeFile(t, filepath.Join(cacheByName, "b"), 500)
+
+	for _, g := range []*usageGuard{
+		{failed: true},
+		{open: []string{strings.ToLower(resolvePath(filepath.Join(app, "Contents", "Info.plist")))}},
+	} {
+		stubUsage(t, g)
+		res := Cleaner{}.CleanAppCache(app)
+		if res.Moved != 0 || res.Freed != 0 || len(res.Failed) != 1 || res.Failed[0] != app+": in-use" || !exists(cache) || !exists(cacheByName) {
+			t.Fatalf("unsafe probe: %+v", res)
+		}
+	}
+
+	stubUsage(t, &usageGuard{open: []string{strings.ToLower(resolvePath(filepath.Join(cache, "a")))}})
+	res := Cleaner{}.CleanAppCache(app)
+	if res.Moved != 1 || res.Freed < 500 || len(res.Failed) != 1 || res.Failed[0] != cache+": in-use" || !exists(cache) || exists(cacheByName) || !exists(app) {
+		t.Fatalf("busy cache: %+v", res)
+	}
+}
+
+func TestCleanAppCacheRechecksUsageAfterMeasuring(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	cache := filepath.Join(home, "Library", "Caches", "com.example.testapp")
+	writeFile(t, filepath.Join(cache, "a"), 1000)
+
+	// The app starts while associated folders are being measured. Each usage
+	// probe returns a snapshot, so an earlier guard cannot see that launch.
+	started := false
+	savedUsage, savedPaths := probeUsageFn, appCachePaths
+	probeUsageFn = func() *usageGuard {
+		return &usageGuard{running: map[string]bool{"com.example.testapp": started}}
+	}
+	appCachePaths = func(info AppInfo) []UninstallItem {
+		items := uninstallPaths(info)
+		started = true
+		return items
+	}
+	t.Cleanup(func() { probeUsageFn, appCachePaths = savedUsage, savedPaths })
+
+	res := Cleaner{}.CleanAppCache(app)
+	if !started || res.Moved != 0 || res.Freed != 0 || len(res.Failed) != 1 || res.Failed[0] != app+": in-use" || !exists(cache) {
+		t.Fatalf("app started during measurement: %+v; cache exists=%v", res, exists(cache))
+	}
+}

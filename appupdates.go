@@ -272,3 +272,12 @@ func resetAppActions() {
 	defer appUpdateCache.Unlock()
 	appUpdateCache.m = map[string]appUpdateAction{}
 }
+
+// probeUsageFn is probeUsage's implementation; tests replace it.
+var probeUsageFn = platformUsage
+
+func forgetAppAction(id string) {
+	appUpdateCache.Lock()
+	defer appUpdateCache.Unlock()
+	delete(appUpdateCache.m, id)
+}

@@ -132,6 +132,45 @@ export interface AppInfo {
 }
 
 /**
+ * AppUpdate is one installed app's update state, streamed by
+ * CheckAppUpdates. The page shows Current → Latest and an Update button for
+ * State "update"; the button sends only ID, and the action stays in Go.
+ */
+export interface AppUpdate {
+  /** AppInfo.ID; "__done" ends the stream */
+  id: string;
+  /** "mas" | "brew" | "sparkle" | "electron" | "" */
+  source: string;
+  /** the bundle's version */
+  current: string;
+  /** the source's newest version */
+  latest: string;
+  /** "update" | "current" | "unknown" | "error" */
+  state: string;
+  /** why unknown or error: no-source, bad-url, network, rate-limited, bad-feed, uncomparable, not-found */
+  reason: string;
+  /** release notes; https only */
+  notesUrl: string;
+  /** "brew" | "open-store" | "open-app" | "" */
+  action: string;
+}
+
+/** AppUpgradeResult is what UpgradeApp did. */
+export interface AppUpgradeResult {
+  id: string;
+  /** brew: the bundle now has Latest; open-*: opened */
+  done: boolean;
+  /** the bundle's version afterwards (brew) */
+  version: string;
+  /** "in-use" | "brew-failed" | "not-checked" | "unsupported" | "busy" | "" */
+  code: string;
+  /** brew's last output line */
+  detail: string;
+  /** the command to run in Terminal when brew failed */
+  command: string;
+}
+
+/**
  * AppUsage is one merged row: a bundle's processes summed up. CPU is a
  * single-core percentage like Activity Monitor's CPU column, so it can
  * exceed 100 while the card above stays below it.
@@ -1013,6 +1052,10 @@ export const Cleaner = {
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
+  /** CheckAppUpdates streams the update state of the apps listed by the page. */
+  checkAppUpdates(ids: string[], ch: Channel<AppUpdate>): Promise<void> {
+    return call("Cleaner.CheckAppUpdates", ids, ch);
+  },
   /**
    * CheckForUpdates opens the update window, which says when Cleanzo is up to
    * date or offers the new version.
@@ -1035,6 +1078,10 @@ export const Cleaner = {
    */
   cleanAITools(selections: AISelection[]): Promise<AICleanResult> {
     return call("Cleaner.CleanAITools", selections);
+  },
+  /** CleanAppCache delegates to the platform's cache cleanup implementation. */
+  cleanAppCache(path: string): Promise<UninstallResult> {
+    return call("Cleaner.CleanAppCache", path);
   },
   /** CleanJunk streams progress, refreshing file usage before each selected item. */
   cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
@@ -1289,6 +1336,10 @@ export const Cleaner = {
    */
   uninstallApp(path: string): Promise<UninstallResult> {
     return call("Cleaner.UninstallApp", path);
+  },
+  /** UpgradeApp uses only the action remembered by the Go update check. */
+  upgradeApp(id: string): Promise<AppUpgradeResult> {
+    return call("Cleaner.UpgradeApp", id);
   },
   /**
    * UpgradeSkills upgrades the requested folders to their source. Each one is

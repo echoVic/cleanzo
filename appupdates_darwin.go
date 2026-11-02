@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -567,3 +568,137 @@ func feedMatchesApp(names []string, b appBundle) bool {
 	}
 	return false
 }
+
+// openURLCommand opens a URL or an app with /usr/bin/open; tests replace it.
+var openURLCommand = func(target string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/open", target)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("open failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// appUpgradeMu lets one brew upgrade run at a time: Homebrew takes a lock.
+var appUpgradeMu sync.Mutex
+
+// upgradeApp does what the last check found for id (spec section 5).
+func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
+	res := AppUpgradeResult{ID: id}
+	a, ok := appActionFor(id)
+	if !ok {
+		res.Code = "not-checked"
+		return res
+	}
+	switch a.kind {
+	case "open-store", "open-app":
+		target := a.url
+		if a.kind == "open-app" {
+			target = a.path
+		}
+		if err := openURLCommand(target); err != nil {
+			res.Code, res.Detail = "open-failed", err.Error()
+			return res
+		}
+		res.Done = true
+		return res
+	case "brew":
+	default:
+		res.Code = "not-checked"
+		return res
+	}
+	if !appUpgradeMu.TryLock() {
+		res.Code = "busy"
+		return res
+	}
+	defer appUpgradeMu.Unlock()
+	b, ok := readAppBundle(a.path)
+	if !ok {
+		res.Code = "not-checked"
+		return res
+	}
+	// A running app would be replaced under itself.
+	g := probeUsage()
+	if g.failed || g.inUse(resolvePath(a.path)) || (b.bundleID != "" && g.running[strings.ToLower(b.bundleID)]) {
+		res.Code = errInUse.Error()
+		return res
+	}
+	res.Command = "brew upgrade --cask " + a.token
+	tool := findTool("brew")
+	if tool == "" {
+		res.Code, res.Detail = "brew-failed", "no-tool"
+		return res
+	}
+	out, err := runTool(ctx, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
+	if after, ok := readAppBundle(a.path); ok {
+		res.Version = after.short
+	}
+	if v, l := versionParts(cleanVersion(res.Version)), versionParts(cleanVersion(a.latest)); v != nil && l != nil && compareVersions(v, l) >= 0 {
+		forgetAppAction(id)
+		res.Done, res.Command = true, ""
+		return res
+	}
+	res.Code = "brew-failed"
+	res.Detail = lastLine(out)
+	if res.Detail == "" && err != nil {
+		res.Detail = err.Error()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		res.Detail = "timeout"
+	}
+	return res
+}
+
+// lastLine is the last non-empty line of a command's output.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
+// cleanAppCache moves an installed app's cache folders to the Trash.
+func cleanAppCache(path string) UninstallResult {
+	res := UninstallResult{Path: path}
+	if !installedApp(path) {
+		res.Failed = append(res.Failed, path+": not-app")
+		return res
+	}
+	app := appInfoFromPath(path)
+	items := appCachePaths(app)
+	// Probe after measuring so an app launched during the scan is protected.
+	g := probeUsage()
+	if g.failed || g.inUse(resolvePath(path)) || (app.BundleID != "" && g.running[strings.ToLower(app.BundleID)]) {
+		res.Failed = append(res.Failed, path+": "+errInUse.Error())
+		return res
+	}
+	for _, item := range items {
+		if item.Kind != "cache" {
+			continue
+		}
+		if g.inUse(resolvePath(item.Path)) {
+			res.Failed = append(res.Failed, item.Path+": "+errInUse.Error())
+			continue
+		}
+		if err := trashItem(item.Path); err != nil {
+			res.Failed = append(res.Failed, item.Path+": "+err.Error())
+			continue
+		}
+		res.Moved++
+		res.Freed += item.Size
+	}
+	return res
+}
+
+func init() {
+	appUpdateUpgrade = upgradeApp
+	appUpdateClean = cleanAppCache
+}
+
+// appCachePaths collects and measures associated folders; tests replace it
+// to simulate an app starting while those measurements are in progress.
+var appCachePaths = uninstallPaths
