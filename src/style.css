@@ -29,6 +29,11 @@
   --danger: #d92d20;
   --danger-strong: #b42318;
   --danger-soft: rgba(217, 45, 32, 0.09);
+  /* 小号危险文字（徽章/内联错误）在软底与卡片上需满足正文 AA */
+  --danger-text: #b42318;
+  /* 实心危险按钮/错误 Toast 底色：白字需满足正文 AA（亮/暗各取达标色阶） */
+  --danger-solid: #d92d20;
+  --danger-solid-strong: #b42318;
 
   --warn: #b45309;
   --warn-soft: rgba(217, 119, 6, 0.12);
@@ -69,12 +74,18 @@
     --accent-strong: #30D158;
     --accent-deep: #30D158;
     --accent-soft: rgba(48, 209, 88, 0.14);
-    --accent-ring: rgba(48, 209, 88, 0.32);
+    /* 0.6 与卡片合成后约 3.6:1，满足 WCAG 2.4.11 焦点外观 3:1 */
+    --accent-ring: rgba(48, 209, 88, 0.60);
     --on-accent: #062812;
 
     --danger: #e5484d;
     --danger-strong: #f0666a;
     --danger-soft: rgba(229, 72, 77, 0.14);
+    /* 小号危险文字：比实色 danger 更亮，软底上约 4.8:1 */
+    --danger-text: #f97073;
+    /* 白字在 #d2383d 上 4.8:1、与卡片边界 3.2:1；hover 再压深 */
+    --danger-solid: #d2383d;
+    --danger-solid-strong: #ce353a;
 
     --warn: #f59e0b;
     --warn-soft: rgba(245, 158, 11, 0.16);
@@ -322,8 +333,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
 }
 
-.btn.danger { background: var(--danger); color: #fff; }
-.btn.danger:hover:not(:disabled) { background: var(--danger-strong); }
+.btn.danger { background: var(--danger-solid); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: var(--danger-solid-strong); }
 /* 禁用的危险按钮不再发红：中性底色，避免“可执行的危险操作”误导 */
 .btn.danger:disabled {
   background: var(--btn-bg);
@@ -621,7 +632,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   border-radius: 999px;
   line-height: 1.5;
 }
-.tag.warn { background: var(--danger-soft); color: var(--danger); }
+.tag.warn { background: var(--danger-soft); color: var(--danger-text); }
 .tag.dim { background: var(--bg-subtle); color: var(--muted); }
 .tag.ok { background: var(--accent-soft); color: var(--accent-strong); }
 
@@ -1029,7 +1040,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .check input { accent-color: var(--accent); width: 14px; height: 14px; }
 .settings-status { font-size: 12.5px; min-height: 1.2em; }
-.settings-status.err { color: var(--danger); }
+.settings-status.err { color: var(--danger-text); }
 
 /* ---- 弹窗 ---- */
 .overlay {
@@ -1071,7 +1082,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .detail-item .kind { color: var(--muted); }
 .detail-item .path { overflow-wrap: anywhere; }
 .detail-item .size { font-weight: 620; font-variant-numeric: tabular-nums; }
-.warn-text { color: var(--danger) !important; font-weight: 550; }
+.warn-text { color: var(--danger-text) !important; font-weight: 550; }
 
 /* ---- 骨架屏 ---- */
 .skeleton {
@@ -1124,7 +1135,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   gap: 10px;
 }
 .empty.err .err-icon { font-size: 1.5rem; }
-.err-inline { color: var(--danger); font-size: 12.5px; padding: 6px 0; }
+.err-inline { color: var(--danger-text); font-size: 12.5px; padding: 6px 0; }
 
 /* ---- Toast ---- */
 .toast {
@@ -1151,7 +1162,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .toast { color: #1a1c20; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); transition: opacity var(--t-state) linear, transform var(--t-layout) var(--e-out); }
-.toast.err { background: var(--danger); color: #fff; }
+.toast.err { background: var(--danger-solid); color: #fff; }
 
 /* ---- 杂项 ---- */
 .hidden { display: none !important; }
@@ -1216,7 +1227,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   border-radius: 999px;
   letter-spacing: 0.2px;
 }
-.photo-badge.exact { background: var(--danger-soft); color: var(--danger); }
+.photo-badge.exact { background: var(--danger-soft); color: var(--danger-text); }
 .photo-badge.similar { background: var(--warn-soft); color: var(--warn-text); }
 .photo-grid {
   display: grid;
@@ -1548,7 +1559,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   background: var(--warn-soft);
   color: var(--warn-text);
 }
-.mbadge.crit { background: var(--danger-soft); color: var(--danger); }
+.mbadge.crit { background: var(--danger-soft); color: var(--danger-text); }
 .mhero { display: flex; align-items: baseline; gap: 6px; margin-top: 14px; }
 .mhero b { font-size: 28px; font-weight: 600; letter-spacing: -0.3px; color: var(--fg); font-variant-numeric: tabular-nums; }
 .mhero b.ph { color: var(--muted); }
@@ -1647,7 +1658,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .st-htile .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
 .st-htile .v.ok { color: var(--accent-strong); }
 .st-htile .v.warn { color: var(--warn-text); }
-.st-htile .v.crit { color: var(--danger); }
+.st-htile .v.crit { color: var(--danger-text); }
 .st-htile.st-skel .sk-line { margin-top: 0; }
 .st-htile.st-skel .sk-line + .sk-line { margin-top: 10px; height: 16px; }
 /* 卡片标题右侧的说明（网络的连接方式） */
@@ -2109,7 +2120,7 @@ div.pr-toggle { cursor: default; }
 .pr-est { color: var(--muted); }
 .pr-act { display: flex; width: 168px; flex: none; align-items: center; justify-content: flex-end; gap: 8px; }
 .pr-stuck { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.pr-force { height: 28px; padding: 0 12px; border: 1px solid var(--danger); border-radius: 7px; background: var(--card); color: var(--danger); font-size: 12px; font-weight: 600; cursor: pointer; }
+.pr-force { height: 28px; padding: 0 12px; border: 1px solid var(--danger); border-radius: 7px; background: var(--card); color: var(--danger-text); font-size: 12px; font-weight: 600; cursor: pointer; }
 .pr-force:disabled { opacity: 0.45; cursor: default; }
 .pr-children { margin: 0; padding: 4px 0; list-style: none; background: var(--bg-subtle); }
 .pr-child { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 20px 0 66px; color: var(--muted); font-size: 12px; }

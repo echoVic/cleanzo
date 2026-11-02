@@ -590,10 +590,10 @@ function UpdateState({ update: u, hasCheck, busy, onUpgrade }: {
     return <span className="text-[11px] text-muted">{t("skills.updates.current")}</span>;
   }
   if (u.status === "missing") {
-    return <span className="text-[11px] text-danger">{t("skills.tag.missing")}</span>;
+    return <span className="text-[11px] text-danger-text">{t("skills.tag.missing")}</span>;
   }
   if (u.status === "error") {
-    return <span className="text-[11px] text-danger" title={failReason(t, u.error)}>{failReason(t, u.error)}</span>;
+    return <span className="text-[11px] text-danger-text" title={failReason(t, u.error)}>{failReason(t, u.error)}</span>;
   }
   // update
   return (

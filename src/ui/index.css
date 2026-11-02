@@ -14,7 +14,7 @@
   /* 与原生 .btn.primary 一致：底色 var(--accent)，hover 才加深。 */
   --primary: var(--accent);
   --primary-foreground: #ffffff;
-  --destructive: var(--danger);
+  --destructive: var(--danger-solid);
   --destructive-foreground: #ffffff;
   --warning: var(--warn);
   --warning-soft: var(--warn-soft);
@@ -52,6 +52,9 @@
   --color-danger: var(--danger);
   --color-danger-strong: var(--danger-strong);
   --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-solid-strong: var(--danger-solid-strong);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-warning-text: var(--warning-text);
