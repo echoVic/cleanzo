@@ -36,6 +36,23 @@ function tagText(tag: GrowthTag, t: T): string {
   return t(tag.window === "day" ? "process.tag.day" : "process.tag.week", { size: tag.atLeast ? t("growth.atLeast", { size }) : size });
 }
 
+const ROW_FOCUSABLE =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/** 焦点所在行因退出被去掉按钮时，把焦点移到该行下方最近的可聚焦元素，避免丢给 body。 */
+function focusNextAfter(rowEl: Element | null) {
+  if (!rowEl) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const list = Array.from(main.querySelectorAll<HTMLElement>(ROW_FOCUSABLE)).filter(
+    (el) => el.getClientRects().length > 0 && !el.closest("[inert]"),
+  );
+  if (list.length === 0) return;
+  const top = rowEl.getBoundingClientRect().top;
+  const next = list.find((el) => !rowEl.contains(el) && el.getBoundingClientRect().top >= top);
+  (next ?? list[0])?.focus({ preventScroll: true });
+}
+
 export interface ProcessRowViewProps {
   row: ProcessRow;
   /** 展开后的进程跟着当前标签排。 */
@@ -236,8 +253,12 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   }, [sample]);
 
   const markDone = (row: ProcessRow) => {
+    const rowEl = document.querySelector(`[data-key="${CSS.escape(row.key)}"]`);
+    const focusInRow = !!rowEl && rowEl.contains(document.activeElement);
     setQuit((q) => ({ ...q, done: new Set(q.done).add(row.key) }));
     setStuck((s) => { const next = new Set(s); next.delete(row.path); return next; });
+    // done 会让该行的退出按钮从 DOM 移除；若焦点在该行内，重渲染后回退到下一个可聚焦元素。
+    if (focusInRow) requestAnimationFrame(() => focusNextAfter(rowEl));
   };
   const setBusy = (path: string, on: boolean) => setQuit((q) => {
     const busy = new Set(q.busy);
