@@ -387,7 +387,7 @@ export function LargePage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
-            <DialogDescription>
+            <DialogDescription style={{ overflowWrap: "anywhere" }}>
               {t("fs.trash.body", {
                 path: trashTarget ? displayPath(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
