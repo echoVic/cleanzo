@@ -19,6 +19,7 @@ import { PhotoViewer } from "./PhotoViewer";
 import { PhotoClusterCard } from "./PhotoClusterCard";
 import { Collapse } from "../../ui/motion/Collapse";
 import { usePresence } from "../../ui/motion/presence";
+import { dur } from "../../ui/motion/motion";
 
 export function PhotosPage() {
   const t = useT();
@@ -47,6 +48,8 @@ export function PhotosPage() {
   clustersRef.current = clusters;
   scanningRef.current = scanning;
 
+  // 批量删除落定后的焦点兜底计时器（见 recoverFocusAfterTrash）。
+  const focusTimer = React.useRef<number | null>(null);
   // 离开页面：让旧流式循环停止消费并关闭 Channel，避免未处理 rejection。
   React.useEffect(() => {
     return () => {
@@ -55,6 +58,7 @@ export function PhotosPage() {
       chanRef.current = null;
       // 开发模式 StrictMode 卸载重挂：刚关掉的自动扫描要重新开始。
       autoStartedRef.current = false;
+      if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
     };
   }, []);
 
@@ -181,6 +185,21 @@ export function PhotosPage() {
     setTrashOpen(true);
   };
 
+  // 删除在 CleanPaths 返回后才真正落定：弹窗退出时 busy 已禁用触发按钮，Radix 的
+  // 关闭还焦只能回退到列表单元；若该单元随整簇收敛被离场卸载，焦点会掉到 body。
+  // 与 usePresence 的离场保留时长对齐，等节点真正移除后再兜底到扫描按钮；
+  // 焦点仍在有效元素上（如部分失败、簇仍存在）时不打扰。
+  const recoverFocusAfterTrash = React.useCallback(() => {
+    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
+    focusTimer.current = window.setTimeout(() => {
+      focusTimer.current = null;
+      const a = document.activeElement;
+      const lost = !a || a === document.body || !(a instanceof HTMLElement) || !a.isConnected
+        || !!a.closest('[inert],[aria-hidden="true"]');
+      if (lost) document.querySelector<HTMLElement>("[data-ph-scan-btn]")?.focus({ preventScroll: true });
+    }, Math.max(dur("layout"), dur("fade")) + 120);
+  }, []);
+
   const doTrashBatch = async () => {
     setTrashOpen(false);
     const paths = liveSel(selection);
@@ -201,6 +220,7 @@ export function PhotosPage() {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
       setBusy(false);
+      recoverFocusAfterTrash();
     }
   };
 
