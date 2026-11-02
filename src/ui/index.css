@@ -11,8 +11,8 @@
   --foreground: var(--fg);
   --card-foreground: var(--fg);
   --muted-background: var(--bg-subtle);
-  /* 与原生 .btn.primary 一致：底色 var(--accent)，hover 才加深。 */
-  --primary: var(--accent);
+  /* 与原生 .btn.primary 一致：文字承载面用 solid 色阶（白字满足 AA），hover 才加深。 */
+  --primary: var(--accent-solid);
   --primary-foreground: #ffffff;
   --destructive: var(--danger-solid);
   --destructive-foreground: #ffffff;
@@ -44,6 +44,8 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-strong: var(--accent-solid-strong);
   --color-accent-deep: var(--accent-deep);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ring: var(--accent-ring);

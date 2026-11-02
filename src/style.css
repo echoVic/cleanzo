@@ -25,6 +25,11 @@
   --accent-ring: rgba(12, 127, 63, 0.92);
   /* 压在 accent 实底上的前景色（主按钮文字、保留标签等） */
   --on-accent: #ffffff;
+  /* 承载文字的实心 accent 表面：--accent(#1FA355) 压白字仅 3.27:1，不满足正文 AA 4.5。
+     文字表面（主按钮、保留标签）统一用更深的 solid 色阶；--accent 仍留给进度条、
+     描边、图标等非文字图形元素。白字对比 4.86:1，hover 压深后 6.36:1。 */
+  --accent-solid: #0C7F3F;
+  --accent-solid-strong: #0A6E37;
 
   --danger: #d92d20;
   --danger-strong: #b42318;
@@ -78,6 +83,9 @@
     /* 0.6 与卡片合成后约 3.6:1，满足 WCAG 2.4.11 焦点外观 3:1 */
     --accent-ring: rgba(48, 209, 88, 0.60);
     --on-accent: #062812;
+    /* 深色下亮绿底配深绿字 #062812 约 7.8:1，solid 与 --accent 同色；hover 维持现状不压深 */
+    --accent-solid: #30D158;
+    --accent-solid-strong: #30D158;
 
     --danger: #e5484d;
     --danger-strong: #f0666a;
@@ -325,13 +333,13 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 
 .btn.ghost { border-color: var(--border); }
 .btn.primary {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
 }
-.btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+.btn.primary:hover:not(:disabled) { background: var(--accent-solid-strong); }
 @media (prefers-color-scheme: dark) {
   .btn.primary { color: #062812; }
-  .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+  .btn.primary:hover:not(:disabled) { background: var(--accent-solid-strong); }
 }
 
 .btn.danger { background: var(--danger-solid); color: #fff; }
@@ -1267,7 +1275,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   font-size: 10px;
   font-weight: 700;
   color: var(--on-accent);
-  background: var(--accent);
+  background: var(--accent-solid);
   padding: 2px 7px;
   border-radius: 999px;
 }
