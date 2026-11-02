@@ -213,6 +213,9 @@ function ListRow({ row, selection, busy, leaving, ...cb }: RowProps) {
   );
 }
 
+const ROW_FOCUSABLE =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 /** 行列表容器：直接复用 fs-list 的视觉。 */
 export function ListRows(props: Omit<RowProps, "row"> & { rows: ListRowData[] }) {
   const { rows, ...rest } = props;
@@ -226,6 +229,39 @@ export function ListRows(props: Omit<RowProps, "row"> & { rows: ListRowData[] })
   React.useLayoutEffect(() => { prevKeys.current = keys; });
   // 有行离场的这次更新不换位，补位交给收起。
   useFlip(box, keys, !removing);
+
+  // 破坏性操作（移到废纸篓等）后，对应行进入 leaving 并被设为 inert，
+  // 浏览器会把行内焦点甩给 body。在焦点真正丢失前把它移到下一行（或上一行）
+  // 的可聚焦元素，避免键盘用户丢位置。lastFocused 兜底 inert 已生效的情况。
+  const lastFocused = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const onFocus = (e: FocusEvent) => { lastFocused.current = e.target as HTMLElement; };
+    el.addEventListener("focusin", onFocus);
+    return () => el.removeEventListener("focusin", onFocus);
+  }, []);
+  React.useLayoutEffect(() => {
+    const leaving = shown.filter((p) => p.leaving).map((p) => p.key);
+    if (leaving.length === 0) return;
+    const leavingSet = new Set(leaving);
+    let ae = document.activeElement as HTMLElement | null;
+    if (!ae || ae === document.body) ae = lastFocused.current;
+    const rowEl = ae?.closest<HTMLElement>("[data-key]") ?? null;
+    if (!rowEl || !leavingSet.has(rowEl.dataset.key ?? "")) return;
+    const allRows = Array.from(box.current?.querySelectorAll<HTMLElement>("[data-key]") ?? []);
+    const idx = allRows.indexOf(rowEl);
+    const focusNext = (start: number, step: number) => {
+      for (let i = start; i >= 0 && i < allRows.length; i += step) {
+        const r = allRows[i];
+        if (!r || r.hasAttribute("inert")) continue;
+        const f = r.querySelector<HTMLElement>(ROW_FOCUSABLE);
+        if (f) { f.focus({ preventScroll: true }); return true; }
+      }
+      return false;
+    };
+    focusNext(idx + 1, 1) || focusNext(idx - 1, -1);
+  }, [shown]);
   return (
     <div className="fs-list" ref={box}>
       {shown.map(({ item, key, leaving }) => (
