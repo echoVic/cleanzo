@@ -129,7 +129,7 @@ func runTool(ctx context.Context, tool string, args []string, timeout time.Durat
 	cmd := quietCommand(exec.CommandContext(ctx, tool, args...))
 	cmd.Env = append(os.Environ(), toolPath(tool))
 	if filepath.Base(tool) == "brew" {
-		cmd.Env = append(cmd.Env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1")
+		cmd.Env = append(cmd.Env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1")
 	}
 	out, err := runToolCmd(cmd)
 	if ctx.Err() != nil {
