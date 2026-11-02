@@ -310,7 +310,7 @@ export function LargePage() {
         <div className="fs-progress" style={{ display: "flex" }}>
           <div className="spinner" />
           <div className="fs-progress-text">
-            <div className="fs-progress-current">{currentPath ? t("fs.scanning", { path: displayPath(currentPath) }) : t("fs.prep")}</div>
+            <div className="fs-progress-current" title={currentPath ? displayPath(currentPath) : undefined}>{currentPath ? t("fs.scanning", { path: displayPath(currentPath) }) : t("fs.prep")}</div>
             <div className="muted small">{t("large.count", { n: visible.length.toLocaleString() })}</div>
           </div>
         </div>
