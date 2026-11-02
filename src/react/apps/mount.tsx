@@ -6,16 +6,16 @@ import "../../ui/index.css";
 
 let root: Root | null = null;
 
-/** 垃圾页「残留」动作等外部入口请求切到指定 tab。 */
-export { requestAppsTab } from "./requests";
-
-/** 在原生视图的容器里挂载应用卸载页；root 复用，重进视图不整树卸载（结果保留、不重扫）。 */
-export function mountApps(el: HTMLElement) {
-  if (!root) root = createRoot(el);
+/** 第一次进入才建根，之后复用；离开时传 active=false 取消更新检查。 */
+export function mountApps(el: HTMLElement, active: boolean) {
+  if (!root) {
+    if (!active) return;
+    root = createRoot(el);
+  }
   const r = appsRequest();
   root.render(
     <React.StrictMode>
-      <AppsPage initialTab={r.tab} nonce={r.tabNonce} uninstallPath={r.uninstallPath} uninstallNonce={r.uninstallNonce} />
+      <AppsPage active={active} initialFilter={r.filter} nonce={r.filterNonce} uninstallPath={r.uninstallPath} uninstallNonce={r.uninstallNonce} />
     </React.StrictMode>,
   );
 }

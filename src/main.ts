@@ -3,7 +3,7 @@ import { initReactSkills, showReactSkills } from "./react/skills/entry";
 import { requestSettingsSection, setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
 import { showReactPhotos } from "./react/photos/entry";
-import { showReactApps, requestAppsUninstall } from "./react/apps/entry";
+import { showReactApps, requestAppsFilter, requestAppsUninstall } from "./react/apps/entry";
 import { showReactProcess, openReactProcess, setProcessHandlers } from "./react/process/entry";
 import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
@@ -98,9 +98,8 @@ function switchView(v: View, tool?: string) {
     showReactAITool(tool, names[tool] ?? tool);
   }
   if (v === "skills") showReactSkills();
-  if (v === "apps") showReactApps();
   if (v === "fullscan") showReactFullScan();
-  showReactProcess(v === "process");
+  showReactProcess(v === "process"); showReactApps(v === "apps");
   if (v === "settings") showReactSettings();
   if (v === "large") showReactLarge();
   if (v === "photos") showReactPhotos();
@@ -117,8 +116,8 @@ switchView("status");
 setGoCleanHandler(() => switchView("clean"));
 setCrashGoClean(() => switchView("clean"));
 setProcessHandlers({
-  goLeftovers: () => { switchView("apps"); showReactApps("leftovers"); },
-  goUninstall: (appPath) => { switchView("apps"); requestAppsUninstall(appPath); },
+  goLeftovers: () => { requestAppsFilter("leftovers"); switchView("apps"); },
+  goUninstall: (appPath) => { requestAppsUninstall(appPath); switchView("apps"); },
 });
 // 通知 / 菜单栏点进来：打开进程页的磁盘占用标签并定位那一行。
 if (window.mygo) events.growthFocus.on((key) => { openReactProcess("disk", key); switchView("process"); });
