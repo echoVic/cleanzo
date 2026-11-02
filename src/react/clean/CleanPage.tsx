@@ -161,7 +161,8 @@ export function CleanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  // 行菜单：开关、失焦、Escape、方向键导航（行为对齐旧 document 级监听）。
+  // 行菜单（ARIA Menu 模式）：打开即聚焦首项，菜单项不占 Tab 停留点；
+  // Tab/Shift+Tab 离焦收起且不抢焦，Escape 收起并还焦触发钮，↑/↓ 循环。
   const closeRowMenu = (focusTrigger: boolean) => {
     const trigger = focusTrigger
       ? document.querySelector<HTMLElement>(".junk-menu:not([data-leaving])")
@@ -186,11 +187,22 @@ export function CleanPage() {
     const onDocClick = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest(".junk-menu, [data-action='menu']")) setMenuID(null);
     };
+    // 焦点移出菜单（Tab/Shift+Tab/点击别处）即静默收起，不把焦点拽回触发钮。
+    // 例外：焦点移到触发钮（鼠标 mousedown）时不在此收起——开关交给随后的 click，
+    // 否则会先收起再被 toggle 重新打开。
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (next && menu?.contains(next)) return;
+      if (next instanceof Element && next.closest("[data-action='menu']")) return;
+      setMenuID(null);
+    };
     document.addEventListener("keydown", onKey);
     document.addEventListener("click", onDocClick);
+    menu?.addEventListener("focusout", onFocusOut);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("click", onDocClick);
+      menu?.removeEventListener("focusout", onFocusOut);
     };
   }, [menuID]);
 
@@ -576,6 +588,7 @@ export function CleanPage() {
               type="button"
               data-action="menu"
               aria-haspopup="menu"
+              aria-controls={`row-menu-${it.id}`}
               aria-label={t("junk.menu", { name: itemTitle(it, ruleName) })}
               title={t("junk.menu", { name: itemTitle(it, ruleName) })}
               aria-expanded={menuID === it.id}
@@ -604,11 +617,11 @@ export function CleanPage() {
             ) : <span className="junk-action-space" />}
           </div>
           {menuP.filter((m) => m.item === it.id).map((m) => (
-            <div key="menu" className="junk-menu" role="menu" data-leaving={m.leaving ? "" : undefined}>
-              <button type="button" role="menuitem" disabled={!it.paths?.length} onClick={() => reveal(it)}>
+            <div key="menu" id={`row-menu-${it.id}`} className="junk-menu" role="menu" data-leaving={m.leaving ? "" : undefined}>
+              <button type="button" role="menuitem" tabIndex={-1} disabled={!it.paths?.length} onClick={() => reveal(it)}>
                 {t("junk.reveal")}
               </button>
-              <button type="button" role="menuitem" disabled={ignoring} onClick={() => void ignore(it)}>
+              <button type="button" role="menuitem" tabIndex={-1} disabled={ignoring} onClick={() => void ignore(it)}>
                 {t("junk.ignore")}
               </button>
             </div>
