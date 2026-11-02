@@ -22,7 +22,7 @@
   --accent-strong: #0C7F3F;
   --accent-deep: #0C7F3F;
   --accent-soft: rgba(31, 163, 85, 0.10);
-  --accent-ring: rgba(31, 163, 85, 0.28);
+  --accent-ring: rgba(12, 127, 63, 0.92);
   /* 压在 accent 实底上的前景色（主按钮文字、保留标签等） */
   --on-accent: #ffffff;
 
