@@ -368,7 +368,7 @@ export function SkillsPage() {
             {upgradeTargets.map((u) => (
               <li key={u.path} className="flex items-center gap-2">
                 <b>{u.name}</b>
-                <span className="min-w-0 truncate text-muted">{u.origin.repo}{u.origin.path ? `/${u.origin.path}` : ""}</span>
+                <span className="min-w-0 truncate text-muted" title={`${u.origin.repo}${u.origin.path ? `/${u.origin.path}` : ""}`}>{u.origin.repo}{u.origin.path ? `/${u.origin.path}` : ""}</span>
                 {u.modified && <span className="tag warn shrink-0">{t("skills.tag.modified")}</span>}
               </li>
             ))}
@@ -438,7 +438,7 @@ function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasChe
         <Stat label={t("skills.stat.idle")} value={counts.idle} />
         <Stat label={t("skills.stat.issues")} value={counts.issues} />
         <Stat label={t("skills.stat.roots")} value={data.roots.length} />
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           {updatable > 0 && (
             <Button size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
               <ArrowUpToLine className="h-3.5 w-3.5" />{t("skills.updateAll", { n: updatable })}
@@ -507,7 +507,7 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
             ))}
             <span className="text-[11px] text-muted">{tools.map(toolName).join(" · ")}</span>
           </div>
-          {s.description && <div className="mt-0.5 truncate text-xs text-muted">{s.description}</div>}
+          {s.description && <div className="mt-0.5 truncate text-xs text-muted" title={s.description}>{s.description}</div>}
         </button>
         <span className="sk-last w-[170px] whitespace-nowrap text-right text-xs tabular-nums">{lastText(t, s, now)}</span>
         <span className="sk-size w-[70px] text-right text-xs tabular-nums text-muted">{human(s.size)}</span>
