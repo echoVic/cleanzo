@@ -565,7 +565,8 @@ async function appsHarness(overrides: Partial<typeof import("../src/react/apps/a
   const messages: string[] = [];
   const focus: string[] = [];
   const toastEl = { textContent: "", className: "", setAttribute() {} };
-  const button = { scrollIntoView() { focus.push("scroll"); }, focus() { focus.push("focus"); } };
+  // 和真的按钮一样：focus() 之后它就是 document.activeElement（实现会核对焦点真的落上去了）
+  const button = { scrollIntoView() { focus.push("scroll"); }, focus() { focus.push("focus"); (document as any).activeElement = button; } };
   document.querySelector = ((selector: string) => selector === "#toast" ? toastEl : selector.endsWith(".app-uninstall") ? button : null) as any;
   globalThis.window = { setTimeout: () => 0, clearTimeout() {} } as any;
   globalThis.requestAnimationFrame = (fn) => { const id = frames.size + 1; frames.set(id, fn); return id; };
@@ -648,7 +649,7 @@ async function appsHarness(overrides: Partial<typeof import("../src/react/apps/a
       for (const slot of slots) slot?.cleanup?.();
       Object.assign(appsApi, savedApi);
       globalThis.window = savedWindow;
-      document.querySelector = savedQuery;
+      document.querySelector = savedQuery; delete (document as any).activeElement;
       globalThis.requestAnimationFrame = savedRaf; globalThis.cancelAnimationFrame = savedCancel; globalThis.CSS = savedCSS;
       setPlatformForTest(undefined); setPref("system");
     },
@@ -705,7 +706,7 @@ test("展开只开一行，详情缓存复用；外部请求先展开和定位�
   try {
     await h.flush({ active: true, uninstallPath: b.id, uninstallNonce: 1 });
     expect(h.rows().filter((n) => n.props.open).map((n) => n.props.app.id)).toEqual([b.id]);
-    expect(h.dialog().open).toBe(false); h.frames(); expect(h.focus).toEqual(["scroll", "focus"]);
+    expect(h.dialog().open).toBe(false); h.frames(); expect(h.focus).toEqual(["focus", "scroll"]);
     expect(h.expanded(b.id).usage).toEqual({ app: 800, data: 0, cache: 200, cachePaths: ["/cache"] });
     h.rows()[0].props.onToggle(a.id); await h.flush();
     expect(h.rows().filter((n) => n.props.open).map((n) => n.props.app.id)).toEqual([a.id]);
