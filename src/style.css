@@ -1041,6 +1041,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .app-expand .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 @media (max-width: 760px) { .app-expand { grid-template-columns: 1fr; padding-left: 16px; } }
 .app-filters .cz-apps-seg { margin-right: auto; }
+.app-expand .mlink { color: var(--accent-strong); font-size: 12px; align-self: center; text-decoration: none; }
+.app-expand .mlink:hover { text-decoration: underline; }
 
 /* ---- 设置 ---- */
 .setting-block { padding: 6px 16px; margin-bottom: 0; }

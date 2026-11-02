@@ -246,12 +246,23 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   }, [active, loaded, filter, uninstallNonce, uninstallPath, apps]);
   React.useEffect(() => {
     if (!active || !focusRequest || openId !== focusRequest) return;
-    const raf = requestAnimationFrame(() => {
+    // 刚展开的行先以收起态（visibility: hidden）挂上、下一帧才展开，那时 focus() 会静默失败：
+    // 每帧试一次，直到焦点真的落到「卸载…」上（最多约 1 秒）。
+    let raf = 0;
+    let tries = 0;
+    const attempt = () => {
       const button = document.querySelector<HTMLButtonElement>(`[data-key="${CSS.escape(focusRequest)}"] .app-uninstall`);
-      button?.scrollIntoView({ block: "nearest" });
-      button?.focus();
-      setFocusRequest(null);
-    });
+      button?.focus({ preventScroll: true });
+      if (button && document.activeElement === button) {
+        button.scrollIntoView({ block: "nearest" });
+        setFocusRequest(null);
+      } else if (++tries < 60) {
+        raf = requestAnimationFrame(attempt);
+      } else {
+        setFocusRequest(null);
+      }
+    };
+    raf = requestAnimationFrame(attempt);
     return () => cancelAnimationFrame(raf);
   }, [active, focusRequest, openId]);
 
