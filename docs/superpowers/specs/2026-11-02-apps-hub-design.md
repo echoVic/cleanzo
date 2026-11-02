@@ -50,13 +50,13 @@
 |---|---|---|---|---|
 | 1 | App Store | `Contents/_MASReceipt/receipt` 存在 | `https://itunes.apple.com/lookup?bundleId=<bid>&entity=macSoftware&country=<系统地区>`，没结果时用 `country=us` 再查一次 | `CFBundleShortVersionString` |
 | 2 | Homebrew | 一次 `brew info --cask --installed --json=v2`，用 artifacts 里的 `app` 名对上 App 路径 | cask 的 `version` 字段，取逗号前的部分 | `CFBundleShortVersionString`（不用 brew 记的 installed） |
-| 3 | Sparkle | Info.plist 里有 `SUFeedURL` | appcast 里版本最高的 `item`（只看没有 `sparkle:channel` 的） | 有 `sparkle:version` 就和 `CFBundleVersion` 比，否则用 `sparkle:shortVersionString` 和 `CFBundleShortVersionString` 比 |
-| 4 | Electron | `Contents/Resources/app-update.yml` | `provider: github`：`api.github.com/repos/<owner>/<repo>/releases/latest` 的 `tag_name`；`generic`：`<url>/latest-mac.yml` 的 `version` | `CFBundleShortVersionString` |
+| 3 | Sparkle | Info.plist 里有 `SUFeedURL` | appcast 里版本最高的 `item`（只看没有 `sparkle:channel` 的，跳过 `sparkle:minimumSystemVersion` 高于本机系统的） | 有 `sparkle:version` 就和 `CFBundleVersion` 比，否则用 `sparkle:shortVersionString` 和 `CFBundleShortVersionString` 比 |
+| 4 | Electron | `Contents/Resources/app-update.yml` | `provider: github`：`https://github.com/<owner>/<repo>/releases/latest/download/<channel>-mac.yml` 的 `version`（不用 API：2026-11-02 这台机器上 `api.github.com` 未登录直接 403 限流，下载链接不受限）；`generic`：`<url>/<channel>-mac.yml` 的 `version`。`channel` 取 yml 里的 `channel`，默认 `latest` | `CFBundleShortVersionString` |
 | — | 都没有 | | | 状态 `unknown`，原因「没有更新源」 |
 
 **版本比较 `compareVersions(a, b)`**
 
-- 去掉开头的 `v`/`V`，丢掉第一个 `-`、`+` 或空格之后的内容，再按 `.` 拆成段。每一段都必须是纯数字，否则结果是「无法比较」。
+- 去掉开头的 `v`/`V`，丢掉第一个 `-`、`+`、`_`、`,`、`(` 或空格之后的内容，再按 `.` 拆成段。每一段都必须是纯数字，否则结果是「无法比较」。实测样例：QQ 的 cask 版本 `7.0.0_260812_01,9.9.33,…` 取 `7.0.0`；Arc 的 `1.171.0 (89666)` 取 `1.171.0`。比较复用 `junk.go` 现有的 `compareVersions([]int, []int)`。
 - 段数不同就在后面补 0。
 - 「无法比较」时状态是 `unknown`，原因「版本无法比较」，不当作有更新。
 
@@ -64,7 +64,7 @@
 
 - 只请求 `https://`。主机是 `localhost`、`0.0.0.0`、回环地址或私有地址的 URL，以及空 URL，直接判 `unknown`，原因「更新地址无效」，不发请求。
 - 每个请求超时 10 秒，响应体最多读 2 MB，超出算错误。同时最多 6 个请求。整次检查共用一个 ctx，页面一关就取消。
-- GitHub 403/429 记为 `error`，原因「GitHub 限流」。它和技能更新共用 `githubRequest`，User-Agent 也是同一个。
+- github.com 返回 403/429 记为 `error`，原因「GitHub 限流」。User-Agent 是 `Cleanzo`。重定向最多 5 次，每一跳都要过同样的 URL 校验。
 - 请求头里不带 Cookie，也不带 App 的任何本地数据。
 
 **类型和绑定**
@@ -82,7 +82,8 @@ type AppUpdate struct {
 }
 
 // 流式：每查完一个 App 发一条，最后发 ID 为 "__done" 的哨兵（和 ScanOrphans 同样写法）。
-func (Cleaner) CheckAppUpdates(ctx context.Context, ch *mygo.Channel[AppUpdate]) error
+// ids 是页面已有的 AppInfo.ID；Go 侧逐个校验是已安装的 App，只读 Info.plist，不重新量大小。
+func (Cleaner) CheckAppUpdates(ctx context.Context, ids []string, ch *mygo.Channel[AppUpdate]) error
 type AppUpgradeResult struct {
     ID      string `json:"id"`
     Done    bool   `json:"done"`    // brew：包里的版本已等于 Latest；open-*：已打开
@@ -163,7 +164,7 @@ func (Cleaner) CleanAppCache(path string) UninstallResult
 - `AppsList.tsx`：合并 `InstalledTab` 和 `LeftoversTab`，包含筛选条和展开状态。
 - `AppRowExpanded.tsx`，下面是 `VersionCell`、`UsageCell`、`RunCell`。
 - `updates.ts`：检查用的 Channel、进度和 `Map<id, AppUpdate>`。离开页面时关掉 Channel，Go 侧的 ctx 随之取消。
-- `UninstallDialog.tsx`：只留确认阶段。
+- `UninstallDialog.tsx`：不改；列表打开它时直接进入「详情」阶段（路径列表已在展开行里量好），Windows 的「已打开卸载器」阶段照旧。
 - `api.ts`：加上 `checkAppUpdates`、`upgradeApp`、`cleanAppCache`、`quitApp`、`forceQuitApp`。
 
 ## 七、测试与验证
