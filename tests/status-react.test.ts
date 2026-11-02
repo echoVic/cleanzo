@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, mock, test } from "bun:test";
 import { setPref, t } from "../src/i18n";
 import type { AppUsage, MachineSample, SSDInfo, StatusSample } from "../src/mygo";
 import {
@@ -558,4 +558,35 @@ test("macOS home numbers change in place; Windows keeps the rolling number", asy
     setPlatformForTest("win32");
     expect(renderToStaticMarkup(createElement(CpuCard, props))).toContain("<b>23</b>");
   } finally { setPlatformForTest(undefined); }
+});
+
+test("status bridge resolves handlers lazily: a handler injected after first mount works without re-entering", async () => {
+  await import("./setup-dom");
+  // 截获 mountStatus 实际收到的回调，避免挂载整棵 StatusPage（采样 Channel、API）。
+  const captured: { goClean?: () => void; goProcess?: (tab: string, key?: string) => void } = {};
+  mock.module("../src/react/status/mount", () => ({
+    mountStatus(
+      _el: HTMLElement,
+      _active: boolean,
+      goClean: () => void,
+      goProcess: (tab: string, focusKey?: string) => void,
+    ) {
+      captured.goClean = goClean;
+      captured.goProcess = goProcess;
+    },
+  }));
+  const entry = await import("../src/react/status/entry");
+  // setup-dom 的极简 document.querySelector 返回占位元素：showReactStatus 会照常调用 mountStatus。
+  // main.ts 的真实顺序：switchView("status") 先挂载，setGoCleanHandler 后注入。
+  entry.showReactStatus(true);
+  let cleaned = 0;
+  captured.goClean!(); // 注入前：默认空函数，不跳转也不抛错
+  expect(cleaned).toBe(0);
+  entry.setGoCleanHandler(() => { cleaned += 1; });
+  captured.goClean!(); // 首屏那次挂载拿到的回调必须读到最新 handler（回归点：无需重进视图）
+  expect(cleaned).toBe(1);
+  let seen: unknown = null;
+  entry.setGoProcessHandler((tab, key) => { seen = [tab, key]; });
+  captured.goProcess!("disk", "todesk");
+  expect(seen).toEqual(["disk", "todesk"]);
 });
