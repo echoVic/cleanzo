@@ -151,7 +151,7 @@ export function CpuCard({ cpu, cores, hist, t, m, split }: {
       <div className="mhcapt">{t("status.cpu.caption")}</div>
       <div className="mviz"><SparkSvg hist={hist} /></div>
       {!isWindows() && <div className="mloads num">
-        {loads.map(([label, v], i) => <div key={i}><span>{label}</span><b>{v}</b></div>)}
+        {loads.map(([label, v], i) => <div key={i}><span title={label}>{label}</span><b>{v}</b></div>)}
       </div>}
       {m && (m.perfCpu >= 0 || m.effCpu >= 0) && (
         <ul className="mlegend num mlegend-rows">

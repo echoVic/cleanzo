@@ -445,6 +445,8 @@ test("the macOS CPU card splits performance and efficiency cores", async () => {
     const split = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample(), split: { perf: 8, eff: 4 } }));
     for (const s of ["性能核（8）", "31%", "能效核（4）", "58%"]) expect(split).toContain(s);
     expect(split).toContain('class="mlegend num mlegend-rows"');
+    // 负载格窄到只能省略显示时，标签必须带全名 title（全产品截断约定）
+    expect(split).toContain('<span title="负载 1 分钟">负载 1 分钟</span>');
     // 核数还没读到：只写「性能核」「能效核」
     const counts = renderToStaticMarkup(createElement(CpuCard, { ...base, m: machineSample() }));
     expect(counts).toContain("性能核");
