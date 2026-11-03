@@ -15,8 +15,9 @@
   --card: #ffffff;
   --fg: #1a1c20;
   --muted: #5B6472;
-  --border: rgba(20, 24, 31, 0.09);
-  --border-strong: rgba(20, 24, 31, 0.16);
+  --border: rgba(20, 24, 31, 0.14);
+  /* 交互控件描边：需满足 WCAG 1.4.11 非文本对比度 ≥3:1；0.47 alpha 压白卡约 3.05:1 */
+  --border-strong: rgba(20, 24, 31, 0.47);
 
   --accent: #1FA355;
   /* #0C7F3F 压在 accent-soft+行 hover 灰层上仅 4.22:1（11px 徽标需 4.5）；
@@ -80,8 +81,9 @@
     --fg: #e9ebef;
     /* 行 hover(.055 白)+ 次级芯片(.045 白)叠层后仍要 ≥4.5：1，#9AA3AF 最差栈仅 4.48 */
     --muted: #A3ABB6;
-    --border: rgba(255, 255, 255, 0.085);
-    --border-strong: rgba(255, 255, 255, 0.16);
+    --border: rgba(255, 255, 255, 0.14);
+    /* 交互控件描边：暗色下 0.40 alpha 压卡底约 3.05:1，满足 WCAG 1.4.11 */
+    --border-strong: rgba(255, 255, 255, 0.40);
 
     --accent: #30D158;
     --accent-strong: #30D158;
@@ -344,7 +346,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 
-.btn.ghost { border-color: var(--border); }
+.btn.ghost { border-color: var(--border-strong); }
 .btn.primary {
   background: var(--accent-solid);
   color: var(--on-accent);
@@ -978,14 +980,14 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   width: 100%;
   padding: 9px 14px 9px 36px;
   border-radius: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--card);
   font-size: 13px;
   outline: none;
   transition: border-color 0.13s ease, box-shadow 0.13s ease;
 }
 .search::placeholder { color: var(--muted); }
-.search:hover:not(:disabled) { border-color: var(--border-strong); }
+.search:hover:not(:disabled) { border-color: color-mix(in srgb, var(--border-strong) 55%, var(--fg)); }
 .search:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -1051,14 +1053,14 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .select {
   appearance: none;
   background: var(--btn-bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 11px center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 6px 32px 6px 12px;
   font-size: 12.5px;
   cursor: pointer;
   transition: border-color 0.13s ease, box-shadow 0.13s ease, background-color 0.13s ease;
 }
-.select:hover:not(:disabled) { background-color: var(--hover); border-color: var(--border-strong); }
+.select:hover:not(:disabled) { background-color: var(--hover); border-color: color-mix(in srgb, var(--border-strong) 55%, var(--fg)); }
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
@@ -1504,8 +1506,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .settings-item-line > span { overflow-wrap: anywhere; min-width: 0; }
 .settings-custom-line { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .settings-folder-info { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
-.settings-folder-info input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); transition: border-color 0.13s ease, box-shadow 0.13s ease; }
-.settings-folder-info input:hover:not(:disabled) { border-color: var(--border-strong); }
+.settings-folder-info input { width: 100%; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-subtle); transition: border-color 0.13s ease, box-shadow 0.13s ease; }
+.settings-folder-info input:hover:not(:disabled) { border-color: color-mix(in srgb, var(--border-strong) 55%, var(--fg)); }
 .settings-folder-info input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .settings-folder-path { overflow-wrap: anywhere; }
 .settings-add { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
