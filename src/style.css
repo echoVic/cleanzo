@@ -985,6 +985,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   transition: border-color 0.13s ease, box-shadow 0.13s ease;
 }
 .search::placeholder { color: var(--muted); }
+.search:hover:not(:disabled) { border-color: var(--border-strong); }
 .search:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -1055,8 +1056,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   padding: 6px 32px 6px 12px;
   font-size: 12.5px;
   cursor: pointer;
-  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease, background-color 0.13s ease;
 }
+.select:hover:not(:disabled) { background-color: var(--hover); border-color: var(--border-strong); }
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
@@ -1502,7 +1504,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .settings-item-line > span { overflow-wrap: anywhere; min-width: 0; }
 .settings-custom-line { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .settings-folder-info { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
-.settings-folder-info input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); }
+.settings-folder-info input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-subtle); transition: border-color 0.13s ease, box-shadow 0.13s ease; }
+.settings-folder-info input:hover:not(:disabled) { border-color: var(--border-strong); }
+.settings-folder-info input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .settings-folder-path { overflow-wrap: anywhere; }
 .settings-add { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .settings-permission-info { display: flex; flex-direction: column; gap: 8px; }
