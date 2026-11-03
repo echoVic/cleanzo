@@ -100,7 +100,7 @@ export function PhotoClusterCard({
                 {it.keep && <span className="photo-keep-tag">{t("photos.keep")}</span>}
               </div>
               <figcaption className="photo-meta" title={it.path}>
-                <div className="photo-name">{baseName(it.path)}</div>
+                <div className="photo-name" title={baseName(it.path)}>{baseName(it.path)}</div>
                 <div className="photo-sub muted small">
                   {t("photos.sizeDim", { w: it.width, h: it.height })} · {human(it.size)}
                 </div>
