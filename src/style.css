@@ -345,13 +345,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .btn.ghost { border-color: var(--border); }
 .btn.primary {
   background: var(--accent-solid);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.primary:hover:not(:disabled) { background: var(--accent-solid-strong); }
-@media (prefers-color-scheme: dark) {
-  .btn.primary { color: #062812; }
-  .btn.primary:hover:not(:disabled) { background: var(--accent-solid-strong); }
-}
 
 .btn.danger { background: var(--danger-solid); color: #fff; }
 .btn.danger:hover:not(:disabled) { background: var(--danger-solid-strong); }
@@ -1184,7 +1180,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   overflow-wrap: anywhere;
 }
 @media (prefers-color-scheme: dark) {
-  .toast { color: #1a1c20; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+  /* color 沿用基础规则的 var(--bg)：暗色下 toast 为浅底，需深色字，--bg(#191b1f) 已满足 */
+  .toast { box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); transition: opacity var(--t-state) linear, transform var(--t-layout) var(--e-out); }
 .toast.err { background: var(--danger-solid); color: #fff; }
@@ -1869,7 +1866,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
   border-radius: 10px;
   border: none;
   background: var(--accent-deep);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -1878,7 +1875,6 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .ha-cta:hover { filter: brightness(1.08); }
 .ha-cta:active { transform: scale(0.98); }
 @media (prefers-color-scheme: dark) {
-  .ha-cta { color: #062812; }
   .ha-cta:hover { filter: brightness(1.12); }
 }
 .ha-safety { margin-top: 14px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
