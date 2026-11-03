@@ -601,7 +601,11 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   place-items: center;
   font-size: 18px;
   background: color-mix(in srgb, var(--c) 12%, transparent);
-  color: var(--c);
+  /* 图标色在浅底上加暗 40%，否则与同色 12% 透明底对比度仅 ~2.3:1 */
+  color: color-mix(in srgb, var(--c) 60%, #000);
+}
+@media (prefers-color-scheme: dark) {
+  .junk-icon { color: var(--c); }
 }
 .cat-name {
   font-size: 13.5px;
