@@ -752,7 +752,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   height: 24px;
   flex-shrink: 0;
   border: 2.5px solid var(--border);
-  border-top-color: var(--accent);
+  border-top-color: var(--accent-solid);
   border-radius: 50%;
   animation: spin 0.75s linear infinite;
 }
