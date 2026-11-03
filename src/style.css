@@ -1161,6 +1161,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   align-items: center;
   gap: 10px;
 }
+/* 持久错误面板与 err-inline/err toast 一致，用危险色承载失败语义（按钮自带配色不受影响） */
+.empty.err { color: var(--danger-text); }
 .empty.err .err-icon { font-size: 1.5rem; }
 .err-inline { color: var(--danger-text); font-size: 12.5px; padding: 6px 0; overflow-wrap: anywhere; }
 
