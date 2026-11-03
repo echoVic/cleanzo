@@ -142,6 +142,24 @@ export function iconColor(name: string): string {
   return PALETTE[h % PALETTE.length]!;
 }
 
+/** sRGB → 相对亮度（WCAG 2.1）。 */
+function relLum(c: number) {
+  const s = c / 255;
+  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+
+/** 首字母圆标的文字色：按底色亮度选白/近黑，保证正文 4.5:1 对比度。 */
+export function iconFg(bg: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(bg);
+  if (!m) return "#fff";
+  const r = parseInt(m[1]!.slice(0, 2), 16);
+  const g = parseInt(m[1]!.slice(2, 4), 16);
+  const b = parseInt(m[1]!.slice(4, 6), 16);
+  const L = 0.2126 * relLum(r) + 0.7152 * relLum(g) + 0.0722 * relLum(b);
+  // 白字需底色 L ≤ 0.183 才达 4.5:1；其余用近黑字。
+  return L <= 0.183 ? "#fff" : "#111";
+}
+
 /** 退出状态机：busy 正在退出中的 .app 路径；done 已退出行 key（置灰、去按钮）；gone 已从采样消失过的 key。 */
 export interface QuitState {
   busy: ReadonlySet<string>;

@@ -25,7 +25,7 @@ import { growthHint } from "../growth/hint";
 import type { ProcessTab } from "../process/format";
 import type { CrashDumpSummary } from "../../mygo";
 import {
-  GiB, MiB, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText, fmtTemp, iconColor,
+  GiB, MiB, displayText, emptyQuit, fmtDec, fmtMem, fmtPct, fmtRate, fmtRateText, fmtTemp, iconColor, iconFg,
   modelLabel, netSparkMax, pickAlerts, quitErrCode, refreshFrozenRows, sortApps, splitMem, ssdWarnings,
   syncQuitRows, trimSpark, uptimeParts,
   type QuitState, type SortBy,
@@ -766,7 +766,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
                     <div className={`st-row cz-fade-in${quitted ? " quitted" : ""}`} data-key={key}>
                       <div className="st-app">
                         <AppIcon path={r.path} box="st-ico">
-                          <div className="st-ico" style={{ background: iconColor(r.name) }}>{r.name.charAt(0).toUpperCase()}</div>
+                          <div className="st-ico" style={{ background: iconColor(r.name), color: iconFg(iconColor(r.name)) }}>{r.name.charAt(0).toUpperCase()}</div>
                         </AppIcon>
                         <span className="st-name" title={`${r.name} · ${t("status.apps.procs", { n: r.procs })}`}>{r.name}</span>
                         <span className="st-procs">{t("status.apps.procs", { n: r.procs })}</span>

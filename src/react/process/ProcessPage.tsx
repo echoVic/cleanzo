@@ -13,7 +13,7 @@ import { Collapse } from "../../ui/motion/Collapse";
 import { useIndicator } from "../../ui/motion/indicator";
 import { isWindows } from "../../platform";
 import { errText, human, toast } from "../../shared";
-import { emptyQuit, fmtMem, fmtPct, iconColor, quitErrCode, syncQuitRows, type QuitState } from "../status/format";
+import { emptyQuit, fmtMem, fmtPct, iconColor, iconFg, quitErrCode, syncQuitRows, type QuitState } from "../status/format";
 import { growthApi } from "../growth/api";
 import { GrowthPanel, type GrowthHandlers } from "../growth/GrowthPage";
 import { processApi } from "./api";
@@ -82,7 +82,7 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
     <>
       <span className="pr-chev" aria-hidden="true">{expandable ? (open ? "▾" : "›") : ""}</span>
       <AppIcon path={row.kind === "app" ? row.path : ""} box="st-ico">
-        <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name) } : undefined} aria-hidden="true">
+        <span className={`st-ico${row.kind === "app" ? "" : " pr-ico-sys"}`} style={row.kind === "app" ? { background: iconColor(row.name), color: iconFg(iconColor(row.name)) } : undefined} aria-hidden="true">
           {initial(row.name)}
         </span>
       </AppIcon>

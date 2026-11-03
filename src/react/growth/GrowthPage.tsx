@@ -9,7 +9,7 @@ import { useT } from "../../ui/i18n-react";
 import { errText, human, toast } from "../../shared";
 import { shortHome } from "../../platform";
 import { t as translate, currentLang } from "../../i18n";
-import { iconColor } from "../status/format";
+import { iconColor, iconFg } from "../status/format";
 import { growthApi } from "./api";
 import { fmtDelta, growthBanner, growthView, sortApps, sparkPath, uninstallGap, type GrowthSort } from "./format";
 import { AppIcon } from "../icons/AppIcon";
@@ -199,7 +199,7 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
                   <button type="button" className="cz-growth-row" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : a.key)}>
                     <span className="cz-growth-name">
                       <AppIcon path={a.appPath} box="cz-growth-icon">
-                        <span className="cz-growth-icon" style={{ background: iconColor(a.name) }} aria-hidden>
+                        <span className="cz-growth-icon" style={{ background: iconColor(a.name), color: iconFg(iconColor(a.name)) }} aria-hidden>
                           {(a.name.replace(/^\.+/, "") || a.name).charAt(0).toUpperCase()}
                         </span>
                       </AppIcon>
