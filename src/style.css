@@ -19,7 +19,9 @@
   --border-strong: rgba(20, 24, 31, 0.16);
 
   --accent: #1FA355;
-  --accent-strong: #0C7F3F;
+  /* #0C7F3F 压在 accent-soft+行 hover 灰层上仅 4.22:1（11px 徽标需 4.5）；
+     文字统一加深到 #0A6E37，最差底色仍有 5.27:1。 */
+  --accent-strong: #0A6E37;
   --accent-deep: #0C7F3F;
   --accent-soft: rgba(31, 163, 85, 0.10);
   --accent-ring: rgba(12, 127, 63, 0.92);
@@ -74,7 +76,8 @@
     --sidebar: rgba(28, 30, 35, 0.88);
     --card: #22252a;
     --fg: #e9ebef;
-    --muted: #9AA3AF;
+    /* 行 hover(.055 白)+ 次级芯片(.045 白)叠层后仍要 ≥4.5：1，#9AA3AF 最差栈仅 4.48 */
+    --muted: #A3ABB6;
     --border: rgba(255, 255, 255, 0.085);
     --border-strong: rgba(255, 255, 255, 0.16);
 
@@ -92,8 +95,8 @@
     --danger: #e5484d;
     --danger-strong: #f0666a;
     --danger-soft: rgba(229, 72, 77, 0.14);
-    /* 小号危险文字：比实色 danger 更亮，软底上约 4.8:1 */
-    --danger-text: #f97073;
+    /* 小号危险文字：行 hover 叠白后软红底变浅，需更亮的红，最差栈（含锁定区）≈4.9:1 */
+    --danger-text: #fc9295;
     /* 白字在 #d2383d 上 4.8:1、与卡片边界 3.2:1；hover 再压深 */
     --danger-solid: #d2383d;
     --danger-solid-strong: #ce353a;

@@ -88,7 +88,7 @@ export function PartRow(p: Props) {
               ? <Badge variant="warn">{t("ai.quitFirst")}</Badge>
               : <Badge variant={badge.variant}>{t(badge.label)}</Badge>}
           </div>
-          {desc && <div className="mt-px truncate text-[12px] text-muted">{desc}</div>}
+          {desc && <div className="mt-px truncate text-[12px] text-muted" title={desc}>{desc}</div>}
           {part.keep && (
             <div className="mt-[3px] text-[11.5px] text-muted">
               {t("ai.keepRelease", { v: part.keep.split("-")[0] ?? part.keep })}
