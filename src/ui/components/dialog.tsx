@@ -103,6 +103,7 @@ const DialogPanel = React.forwardRef<
         "cz-dialog focus:outline-none",
         className,
       )}
+      aria-modal="true"
       {...props}
     >
       {animateHeight ? <div ref={inner}>{children}</div> : children}
