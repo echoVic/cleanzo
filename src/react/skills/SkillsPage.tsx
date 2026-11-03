@@ -45,22 +45,28 @@ export function SkillsPage() {
   const [checkedAt, setCheckedAt] = React.useState(0);
   const [upgradeOpen, setUpgradeOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  /** 最近一次扫描是否失败：失败由 assertive toast 播报，避免完成里程碑重复播报旧数据。 */
-  const [scanError, setScanError] = React.useState(false);
+  /** 首次扫描失败：持久化内联错误面板（含重试）；已有数据时重扫失败仍走 toast 保留旧数据。 */
+  const [scanErr, setScanErr] = React.useState<string | null>(null);
 
   React.useEffect(() => { setNavBusy("skills", phase === "scanning" || busy || checking); }, [phase, busy, checking]);
 
   const scan = React.useCallback(async () => {
     setPhase("scanning");
-    setScanError(false);
+    setScanErr(null);
     try {
       const res = await skillsApi.scan();
       setData(res);
       setPicked((prev) => new Set([...prev].filter((n) => res.skills.some((s) => s.name === n))));
       setPhase("scanned");
     } catch (e) {
-      toast(t("skills.fail", { msg: errText(e) }), "err");
-      setScanError(true);
+      const msg = t("skills.fail", { msg: errText(e) });
+      if (data) {
+        // 已有数据的重扫失败：保留旧列表，用 assertive toast 承载错误原因。
+        toast(msg, "err");
+      } else {
+        // 首次扫描失败：内联持久错误面板 + 重试，与大文件/空间分析等扫描页一致。
+        setScanErr(msg);
+      }
       setPhase(data ? "scanned" : "idle");
     }
   }, [t, data]);
@@ -116,10 +122,10 @@ export function SkillsPage() {
     unobserved: skills.filter((s) => !s.observed).length,
     updates: skills.filter(updateMatches).length,
   };
-  // 读屏里程碑：只播报扫描进行 / 完成；失败由 assertive toast 承担，计数细节仅视觉呈现。
+  // 读屏里程碑：只播报扫描进行 / 完成；失败由内联错误面板（首次）或 assertive toast（重扫）承担。
   const liveMsg = phase === "scanning"
     ? t("skills.scanning")
-    : phase === "scanned" && data !== null && !scanError
+    : phase === "scanned" && data !== null && scanErr === null
       ? t("skills.scanned", { n: counts.all.toLocaleString() })
       : "";
   const plan = trashPlan(skills, picked);
@@ -227,7 +233,16 @@ export function SkillsPage() {
 
       <span className="sr-only" role="status">{liveMsg}</span>
 
-      {phase === "idle" && !data && (
+      {phase === "idle" && !data && scanErr !== null && (
+        <div className="empty err" role="alert">
+          <div className="err-icon">⚠</div>
+          <div>{scanErr}</div>
+          <button className="btn ghost retry-btn" type="button" onClick={() => void scan()}>
+            {t("btn.retry")}
+          </button>
+        </div>
+      )}
+      {phase === "idle" && !data && scanErr === null && (
         <IdleHero
           label={t("skills.idle.label")}
           value="--"
