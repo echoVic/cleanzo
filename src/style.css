@@ -50,10 +50,11 @@
   /* 角标等落在更亮底色（如 TabsList）上的小号警告文字，比 --warn-text 深一阶以保持 AA 4.5 */
   --warn-text-deep: #855200;
 
-  /* 系统状态页语义 Token（亮色） */
+  /* 系统状态页语义 Token（亮色）。warn/critical 仅用于 callout 三角图标（WCAG 1.4.11 图形 ≥3:1）：
+     iOS 亮色 #ff9500/#ff3b30 压在 10% 同色淡底上仅 1.87/2.85:1，改用更深的 --warn/--danger 色阶（4.26/3.88:1） */
   --status-ok: #34c759;
-  --status-warn: #ff9500;
-  --status-critical: #ff3b30;
+  --status-warn: #b45309;
+  --status-critical: #d92d20;
   --seg-app: #3b82f6;
   --seg-wired: #8b5cf6;
   --seg-compressed: #D97706;
