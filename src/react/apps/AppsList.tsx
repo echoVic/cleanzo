@@ -472,7 +472,7 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
           {growthEnabled && <option value="growth">{t("apps.sortGrowth")}</option>}
         </select>
       </div>
-      {!win && filter === "updates" && !progress.finished && <p className="muted small" role="status">{t("apps.checking", { done: progress.done, total: progress.total })}</p>}
+      {!win && filter === "updates" && !progress.finished && !loading && !loadError && shownRows.length > 0 && <p className="muted small" role="status">{t("apps.checking", { done: progress.done, total: progress.total })}</p>}
       {checkError && <div className="empty err" role="alert">{t("apps.reason.network")}: {checkError}</div>}
       {loading && <div className="app-list">{Array.from({ length: 8 }, (_, i) => <div className="skeleton card" key={i} />)}</div>}
       {!loading && loadError && <div className="empty err" role="alert"><div className="err-icon">⚠</div><div>{t("apps.loadFail", { msg: loadError })}</div><button className="btn ghost retry-btn" type="button" onClick={() => void loadApps()}>{t("btn.retry")}</button></div>}

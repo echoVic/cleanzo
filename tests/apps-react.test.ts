@@ -411,6 +411,38 @@ test("收起的行：有新版本显示版本标签和独立的「更新」按�
   setPref("system");
 });
 
+test("运行中的 brew 更新在按钮外提供退出提示；其他禁用原因不提示退出", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AppRow } = await import("../src/react/apps/AppRow");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  const a = app({ name: "WeChat", path: "/Applications/WeChat.app", running: true });
+  const u = upd({ id: a.id, source: "brew", action: "brew", state: "update", current: "4.1.15", latest: "4.2.0.15" });
+  const base = { app: a, update: u, growthTag: null, open: false, busy: null, brewBusy: false, onToggle() {}, onUpgrade() {} };
+  try {
+    setPlatformForTest("darwin");
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      const html = renderToStaticMarkup(createElement(AppRow, base));
+      expect(html).toMatch(new RegExp(`<span[^>]*title="${t("apps.hint.quitFirst")}"[^>]*><button[^>]*app-upgrade[^>]*disabled=""[^>]*>`));
+      expect(html).not.toMatch(/<button[^>]*title=/);
+      const available = renderToStaticMarkup(createElement(AppRow, { ...base, app: { ...a, running: false } }));
+      expect(available).not.toContain('disabled=""');
+      expect(available).not.toContain('title="' + t("apps.hint.quitFirst") + '"');
+      const otherSource = renderToStaticMarkup(createElement(AppRow, { ...base, update: { ...u, source: "sparkle", action: "open-app" } }));
+      expect(otherSource).not.toContain('disabled=""');
+      expect(otherSource).not.toContain('title="' + t("apps.hint.quitFirst") + '"');
+      for (const state of [{ busy: "upgrade" as const }, { busy: "cache" as const }, { brewBusy: true }]) {
+        const blocked = renderToStaticMarkup(createElement(AppRow, { ...base, app: { ...a, running: false }, ...state }));
+        expect(blocked).toContain('disabled=""');
+        expect(blocked).not.toContain('title="' + t("apps.hint.quitFirst") + '"');
+      }
+    }
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
 test("展开的三栏：版本原因、缓存可清、运行中禁用清理、卸载按钮", async () => {
   await import("./setup-dom");
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -674,6 +706,34 @@ function updateStream() {
   };
   return { ch, done, emit(u: AppUpdate) { queue.push(u); wake?.(); }, finish() { queue.push(upd({ id: "__done" })); resolve(); wake?.(); }, fail(e: unknown) { reject(e); }, get closeCount() { return closeCount; } };
 }
+
+test("更新筛选空列表只显示一次进度；收到更新行后进度移到列表上方", async () => {
+  const a = app({ name: "Arc", path: "/Applications/Arc.app" });
+  const b = app({ name: "B", path: "/Applications/B.app" });
+  const stream = updateStream();
+  const h = await appsHarness({ listApps: async () => [a, b], startUpdateCheck: () => stream as any });
+  const progressNodes = () => h.nodes().filter((n) => typeof n.props.children === "string" && n.props.children.startsWith("还在检查（"));
+  try {
+    await h.flush({ active: true, filter: "updates" });
+    expect(h.rows()).toHaveLength(0);
+    expect(progressNodes()).toHaveLength(1);
+    expect(progressNodes()[0].props.className).toBe("empty");
+    expect(progressNodes()[0].props.children).toBe("还在检查（0/2）");
+    stream.emit(upd({ id: b.id, state: "current" }));
+    await h.flush();
+    expect(progressNodes()).toHaveLength(1);
+    expect(progressNodes()[0].props.children).toBe("还在检查（1/2）");
+    stream.emit(upd({ id: a.id, state: "update", source: "brew", action: "brew" }));
+    await h.flush();
+    expect(h.rows()).toHaveLength(1);
+    expect(progressNodes()).toHaveLength(1);
+    expect(progressNodes()[0].props.role).toBe("status");
+    expect(progressNodes()[0].props.children).toBe("还在检查（2/2）");
+    stream.finish();
+    await h.flush();
+    expect(progressNodes()).toHaveLength(0);
+  } finally { h.dispose(); }
+});
 
 test("页面检查实际接线：懒加载、流式计数、离开取消、返回保留结果、查完不重查、手动清空重查", async () => {
   const a = app({ name: "Arc", path: "/Applications/Arc.app" });

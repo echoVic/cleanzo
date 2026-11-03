@@ -88,6 +88,7 @@ type appcastItem struct {
 	MinOS     string             `xml:"http://www.andymatuschak.org/xml-namespaces/sparkle minimumSystemVersion"`
 	Channel   string             `xml:"http://www.andymatuschak.org/xml-namespaces/sparkle channel"`
 	Notes     string             `xml:"http://www.andymatuschak.org/xml-namespaces/sparkle releaseNotesLink"`
+	FullNotes string             `xml:"http://www.andymatuschak.org/xml-namespaces/sparkle fullReleaseNotesLink"`
 	Enclosure []appcastEnclosure `xml:"enclosure"`
 }
 
@@ -131,7 +132,11 @@ func parseAppcast(data []byte, osVersion string) (version, short, notes string, 
 			continue
 		}
 		best, version, short, notes = key, v, s, ""
-		if n := strings.TrimSpace(it.Notes); feedURLOK(n) {
+		n := strings.TrimSpace(it.Notes)
+		if !feedURLOK(n) {
+			n = strings.TrimSpace(it.FullNotes)
+		}
+		if feedURLOK(n) {
 			notes = n
 		}
 	}

@@ -52,7 +52,7 @@ export function AppRow({ app: a, update, growthTag, open, busy, brewBusy, onTogg
           </AppIcon>
           <div className="app-main">
             <div className="app-name">
-              {a.name}
+              <span className="app-label" title={a.name}>{a.name}</span>
               {tags.slice(0, 2)}
               {!ver && a.version && <span className="ver muted"> {a.version}</span>}
             </div>
@@ -65,9 +65,11 @@ export function AppRow({ app: a, update, growthTag, open, busy, brewBusy, onTogg
           <ChevronRight className="app-chev h-4 w-4" aria-hidden="true" />
         </button>
         {canUpgrade && (
-          <Button size="sm" className="app-upgrade" disabled={upgradeBlocked} onClick={() => onUpgrade(a.id)}>
-            {busy === "upgrade" ? t("apps.updating") : t("apps.update")}
-          </Button>
+          <span className="app-upgrade-wrap" title={update?.action === "brew" && a.running ? t("apps.hint.quitFirst") : undefined}>
+            <Button size="sm" className="app-upgrade" disabled={upgradeBlocked} onClick={() => onUpgrade(a.id)}>
+              {busy === "upgrade" ? t("apps.updating") : t("apps.update")}
+            </Button>
+          </span>
         )}
       </div>
       {children}

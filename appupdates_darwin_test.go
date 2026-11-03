@@ -64,6 +64,27 @@ func TestParseAppcast(t *testing.T) {
 	}
 }
 
+func TestParseAppcastReleaseNotesFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, links, want string
+	}{
+		{"full only", `<sparkle:fullReleaseNotesLink> https://github.com/manaflow-ai/cmux/releases/tag/v0.65.2.2 </sparkle:fullReleaseNotesLink>`, "https://github.com/manaflow-ai/cmux/releases/tag/v0.65.2.2"},
+		{"prefer release", `<sparkle:releaseNotesLink>https://example.com/notes</sparkle:releaseNotesLink><sparkle:fullReleaseNotesLink>https://example.com/full</sparkle:fullReleaseNotesLink>`, "https://example.com/notes"},
+		{"empty release falls back", `<sparkle:releaseNotesLink> </sparkle:releaseNotesLink><sparkle:fullReleaseNotesLink>https://example.com/full</sparkle:fullReleaseNotesLink>`, "https://example.com/full"},
+		{"invalid release falls back", `<sparkle:releaseNotesLink>http://example.com/notes</sparkle:releaseNotesLink><sparkle:fullReleaseNotesLink>https://example.com/full</sparkle:fullReleaseNotesLink>`, "https://example.com/full"},
+		{"http full rejected", `<sparkle:fullReleaseNotesLink>http://example.com/full</sparkle:fullReleaseNotesLink>`, ""},
+		{"private full rejected", `<sparkle:fullReleaseNotesLink>https://127.0.0.1/full</sparkle:fullReleaseNotesLink>`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := `<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:version>113</sparkle:version><sparkle:shortVersionString>0.65.2</sparkle:shortVersionString>` + tc.links + `</item></channel></rss>`
+			v, short, notes, ok := parseAppcast([]byte(feed), "26.6.2")
+			if !ok || v != "113" || short != "0.65.2" || notes != tc.want {
+				t.Fatalf("got %q %q %q %v, want 113 / 0.65.2 / %q / true", v, short, notes, ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseYAMLScalars(t *testing.T) {
 	m := parseYAMLScalars([]byte("owner: Molunerfinn\nrepo: PicGo\nprovider: github\nupdaterCacheDirName: picgo-updater\n"))
 	if m["owner"] != "Molunerfinn" || m["repo"] != "PicGo" || m["provider"] != "github" {
