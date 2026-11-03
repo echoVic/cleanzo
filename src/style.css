@@ -1181,6 +1181,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--t-state) linear, transform var(--t-state) var(--e-in);
+  /* left:50% 定位的 shrink-to-fit 可用宽只有半屏，显式 max-content 让长 toast 用满 max-width */
+  width: max-content;
   max-width: min(560px, 82vw);
   line-height: 1.45;
   text-align: center;
