@@ -327,6 +327,11 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   }
   const tags = growthTags(growth);
   const diag = tab === "disk" ? null : diagnose(sample, cpuHist);
+  const busyCount = quit.busy.size + (quitTarget !== null ? 1 : 0) + (forceTarget !== null ? 1 : 0);
+  // 读屏里程碑：播报监控状态 + 当前标签；退出/诊断等细节由 toast 和页面自身结构承担。
+  const liveMsg = sample
+    ? (running ? "" : t("process.paused")) + (tab === "cpu" ? t("process.tab.cpu") : tab === "mem" ? t("process.tab.mem") : t("process.tab.disk"))
+    : "";
   const goDisk = (key: string) => {
     setFocus((f) => ({ key, nonce: f.nonce + 1 }));
     setTab("disk");
@@ -397,6 +402,8 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
           </TabsRoot>
         </div>
       </header>
+
+      <span className="sr-only" role="status">{liveMsg}</span>
 
       {tab === "disk" ? (
         <GrowthPanel active={active} visit={visit} focusKey={focus.key} focusNonce={focus.nonce} goLeftovers={goLeftovers} goUninstall={goUninstall} />
