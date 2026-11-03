@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestScanAITools(t *testing.T) {
@@ -94,8 +95,13 @@ func TestListAITools(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := (Cleaner{}).ListAITools()
-	if len(list) != 2 || list[0].ID != "claude" || list[0].Installed || list[1].ID != "codex" || !list[1].Installed || list[1].Name != "Codex" {
+	if len(list) != 3 || list[0].ID != "claude" || list[0].Installed || list[1].ID != "codex" || !list[1].Installed || list[1].Name != "Codex" || list[2].ID != "trae" || list[2].Installed {
 		t.Fatalf("list = %+v", list)
+	}
+	// TRAE counts as installed with only its IDE.
+	mustMkdir(t, filepath.Join(home, "Library/Application Support/Trae CN"))
+	if list := (Cleaner{}).ListAITools(); !list[2].Installed {
+		t.Fatalf("trae = %+v", list[2])
 	}
 }
 
@@ -383,6 +389,10 @@ func TestAIRunningMatches(t *testing.T) {
 		"/opt/homebrew/bin/codex exec hi\n":                                                                          {"codex"},
 		"/Applications/Obsidian.app/Contents/MacOS/Obsidian\n":                                                       {},
 		"vim notes-about-claude.txt\n":                                                                               {},
+		"/Users/me/.local/share/traex/current/traex\n":                                                               {"trae"},
+		"/Applications/Trae CN.app/Contents/Frameworks/Trae CN Helper.app/Contents/MacOS/Trae CN Helper\n":           {"trae:ide"},
+		"/Applications/Trae.app/Contents/MacOS/Electron\n":                                                           {"trae:ide"},
+		"vim trae-notes.md\n":                                                                                        {},
 	}
 	for ps, want := range cases {
 		aiProcesses = func() (string, error) { return ps, nil }
@@ -396,5 +406,187 @@ func TestAIRunningMatches(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("%q: running = %v, want %v", ps, got, want)
 		}
+	}
+}
+
+// traeFixture lays out TRAE's CLI and IDE folders in a test home.
+func traeFixture(t *testing.T) (home string, project string) {
+	t.Helper()
+	home = aiFixture(t)
+	now := aiNow()
+	old, recent := now.Add(-40*24*time.Hour), now.Add(-2*time.Hour)
+	write := func(rel, body string, size int, mod time.Time) {
+		t.Helper()
+		p := filepath.Join(home, rel)
+		mustMkdir(t, filepath.Dir(p))
+		data := []byte(body)
+		if len(data) < size {
+			data = append(data, make([]byte, size-len(data))...)
+		}
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project = filepath.Join(home, "work", "app")
+	meta := func(cwd string) string { return `{"type":"session_meta","payload":{"cwd":"` + cwd + `"}}` + "\n" }
+	// CLI
+	day := ".trae/cli/sessions/2026/09/06/"
+	write(day+"rollout-a.jsonl", meta(project), 8192, old)
+	write(day+"rollout-a.artifacts/tool-results/r.txt", "", 4096, old)
+	write(".trae/cli/sessions/2026/10/16/rollout-b.jsonl", meta(project), 8192, recent)
+	write(".trae/cli/sessions/2026/09/07/rollout-c.jsonl", meta("/nowhere/gone"), 8192, old)
+	write(".trae/cli/log/tui.log", "", 4096, old)
+	write(".trae/cli/auth.json", "{}", 100, old)
+	write(".trae/traecli.toml", "", 100, old)
+	// IDE
+	ide := "Library/Application Support/Trae CN/"
+	write(ide+"ModularData/ai-agent/database.db", "", 16384, old)
+	write(ide+"ModularData/ai-agent/database.db-wal", "", 4096, recent)
+	write(ide+"ModularData/ai-agent/snapshot/s1/f", "", 4096, old)
+	write(ide+"logs/20261001T100000/main.log", "", 8192, old)
+	write(ide+"logs/20261016T100000/main.log", "", 4096, recent)
+	write(ide+"CachedData/abc/chrome/js/x.code", "", 8192, old)
+	write(ide+"Partitions/trae-webview/Cache/Cache_Data/data_0", "", 8192, old)
+	write(ide+"Partitions/trae-webview/Cookies", "", 4096, old)
+	write(ide+"User/settings.json", "{}", 100, old)
+	write(ide+"Cookies", "", 4096, old)
+	write(".trae-cn/extensions/e/package.json", "{}", 100, old)
+	write(".trae-cn/trae-browser-screenshots/a.png", "", 4096, old)
+	write("Library/Caches/Trae CN/update.zip", "", 8192, old)
+	return home, project
+}
+
+func TestScanAIToolTRAE(t *testing.T) {
+	home, project := traeFixture(t)
+	res, err := (Cleaner{}).ScanAITool(context.Background(), "trae")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trae := res.Tools[0]
+	if !trae.Installed || trae.Running || trae.Size == 0 {
+		t.Fatalf("trae = %+v", trae)
+	}
+	// CLI sessions are grouped by project; artifacts count with their session.
+	sessions := aiPart_(t, trae, "trae.sessions")
+	var app, gone AIGroup
+	for _, g := range sessions.Groups {
+		switch g.Key {
+		case project:
+			app = g
+		case "/nowhere/gone":
+			gone = g
+		}
+	}
+	if app.Count != 2 || app.Recent != 1 || app.Gone || app.Size < 8192*2+4096 {
+		t.Fatalf("app group = %+v", app)
+	}
+	if !gone.Gone || gone.Count != 1 {
+		t.Fatalf("gone group = %+v", gone)
+	}
+	// IDE parts come from its own folders.
+	ide := filepath.Join(home, "Library/Application Support/Trae CN")
+	chats := aiPart_(t, trae, "trae.ide.chats")
+	if chats.Level != aiSensitive || chats.Files != 2 || chats.Path != filepath.Join(ide, "ModularData/ai-agent/database.db*") {
+		t.Fatalf("chats = %+v", chats)
+	}
+	if p := aiPart_(t, trae, "trae.ide.logs"); p.Level != aiSafe || p.Path != filepath.Join(ide, "logs") {
+		t.Fatalf("logs = %+v", p)
+	}
+	if p := aiPart_(t, trae, "trae.ide.update"); p.Level != aiSafe || p.Path != filepath.Join(home, "Library/Caches/Trae CN/update.zip") {
+		t.Fatalf("update = %+v", p)
+	}
+	// The webview cache is measured on its own; the partition reports the rest.
+	if cache, data := aiPart_(t, trae, "trae.ide.webCache"), aiPart_(t, trae, "trae.ide.webData"); cache.Files != 1 || data.Files != 1 || data.Level != aiProtected {
+		t.Fatalf("webCache = %+v, webData = %+v", cache, data)
+	}
+	for _, id := range []string{"trae.auth", "trae.config", "trae.ide.user", "trae.ide.extensions"} {
+		if p := aiPart_(t, trae, id); p.Level != aiProtected {
+			t.Fatalf("%s = %+v", id, p)
+		}
+	}
+	// What the IDE folder holds besides the known parts is one unknown item.
+	if p := aiPart_(t, trae, "unknown:ide"); p.Level != aiUnknown || p.Files != 1 {
+		t.Fatalf("unknown ide = %+v", p)
+	}
+}
+
+func TestCleanAIToolsTRAE(t *testing.T) {
+	home, project := traeFixture(t)
+	ide := filepath.Join(home, "Library/Application Support/Trae CN")
+	res, _ := (Cleaner{}).CleanAITools(context.Background(), []AISelection{
+		{Tool: "trae", Part: "trae.sessions", Groups: []string{project}},
+		{Tool: "trae", Part: "trae.ide.logs"},
+		{Tool: "trae", Part: "trae.ide.update"},
+	})
+	sessions, logs, update := res.Parts[0], res.Parts[1], res.Parts[2]
+	// The old session goes with its artifacts; today's stays.
+	if sessions.Skipped != "" || sessions.Kept != 1 || sessions.Moved != 2 {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if fileExists(filepath.Join(home, ".trae/cli/sessions/2026/09/06/rollout-a.jsonl")) || fileExists(filepath.Join(home, ".trae/cli/sessions/2026/09/06/rollout-a.artifacts")) {
+		t.Fatal("old session should be in the Trash")
+	}
+	if !fileExists(filepath.Join(home, ".trae/cli/sessions/2026/10/16/rollout-b.jsonl")) || !fileExists(filepath.Join(home, ".trae/cli/sessions/2026/09/07/rollout-c.jsonl")) {
+		t.Fatal("recent and unselected sessions should stay")
+	}
+	// IDE logs go run by run; the folder stays.
+	if logs.Skipped != "" || logs.Moved != 2 || !fileExists(filepath.Join(ide, "logs")) || fileExists(filepath.Join(ide, "logs/20261001T100000")) {
+		t.Fatalf("logs = %+v", logs)
+	}
+	if update.Moved != 1 || fileExists(filepath.Join(home, "Library/Caches/Trae CN/update.zip")) {
+		t.Fatalf("update = %+v", update)
+	}
+	// A cwd outside the sessions folder is not a path to clean.
+	bad, _ := (Cleaner{}).CleanAITools(context.Background(), []AISelection{{Tool: "trae", Part: "trae.sessions", Groups: []string{"relative/dir"}}})
+	if bad.Parts[0].Skipped != "blocked" || !fileExists(project) {
+		t.Fatalf("bad = %+v", bad.Parts[0])
+	}
+}
+
+func TestCleanAIToolsTRAEApps(t *testing.T) {
+	home, _ := traeFixture(t)
+	ide := filepath.Join(home, "Library/Application Support/Trae CN")
+	// The IDE runs, the CLI does not.
+	aiProcesses = func() (string, error) {
+		return "/Applications/Trae CN.app/Contents/MacOS/Electron\n", nil
+	}
+	res, _ := (Cleaner{}).ScanAITool(context.Background(), "trae")
+	trae := res.Tools[0]
+	if !trae.Running || !slices.Equal(trae.RunningApps, []string{"ide"}) {
+		t.Fatalf("trae = %+v", trae)
+	}
+	if !aiPart_(t, trae, "trae.ide.cachedData").Running || aiPart_(t, trae, "trae.logs").Running {
+		t.Fatal("only the IDE's parts should be marked running")
+	}
+	clean, _ := (Cleaner{}).CleanAITools(context.Background(), []AISelection{
+		{Tool: "trae", Part: "trae.ide.cachedData"},
+		{Tool: "trae", Part: "trae.logs"},
+	})
+	if clean.Parts[0].Skipped != "running" || !fileExists(filepath.Join(ide, "CachedData")) {
+		t.Fatalf("cachedData = %+v", clean.Parts[0])
+	}
+	if clean.Parts[1].Skipped != "" || clean.Parts[1].Moved != 1 {
+		t.Fatalf("cli logs = %+v", clean.Parts[1])
+	}
+}
+
+func TestMeasureAICountsHardLinksOnce(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "a", "traex")
+	mustMkdir(t, filepath.Dir(bin))
+	if err := os.WriteFile(bin, make([]byte, 64*1024), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"apply_patch", "applypatch"} {
+		if err := os.Link(bin, filepath.Join(dir, "a", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	size, files, _ := measureAI(context.Background(), dir, nil)
+	if files != 3 || size > 64*1024 {
+		t.Fatalf("size = %d, files = %d", size, files)
 	}
 }

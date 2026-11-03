@@ -1,5 +1,5 @@
 import * as React from "react";
-import { RefreshCw, ShieldCheck } from "lucide-react";
+import { ChevronRight, RefreshCw, ShieldCheck } from "lucide-react";
 import type { AIPart, AITool } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import { Card } from "../../ui/components/card";
@@ -11,7 +11,7 @@ import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { errText, toast } from "../../shared";
 import { human } from "./format";
-import { offered, groupSelectable, type WindowDays } from "./types";
+import { offered, groupSelectable, blockedByRun, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
 import { aiApi } from "./api";
 import { codexSize, crashDumps, goCleanForCrashDumps } from "../list/crash-dumps";
@@ -67,7 +67,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const cleanable = React.useMemo(() => {
     if (!tool) return 0;
     return visible
-      .filter((p) => !(tool.running && !p.runSafe))
+      .filter((p) => !blockedByRun(p))
       .reduce((n, p) => {
         if (p.groups.length === 0) return n + p.size;
         return n + p.groups.filter((g) => groupSelectable(p, g, windowDays, scannedAt)).reduce((m, g) => m + g.size, 0);
@@ -94,7 +94,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       const ng = new Map<string, Set<string>>();
       const now = res.scannedAt;
       for (const p of s.parts) {
-        if (p.level !== "safe" || (s.running && !p.runSafe)) continue;
+        if (p.level !== "safe" || blockedByRun(p)) continue;
         if (p.groups.length > 0) {
           // 分组部件（如旧版本）：没有可选分组时不勾，避免勾上一个 0 B 的空壳。
           const keys = p.groups.filter((g) => groupSelectable(p, g, 30, now)).map((g) => g.key);
@@ -115,7 +115,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   }, [toolId]);
 
   // 不自动扫描；进入页面保持 idle。
-  const selectable = (p: AIPart) => p.size > 0 && !(tool?.running && !p.runSafe);
+  const selectable = (p: AIPart) => p.size > 0 && !blockedByRun(p);
 
   const togglePart = (p: AIPart, on: boolean) => {
     if (!selectable(p)) return;
@@ -248,7 +248,9 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
           safetyText={t("ai.idle.desc")}
           chips={toolId === "codex"
             ? [t("ai.chip.oldVersions"), t("ai.chip.sessions"), t("ai.chip.cache")]
-            : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]}
+            : toolId === "trae"
+              ? [t("ai.chip.sessions"), t("ai.chip.cache")]
+              : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]}
         />
       )}
       {phase === "scanning" && (
@@ -281,8 +283,9 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
 
           {tool.running && (
             <div className="mb-4 rounded-[10px] px-4 py-2.5 text-[12px] leading-relaxed text-warning-text"
-                 style={{ background: "var(--warning-soft)" }}>
-              {t("ai.running", { name: toolName })}
+                 style={{ background: "var(--warning-soft)" }}
+                 role="status">
+              {t("ai.running", { name: runningName(tool, toolName, t) })}
             </div>
           )}
 
@@ -319,7 +322,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                     <ShieldCheck className="h-4 w-4" />
                     {t("ai.locked", { n: lockedParts.length, size: human(lockedSize) })}
                   </span>
-                  <RefreshCw className={cn("h-4 w-4 rotate-90 transition-transform", showLocked && "rotate-[270deg]")} />
+                  <ChevronRight className={cn("h-4 w-4 transition-transform", showLocked && "rotate-90")} />
                 </button>
                 {showLocked && <div className="border-t border-border bg-muted-background/50">
                   {lockedParts.map((p) => (
@@ -361,6 +364,13 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       />
     </div>
   );
+}
+
+/** TRAE 有 IDE 和 CLI 两个应用，提示里说清是哪个在运行。 */
+function runningName(tool: AITool, toolName: string, t: (k: DictKey) => string) {
+  const apps = tool.runningApps ?? [];
+  if (tool.id !== "trae" || apps.length !== 1) return toolName;
+  return t(apps[0] === "ide" ? "ai.app.trae.ide" : "ai.app.trae.cli");
 }
 
 function isSessionsPart(p: AIPart) {

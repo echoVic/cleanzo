@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,12 +62,19 @@ func TestWindowsAICommandLines(t *testing.T) {
 		{`"C:\Program Files\nodejs\node.exe" C:\npm\node_modules\@anthropic-ai\claude-code\cli.js`, "claude"},
 		{`C:\Users\a\bin\CODEX.EXE app-server`, "codex"},
 		{`"C:\Users\a\bin\claude.exe" --help`, "claude"},
+		{`C:\Users\a\.local\bin\traex.exe`, "trae"},
 	} {
 		for _, tool := range aiTools {
 			if tool.ID == tc.id && !aiCommandRunning(tc.line, tool, true) {
 				t.Errorf("missed %s: %s", tc.id, tc.line)
 			}
 		}
+	}
+	// TRAE's IDE has its own running state.
+	trae := aiTools[slices.IndexFunc(aiTools, func(t aiTool) bool { return t.ID == "trae" })]
+	ide := aiTool{Process: trae.Apps[0].Process}
+	if !aiCommandRunning(`"C:\Users\a\AppData\Local\Programs\Trae CN\Trae CN.exe" --type=renderer`, ide, true) || aiCommandRunning(`C:\Users\a\.local\bin\traex.exe`, ide, true) || aiCommandRunning(`"C:\Windows\explorer.exe" /select`, ide, true) {
+		t.Error("TRAE IDE detection")
 	}
 	for _, tool := range aiTools {
 		if aiCommandRunning(strings.Repeat("unrelated ", 2), tool, true) {

@@ -31,6 +31,14 @@ func onDisk(info fs.FileInfo) int64 {
 	return info.Size()
 }
 
+// hardLinkID names a file with more than one hard link, so it is counted once.
+func hardLinkID(info fs.FileInfo) (uint64, bool) {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+		return st.Ino, true
+	}
+	return 0, false
+}
+
 // deviceOf names the volume an entry lives on, to keep walks on one volume.
 func deviceOf(info fs.FileInfo) uint64 {
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {

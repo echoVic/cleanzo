@@ -64,6 +64,11 @@ export interface AIPart {
   keep: string;
   /** can be cleaned while the tool runs */
   runSafe: boolean;
+  /**
+   * Running: the app that uses this part runs (TRAE's IDE or CLI); only
+   * run-safe parts are cleaned then.
+   */
+  running: boolean;
 }
 
 /** AIPartResult reports one selection's outcome. */
@@ -100,10 +105,15 @@ export interface AITool {
   id: string;
   name: string;
   path: string;
-  /** its folder exists */
+  /** one of its folders exists */
   installed: boolean;
-  /** nothing is cleaned while it runs */
+  /** one of its apps runs; see AIPart.Running */
   running: boolean;
+  /**
+   * RunningApps lists the apps that run: "cli" for the tool itself, then
+   * its other apps ("ide").
+   */
+  runningApps: string[];
   size: number;
   parts: AIPart[];
 }
@@ -1144,7 +1154,7 @@ export const Cleaner = {
     return call("Cleaner.LinkSkillCopy", path, target);
   },
   /**
-   * ListAITools reports which supported tools have a folder, without measuring
+   * ListAITools reports which supported tools have a folder (any of them), without measuring
    * anything, so the sidebar can show one entry per installed tool at start.
    */
   listAITools(): Promise<AIToolInfo[]> {

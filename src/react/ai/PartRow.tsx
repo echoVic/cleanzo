@@ -8,7 +8,7 @@ import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { currentLang } from "../../i18n";
 import { human, displayPath } from "./format";
-import { offered, isSessions, groupSelectable, type WindowDays } from "./types";
+import { offered, isSessions, groupSelectable, blockedByRun as runBlocked, type WindowDays } from "./types";
 
 const levelBadge: Record<AIPart["level"], { label: DictKey; variant: "safe" | "optional" | "warn" | "protected" }> = {
   safe: { label: "ai.level.safe", variant: "safe" },
@@ -44,7 +44,7 @@ export function PartRow(p: Props) {
   const { part } = p;
   const isOffered = offered(part);
   const badge = levelBadge[part.level as AIPart["level"]] ?? levelBadge.safe!;
-  const blockedByRun = p.tool.running && !part.runSafe;
+  const blockedByRun = runBlocked(part);
   const hasDetails = part.groups.length > 0 || part.top.length > 0 || part.more > 0;
   const sessions = isSessions(part);
 
@@ -150,8 +150,8 @@ export function PartRow(p: Props) {
                   onClick={() => p.onReveal(e.path)}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] text-foreground hover:text-accent-strong">{e.name}{e.isDir ? "/" : ""}</span>
-                    <span className="block truncate text-xs text-muted">{displayPath(e.path)}</span>
+                    <span className="block truncate text-[13px] text-foreground hover:text-accent-strong" title={`${e.name}${e.isDir ? "/" : ""}`}>{e.name}{e.isDir ? "/" : ""}</span>
+                    <span className="block truncate text-xs text-muted" title={e.path}>{displayPath(e.path)}</span>
                   </span>
                   <span className="text-xs tabular-nums text-muted">{human(e.size)}</span>
                 </button>
@@ -274,7 +274,7 @@ function Groups({
               onClick={() => g.path && onReveal(g.path)}
             >
               <span className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-[13px] hover:text-accent-strong">{label}</span>
+                <span className="truncate text-[13px] hover:text-accent-strong" title={label}>{label}</span>
                 {g.gone && <Badge variant="protected">{t("ai.group.gone")}</Badge>}
                 {!can && sessions && (
                   <Badge variant="protected">{g.count <= g.recent ? t("ai.group.allRecent") : t("ai.group.inWindow")}</Badge>

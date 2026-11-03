@@ -18,6 +18,9 @@ export interface ToolViewState {
 export const offered = (p: AIPart) => p.level !== "protected" && p.level !== "unknown";
 export const isSessions = (p: AIPart) => p.level === "sensitive";
 
+/** 用这一项的应用正在运行、且这项不能边跑边清。TRAE 的 IDE 和 CLI 各算各的。 */
+export const blockedByRun = (p: AIPart) => p.running && !p.runSafe;
+
 /** 最近 24h 的会话不参与勾选；分组还要在保留窗口之外。 */
 export function groupSelectable(p: AIPart, g: AIGroup, windowDays: WindowDays, now: number): boolean {
   if (!isSessions(p)) return g.size > 0;

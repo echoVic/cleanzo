@@ -29,6 +29,9 @@ func changedAt(info fs.FileInfo) time.Time {
 // onDisk conservatively reports the logical file size.
 func onDisk(info fs.FileInfo) int64 { return info.Size() }
 
+// hardLinkID is never set on Windows, where sizes stay logical.
+func hardLinkID(fs.FileInfo) (uint64, bool) { return 0, false }
+
 // deviceOf is constant on Windows, where the growth monitor does not run.
 func deviceOf(fs.FileInfo) uint64 { return 0 }
 

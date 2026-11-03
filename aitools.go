@@ -64,6 +64,12 @@ type aiPart struct {
 	// not use old releases, sessions it last wrote over a day ago, or
 	// leftovers of earlier writes. Open files are still left alone.
 	RunSafe bool
+	// Root names the tool's folder the part lives in: "" for Home, or the
+	// Key of one of the tool's Roots.
+	Root string
+	// Entries parts are cleaned entry by entry, so the ones in use stay
+	// (the log folder of the IDE's current run).
+	Entries bool
 }
 
 // aiTool describes one AI coding tool.
@@ -73,6 +79,26 @@ type aiTool struct {
 	Home    string   // folder in the home folder
 	Process []string // command fragments that mean the tool is running
 	Parts   []aiPart
+	// Roots are more folders of the same tool, kept by another app of it
+	// (TRAE's IDE next to its CLI).
+	Roots []aiRoot
+	Apps  []aiApp
+}
+
+// aiRoot is one more folder of a tool.
+type aiRoot struct {
+	Key string
+	// Dirs lists where the folder may be; the first one that exists is used.
+	Dirs func() []string
+	// App names the tool's other app that uses the folder ("ide"); ""
+	// means the tool's own.
+	App string
+}
+
+// aiApp is a tool's other app, with its own running state.
+type aiApp struct {
+	Key     string
+	Process []string
 }
 
 // aiTools is the table of supported tools. Paths come from the tools' own
@@ -127,6 +153,154 @@ var aiTools = []aiTool{
 			{ID: "codex.memory", Path: "AGENTS.md", Level: aiProtected},
 		},
 	},
+	{
+		// One page for TRAE: the CLI keeps ~/.trae, the IDE (an Electron app,
+		// "Trae CN" in China) keeps its data, caches and extensions elsewhere.
+		ID:      "trae",
+		Name:    "TRAE",
+		Home:    ".trae",
+		Process: []string{"/trae ", "/trae\n", "traex", "trae-cli"},
+		Roots: []aiRoot{
+			{Key: "ide", Dirs: traeIDEData, App: "ide"},
+			{Key: "ideHome", Dirs: traeIDEHome, App: "ide"},
+			{Key: "ideCache", Dirs: traeIDECaches, App: "ide"},
+		},
+		// Every process of the IDE, helpers and updater included, runs from
+		// inside its app.
+		Apps: []aiApp{{Key: "ide", Process: []string{"Trae CN.app/", "Trae.app/", "/trae cn.exe", "/trae.exe"}}},
+		Parts: []aiPart{
+			// CLI
+			{ID: "trae.sessions", Path: "cli/sessions/", Level: aiSensitive, Sessions: "trae-projects", RunSafe: true},
+			{ID: "trae.history", Path: "cli/history.jsonl", Level: aiOptional},
+			{ID: "trae.logs", Path: "cli/log/", Level: aiSafe},
+			{ID: "trae.sqliteLogs", Path: "cli/logs_*.sqlite*", Glob: true, Level: aiSafe},
+			{ID: "trae.tmp", Path: ".tmp/", Level: aiSafe},
+			{ID: "trae.tmpAlt", Path: "tmp/", Level: aiSafe},
+			{ID: "trae.computerUse", Path: "computer-use/", Level: aiOptional},
+			{ID: "trae.tasks", Path: "tasks/", Level: aiOptional},
+			{ID: "trae.pluginCache", Path: "plugins/cache/", Level: aiSafe},
+			{ID: "trae.threads", Path: "cli/thread_history_*.sqlite*", Glob: true, Level: aiProtected},
+			{ID: "trae.state", Path: "cli/state_*.sqlite*", Glob: true, Level: aiProtected},
+			{ID: "trae.memories", Path: "cli/memories/", Level: aiProtected},
+			{ID: "trae.skills", Path: "skills/", Level: aiProtected},
+			{ID: "trae.plugins", Path: "plugins/", Level: aiProtected},
+			{ID: "trae.extensions", Path: "extensions/", Level: aiProtected},
+			{ID: "trae.config", Path: "traecli.toml", Level: aiProtected},
+			{ID: "trae.auth", Path: "cli/auth.json", Level: aiProtected},
+			// IDE: Electron data. The agent keeps every conversation in one
+			// encrypted database, so it can only go whole.
+			{ID: "trae.ide.chats", Root: "ide", Path: "ModularData/ai-agent/database.db*", Glob: true, Level: aiSensitive},
+			{ID: "trae.ide.snapshots", Root: "ide", Path: "ModularData/ai-agent/snapshot/", Level: aiOptional},
+			{ID: "trae.ide.codeIndex", Root: "ide", Path: "ModularData/ckg_server/", Level: aiOptional},
+			{ID: "trae.ide.logs", Root: "ide", Path: "logs/", Level: aiSafe, Entries: true, RunSafe: true},
+			{ID: "trae.ide.cachedData", Root: "ide", Path: "CachedData/", Level: aiSafe},
+			{ID: "trae.ide.cache", Root: "ide", Path: "Cache/", Level: aiSafe},
+			{ID: "trae.ide.webCache", Root: "ide", Path: "Partitions/trae-webview/Cache/", Level: aiSafe},
+			{ID: "trae.ide.webCodeCache", Root: "ide", Path: "Partitions/trae-webview/Code Cache/", Level: aiSafe},
+			{ID: "trae.ide.webWorkers", Root: "ide", Path: "Partitions/trae-webview/Service Worker/CacheStorage/", Level: aiOptional},
+			{ID: "trae.ide.webData", Root: "ide", Path: "Partitions/", Level: aiProtected},
+			{ID: "trae.ide.user", Root: "ide", Path: "User/", Level: aiProtected},
+			{ID: "trae.ide.storage", Root: "ide", Path: "WebStorage/", Level: aiProtected},
+			// IDE: the home folder.
+			{ID: "trae.ide.screenshots", Root: "ideHome", Path: "trae-browser-screenshots/", Level: aiOptional},
+			{ID: "trae.ide.extensions", Root: "ideHome", Path: "extensions/", Level: aiProtected},
+			{ID: "trae.ide.plugins", Root: "ideHome", Path: "plugins/", Level: aiProtected},
+			{ID: "trae.ide.skills", Root: "ideHome", Path: "skills/", Level: aiProtected},
+			{ID: "trae.ide.memory", Root: "ideHome", Path: "memory/", Level: aiProtected},
+			{ID: "trae.ide.rules", Root: "ideHome", Path: "rules/", Level: aiProtected},
+			{ID: "trae.ide.auth", Root: "ideHome", Path: "trae-jwt-token", Level: aiProtected},
+			// IDE: the downloaded update (Squirrel keeps it twice).
+			{ID: "trae.ide.update", Root: "ideCache", Path: "update.zip", Level: aiSafe},
+			{ID: "trae.ide.updatePending", Root: "ideCache", Path: "pending/", Level: aiSafe},
+		},
+	},
+}
+
+// traeIDEData lists where the TRAE IDE may keep its Electron data, the
+// China build first.
+func traeIDEData() []string {
+	parent := filepath.Join(homeDir(), "Library", "Application Support")
+	if runtime.GOOS == "windows" {
+		parent = os.Getenv("APPDATA")
+	}
+	return traeIDENamed(parent)
+}
+
+// traeIDECaches lists where the TRAE IDE may keep its downloaded update.
+func traeIDECaches() []string {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return traeIDENamed(filepath.Join(homeDir(), "Library", "Caches"))
+}
+
+// traeIDEHome is the IDE's folder in the home folder (extensions, plugins).
+func traeIDEHome() []string { return []string{filepath.Join(homeDir(), ".trae-cn")} }
+
+func traeIDENamed(parent string) []string {
+	if parent == "" {
+		return nil
+	}
+	return []string{filepath.Join(parent, "Trae CN"), filepath.Join(parent, "Trae")}
+}
+
+// aiRootDir is the folder a tool keeps under key ("" for Home), or "" when
+// it has none here.
+func aiRootDir(tool aiTool, key string) string {
+	if key == "" {
+		root := filepath.Join(homeDir(), tool.Home)
+		if info, err := os.Lstat(root); err == nil && info.IsDir() {
+			return root
+		}
+		return ""
+	}
+	for _, r := range tool.Roots {
+		if r.Key != key {
+			continue
+		}
+		for _, d := range r.Dirs() {
+			if info, err := os.Lstat(d); err == nil && info.IsDir() {
+				return d
+			}
+		}
+	}
+	return ""
+}
+
+// aiRootKeys are a tool's folder keys, Home ("") first.
+func aiRootKeys(tool aiTool) []string {
+	keys := []string{""}
+	for _, r := range tool.Roots {
+		keys = append(keys, r.Key)
+	}
+	return keys
+}
+
+// aiRunKey names an app of a tool in the running map: the tool's id for
+// its own, "<id>:<app>" for another.
+func aiRunKey(tool aiTool, app string) string {
+	if app == "" {
+		return tool.ID
+	}
+	return tool.ID + ":" + app
+}
+
+// aiRootRunKey is the running key of the app that uses a folder key.
+func aiRootRunKey(tool aiTool, key string) string {
+	for _, r := range tool.Roots {
+		if r.Key == key {
+			return aiRunKey(tool, r.App)
+		}
+	}
+	return tool.ID
+}
+
+// aiToolRunning reports whether any app of the tool runs.
+func aiToolRunning(running map[string]bool, tool aiTool) bool {
+	if running[tool.ID] {
+		return true
+	}
+	return slices.ContainsFunc(tool.Apps, func(a aiApp) bool { return running[aiRunKey(tool, a.Key)] })
 }
 
 // AIGroup is a pickable slice of a sensitive part (a project's or a month's
@@ -168,17 +342,23 @@ type AIPart struct {
 	More    int       `json:"more"`    // entries beyond Top
 	Keep    string    `json:"keep"`    // the release kept for old releases
 	RunSafe bool      `json:"runSafe"` // can be cleaned while the tool runs
+	// Running: the app that uses this part runs (TRAE's IDE or CLI); only
+	// run-safe parts are cleaned then.
+	Running bool `json:"running"`
 }
 
 // AITool is one tool's folder as the page lists it.
 type AITool struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Path      string   `json:"path"`
-	Installed bool     `json:"installed"` // its folder exists
-	Running   bool     `json:"running"`   // nothing is cleaned while it runs
-	Size      int64    `json:"size"`
-	Parts     []AIPart `json:"parts"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Installed bool   `json:"installed"` // one of its folders exists
+	Running   bool   `json:"running"`   // one of its apps runs; see AIPart.Running
+	// RunningApps lists the apps that run: "cli" for the tool itself, then
+	// its other apps ("ide").
+	RunningApps []string `json:"runningApps"`
+	Size        int64    `json:"size"`
+	Parts       []AIPart `json:"parts"`
 }
 
 // AIScanResult is what ScanAITools returns.
@@ -194,17 +374,16 @@ var aiProcesses = func() (string, error) {
 }
 
 // aiRunning reports which tools are running. When processes cannot be
-// listed every tool counts as running, so nothing is cleaned blind.
+// listed every tool counts as running, so nothing is cleaned blind. A tool's
+// other apps (TRAE's IDE) have their own entries, keyed by aiRunKey.
 func aiRunning() map[string]bool {
 	out, err := aiProcesses()
+	windows := runtime.GOOS == "windows"
 	running := map[string]bool{}
 	for _, tool := range aiTools {
-		if err != nil {
-			running[tool.ID] = true
-			continue
-		}
-		if aiCommandRunning(out, tool, runtime.GOOS == "windows") {
-			running[tool.ID] = true
+		running[tool.ID] = err != nil || aiCommandRunning(out, tool, windows)
+		for _, app := range tool.Apps {
+			running[aiRunKey(tool, app.Key)] = err != nil || aiCommandRunning(out, aiTool{Process: app.Process}, windows)
 		}
 	}
 	return running
@@ -215,7 +394,9 @@ func aiCommandRunning(out string, tool aiTool, windows bool) bool {
 	patterns := tool.Process
 	if windows {
 		out = strings.ToLower(strings.ReplaceAll(out, `\`, "/"))
-		patterns = append(append([]string(nil), patterns...), "/"+tool.ID+".exe", tool.ID+".exe ") // slash-ok: Windows command lines are normalized to forward slashes
+		if tool.ID != "" {
+			patterns = append(append([]string(nil), patterns...), "/"+tool.ID+".exe", tool.ID+".exe ") // slash-ok: Windows command lines are normalized to forward slashes
+		}
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if windows && tool.ID == "claude" && windowsClaudeDesktop(line, os.Getenv("LOCALAPPDATA")) && !strings.Contains(line, "@anthropic-ai/claude-code/") {
@@ -239,7 +420,7 @@ func (Cleaner) ScanAITools(ctx context.Context) (AIScanResult, error) {
 	running := aiRunning()
 	res := AIScanResult{ScannedAt: aiNow().Unix()}
 	for _, tool := range aiTools {
-		t, err := scanAITool(ctx, tool, running[tool.ID])
+		t, err := scanAITool(ctx, tool, running)
 		if err != nil {
 			return AIScanResult{}, err
 		}
@@ -255,13 +436,13 @@ type AIToolInfo struct {
 	Installed bool   `json:"installed"` // its folder exists
 }
 
-// ListAITools reports which supported tools have a folder, without measuring
+// ListAITools reports which supported tools have a folder (any of them), without measuring
 // anything, so the sidebar can show one entry per installed tool at start.
 func (Cleaner) ListAITools() []AIToolInfo {
 	out := []AIToolInfo{}
 	for _, tool := range aiTools {
-		info, err := os.Lstat(filepath.Join(homeDir(), tool.Home))
-		out = append(out, AIToolInfo{ID: tool.ID, Name: tool.Name, Installed: err == nil && info.IsDir()})
+		installed := slices.ContainsFunc(aiRootKeys(tool), func(k string) bool { return aiRootDir(tool, k) != "" })
+		out = append(out, AIToolInfo{ID: tool.ID, Name: tool.Name, Installed: installed})
 	}
 	return out
 }
@@ -275,7 +456,7 @@ func (Cleaner) ScanAITool(ctx context.Context, id string) (AIScanResult, error) 
 		if tool.ID != id {
 			continue
 		}
-		t, err := scanAITool(ctx, tool, aiRunning()[tool.ID])
+		t, err := scanAITool(ctx, tool, aiRunning())
 		if err != nil {
 			return AIScanResult{}, err
 		}
@@ -284,19 +465,54 @@ func (Cleaner) ScanAITool(ctx context.Context, id string) (AIScanResult, error) 
 	return AIScanResult{}, errAIUnknownTool
 }
 
-// scanAITool measures one tool's folder part by part.
-func scanAITool(ctx context.Context, tool aiTool, running bool) (AITool, error) {
-	root := filepath.Join(homeDir(), tool.Home)
-	out := AITool{ID: tool.ID, Name: tool.Name, Path: root, Running: running, Parts: []AIPart{}}
-	info, err := os.Lstat(root)
-	if err != nil || !info.IsDir() {
-		return out, nil
+// scanAITool measures one tool's folders part by part.
+func scanAITool(ctx context.Context, tool aiTool, running map[string]bool) (AITool, error) {
+	home := filepath.Join(homeDir(), tool.Home)
+	out := AITool{ID: tool.ID, Name: tool.Name, Path: home, Running: aiToolRunning(running, tool), RunningApps: aiRunningApps(running, tool), Parts: []AIPart{}}
+	for _, key := range aiRootKeys(tool) {
+		root := aiRootDir(tool, key)
+		if root == "" {
+			continue
+		}
+		out.Installed = true
+		if err := scanAIRoot(ctx, tool, key, root, running[aiRootRunKey(tool, key)], &out); err != nil {
+			return AITool{}, err
+		}
 	}
-	out.Installed = true
+	sort.SliceStable(out.Parts, func(i, j int) bool {
+		return aiLevelRank(out.Parts[i].Level) < aiLevelRank(out.Parts[j].Level) ||
+			aiLevelRank(out.Parts[i].Level) == aiLevelRank(out.Parts[j].Level) && out.Parts[i].Size > out.Parts[j].Size
+	})
+	return out, nil
+}
+
+// aiRunningApps lists which of a tool's apps run: "cli" for its own, then
+// the keys of its other apps.
+func aiRunningApps(running map[string]bool, tool aiTool) []string {
+	apps := []string{}
+	if running[tool.ID] {
+		apps = append(apps, "cli")
+	}
+	for _, a := range tool.Apps {
+		if running[aiRunKey(tool, a.Key)] {
+			apps = append(apps, a.Key)
+		}
+	}
+	return apps
+}
+
+// scanAIRoot measures the parts of one of a tool's folders and adds them to
+// out. What the table does not know is listed as unknown, never offered:
+// entry by entry in the tool's own folder, as one item in another app's
+// folder (an Electron app keeps dozens of its own).
+func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool, out *AITool) error {
 	claimed := map[string]bool{} // top-level entries a known part accounts for
 	for _, part := range tool.Parts {
+		if part.Root != key {
+			continue
+		}
 		if ctx.Err() != nil {
-			return AITool{}, ctx.Err()
+			return ctx.Err()
 		}
 		paths := aiPartPaths(root, part)
 		if len(paths) == 0 {
@@ -307,7 +523,7 @@ func scanAITool(ctx context.Context, tool aiTool, running bool) (AITool, error) 
 		}
 		// A nested known part (plugins/cache) is measured on its own; its
 		// parent (plugins) reports the rest.
-		p := AIPart{ID: part.ID, Path: paths[0], Level: part.Level, Groups: []AIGroup{}, RunSafe: part.RunSafe}
+		p := AIPart{ID: part.ID, Path: paths[0], Level: part.Level, Groups: []AIGroup{}, RunSafe: part.RunSafe, Running: running}
 		if part.Glob {
 			p.Path = filepath.Join(root, part.Path)
 		}
@@ -322,6 +538,8 @@ func scanAITool(ctx context.Context, tool aiTool, running bool) (AITool, error) 
 			p.Groups = claudeProjects(ctx, paths[0])
 		case part.Sessions == "codex-months":
 			p.Groups = codexMonths(ctx, paths[0])
+		case part.Sessions == "trae-projects":
+			p.Groups = traeProjects(ctx, paths[0])
 		case part.Releases:
 			p.Keep, p.Groups = oldReleases(ctx, paths[0])
 			// Only the old ones are on offer.
@@ -338,31 +556,44 @@ func scanAITool(ctx context.Context, tool aiTool, running bool) (AITool, error) 
 		}
 		out.Parts = append(out.Parts, p)
 	}
-	// Anything else in the folder is listed as unknown, never offered.
 	entries, _ := os.ReadDir(root)
+	var rest []string
 	for _, e := range entries {
 		if claimed[e.Name()] || e.Name() == ".DS_Store" {
 			continue
 		}
-		path := filepath.Join(root, e.Name())
-		size, files, last := measureAI(ctx, path, nil)
-		if size == 0 {
-			continue
+		rest = append(rest, filepath.Join(root, e.Name()))
+	}
+	add := func(id, name, path string, paths []string) {
+		var size, files, last int64
+		for _, p := range paths {
+			s, f, l := measureAI(ctx, p, nil)
+			size, files, last = size+s, files+f, max(last, l)
 		}
-		top, more := aiTopEntries(ctx, []string{path}, nil)
-		out.Parts = append(out.Parts, AIPart{ID: "unknown:" + e.Name(), Name: e.Name(), Path: path, Level: aiUnknown, Size: size, Files: files, Last: last, Groups: []AIGroup{}, Top: top, More: more})
+		if size == 0 {
+			return
+		}
+		top, more := aiTopEntries(ctx, paths, nil)
+		out.Parts = append(out.Parts, AIPart{ID: id, Name: name, Path: path, Level: aiUnknown, Size: size, Files: files, Last: last, Groups: []AIGroup{}, Top: top, More: more, Running: running})
 	}
-	for _, p := range out.Parts {
-		out.Size += p.Size
+	if key == "" {
+		for _, p := range rest {
+			add("unknown:"+filepath.Base(p), filepath.Base(p), p, []string{p})
+		}
+	} else {
+		add("unknown:"+key, filepath.Base(root), root, rest)
 	}
+	// du counts hard-linked files once.
 	if du, err := duSize(ctx, root, 60*time.Second); err == nil {
-		out.Size = du
+		out.Size += du
+	} else {
+		for _, p := range out.Parts {
+			if within(p.Path, root) {
+				out.Size += p.Size
+			}
+		}
 	}
-	sort.SliceStable(out.Parts, func(i, j int) bool {
-		return aiLevelRank(out.Parts[i].Level) < aiLevelRank(out.Parts[j].Level) ||
-			aiLevelRank(out.Parts[i].Level) == aiLevelRank(out.Parts[j].Level) && out.Parts[i].Size > out.Parts[j].Size
-	})
-	return out, nil
+	return nil
 }
 
 // aiLevelRank orders parts on the page: what can be cleaned first.
@@ -397,7 +628,7 @@ func aiNested(tool aiTool, part aiPart, root string) []string {
 	base := filepath.Join(root, part.Path)
 	var nested []string
 	for _, other := range tool.Parts {
-		if other.ID == part.ID || other.Glob {
+		if other.ID == part.ID || other.Glob || other.Root != part.Root {
 			continue
 		}
 		p := filepath.Join(root, other.Path)
@@ -409,8 +640,10 @@ func aiNested(tool aiTool, part aiPart, root string) []string {
 }
 
 // measureAI sums a path's size on disk without following links, skipping
-// the folders in skip.
+// the folders in skip. A file with several hard links inside path counts
+// once (TRAE's CLI links its 260 MB binary under four names).
 func measureAI(ctx context.Context, path string, skip []string) (size, files, last int64) {
+	seen := map[uint64]bool{}
 	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -428,9 +661,15 @@ func measureAI(ctx context.Context, path string, skip []string) (size, files, la
 		if err != nil {
 			return nil
 		}
-		size += onDisk(info)
 		files++
 		last = max(last, info.ModTime().Unix())
+		if id, linked := hardLinkID(info); linked {
+			if seen[id] {
+				return nil
+			}
+			seen[id] = true
+		}
+		size += onDisk(info)
 		return nil
 	})
 	return size, files, last
@@ -526,6 +765,79 @@ func codexMonths(ctx context.Context, dir string) []AIGroup {
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].Key > groups[j].Key })
 	return groups
+}
+
+// traeProjects groups TRAE CLI sessions by project, the cwd their
+// session_meta names: cli/sessions/yyyy/mm/dd/rollout-*.jsonl. A project's
+// sessions are spread over the date folders, so the whole tree is walked.
+// A session's companions (rollout-*.jsonl.lock, rollout-*.artifacts/) count
+// with it.
+func traeProjects(ctx context.Context, dir string) []AIGroup {
+	cutoff := aiNow().Add(-aiRecent).Unix()
+	byCwd := map[string]*AIGroup{}
+	cwds := map[string]string{} // session file → cwd, read once
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		session := traeSessionOf(p)
+		if session == "" {
+			return nil
+		}
+		cwd, ok := cwds[session]
+		if !ok {
+			cwd = jsonlField(session, "cwd")
+			cwds[session] = cwd
+		}
+		g := byCwd[cwd]
+		if g == nil {
+			g = &AIGroup{Key: cwd, Label: cwd, Path: cwd}
+			byCwd[cwd] = g
+		}
+		g.Size += onDisk(info)
+		g.Last = max(g.Last, info.ModTime().Unix())
+		if p == session {
+			g.Count++
+			if info.ModTime().Unix() > cutoff {
+				g.Recent++
+			}
+		}
+		return nil
+	})
+	groups := []AIGroup{}
+	for cwd, g := range byCwd {
+		// Without a cwd there is no key to pick the sessions by.
+		if cwd == "" || g.Size == 0 {
+			continue
+		}
+		g.Gone = !fileExists(cwd)
+		groups = append(groups, *g)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Size > groups[j].Size })
+	return groups
+}
+
+// traeSessionOf is the session file a path under TRAE's sessions folder
+// belongs to: itself, its .lock, or its .artifacts folder; "" for others.
+func traeSessionOf(p string) string {
+	switch {
+	case strings.HasSuffix(p, ".jsonl"):
+		return p
+	case strings.HasSuffix(p, ".jsonl.lock"):
+		return strings.TrimSuffix(p, ".lock")
+	}
+	marker := ".artifacts" + string(filepath.Separator)
+	if i := strings.Index(p, marker); i > 0 {
+		return p[:i] + ".jsonl"
+	}
+	return ""
 }
 
 // oldReleases lists the release folders a "current" link next to dir does
@@ -689,14 +1001,17 @@ func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard, co
 	case !ok:
 		r.Skipped = "unknown"
 		return r
-	case running[tool.ID] && !part.RunSafe:
+	case running[aiRootRunKey(tool, part.Root)] && !part.RunSafe:
 		r.Skipped = "running"
 		return r
 	case part.Level == aiProtected || part.Level == aiUnknown:
 		r.Skipped = "blocked"
 		return r
 	}
-	root := filepath.Join(homeDir(), tool.Home)
+	root := aiRootDir(tool, part.Root)
+	if root == "" {
+		return r
+	}
 	targets, kept, err := aiTargets(root, tool, part, sel.Groups)
 	r.Kept = kept
 	if err != nil {
@@ -750,6 +1065,40 @@ func aiTargets(root string, tool aiTool, part aiPart, groups []string) (targets 
 	}
 	cutoff := aiNow().Add(-aiRecent)
 	switch {
+	case part.Sessions == "trae-projects":
+		// Keys are project folders (absolute). A session goes with its
+		// .lock and .artifacts folder, only when none of them is recent.
+		if len(groups) == 0 {
+			return nil, 0, errAIRefused
+		}
+		want := map[string]bool{}
+		for _, key := range groups {
+			if !filepath.IsAbs(key) || filepath.Clean(key) != key {
+				return nil, 0, errAIRefused
+			}
+			want[key] = true
+		}
+		dir := paths[0]
+		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || !d.Type().IsRegular() || !strings.HasSuffix(p, ".jsonl") || !want[jsonlField(p, "cwd")] {
+				return nil
+			}
+			session := []string{p}
+			for _, c := range []string{p + ".lock", strings.TrimSuffix(p, ".jsonl") + ".artifacts"} {
+				if _, err := os.Lstat(c); err == nil {
+					session = append(session, c)
+				}
+			}
+			for _, c := range session {
+				if _, _, last := measureAI(context.Background(), c, nil); time.Unix(last, 0).After(cutoff) {
+					kept++
+					return nil
+				}
+			}
+			targets = append(targets, session...)
+			return nil
+		})
+		return targets, kept, nil
 	case part.Sessions != "" || part.Releases:
 		if len(groups) == 0 {
 			return nil, 0, errAIRefused
@@ -803,6 +1152,15 @@ func aiTargets(root string, tool aiTool, part aiPart, groups []string) (targets 
 			}
 		}
 		return targets, kept, nil
+	case part.Entries:
+		// Entry by entry: the in-use guard keeps the ones open now.
+		for _, dir := range paths {
+			entries, _ := os.ReadDir(dir)
+			for _, e := range entries {
+				targets = append(targets, filepath.Join(dir, e.Name()))
+			}
+		}
+		return targets, 0, nil
 	default:
 		return paths, 0, nil
 	}
@@ -857,7 +1215,11 @@ func aiRemovable(root string, tool aiTool, target string) bool {
 		if part.Level != aiProtected {
 			continue
 		}
-		for _, p := range aiPartPaths(root, part) {
+		dir := aiRootDir(tool, part.Root)
+		if dir == "" {
+			continue
+		}
+		for _, p := range aiPartPaths(dir, part) {
 			rp := resolvePath(p)
 			// The target is a protected part, or holds one. Being inside a
 			// protected folder is fine when a known cleanable part lives there
@@ -865,7 +1227,7 @@ func aiRemovable(root string, tool aiTool, target string) bool {
 			if within(rp, real) {
 				return false
 			}
-			if real != rp && within(real, rp) && !aiInsideCleanable(root, tool, real) {
+			if real != rp && within(real, rp) && !aiInsideCleanable(tool, real) {
 				return false
 			}
 		}
@@ -874,13 +1236,16 @@ func aiRemovable(root string, tool aiTool, target string) bool {
 }
 
 // aiInsideCleanable reports whether path is inside a cleanable part's folder.
-func aiInsideCleanable(root string, tool aiTool, path string) bool {
+func aiInsideCleanable(tool aiTool, path string) bool {
 	for _, part := range tool.Parts {
 		if part.Level == aiProtected || part.Level == aiUnknown || part.Glob {
 			continue
 		}
-		p := resolvePath(filepath.Join(root, part.Path))
-		if within(path, p) {
+		dir := aiRootDir(tool, part.Root)
+		if dir == "" {
+			continue
+		}
+		if within(path, resolvePath(filepath.Join(dir, part.Path))) {
 			return true
 		}
 	}

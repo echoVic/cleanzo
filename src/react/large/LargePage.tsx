@@ -268,7 +268,7 @@ export function LargePage() {
       : stopped
         ? t("scan.stopped")
         : result
-          ? t("large.foot", { n: result.scanned.toLocaleString(), t: (result.elapsedMs / 1000).toFixed(1), s: result.skipped.toLocaleString() })
+          ? t("large.footFiles", { n: result.scanned.toLocaleString(), t: (result.elapsedMs / 1000).toFixed(1), s: result.skipped.toLocaleString() })
           : "";
 
   return (
@@ -375,7 +375,7 @@ export function LargePage() {
       )}
       {sorted.length > 0 && !scanning && !stopped && result && (
         <div className="fs-foot muted small">
-          {t("large.foot", {
+          {t("large.footFiles", {
             n: result.scanned.toLocaleString(),
             t: (result.elapsedMs / 1000).toFixed(1),
             s: result.skipped.toLocaleString(),

@@ -378,10 +378,16 @@ function createRuntime(): Runtime {
     return { recent: 0, gone: false, path: g.key, ...rest, last: now - ageDays * DAY };
   };
   const mkPart = (p: Partial<AIPart> & Pick<AIPart, "id" | "path" | "level" | "size">): AIPart => ({
-    name: "", files: 0, last: now - 10 * DAY, groups: [], top: [], more: 0, keep: "", runSafe: false, ...p,
+    name: "", files: 0, last: now - 10 * DAY, groups: [], top: [], more: 0, keep: "", runSafe: false, running: false, ...p,
+  });
+  // 一个工具的「运行中」落到它的每一项上（后端按应用分别判断，TRAE 的 IDE 和 CLI 各算各的）。
+  const mkTool = (t: Omit<AITool, "runningApps"> & { runningApps?: string[] }): AITool => ({
+    ...t,
+    runningApps: t.runningApps ?? (t.running ? ["cli"] : []),
+    parts: t.parts.map((p) => ({ ...p, running: p.running || (t.running && !t.runningApps) })),
   });
   const aiTools: AITool[] = [
-    {
+    mkTool({
       id: "claude", name: "Claude Code", path: home("~/.claude"), installed: true, running: false,
       size: 6.4 * GB,
       parts: [
@@ -416,8 +422,8 @@ function createRuntime(): Runtime {
         mkPart({ id: "claude.credentials", path: home("~/.claude/credentials"), level: "protected", size: 2 * MB, files: 4 }),
         mkPart({ id: "unknown:legacy-cache", name: "legacy-cache", path: home("~/.claude/legacy"), level: "unknown", size: 70 * MB, files: 12 }),
       ],
-    },
-    {
+    }),
+    mkTool({
       id: "codex", name: "Codex", path: home("~/.codex"), installed: true, running: true,
       size: 3.7 * GB,
       parts: [
@@ -443,7 +449,30 @@ function createRuntime(): Runtime {
         mkPart({ id: "codex.computerUse", path: home("~/.codex/computer-use"), level: "optional", size: 320 * MB, files: 260 }),
         mkPart({ id: "codex.packages", path: home("~/.codex/packages"), level: "protected", size: 880 * MB, files: 90 }),
       ],
-    },
+    }),
+    // TRAE：IDE 在运行、CLI 没在运行，演示只锁 IDE 那几项。
+    mkTool({
+      id: "trae", name: "TRAE", path: home("~/.trae"), installed: true, running: true, runningApps: ["ide"],
+      size: 31 * GB,
+      parts: [
+        mkPart({ id: "trae.ide.logs", path: home("~/Library/Application Support/Trae CN/logs"), level: "safe", size: 2.3 * GB, files: 1473, runSafe: true, running: true }),
+        mkPart({ id: "trae.ide.update", path: home("~/Library/Caches/Trae CN/update.zip"), level: "safe", size: 602 * MB, files: 1, running: true }),
+        mkPart({ id: "trae.ide.cachedData", path: home("~/Library/Application Support/Trae CN/CachedData"), level: "safe", size: 1 * GB, files: 3134, running: true }),
+        mkPart({ id: "trae.tmpAlt", path: home("~/.trae/tmp"), level: "safe", size: 315 * MB, files: 40 }),
+        mkPart({ id: "trae.logs", path: home("~/.trae/cli/log"), level: "safe", size: 54 * MB, files: 2 }),
+        mkPart({ id: "trae.ide.webWorkers", path: home("~/Library/Application Support/Trae CN/Partitions/trae-webview/Service Worker/CacheStorage"), level: "optional", size: 2.7 * GB, files: 12248, running: true }),
+        mkPart({ id: "trae.ide.snapshots", path: home("~/Library/Application Support/Trae CN/ModularData/ai-agent/snapshot"), level: "optional", size: 894 * MB, files: 113780, running: true }),
+        mkPart({
+          id: "trae.sessions", path: home("~/.trae/cli/sessions"), level: "sensitive", size: 3 * GB, files: 774, runSafe: true,
+          groups: [
+            mkGroup({ key: home("~/Documents/GitHub/Blade"), label: home("~/Documents/GitHub/Blade"), size: 2.5 * GB, count: 688, ageDays: 3, recent: 6 }),
+            mkGroup({ key: home("~/Documents/GitHub/cleanzo"), label: home("~/Documents/GitHub/cleanzo"), size: 65 * MB, count: 49, ageDays: 40 }),
+          ],
+        }),
+        mkPart({ id: "trae.ide.chats", path: home("~/Library/Application Support/Trae CN/ModularData/ai-agent/database.db*"), level: "sensitive", size: 12 * GB, files: 3, running: true }),
+        mkPart({ id: "trae.ide.extensions", path: home("~/.trae-cn/extensions"), level: "protected", size: 887 * MB, files: 9000, running: true }),
+      ],
+    }),
   ];
   const aiToolInfos: AIToolInfo[] = aiTools.map(({ id, name, installed }) => ({ id, name, installed }));
   const scanAITool = async (id: string): Promise<AIScanResult> => {
