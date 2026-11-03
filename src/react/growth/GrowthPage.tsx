@@ -41,6 +41,10 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   const [hl, setHl] = React.useState<string | null>(null);
   /** 读屏里程碑文案：进入面板静默，仅播报量盘开始 / 完成，与其它扫描页一致。 */
   const [liveMsg, setLiveMsg] = React.useState("");
+  /** 首次加载失败：持久化内联错误面板（含重试）；已有状态后的后台刷新失败走 toast。 */
+  const [loadErr, setLoadErr] = React.useState<string | null>(null);
+  /** load 回调依赖为空，用 ref 读取最近一次成功状态以区分首次失败与刷新失败。 */
+  const stateRef = React.useRef<GrowthState | null>(null);
   const focused = React.useRef<{ key: string; nonce: number } | null>(null);
   /** 上次核对卸载明细时的记录（时间、条数）。 */
   const measured = React.useRef<{ lastAt: number; records: number } | null>(null);
@@ -50,6 +54,8 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   const load = React.useCallback(async () => {
     try {
       const s = await growthApi.state();
+      stateRef.current = s;
+      setLoadErr(null);
       setState(s);
       // 有了新记录才重新核对卸载能移走的内容；只是刷新状态时保留已取到的明细，展开的行不闪。
       const was = measured.current;
@@ -58,7 +64,12 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
         setDetails({});
       }
     }
-    catch (e) { toast(translate("growth.loadFail", { msg: errText(e) }), "err"); }
+    catch (e) {
+      // 首次加载失败：内容区持久错误面板 + 重试；已有状态后的刷新失败用 toast，不打断当前视图。
+      const msg = translate("growth.loadFail", { msg: errText(e) });
+      if (stateRef.current) toast(msg, "err");
+      else setLoadErr(msg);
+    }
   }, []); // useT 每次渲染返回新函数；加载回调保持稳定，错误文案仍读取当前语言。
   React.useEffect(() => { if (active) void load(); }, [load, visit, active]);
   // 只在显示时跟着 growthUpdated 刷新：隐藏的页面不拉状态，也不在别的页面弹读取失败。
@@ -121,7 +132,19 @@ export function GrowthPanel({ active, visit, focusKey, focusNonce, goLeftovers, 
   const toggleIgnore = (a: GrowthApp) => void save(a.ignored ? { unignore: a.key } : { ignore: a.key });
 
   const view = growthView(state);
-  if (!state || view === "unsupported") return null;
+  if (view === "unsupported") return null;
+  if (!state) {
+    if (loadErr === null) return null;
+    return (
+      <div className="empty err" role="alert">
+        <div className="err-icon">⚠</div>
+        <div>{loadErr}</div>
+        <button className="btn ghost retry-btn" type="button" onClick={() => void load()}>
+          {t("btn.retry")}
+        </button>
+      </div>
+    );
+  }
   const banner = growthBanner(state);
   const atLeast = (s: string) => t("growth.atLeast", { size: s });
   const fmtTime = (sec: number) =>
