@@ -44,6 +44,8 @@
   --warn-soft: rgba(217, 119, 6, 0.12);
   /* 柔琥珀底上的警告正文：页面底 4.71、白卡 4.92，满足正文 AA 4.5 */
   --warn-text: #8F5A00;
+  /* 角标等落在更亮底色（如 TabsList）上的小号警告文字，比 --warn-text 深一阶以保持 AA 4.5 */
+  --warn-text-deep: #855200;
 
   /* 系统状态页语义 Token（亮色） */
   --status-ok: #34c759;
@@ -99,6 +101,7 @@
     --warn: #f59e0b;
     --warn-soft: rgba(245, 158, 11, 0.16);
     --warn-text: #FFC35A;
+    --warn-text-deep: #FFC35A;
 
     /* 系统状态页语义 Token（暗色） */
     --status-ok: #30d158;
@@ -2106,7 +2109,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 /* 暂停按钮 + CPU/内存/磁盘分段在极窄窗口（主窗口下限 560px）放不下时，
    右对齐折成两行；放得下时仍是一行，无需断点、随文案长度自适应 */
 .pr-head-actions { align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-.pr-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text); font-size: 10.5px; font-style: normal; font-weight: 700; }
+.pr-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text-deep, var(--warn-text)); font-size: 10.5px; font-style: normal; font-weight: 700; }
 .pr-diag { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn-text); font-size: 13px; line-height: 1.5; }
 .pr-diag > span { flex: 1; min-width: 0; }
 .pr-paused { margin: 0 0 8px; font-size: 12px; }
