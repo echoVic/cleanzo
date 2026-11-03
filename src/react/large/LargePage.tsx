@@ -33,7 +33,7 @@ export function LargePage() {
   const [busy, setBusy] = React.useState(false);
   const [currentPath, setCurrentPath] = React.useState("");
   const [selection, setSelection] = React.useState<ListSelection>(emptySelection());
-  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number } | null>(null);
+  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number; isDir: boolean } | null>(null);
   const [trashBatchOpen, setTrashBatchOpen] = React.useState(false);
 
   // 异步循环里读最新值，避免闭包捕获旧 state。
@@ -200,9 +200,9 @@ export function LargePage() {
     if (resultRef.current) setResult((r) => (r ? { ...r, items: upd.items } : r));
   };
 
-  const onTrashRow = (path: string, size: number) => {
+  const onTrashRow = (path: string, size: number, isDir = false) => {
     if (busy || isGone(selection, path)) return;
-    setTrashTarget({ path, size });
+    setTrashTarget({ path, size, isDir });
   };
 
   const doTrashRow = async () => {
@@ -388,7 +388,7 @@ export function LargePage() {
           <DialogHeader>
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
             <DialogDescription style={{ overflowWrap: "anywhere" }}>
-              {t("fs.trash.body", {
+              {t(trashTarget?.isDir ? "fs.trash.body" : "fs.trash.bodyFile", {
                 path: trashTarget ? displayPath(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}

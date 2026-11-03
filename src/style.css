@@ -1154,7 +1154,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   gap: 10px;
 }
 .empty.err .err-icon { font-size: 1.5rem; }
-.err-inline { color: var(--danger-text); font-size: 12.5px; padding: 6px 0; }
+.err-inline { color: var(--danger-text); font-size: 12.5px; padding: 6px 0; overflow-wrap: anywhere; }
 
 /* ---- Toast ---- */
 .toast {
@@ -1176,6 +1176,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   max-width: min(560px, 82vw);
   line-height: 1.45;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 @media (prefers-color-scheme: dark) {
   .toast { color: #1a1c20; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }

@@ -313,7 +313,7 @@ export function SkillsPage() {
             <DialogTitle>{t("skills.linkConfirm.title")}</DialogTitle>
             <DialogDescription>{t("skills.linkConfirm.body", { n: linkPairs?.length ?? 0 })}</DialogDescription>
           </DialogHeader>
-          <ul className="max-h-[36vh] space-y-1 overflow-auto text-xs">
+          <ul className="max-h-[36vh] space-y-1 overflow-auto text-xs [overflow-wrap:anywhere]">
             {(linkPairs ?? []).map((p) => (
               <li key={p.path}>{displayPath(p.path)} <span className="text-muted">→ {displayPath(p.target)}</span></li>
             ))}
@@ -347,7 +347,7 @@ export function SkillsPage() {
             <div className="mt-3 rounded-[10px] px-3 py-2 text-xs leading-relaxed text-warning-text"
               style={{ background: "var(--warning-soft)" }}>
               {t("skills.confirm.links", { n: plan.links.length })}
-              <ul className="mt-1">{plan.links.map((l) => <li key={l}>{displayPath(l)}</li>)}</ul>
+              <ul className="mt-1 [overflow-wrap:anywhere]">{plan.links.map((l) => <li key={l}>{displayPath(l)}</li>)}</ul>
             </div>
           )}
           <p className="mt-3 text-xs text-muted">{t("skills.confirm.safety")}</p>

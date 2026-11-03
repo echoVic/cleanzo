@@ -49,7 +49,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   const [doneMs, setDoneMs] = React.useState<number | null>(null);
   const [selection, setSelection] = React.useState<ListSelection>(emptySelection());
   const [busy, setBusy] = React.useState(false);
-  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number } | null>(null);
+  const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number; isDir: boolean } | null>(null);
   const [trashBatchOpen, setTrashBatchOpen] = React.useState(false);
 
   // 异步循环里读最新值，避免闭包捕获旧 state。
@@ -218,9 +218,9 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     setSelection(upd.selection);
   };
 
-  const onTrashRow = (path: string, size: number) => {
+  const onTrashRow = (path: string, size: number, isDir = false) => {
     if (busy || isGone(selection, path)) return;
-    setTrashTarget({ path, size });
+    setTrashTarget({ path, size, isDir });
   };
 
   const doTrashRow = async () => {
@@ -383,8 +383,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
-            <DialogDescription>
-              {t("fs.trash.body", {
+            <DialogDescription style={{ overflowWrap: "anywhere" }}>
+              {t(trashTarget?.isDir ? "fs.trash.body" : "fs.trash.bodyFile", {
                 path: trashTarget ? shortHome(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}

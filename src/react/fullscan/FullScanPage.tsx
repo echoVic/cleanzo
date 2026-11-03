@@ -378,7 +378,7 @@ export function FullScanPage() {
           <DialogHeader>
             <DialogTitle>{t("fs.trash.title")}</DialogTitle>
             <DialogDescription style={{ overflowWrap: "anywhere" }}>
-              {t("fs.trash.body", {
+              {t(trashTarget?.isDir ? "fs.trash.body" : "fs.trash.bodyFile", {
                 path: trashTarget ? displayPath(trashTarget.path) : "",
                 size: trashTarget ? human(trashTarget.size) : "",
               })}
