@@ -108,6 +108,26 @@ function toast(text: string, kind: "ok" | "err" = "ok") {
   toastTimer = window.setTimeout(() => el.classList.remove("show"), 3200);
 }
 
+const FOCUSABLE_AFTER_ROW =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * 焦点所在行动态移除（如退出应用后整行消失）后，把焦点交给该行下方最近的可聚焦元素；
+ * 下方没有就回到列表第一个，避免焦点掉到 body 或工具栏。
+ */
+function focusNextAfter(rowEl: Element | null) {
+  if (!rowEl) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const list = Array.from(main.querySelectorAll<HTMLElement>(FOCUSABLE_AFTER_ROW)).filter(
+    (el) => el.getClientRects().length > 0 && !el.closest("[inert]"),
+  );
+  if (list.length === 0) return;
+  const top = rowEl.getBoundingClientRect().top;
+  const next = list.find((el) => !rowEl.contains(el) && el.getBoundingClientRect().top >= top);
+  (next ?? list[0])?.focus({ preventScroll: true });
+}
+
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 
 function setNavBusy(view: View, on: boolean) {
@@ -117,5 +137,5 @@ function setNavBusy(view: View, on: boolean) {
 const VIEWS = ["clean", "status", "process", "aitools", "skills", "fullscan", "large", "photos", "apps", "settings"] as const;
 type View = (typeof VIEWS)[number];
 
-export { $, errText, human, fmtDate, displayPath, baseName, toast, setNavBusy, VIEWS };
+export { $, errText, human, fmtDate, displayPath, baseName, toast, setNavBusy, focusNextAfter, VIEWS };
 export type { View };

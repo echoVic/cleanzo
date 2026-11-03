@@ -12,7 +12,7 @@ import { useT } from "../../ui/i18n-react";
 import { Collapse } from "../../ui/motion/Collapse";
 import { useIndicator } from "../../ui/motion/indicator";
 import { isWindows } from "../../platform";
-import { errText, human, toast } from "../../shared";
+import { errText, focusNextAfter, human, toast } from "../../shared";
 import { emptyQuit, fmtMem, fmtPct, iconColor, iconFg, quitErrCode, syncQuitRows, type QuitState } from "../status/format";
 import { growthApi } from "../growth/api";
 import { GrowthPanel, type GrowthHandlers } from "../growth/GrowthPage";
@@ -34,23 +34,6 @@ function initial(name: string): string {
 function tagText(tag: GrowthTag, t: T): string {
   const size = `+${human(tag.bytes)}`;
   return t(tag.window === "day" ? "process.tag.day" : "process.tag.week", { size: tag.atLeast ? t("growth.atLeast", { size }) : size });
-}
-
-const ROW_FOCUSABLE =
-  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
-
-/** 焦点所在行因退出被去掉按钮时，把焦点移到该行下方最近的可聚焦元素，避免丢给 body。 */
-function focusNextAfter(rowEl: Element | null) {
-  if (!rowEl) return;
-  const main = document.querySelector("main");
-  if (!main) return;
-  const list = Array.from(main.querySelectorAll<HTMLElement>(ROW_FOCUSABLE)).filter(
-    (el) => el.getClientRects().length > 0 && !el.closest("[inert]"),
-  );
-  if (list.length === 0) return;
-  const top = rowEl.getBoundingClientRect().top;
-  const next = list.find((el) => !rowEl.contains(el) && el.getBoundingClientRect().top >= top);
-  (next ?? list[0])?.focus({ preventScroll: true });
 }
 
 export interface ProcessRowViewProps {
@@ -108,10 +91,10 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
           {row.quit && !done && (stuck ? (
             <>
               <span className="pr-stuck">{t("process.stuck")}</span>
-              <button type="button" className="pr-force" disabled={busy} onClick={onForce} aria-label={t("process.forceName", { name: row.name })}>{t("process.force")}</button>
+              <button type="button" className="pr-force" aria-disabled={busy || undefined} onClick={() => { if (!busy) onForce(); }} aria-label={t("process.forceName", { name: row.name })}>{t("process.force")}</button>
             </>
           ) : (
-            <button type="button" className="st-quit" disabled={busy} onClick={onQuit} aria-label={t("status.apps.quitName", { name: row.name })}>
+            <button type="button" className="st-quit" aria-disabled={busy || undefined} onClick={() => { if (!busy) onQuit(); }} aria-label={t("status.apps.quitName", { name: row.name })}>
               {busy ? t("status.apps.quitting") : t("status.apps.quit")}
             </button>
           ))}
@@ -266,6 +249,21 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     return { ...q, busy };
   });
 
+  // 「还没退出」会把退出按钮换成强退按钮：焦点还在这一行时，延续到强退按钮，不丢给 body。
+  // 新按钮可能晚一帧才提交，逐帧重试几次。
+  const focusRowForce = (row: ProcessRow) => {
+    const keySel = `[data-key="${CSS.escape(row.key)}"]`;
+    const rowEl = document.querySelector(keySel);
+    if (!rowEl?.contains(document.activeElement)) return;
+    let tries = 0;
+    const tryFocus = () => {
+      const btn = document.querySelector<HTMLElement>(`${keySel} .pr-force`);
+      if (btn) { btn.focus({ preventScroll: true }); return; }
+      if (tries++ < 6) requestAnimationFrame(tryFocus);
+    };
+    requestAnimationFrame(tryFocus);
+  };
+
   // 正常退出：和系统状态一样；5 秒后还在跑（或被拒绝），这一行改成「还没退出」+「强制退出」。
   const doQuit = async (row: ProcessRow) => {
     setQuitTarget(null);
@@ -277,6 +275,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
       } else {
         toast(t("status.toast.quitPending", { name: row.name }));
         setStuck((s) => new Set(s).add(row.path));
+        focusRowForce(row);
       }
     } catch (e) {
       const code = quitErrCode(e);
@@ -286,6 +285,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
       } else if (code === "cannot-quit") {
         toast(t("status.toast.cannotQuit", { name: row.name }), "err");
         setStuck((s) => new Set(s).add(row.path));
+        focusRowForce(row);
       } else {
         toast(`${t("status.error")}：${errText(e)}`, "err");
       }

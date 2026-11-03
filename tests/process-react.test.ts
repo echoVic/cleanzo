@@ -181,10 +181,17 @@ test("rows: an app quits; while it is still running it offers force quit; a quit
   expect(idle).toContain("st-quit");
   expect(idle).not.toContain("pr-force");
   expect(idle).toContain(t("status.apps.procs", { n: 62 }));
+  // 忙态按钮保持可聚焦（aria-disabled 而非 disabled），弹层关闭后焦点能还回行内
+  const busyHtml = await rowHtml({ row: app, busy: true });
+  expect(busyHtml).toContain("st-quit");
+  expect(busyHtml).toContain('aria-disabled="true"');
+  expect(busyHtml).not.toContain(" disabled");
   const stuck = await rowHtml({ row: app, stuck: true });
   expect(stuck).toContain(t("process.stuck"));
   expect(stuck).toContain("pr-force");
   expect(stuck).not.toContain("st-quit");
+  const stuckBusy = await rowHtml({ row: app, stuck: true, busy: true });
+  expect(stuckBusy).toMatch(/class="pr-force"[^>]*aria-disabled="true"/);
   const done = await rowHtml({ row: app, done: true });
   expect(done).toContain("pr-item quitted");
   expect(done).not.toContain("st-quit");

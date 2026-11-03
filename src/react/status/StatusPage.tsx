@@ -16,7 +16,7 @@ import { useFlip } from "../../ui/motion/flip";
 import { useIndicator } from "../../ui/motion/indicator";
 import { scrollBehavior } from "../../ui/motion/motion";
 import { Leave, usePresence } from "../../ui/motion/presence";
-import { errText, human, toast } from "../../shared";
+import { errText, focusNextAfter, human, toast } from "../../shared";
 import { statusApi } from "./api";
 import { SparkSvg } from "./Spark";
 import { crashDumps, oversized } from "../list/crash-dumps";
@@ -520,6 +520,14 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
 
   // ---- 退出应用（设计稿 §11：四结果 toast 映射） ----
 
+  // done 会立刻摘掉行内退出按钮；焦点还在这一行时，交给下方最近的可聚焦元素，避免掉到 body。
+  const handoffDoneRow = React.useCallback(() => {
+    const rowEl = document.activeElement instanceof HTMLElement
+      ? document.activeElement.closest<HTMLElement>(".st-row[data-key]")
+      : null;
+    if (rowEl) requestAnimationFrame(() => focusNextAfter(rowEl));
+  }, []);
+
   const doQuit = React.useCallback(async (app: AppUsage) => {
     setQuitTarget(null);
     setQuit((prev) => ({ ...prev, busy: new Set(prev.busy).add(app.path) }));
@@ -528,6 +536,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       if (ok) {
         toast(t("status.toast.quitDone", { name: app.name }));
         setQuit((prev) => ({ ...prev, done: new Set(prev.done).add(app.key) }));
+        handoffDoneRow();
       } else {
         // 5s 超时仍在跑：多半在等未保存内容的确认
         toast(t("status.toast.quitPending", { name: app.name }));
@@ -537,6 +546,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       if (code === "not-running") {
         toast(t("status.toast.notRunning", { name: app.name }));
         setQuit((prev) => ({ ...prev, done: new Set(prev.done).add(app.key) }));
+        handoffDoneRow();
       } else if (code === "cannot-quit") {
         toast(t("status.toast.cannotQuit", { name: app.name }), "err");
       } else {
@@ -550,7 +560,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
         return { ...prev, busy };
       });
     }
-  }, [t]);
+  }, [t, handoffDoneRow]);
 
   // ---- 派生视图 ----
 
@@ -775,8 +785,8 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
                       <span className="st-col st-cpu num">{fmtPct(r.cpu)}</span>
                       <span className="st-act">
                         {r.quit && !leaving && !quit.done.has(r.key) && (
-                          <button key={busy ? "busy" : "idle"} className="st-quit cz-fade-in" disabled={busy} type="button" onClick={() => setQuitTarget(r)} aria-label={t("status.apps.quitName", { name: r.name })}>
-                            {busy ? t("status.apps.quitting") : t("status.apps.quit")}
+                          <button className="st-quit cz-fade-in" aria-disabled={busy || undefined} type="button" onClick={() => { if (!busy) setQuitTarget(r); }} aria-label={t("status.apps.quitName", { name: r.name })}>
+                            <span key={busy ? "busy" : "idle"} className="cz-fade-in">{busy ? t("status.apps.quitting") : t("status.apps.quit")}</span>
                           </button>
                         )}
                       </span>
