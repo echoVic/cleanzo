@@ -568,7 +568,7 @@ function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade }: {
           <UpdateState update={u} hasCheck={hasCheck} busy={busy} onUpgrade={onUpgrade} />
         )}
         {c.kind !== "broken" && (
-          <button type="button" className="cursor-pointer text-muted hover:text-foreground"
+          <button type="button" className="cz-icon-btn cursor-pointer text-muted hover:text-foreground"
             onClick={() => skillsApi.reveal(c.real || c.path).catch(() => {})} aria-label={t("skills.reveal")}>
             <FolderOpen className="h-3.5 w-3.5" />
           </button>

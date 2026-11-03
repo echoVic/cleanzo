@@ -63,15 +63,18 @@ function TriCheck({ checked, indeterminate, disabled, onChange, ariaLabel }: {
       ref.current.indeterminate = !!indeterminate;
     }
   });
+  // label 包裹：视觉框仍 15px，透明热区经 .cz-tri::before 扩到 24px（WCAG 2.5.8），点 label 即切换
   return (
-    <input
-      ref={ref}
-      type="checkbox"
-      aria-label={ariaLabel}
-      checked={checked}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.checked)}
-    />
+    <label className="cz-tri">
+      <input
+        ref={ref}
+        type="checkbox"
+        aria-label={ariaLabel}
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
   );
 }
 

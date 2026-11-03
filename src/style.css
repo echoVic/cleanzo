@@ -795,7 +795,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   flex-shrink: 0;
   accent-color: var(--accent);
   cursor: pointer;
-  padding: 4px;
+  padding: 5px; /* 15+10=25px 点击目标（WCAG 2.5.8） */
 }
 .fs-check input { width: 15px; height: 15px; cursor: pointer; }
 
@@ -1362,7 +1362,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .photo-viewer-info { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; }
 .photo-viewer-info p { margin: 0; }
 .photo-viewer-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
-.photo-viewer-controls .check { color: var(--fg); }
+.photo-viewer-controls .check { color: var(--fg); padding-block: 3px; margin-block: -3px; /* 点击目标 ≥24px（WCAG 2.5.8），占位不变 */ }
 .photo-viewer-nav { display: flex; gap: 6px; }
 @media (max-height: 420px), (max-width: 480px) {
   #photo-viewer { padding: 6px; }
@@ -1374,7 +1374,12 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-group { min-width: 0; }
 .junk-group-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .junk-group-head input, .junk-sub-row input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
-.junk-group-toggle { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg); cursor: pointer; text-align: left; }
+/* 原生 15px 复选框的透明热区：label + ::before 外扩到 24px（WCAG 2.5.8），点击 label 即切换 */
+.cz-tri { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+.cz-tri::before { content: ""; position: absolute; inset: -4.5px; border-radius: 7px; }
+.junk-group-toggle { position: relative; display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: var(--fg); cursor: pointer; text-align: left; }
+/* 透明热区纵向外扩到 ≥24px（WCAG 2.5.8）：组头上下 10px padding 内容纳，不横向侵占复选框 */
+.junk-group-toggle::before { content: ""; position: absolute; top: -2px; bottom: -2px; left: 0; right: 0; }
 .junk-group .group-name { letter-spacing: 0; }
 .junk-group .group-sel { font-size: 12px; white-space: normal; text-align: right; }
 .junk-fold, .junk-expand { display: grid; place-items: center; flex-shrink: 0; }
@@ -1417,7 +1422,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-more { display: flex; justify-content: flex-end; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; border: 0; background: none; color: var(--muted); font-size: 12px; cursor: pointer; text-align: right; }
 .junk-more:hover, .junk-link:hover { color: var(--accent-strong); }
 .junk-foot { padding: 0 16px; line-height: 1.8; }
-.junk-link { padding: 0; border: 0; background: none; color: var(--accent-strong); cursor: pointer; font-size: inherit; }
+/* 纵向负边距补偿 padding：点击目标 ≥24px（WCAG 2.5.8），布局占位不变 */
+.junk-link { padding: 3px 0; margin: -3px 0; border: 0; background: none; color: var(--accent-strong); cursor: pointer; font-size: inherit; }
 .junk-idle-icon { color: var(--accent); margin-bottom: 18px; }
 .junk-idle-icon svg { width: 72px; height: 72px; }
 @media (max-width: 760px) {
@@ -1446,6 +1452,12 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 
 /* Skills 列表：屏外行跳过重排（技能目录可达上百项），auto 记住展开后的真实高度 */
 .sk-item { content-visibility: auto; contain-intrinsic-size: auto 58px; }
+/* 行尾 chevron 视觉仅 16px 高：透明热区纵向外扩到 24px（WCAG 2.5.8），行内 10px 上下留白容纳 */
+.sk-chev { position: relative; }
+.sk-chev::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: 0; right: 0; border-radius: 6px; }
+/* 通用小图标按钮：视觉图标保持原样，透明热区外扩到 24px（WCAG 2.5.8），不占布局 */
+.cz-icon-btn { position: relative; }
+.cz-icon-btn::before { content: ""; position: absolute; inset: -5px; border-radius: 7px; }
 
 /* Skills 窄窗口：固定 170+70px 的时间/大小列会把名称挤到重叠，折成两行 */
 @container content (max-width: 560px) {
@@ -1635,10 +1647,11 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   font-variant-numeric: tabular-nums;
 }
 .mfoot .mlink {
-  margin-left: auto;
+  /* 纵向负边距补偿 padding：点击目标 ≥24px（WCAG 2.5.8），布局占位不变 */
+  margin: -4px 0 -4px auto;
   border: 0;
   background: none;
-  padding: 0;
+  padding: 4px 0;
   cursor: pointer;
   color: var(--accent-strong);
   font-weight: 600;
@@ -2018,7 +2031,12 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 }
 
 /* Radix 复选框：先填色，再一笔画出对勾；半选是横线从中间展开 */
-.cz-cbx-root { transition: background-color var(--t-fade) linear, border-color var(--t-fade) linear; }
+.cz-cbx-root { position: relative; transition: background-color var(--t-fade) linear, border-color var(--t-fade) linear; }
+/* 视觉框保持 15px，透明热区外扩到 24px（WCAG 2.5.8）；不占布局、不影响描边与焦点环。
+   复选框自带 1px border，绝对定位伪元素的包含块是 13px padding box，故外扩 5.5px。
+   注意：Tailwind v4 下 .box-content 位于 cascade layer，会被下方未分层的 * 规则压过，
+   列表行的 p-1 并不会撑大盒子，因此热区对所有变体统一外扩。 */
+.cz-cbx-root::before { content: ""; position: absolute; inset: -5.5px; border-radius: 7px; }
 .cz-cbx path { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .cz-cbx-check { stroke-dasharray: 12; stroke-dashoffset: 12; transition: stroke-dashoffset var(--t-state) var(--e-out); }
 .cz-cbx[data-state="checked"] .cz-cbx-check { stroke-dashoffset: 0; transition-delay: 40ms; }
@@ -2131,7 +2149,8 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .pr-diag { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn-text); font-size: 13px; line-height: 1.5; }
 .pr-diag > span { flex: 1; min-width: 0; }
 .pr-paused { margin: 0 0 8px; font-size: 12px; }
-.pr-cols .pr-sort { width: 96px; flex: none; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: right; cursor: pointer; }
+/* 纵向负边距补偿 padding：点击目标 ≥24px（WCAG 2.5.8），布局占位不变 */
+.pr-cols .pr-sort { width: 96px; flex: none; padding: 4px 0; margin: -4px 0; border: 0; background: none; font: inherit; color: inherit; text-align: right; cursor: pointer; }
 .pr-cols .pr-sort[aria-pressed="true"] { color: var(--fg); font-weight: 600; }
 .pr-cols .c-act { width: 168px; }
 .pr-item { border-bottom: 1px solid var(--bg-subtle); transition: opacity 0.3s ease; }
@@ -2146,7 +2165,9 @@ div.pr-toggle { cursor: default; }
 .pr-chev { width: 10px; flex: none; color: var(--muted); font-size: 11px; }
 .pr-ico-sys { background: var(--bg-subtle); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
 .pr-sys { flex: none; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; }
-.pr-tag { flex: none; padding: 1px 6px; border: 0; border-radius: 6px; background: var(--warn-soft); color: var(--warn-text); font: inherit; font-size: 11px; cursor: pointer; }
+.pr-tag { position: relative; flex: none; padding: 1px 6px; border: 0; border-radius: 6px; background: var(--warn-soft); color: var(--warn-text); font: inherit; font-size: 11px; cursor: pointer; }
+/* 透明热区仅纵向外扩 3px 到 ≥24px（WCAG 2.5.8）：行高 28px 容得下，视觉胶囊不变，也不侵占相邻整行 toggle */
+.pr-tag::before { content: ""; position: absolute; top: -3px; bottom: -3px; left: 0; right: 0; border-radius: 8px; }
 .pr-est { color: var(--muted); }
 .pr-act { display: flex; width: 168px; flex: none; align-items: center; justify-content: flex-end; gap: 8px; }
 .pr-stuck { color: var(--muted); font-size: 12px; white-space: nowrap; }
