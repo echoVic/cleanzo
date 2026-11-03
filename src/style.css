@@ -2091,6 +2091,8 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
     border: none;
     background: currentColor;
   }
+  /* 硬编码时长的 caret 旋转/按下缩放：reduced-motion 下瞬切，不保留过渡 */
+  .group-caret, .cat-details summary::before, .fs-expand .caret, .ha-cta { transition: none; }
 }
 
 /* 占用增长页：沿用卡片、描边与动效令牌。 */
