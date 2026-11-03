@@ -595,7 +595,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-solid);
   cursor: pointer;
 }
 .cat-row.is-empty .cat-check input { cursor: default; }
@@ -798,7 +798,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  accent-color: var(--accent);
+  accent-color: var(--accent-solid);
   cursor: pointer;
   padding: 5px; /* 15+10=25px 点击目标（WCAG 2.5.8） */
 }
@@ -1064,7 +1064,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
-.check input { accent-color: var(--accent); width: 14px; height: 14px; }
+.check input { accent-color: var(--accent-solid); width: 14px; height: 14px; }
 .settings-status { font-size: 12.5px; min-height: 1.2em; }
 .settings-status.err { color: var(--danger-text); }
 
@@ -1381,7 +1381,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 #list.junk-list, #clean-react-root .junk-list { display: flex; flex-direction: column; gap: 20px; background: none; border: none; padding: 0; }
 .junk-group { min-width: 0; }
 .junk-group-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.junk-group-head input, .junk-sub-row input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.junk-group-head input, .junk-sub-row input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--accent-solid); }
 /* 原生 15px 复选框的透明热区：label + ::before 外扩到 24px（WCAG 2.5.8），点击 label 即切换 */
 .cz-tri { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
 .cz-tri::before { content: ""; position: absolute; inset: -4.5px; border-radius: 7px; }
