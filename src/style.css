@@ -65,6 +65,8 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px rgba(16, 24, 40, 0.05);
   --shadow-lift: 0 2px 6px rgba(16, 24, 40, 0.06), 0 14px 34px rgba(16, 24, 40, 0.09);
   --skeleton: rgba(127, 132, 140, 0.12);
+  /* 扫光高亮点：必须始终比 --skeleton 更亮（两套骨架共用，避免深色下光带反转） */
+  --skeleton-sheen: rgba(255, 255, 255, 0.6);
   --overlay: rgba(14, 17, 22, 0.42);
   --toast-bg: #23262c;
 }
@@ -122,6 +124,7 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.25);
     --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.35), 0 14px 34px rgba(0, 0, 0, 0.4);
     --skeleton: rgba(255, 255, 255, 0.07);
+    --skeleton-sheen: rgba(255, 255, 255, 0.14);
     --overlay: rgba(0, 0, 0, 0.55);
     --toast-bg: #f0f2f5;
   }
@@ -1107,9 +1110,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .skeleton {
   height: 76px;
   border-radius: 10px;
-  background: linear-gradient(100deg, var(--skeleton) 30%, color-mix(in srgb, var(--skeleton) 55%, var(--card)) 50%, var(--skeleton) 70%);
+  background: linear-gradient(100deg, var(--skeleton) 30%, var(--skeleton-sheen) 50%, var(--skeleton) 70%);
   background-size: 200% 100%;
-  animation: shimmer 1.3s infinite;
+  animation: shimmer 1.4s ease infinite;
   border-color: transparent;
 }
 .app-list .skeleton { height: 60px; border-radius: 12px; }
@@ -1801,7 +1804,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
   height: 12px;
   border-radius: 6px;
   background: var(--skeleton);
-  background-image: linear-gradient(90deg, transparent, rgba(127, 132, 140, 0.18), transparent);
+  background-image: linear-gradient(90deg, transparent, var(--skeleton-sheen), transparent);
   background-size: 200% 100%;
   background-repeat: no-repeat;
   animation: st-shimmer 1.4s ease infinite;
