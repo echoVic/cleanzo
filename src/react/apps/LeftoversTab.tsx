@@ -1,4 +1,4 @@
-import { shortHome, isWindows } from "../../platform";
+import { shortHome } from "../../platform";
 import * as React from "react";
 import type { OrphanItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
@@ -230,9 +230,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     setBusy(true);
     try {
       const res = await appsApi.trashPath(target.path);
-      const path = shortHome(target.path);
-      // 保留旧 macOS toast 的主目录展示。
-      toast(t("fs.trash.ok", { path: !isWindows() && path !== target.path ? path.replace(/^~/, "~/") : path, size: human(res.freed) }));
+      // shortHome 已返回 ~/ 前缀，直接使用，避免重复拼出 ~// 双斜杠。
+      toast(t("fs.trash.ok", { path: shortHome(target.path), size: human(res.freed) }));
       applyItemsRemoval([target.path]);
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
