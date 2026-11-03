@@ -2063,6 +2063,16 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
   /* toast 只淡入淡出（--t-state 在这里为 0，改用 --t-fade） */
   .toast, .toast.show { transform: translate(-50%, 0); transition: opacity var(--t-fade) linear; }
   .skeleton, .st-skel .sk-line, .st-skel-row .sk-line { animation: none; }
+  /* 无限旋转的加载指示停转（仍有“扫描中/正在分析”文字传达状态）；
+     导航项 busy 指示无文字配衬，改为静态实心点表达“进行中” */
+  .spinner, .spin { animation: none; }
+  .nav-item.busy::after {
+    animation: none;
+    width: 8px;
+    height: 8px;
+    border: none;
+    background: currentColor;
+  }
 }
 
 /* 占用增长页：沿用卡片、描边与动效令牌。 */
