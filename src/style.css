@@ -433,7 +433,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   height: 100%;
   width: 0;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--accent-solid);
   transition: width var(--t-layout) var(--e-out);
 }
 .banner-actions { position: relative; z-index: 1; flex-shrink: 0; }
@@ -720,7 +720,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   height: 100%;
   width: 0;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--accent-solid);
   transition: width var(--t-move) var(--e-out);
 }
 
@@ -916,7 +916,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   .fs-track { max-width: 380px; }
   .fs-row { padding: 12px 20px; }
 }
-.fs-fill { height: 100%; border-radius: 999px; background: var(--accent); opacity: 0.85; transition: width var(--t-move) var(--e-out); }
+.fs-fill { height: 100%; border-radius: 999px; background: var(--accent-solid); opacity: 0.85; transition: width var(--t-move) var(--e-out); }
 .fs-size {
   font-weight: 720;
   font-size: 13.5px;
@@ -1423,7 +1423,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-menu button:hover, .junk-menu button:focus-visible { background: var(--hover); }
 .junk-menu button:disabled { opacity: 0.5; cursor: default; }
 .junk-banner, .junk-stale, .junk-leftovers { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; line-height: 1.7; }
-.junk-banner { padding: 12px 16px; background: var(--bg-subtle); border-left: 3px solid var(--accent); }
+.junk-banner { padding: 12px 16px; background: var(--bg-subtle); border-left: 3px solid var(--accent-solid); }
 .junk-banner .btn, .junk-stale .btn, .junk-leftovers .btn { flex-shrink: 0; }
 .junk-stale { padding: 0 16px; color: var(--warn); }
 .junk-leftovers { padding: 12px 16px 12px 74px; }
@@ -1640,7 +1640,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 
 /* 磁盘 / 电池用量条 */
 .mbar { width: 100%; height: 10px; border-radius: 5px; background: var(--bg-subtle); overflow: hidden; }
-.mbar > i { display: block; width: 100%; height: 100%; background: var(--accent); transform-origin: left center; transition: transform var(--t-move) var(--e-out); }
+.mbar > i { display: block; width: 100%; height: 100%; background: var(--accent-solid); transform-origin: left center; transition: transform var(--t-move) var(--e-out); }
 .mbar.low > i { background: var(--warn); }
 
 /* footer 钉底 */
@@ -2054,7 +2054,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .cz-cbx-minus { transform-box: fill-box; transform-origin: center; transform: scaleX(0); transition: transform var(--t-state) var(--e-out); }
 .cz-cbx[data-state="indeterminate"] .cz-cbx-minus { transform: scaleX(1); }
 
-.cz-tab-ind { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
+.cz-tab-ind { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent-solid); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
 .cz-seg-thumb { position: absolute; top: 2px; bottom: 2px; left: 0; border-radius: 6px; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 0 0 1px var(--border-strong); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
 .cz-tabpanel:not([hidden]) { animation: cz-view-in var(--t-state) var(--e-out) both; }
 @media (prefers-reduced-motion: reduce) { .cz-tabpanel:not([hidden]) { animation-name: cz-fade-in; animation-duration: var(--t-fade); } }
