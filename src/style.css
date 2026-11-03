@@ -164,7 +164,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 
 ::selection { background: var(--accent-soft); }
 
-:where(button, input, select, textarea, summary, label):focus-visible {
+:where(a, button, input, select, textarea, summary, label):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring);
   border-radius: 6px;
@@ -191,7 +191,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .skip-link:focus-visible {
   transform: translateY(0);
   outline: none;
-  /* 全局焦点环选择器不含 a，这里显式补上，并保留悬浮投影 */
+  /* 全局焦点环已覆盖 a；这里显式重声明以在环之外保留悬浮投影 */
   box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow-lift);
 }
 @media (prefers-reduced-motion: reduce) {
