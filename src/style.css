@@ -1794,7 +1794,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 }
 .st-quit:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--fg); border-color: var(--border); background: var(--card); }
 .st-quit:active:not(:disabled):not([aria-disabled="true"]) { background: var(--accent-soft); color: var(--accent-strong); }
-.st-quit:disabled, .st-quit[aria-disabled="true"] { opacity: 0.6; cursor: default; }
+.st-quit:disabled, .st-quit[aria-disabled="true"] { opacity: 0.88; cursor: default; }
 .st-empty { padding: 18px 20px; color: var(--muted); font-size: 13px; }
 .st-footnote {
   padding: 12px 20px 16px;
@@ -2186,7 +2186,13 @@ div.pr-toggle { cursor: default; }
 .pr-act { display: flex; width: 168px; flex: none; align-items: center; justify-content: flex-end; gap: 8px; }
 .pr-stuck { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .pr-force { height: 28px; padding: 0 12px; border: 1px solid var(--danger); border-radius: 7px; background: var(--card); color: var(--danger-text); font-size: 12px; font-weight: 600; cursor: pointer; }
-.pr-force:disabled, .pr-force[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+/* 忙态不用整按钮 opacity（会让红色文字掉到 2.3:1 难以辨认），改为描边退色 + 文字微淡，
+   边框的退色足够传达“进行中”，文字仍保持 ≥4.5:1 可读。 */
+.pr-force:disabled, .pr-force[aria-disabled="true"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--card));
+  color: color-mix(in srgb, var(--danger-text) 80%, var(--card));
+  cursor: default;
+}
 .pr-children { margin: 0; padding: 4px 0; list-style: none; background: var(--bg-subtle); }
 .pr-child { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 20px 0 66px; color: var(--muted); font-size: 12px; }
 .pr-child-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
