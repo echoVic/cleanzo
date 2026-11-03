@@ -143,7 +143,9 @@ html, body { height: 100%; }
 body {
   margin: 0;
   height: 100vh;
-  overflow: hidden;
+  /* 横向：视口低于 560px 时出现滚动条，保证内容不被挤压裁剪；纵向仍由 .content 内部滚动 */
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--bg);
   color: var(--fg);
   font-size: 13px;
@@ -211,7 +213,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 }
 *::-webkit-scrollbar-thumb:hover { background: rgba(127, 132, 140, 0.45); background-clip: padding-box; }
 
-.app { display: flex; height: 100vh; }
+.app { display: flex; height: 100vh; /* 设计下限：560px 视口 ≈ 内容宽 290px；低于此宽度不再挤压，改由 body 横向滚动 */ min-width: 560px; }
 
 /* ---- Sidebar (unified translucent) ---- */
 .sidebar {
