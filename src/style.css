@@ -16,8 +16,8 @@
   --fg: #1a1c20;
   --muted: #5B6472;
   --border: rgba(20, 24, 31, 0.14);
-  /* 交互控件描边：需满足 WCAG 1.4.11 非文本对比度 ≥3:1；0.47 alpha 压白卡约 3.05:1 */
-  --border-strong: rgba(20, 24, 31, 0.47);
+  /* 交互控件描边：需满足 WCAG 1.4.11 非文本对比度 ≥3:1；0.50 alpha 压白卡约 3.28:1、压分段轨道约 3.06:1 */
+  --border-strong: rgba(20, 24, 31, 0.50);
 
   --accent: #1FA355;
   /* #0C7F3F 压在 accent-soft+行 hover 灰层上仅 4.22:1（11px 徽标需 4.5）；
@@ -2055,7 +2055,7 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .cz-cbx[data-state="indeterminate"] .cz-cbx-minus { transform: scaleX(1); }
 
 .cz-tab-ind { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
-.cz-seg-thumb { position: absolute; top: 2px; bottom: 2px; left: 0; border-radius: 6px; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
+.cz-seg-thumb { position: absolute; top: 2px; bottom: 2px; left: 0; border-radius: 6px; background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 0 0 1px var(--border-strong); pointer-events: none; transition: transform var(--t-layout) var(--e-move), width var(--t-layout) var(--e-move); }
 .cz-tabpanel:not([hidden]) { animation: cz-view-in var(--t-state) var(--e-out) both; }
 @media (prefers-reduced-motion: reduce) { .cz-tabpanel:not([hidden]) { animation-name: cz-fade-in; animation-duration: var(--t-fade); } }
 
