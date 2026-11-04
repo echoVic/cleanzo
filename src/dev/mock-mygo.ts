@@ -93,7 +93,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.4.1", os: "darwin", arch: "arm64", goVersion: "go1.27.3",
+    version: "0.4.2", os: "darwin", arch: "arm64", goVersion: "go1.27.3",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
