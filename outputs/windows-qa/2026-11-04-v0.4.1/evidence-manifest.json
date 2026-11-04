@@ -27,8 +27,8 @@
       "sha256": "e09aa7bddd0853696d2110b1984b916c559c78a308f62af8184c584ffbe2b247"
     },
     "fix_validation.md": {
-      "bytes": 4981,
-      "sha256": "910ac4c8d179806833a01a74a8035513cb5d4c258e338f0490dadcc7e59a8201"
+      "bytes": 5469,
+      "sha256": "a97217a8608d951d60b05e62f1da5b77ef959a13abbb35acc08fda77c5d02f10"
     },
     "report-followup.jsonl": {
       "bytes": 614,
@@ -289,6 +289,18 @@
     "test_report.md": {
       "bytes": 11004,
       "sha256": "0e34cc9383f1ceda9809889f16c429b3265e5c3f1ad06514ed75a7bc80925346"
+    },
+    "validation/go-race.txt": {
+      "bytes": 385,
+      "sha256": "b636444c69e3e3c9a53be37e41032d1bb58687d3285ba2b47f6127300429b269"
+    },
+    "validation/web-build.log": {
+      "bytes": 739,
+      "sha256": "1d6797459f62524a8bf2530f13ea2ff1ac8226c5f4cdee578f931f7bfb624593"
+    },
+    "validation/web-tests.log": {
+      "bytes": 26300,
+      "sha256": "a080fe5a87cfbf0b54ad7a53289b19ca28d1d028845cb9fc9fe91353a2dc748f"
     }
   }
 }

@@ -45,13 +45,16 @@ AssertionError: dark: ambiguous native palette:
 
 ## 验证与材料
 
+本地前端测试及构建原始输出见 [前端验证日志](validation/web-tests.log)、[构建日志](validation/web-build.log)；Go race 的命令及终端结果见 [Go 验证记录](validation/go-race.txt)。
+
 - 前端单元测试：270 通过；前端类型检查及生产构建通过。
 - 侧栏浏览器回归通过：固定页脚、低高度滚动、键盘导航、动态选中态。
 - hover 浏览器回归通过：图标、禁用更新按钮、四种 Button 的深浅色状态；启用 hover 保留。
 - 原生控件浏览器回归通过；冒烟辅助测试 3 通过。
-- Windows amd64 交叉 `go vet ./...` 通过。
+- 本机 macOS 完整 `go test -race -count=1 ./...` 通过：`ok cleanzo 575.567s`，未跳过原生 sysctl 测试。
+- Windows amd64 / arm64 交叉 `go vet ./...` 均通过。
 - 原始结果审计：18 项计划全部有记录，证据存在，无缺失用例；审计仅检查记录完整性，不代替截图判读。
 
-源码修复仍使用 0.4.1 版本号，此次没有发布新安装包。持续集成结果以修复提交对应的 GitHub Actions 为准。
+源码修复仍使用 0.4.1 版本号，此次没有发布新安装包。持续集成使用修复提交 `001933fc1303fd7ef690076e5c657790347acc8d`，见 [GitHub Actions](https://github.com/echoVic/cleanzo/actions/runs/41849116858)。本报告补充提交不改变该修复源码。
 
 结束状态：临时 PowerShell 已关闭，应用正常重开并显示系统状态；System 外观与 System 语言保留，云桌面连接保留。新增原始截图 42–54 同目录保存，原始报告截图没有覆盖。

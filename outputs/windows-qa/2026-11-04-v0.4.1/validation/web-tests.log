@@ -1,0 +1,415 @@
+$ bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts && bun test tests/skills-react.test.ts && bun test tests/crash-dumps.test.ts && bun test tests/platform.test.ts && bun test tests/i18n-windows.test.ts && bun test tests/motion.test.ts && bun test tests/growth-react.test.ts && bun test tests/process-react.test.ts && bun test tests/app-icon.test.ts
+bun test v1.3.11 (af24e281)
+
+tests/css-tokens.test.ts:
+(pass) index.css 不存在 --x: var(--x) 自引用（含 fallback） [1.58ms]
+(pass) 无 layer 的裸元素规则不设置 color/font/font-weight（style.css + index.css） [5.41ms]
+
+ 2 pass
+ 0 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [52.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/clean-react.test.ts:
+(pass) pending rows spin; measured zero rows disappear; running and denied rows remain unselectable [5.27ms]
+(pass) discovered bytes include running and review candidates without making them selectable [0.31ms]
+(pass) selected review bytes agree with the confirmation plan [0.21ms]
+(pass) group totals and hidden apps use discovered capacity, while busy entries remain unselectable [0.07ms]
+(pass) review and running are overlapping labels, not additive buckets [0.05ms]
+(pass) detail selection uses only default children and confirmation sends their paths [0.03ms]
+(pass) unchecking the last child never falls back to cleaning the entire item [0.12ms]
+(pass) apps are truncated at 15 and show their remaining size; usage and estimate labels render [0.24ms]
+(pass) ignore persists before hiding a row and rolls back on failure, without a stale-results bar [0.31ms]
+(pass) leftovers callback and English refresh use the current language [0.58ms]
+(pass) a scan error presents retry instead of selectable partial results [0.07ms]
+(pass) stopping a scan retains measured rows and drops buffered and unmeasured rows [0.07ms]
+(pass) group checkbox is half-checked, never fully checked, while running or denied rows are unselected [0.11ms]
+(pass) group is fully checked only when every visible row is selected [0.10ms]
+(pass) group state follows nested child selection instead of counting a partial row as fully checked [0.13ms]
+(pass) group select and deselect preserve partial state while blocked rows never enter the plan [0.18ms]
+(pass) group selection never includes a running app or a denied item [0.10ms]
+(pass) tool failure shows both its skip reason and failed count [0.04ms]
+(pass) shared confirmation clears pending on cancel and invalidates old async modal work [0.02ms]
+(pass) all backend catalog rules have names and descriptions in both languages [3.12ms]
+(pass) v3 errors from ignoring an item are translated rather than showing raw JSON [0.26ms]
+(pass) unsupported platform operations have a translated error in both languages [0.04ms]
+(pass) explicitly selecting the latest version removes Keep Latest and sends only that path [0.05ms]
+(pass) stopping cleanup retains completed results and marks the remaining rows [0.17ms]
+(pass) cleanup completion retains final results before React commits the queued render [0.12ms]
+(pass) cleanup tracker keeps completed and failed results when another row is canceled [0.07ms]
+(pass) rejected cleanup keeps the failure visible and permits a rescan [0.03ms]
+(pass) Windows hides the Full Disk Access notice even when the summary denies access [664.74ms]
+(pass) scan progress counts measured rules and the phase is the first group still pending [0.21ms]
+(pass) scan phase labels exist in both languages [0.21ms]
+(pass) the clean-complete moment plays only for a full, error-free clean that freed space [0.50ms]
+
+ 31 pass
+ 0 fail
+ 515 expect() calls
+Ran 31 tests across 1 file. [711.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/status-react.test.ts:
+(pass) STATUS_ALERT thresholds match the spec constants [0.06ms]
+(pass) fmtMem strips .0 on whole GiB, MB below 1 GiB, dash for zero [0.27ms]
+(pass) uptimeParts: under a minute hidden, then days/hours/minutes buckets [0.06ms]
+(pass) alerts: pressure warn + swap line, critical, swap-only, disk low; at most two, memory on top [0.25ms]
+(pass) sortApps sorts by memory or CPU desc without mutating the sample [0.05ms]
+(pass) hover freeze keeps the row set and order while numbers refresh by key [0.06ms]
+(pass) quit state machine: busy → done → gone on disappearance; same key reappearance restores the row [0.10ms]
+(pass) syncQuitRows is a no-op when no quitted rows are tracked [0.02ms]
+(pass) syncQuitRows returns the same state when a gone key remains absent [0.02ms]
+(pass) quitErrCode parses structured errors; plain text passes through [0.11ms]
+(pass) spark history caps at 30 points and drops the oldest [0.07ms]
+(pass) a new CPU sample that only moves the window along is a shift [0.45ms]
+(pass) iconColor is stable per name and stays in the palette [0.02ms]
+(pass) English interface renders the paired status strings [0.27ms]
+(pass) Windows memory card hides zero compressed memory and uses page-file terms [93.38ms]
+(pass) Windows CPU hides unsupported load tiles and memory uses the short Kernel label [5.12ms]
+(pass) Windows memory legend keeps three full label/value rows in zh/en [3.60ms]
+(pass) Windows disk legend keeps full labels and 103.3 GB in full-width rows in zh/en [1.97ms]
+(pass) the top-apps list is Windows-only, without View All; macOS lists no apps [10.81ms]
+(pass) modelLabel splits the device-tree name and localizes the details [0.34ms]
+(pass) machine numbers format without NaN: rates, temperatures, drive sizes [0.64ms]
+(pass) ssdWarnings names each NVMe critical-warning bit [0.08ms]
+(pass) displayText writes the name, size and refresh rate [0.29ms]
+(pass) the network chart keeps a floor so idle traffic doesn't fill it [0.13ms]
+(pass) the health strip shows what it read and leaves out the rest [1.57ms]
+(pass) the macOS CPU card splits performance and efficiency cores [2.95ms]
+(pass) the GPU and network cards show live numbers, and dashes until they are known [1.87ms]
+(pass) the macOS disk card adds the SSD and live read/write; without them it stays as before [4.42ms]
+(pass) the battery card adds its temperature and the adapter's watts when known [2.37ms]
+(pass) English machine strings [0.41ms]
+(pass) macOS home numbers change in place; Windows keeps the rolling number [2.75ms]
+(pass) StatusPage async quit success: A pending → focus B → A completes keeps B focused [19.24ms]
+(pass) StatusPage async quit success: focus still in completed A hands off to B [3.16ms]
+(pass) StatusPage async quit success: focus changes after completion before rAF stays on C [2.33ms]
+(pass) StatusPage async quit success: body focus before own done commit is preserved [2.75ms]
+(pass) StatusPage async quit success: detached completed row cannot hand off focus [1.79ms]
+(pass) StatusPage async quit not-running: A pending → focus B → A completes keeps B focused [1.27ms]
+(pass) StatusPage async quit not-running: focus still in completed A hands off to B [1.86ms]
+(pass) StatusPage async quit not-running: focus changes after completion before rAF stays on C [3.18ms]
+(pass) StatusPage async quit not-running: body focus before own done commit is preserved [3.33ms]
+(pass) StatusPage async quit not-running: detached completed row cannot hand off focus [1.30ms]
+(pass) status bridge resolves handlers lazily: a handler injected after first mount works without re-entering [7.36ms]
+
+ 42 pass
+ 0 fail
+ 295 expect() calls
+Ran 42 tests across 1 file. [212.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/language.test.ts:
+(pass) existing manual preference migrates to native language without a transient repaint [0.29ms]
+(pass) system follows MyGo's supported locale, and changing back from manual refreshes immediately [0.09ms]
+(pass) failed native change retains both the stored choice and the page language [0.15ms]
+(pass) browser fallback and unavailable storage still allow switching during this session [0.08ms]
+(pass) plural token picks singular only for exactly 1 in English [0.32ms]
+(pass) multiple plural tokens in one string resolve independently [0.05ms]
+(pass) every English plural token resolves for 0, 1 and 2 without leaking syntax [3.10ms]
+(pass) Chinese dictionary contains no plural token syntax [0.73ms]
+(pass) Chinese counters never leak plural token syntax [0.10ms]
+
+ 9 pass
+ 0 fail
+ 1657 expect() calls
+Ran 9 tests across 1 file. [31.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/aitools-react.test.ts:
+(pass) offered hides protected and unknown parts only [0.21ms]
+(pass) non-session groups are selectable whenever nonempty [0.06ms]
+(pass) session groups need entries beyond today's and an age outside the window [0.04ms]
+(pass) human formats bytes the same way the rest of the UI does [0.07ms]
+(pass) displayPath collapses the home directory [0.30ms]
+
+ 5 pass
+ 0 fail
+ 20 expect() calls
+Ran 5 tests across 1 file. [20.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/settings-react.test.ts:
+(pass) normalized fills null arrays the Go binding may emit [0.05ms]
+(pass) group checkbox checked state mirrors membership in disabledGroups [0.09ms]
+(pass) empty folder name falls back to the path's base name [0.14ms]
+(pass) ignored item label resolves app: ids via the installed-app map, keeps rule ids [0.05ms]
+(pass) SaveQueue runs jobs serially and isolates failures [0.53ms]
+(pass) Windows settings omit the permission section; macOS keeps its controls [444.99ms]
+(pass) settings page offers system, light and dark appearance modes [16.64ms]
+(pass) toggleMenuBarItem keeps the menu bar's order and drops names it doesn't know [0.26ms]
+
+ 8 pass
+ 0 fail
+ 30 expect() calls
+Ran 8 tests across 1 file. [483.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/large-react.test.ts:
+(pass) under matches path itself and descendants only [0.29ms]
+(pass) effectiveRemoved drops children of removed roots [0.40ms]
+(pass) toggleRow selects the row and loaded kids, deselects everything under it [0.58ms]
+(pass) toggleRow does nothing for gone paths [0.16ms]
+(pass) toggleChild off unwinds a whole-row pick into the remaining loaded kids [0.29ms]
+(pass) rowIndeterminate is true when some but not all loaded kids are picked [0.25ms]
+(pass) pickedPaths collapses a picked folder and drops gone entries [1.34ms]
+(pass) applyRemoval removes rows under roots and shrinks kept rows by known kids [0.66ms]
+(pass) loadedKids filters gone children [0.10ms]
+(pass) visibleAfterThreshold keeps only files at or above the minimum [0.06ms]
+(pass) topBySize sorts desc and caps at n [0.04ms]
+(pass) barWidth is at least 2% of the largest item [0.03ms]
+(pass) threshold buckets are the four persisted tiers [0.04ms]
+(pass) human and displayPath match the rest of the UI [0.53ms]
+
+ 14 pass
+ 0 fail
+ 34 expect() calls
+Ran 14 tests across 1 file. [27.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/photos-react.test.ts:
+(pass) defaultPickedPaths selects only non-keep items inside exact clusters [0.31ms]
+(pass) visibleSelectablePaths excludes keep items and gone paths [0.78ms]
+(pass) visibleClusters drops clusters with fewer than 2 visible items [0.23ms]
+(pass) allChecked / someChecked give the tri-state of the toolbar checkbox [0.06ms]
+(pass) liveSel drops checked paths that were moved to Trash [0.06ms]
+(pass) removeClusters drops clusters under 2 items and rewrites keep/totalSize/waste [0.26ms]
+(pass) removeClusters picks the largest remaining item as keep when the old keep is gone [0.05ms]
+(pass) effectiveRemoved collapses nested removals
+
+ 8 pass
+ 0 fail
+ 24 expect() calls
+Ran 8 tests across 1 file. [17.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/apps-react.test.ts:
+(pass) macOS app filters reference existing panels and label the active content [198.48ms]
+(pass) fresh app details update running controls in both directions [15.82ms]
+(pass) filterApps matches name or path case-insensitively [0.10ms]
+(pass) filterApps with empty/blank query keeps everything [0.05ms]
+(pass) sortApps by name uses localeCompare, size/opened fall back to name [1.91ms]
+(pass) classifyUninstall: pure in-use failures (moved 0) -> inUse [0.09ms]
+(pass) classifyUninstall: any other failures -> partial
+(pass) classifyUninstall: no failures -> ok
+(pass) bundleFailed: bundle path itself or 'path:' prefix fails -> true, otherwise row removed [0.05ms]
+(pass) parseDoneEv reads total size from size field and elapsed ms from path field [0.04ms]
+(pass) orphanFootAfterRemoval recomputes n and size from remaining items, keeps elapsed seconds [0.03ms]
+(pass) sortOrphans sorts by size desc [0.04ms]
+(pass) barWidth is at least 2% of the largest item [0.02ms]
+(pass) Windows Apps cannot mount Leftovers even when requested by an old navigation action [4.07ms]
+(pass) Windows launched result keeps the row until an explicit refresh
+(pass) Windows app row displays publisher and version and sends only its registry id [3.30ms]
+(pass) Windows uninstall dialog hides related files and offers refresh after launch in zh/en [13.81ms]
+(pass) Windows Apps subtitle explains the uninstaller and Store link uses the OS settings URI [4.48ms]
+(pass) Windows app rows omit unknown last-opened metadata without an empty line [4.07ms]
+(pass) Windows Apps hide last-opened sorting and fall back from a saved opened sort [11.26ms]
+(pass) 增长页请求卸载：切到全部、记下要展开的 App，两个 nonce 都递增 [0.06ms]
+(pass) installed app row shows the app's icon once known [58.82ms]
+(pass) 「很久没用」：90 天以前或从未打开 [0.44ms]
+(pass) 筛选：有更新只看 state=update；残留不列已装 App [1.66ms]
+(pass) 版本标签和来源、原因文案键 [0.39ms]
+(pass) 占用拆成本体、数据、缓存 [0.11ms]
+(pass) 增长按 appPath 对上；小标签按 bundle ID [0.22ms]
+(pass) 按 7 天增长排序：有数据的在前，没数据的按大小 [0.06ms]
+(pass) 每个来源和原因都有中英文文案（不会把键名显示出来） [0.50ms]
+(pass) 收起的行：有新版本显示版本标签和独立的「更新」按钮；展开状态写在 aria-expanded [1.55ms]
+(pass) 运行中的 brew 更新在按钮外提供退出提示；其他禁用原因不提示退出 [8.22ms]
+(pass) 展开的三栏：版本原因、缓存可清、运行中禁用清理、卸载按钮 [2.83ms]
+(pass) Windows 行和展开：没有更新、缓存、增长，只剩大小和卸载 [0.55ms]
+(pass) 应用页筛选条：macOS 有四个筛选，Windows 没有；页脚写明会联网 [6.44ms]
+(pass) 外部请求：残留筛选只记请求不挂载；卸载请求回到「全部」 [0.14ms]
+(pass) main.ts 每次切视图都告诉应用页是否可见；垃圾页「查看」残留会切到应用页 [11.73ms]
+(pass) 更新检查只在页面开着时跑：离开就停，没查完回来从头再查，查完不重复 [0.40ms]
+(pass) 增长关闭时已保存的增长排序回退到名称；更新筛选在检查前显示进度 [1.85ms]
+(pass) 更新筛选空列表只显示一次进度；收到更新行后进度移到列表上方 [9.85ms]
+(pass) 页面检查实际接线：懒加载、流式计数、离开取消、返回保留结果、查完不重查、手动清空重查 [16.44ms]
+(pass) 返回后新结果到达前，保留的更新按钮仍发送原应用 ID [8.16ms]
+(pass) 展开只开一行，详情缓存复用；外部请求先展开和定位，不打开卸载确认 [25.82ms]
+(pass) 更新动作：brew 互斥、成功同步版本和计数，失败展开并提供命令，分类错误提示 [29.82ms]
+(pass) 清缓存后确认框移除缓存路径；卸载部分失败移除本体成功的行 [18.17ms]
+(pass) 退出和强退只在确认后调用；待退出、不能退出和已退出按进程页规则处理 [48.61ms]
+(pass) Windows 接线：不检查更新和增长，外部展开后打开卸载器、保留行、显式刷新 [8.72ms]
+(pass) 增长开启才读明细、展示排序和增长；搜索排在筛选后，关闭时不读明细 [19.50ms]
+(pass) 占用读取失败保留错误；卸载可重试分析，关闭后丢弃晚到的对话框结果 [12.00ms]
+(pass) 详情晚于退出返回时，卸载确认仍使用退出后的运行状态 [5.87ms]
+(pass) 详情晚于升级返回时，卸载确认仍使用升级后的版本 [5.93ms]
+(pass) 其他更新来源只打开目标；复制命令成功或失败都有反馈 [17.58ms]
+(pass) 缓存清理失败不会清掉占用；全是 in-use、其他失败和异常分别反馈 [8.63ms]
+(pass) 加载失败可重试；空更新在完成前显示进度，完成后显示最新，闲置为空显示对应文案 [6.11ms]
+(pass) 残留扫描失败：tab 角标回退为未知 null（不用 0 误导），内容区给 role=alert [4.16ms]
+(pass) 残留扫描成功：tab 角标实时为残留数量 [10.80ms]
+
+ 55 pass
+ 0 fail
+ 435 expect() calls
+Ran 55 tests across 1 file. [638.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/fullscan-react.test.ts:
+(pass) usage probe failure does not tell users an app is running [0.26ms]
+(pass) type hints distinguish data from caches and do not change cleanup eligibility [0.47ms]
+(pass) topBySize sorts desc and caps at 30 [0.13ms]
+(pass) topBySize honors a custom n and short arrays [0.19ms]
+(pass) barWidth is at least 2% of the largest item [0.20ms]
+(pass) diskPercent rounds and clamps to 0..100 [0.14ms]
+(pass) gone filter hides rows removed to Trash and collapses selection [0.49ms]
+(pass) human and displayPath match the rest of the UI [0.12ms]
+(pass) Windows Space Analysis subtitle and body measure the user profile in zh/en [60.65ms]
+(pass) an unknown directory with a measurement in flight renders the measuring label in zh/en [5.94ms]
+(pass) expansion measures unknown children, re-sorts, and includes the late size in selection totals [6.96ms]
+(pass) failed measurements render -- with a localized tooltip and translated backend error [4.46ms]
+(pass) collapsed, removed, and replaced expansions ignore late measurement results [1.31ms]
+(pass) a collapsed expansion ignores a late initial child listing [0.15ms]
+
+ 14 pass
+ 0 fail
+ 126 expect() calls
+Ran 14 tests across 1 file. [221.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/skills-react.test.ts:
+(pass) filters by idle, issues and missing data [0.14ms]
+(pass) query matches name or description, case-insensitively [0.06ms]
+(pass) last-called sort puts unused first, then oldest call, and no-data last [0.39ms]
+(pass) window and age are whole days [0.08ms]
+(pass) trash plan takes the links that point at a picked folder along with it [0.16ms]
+(pass) trash plan lists links from another skill name as extras [0.07ms]
+(pass) only identical, unlinked copies outside ~/.agents are offered for linking [0.12ms]
+(pass) a cross-name symlink to a different skill moves only the link when its target is not picked [0.05ms]
+(pass) Windows offers no link-copy candidates for identical skill copies [0.15ms]
+(pass) Windows Skills empty guide uses a native agents path in zh/en [193.56ms]
+
+ 10 pass
+ 0 fail
+ 38 expect() calls
+Ran 10 tests across 1 file. [212.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/crash-dumps.test.ts:
+(pass) Codex 的两个目录按应用合计后再比阈值 [0.30ms]
+(pass) 没到阈值、测量失败都不提示 [0.14ms]
+(pass) 多个应用超阈值时最大的在前 [0.15ms]
+(pass) 规则与提示文案中英文都有 [1.28ms]
+
+ 4 pass
+ 0 fail
+ 12 expect() calls
+Ran 4 tests across 1 file. [25.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/platform.test.ts:
+(pass) macOS paths retain their spelling, case and home abbreviation [0.41ms]
+(pass) Windows paths abbreviate home and compare complete components without case [0.13ms]
+(pass) Windows file hints use the leaf name and cover installers, shortcuts and images [0.23ms]
+
+ 3 pass
+ 0 fail
+ 32 expect() calls
+Ran 3 tests across 1 file. [14.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/i18n-windows.test.ts:
+(pass) Windows resolves every zh/en dictionary value without macOS terms [14.83ms]
+(pass) Windows overrides precede the glossary; interpolation does not rewrite paths or app names [0.34ms]
+(pass) Recycle Bin refusal codes explain retained and connected files in both languages [2.80ms]
+
+ 3 pass
+ 0 fail
+ 18 expect() calls
+Ran 3 tests across 1 file. [57.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/motion.test.ts:
+(pass) without Web Animations every duration is zero [2.87ms]
+(pass) reduced motion keeps only fades [0.09ms]
+(pass) leaving items go back to their old positions and a returning key is not duplicated [1.10ms]
+(pass) Collapse renders open content statically and nothing when closed [9.36ms]
+(pass) NumberTicker renders the final text, or the starting text when it counts up [0.73ms]
+(pass) containRect letterboxes a 4:3 photo in a wide stage [0.08ms]
+(pass) Collapse appear stays open in static rendering without Web Animations [0.13ms]
+
+ 7 pass
+ 0 fail
+ 29 expect() calls
+Ran 7 tests across 1 file. [125.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/growth-react.test.ts:
+(pass) 页面状态：不支持 / 没有记录 / 只有一次 / 列表 [0.19ms]
+(pass) 横幅：没开过就询问，问过没开就提示，开着不显示 [0.05ms]
+(pass) 增长文案：正负、下限、没有可比记录 [0.62ms]
+(pass) 排序：按 7 天增长时没有数据的排后面，再按占用 [0.27ms]
+(pass) 迷你曲线：-1 处断开，少于两个点不画 [0.14ms]
+(pass) 卸载能移走多少、另外剩多少（不算 App 本身） [0.09ms]
+(pass) 新文案中英文都有 [0.05ms]
+(pass) 首次通知定位等待目标行加载，再滚动并开始高亮 [85.08ms]
+(pass) 未知 App 的徽章不随 orphan 改变，orphan 只控制残留页签按钮 [1.87ms]
+(pass) 状态更新重新取卸载差额，过期请求不会盖掉新明细 [15.99ms]
+(pass) 状态页提示：监控开着时取最大的一条；崩溃转储提示已覆盖的同一 App 不重复 [0.22ms]
+(pass) 状态页提示：最大的提醒已被忽略时返回下一条，全部忽略时不提示 [0.10ms]
+(pass) 状态页提示：不支持时不显示，Crashpad 去重忽略大小写并识别路径边界 [0.05ms]
+(pass) 增长设置错误码：开机启动错误带名称，阈值错误有中英文文案 [0.34ms]
+(pass) 增长设置：关监控后回读后端的开机启动值，保存期间锁住控件 [133.50ms]
+(pass) 增长设置：保存失败保留原值并通过 errText 显示错误 toast [3.87ms]
+(pass) 增长设置：每次进入重新读取，不支持、Windows 或读取失败时隐藏 [3.74ms]
+(pass) 增长设置：重新进入时等待配置刷新，改阈值不会覆盖刚忽略的 App [2.14ms]
+(pass) 增长设置：每个控件只发自己改的字段，不带整份旧配置 [3.13ms]
+(pass) 增长设置：后端广播时重读，保存期间到达的广播在保存后补读 [2.57ms]
+(pass) 增长设置：开机启动出错时设置已保存并生效，回读后显示后端的值 [1.09ms]
+(pass) 菜单栏设置：按固定顺序列出这台 Mac 能显示的读数，勾选时发整份列表 [2.36ms]
+(pass) 菜单栏设置：有读数时，后台监控关着也能勾开机启动；读数全关后变灰并说明 [2.97ms]
+(pass) 菜单栏设置：不支持菜单栏读数时整节不显示 [0.62ms]
+(pass) 增长页只发改动的字段：打开、先不用、关着时打开、忽略与取消忽略 [1.43ms]
+(pass) 刷新但没有新记录时保留卸载明细，有新记录才重新核对 [1.71ms]
+(pass) 隐藏时不跟着 growthUpdated 刷新，再显示时重新读 [0.97ms]
+(pass) 没有记录时「现在量一次」只在空状态里，量的时候转圈、不能再点；有了记录回到顶部 [0.63ms]
+(pass) 读屏里程碑：进入静默，列表态量盘开始/完成各播一次；空状态不重复播「正在量」 [1.37ms]
+(pass) 面板没有页头；有记录时「现在量一次」在状态那一行里 [0.26ms]
+(pass) 行首有字母头像（点目录跳过开头的点），测量中图标用 animate-spin [0.36ms]
+
+ 31 pass
+ 0 fail
+ 156 expect() calls
+Ran 31 tests across 1 file. [295.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/process-react.test.ts:
+(pass) sortRows: CPU or memory high to low, ties by name, without touching the sample [0.50ms]
+(pass) sortChildren follows the tab's order [0.06ms]
+(pass) refreshFrozen keeps the rows and their order, updates numbers by key, keeps rows that left [0.12ms]
+(pass) diagnose: memory pressure names the biggest memory user [0.09ms]
+(pass) diagnose: CPU only after three readings at 80% or more, and memory wins [0.07ms]
+(pass) pushCpu keeps the last three readings [0.01ms]
+(pass) diagnose: only the most recent three CPU readings determine the diagnosis [0.05ms]
+(pass) shouldWatch: only while shown, on CPU or memory, running and visible [0.02ms]
+(pass) est marks estimates but never a dash [0.03ms]
+(pass) growthTags: the biggest alert per owner, without ignored ones, only while monitoring [0.17ms]
+(pass) rowTag: only app rows, matched by bundle ID [0.04ms]
+(pass) rowTag: Apple apps can use macos owner tags, with app tags taking priority
+(pass) pruneStuck drops apps that are gone and returns the same set when nothing changed [0.09ms]
+(pass) rows: a system process is marked, its numbers are estimates, and it has no buttons [120.91ms]
+(pass) rows: an app quits; while it is still running it offers force quit; a quit row has no buttons [24.33ms]
+(pass) rows: a growth tag shows its window and size; command-line rows have no quit [0.63ms]
+(pass) rows: an app row shows its icon once known; other rows keep the letter [0.62ms]
+(pass) rows: a row a menu bar panel named is highlighted [0.33ms]
+(pass) sortRows compares the numbers the page shows; equal ones keep name order [0.26ms]
+(pass) sortRows follows fmtMem and fmtPct across display boundaries [0.67ms]
+
+ 20 pass
+ 0 fail
+ 208 expect() calls
+Ran 20 tests across 1 file. [162.00ms]
+bun test v1.3.11 (af24e281)
+
+tests/app-icon.test.ts:
+(pass) hasAppIcon: only absolute .app bundle paths [0.18ms]
+(pass) loadIcon asks once per path, shares the answer and remembers it [0.30ms]
+(pass) a failed or empty answer is remembered as no icon [0.42ms]
+(pass) AppIcon shows the letter until the icon is known, then the image in the same box [42.50ms]
+
+ 4 pass
+ 0 fail
+ 22 expect() calls
+Ran 4 tests across 1 file. [64.00ms]

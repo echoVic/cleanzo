@@ -1,0 +1,7 @@
+Environment: macOS; cached Go 1.27.3; repo master source matching 001933fc1303fd7ef690076e5c657790347acc8d
+Command:
+env -u GOROOT GOENV=off GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off /Users/bytedance/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.3.darwin-arm64/bin/go test -race -count=1 ./...
+
+Final terminal output captured from exec session 29785:
+ok  	cleanzo	575.567s
+Exit code: 0
