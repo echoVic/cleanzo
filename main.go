@@ -1925,6 +1925,7 @@ func main() {
 	registerGrowthLifecycle() // before Run, to hear the notification click that launched the app
 
 	mygo.App.WhenReady(func() {
+		refreshApplicationIcon()
 		if runtime.GOOS == "windows" && !mygo.WebViewAvailable() {
 			go offerWebView()
 			return

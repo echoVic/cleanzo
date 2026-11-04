@@ -74,6 +74,8 @@ bun run build -- -sign=- -skip-notarize
 
 ## 测试
 
+Windows 实机测试报告、逐项结果与原始截图见 [测试素材索引](docs/qa/README.md)。
+
 ```sh
 gofmt -l .         # 应无输出
 go vet ./...

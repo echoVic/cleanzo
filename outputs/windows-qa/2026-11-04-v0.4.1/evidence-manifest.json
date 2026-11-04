@@ -1,0 +1,294 @@
+{
+  "algorithm": "SHA256",
+  "note": "Evidence and documents at repository submission; this manifest excludes itself.",
+  "files": {
+    "artifacts/release-exe-embedded-icon.png": {
+      "bytes": 11535,
+      "sha256": "c66ab43251db2953c9ceb2fe2c98e3f57259b7c1108933a316dbefe0cff35335"
+    },
+    "audit.json": {
+      "bytes": 12856,
+      "sha256": "8bc7a5cfac78fc28c7973154790ca29b77f343f6f27824d346a7094150d8e9b1"
+    },
+    "cases.json": {
+      "bytes": 3935,
+      "sha256": "01147a303234933a9848b61f95fcdc9d7af40495aa69e592a905549ac900481c"
+    },
+    "environment-preparation-0.2.4.md": {
+      "bytes": 1377,
+      "sha256": "0f42ae72f8d228a290d9fefd15684f83ffebf776959bf5dc3f3cfc254772797f"
+    },
+    "environment.md": {
+      "bytes": 2772,
+      "sha256": "4f014686fad9e1c4ea6e671dd0974fefe9564c8f8fe138ff9c70b22834519e45"
+    },
+    "findings.md": {
+      "bytes": 3078,
+      "sha256": "e09aa7bddd0853696d2110b1984b916c559c78a308f62af8184c584ffbe2b247"
+    },
+    "fix_validation.md": {
+      "bytes": 4981,
+      "sha256": "910ac4c8d179806833a01a74a8035513cb5d4c258e338f0490dadcc7e59a8201"
+    },
+    "report-followup.jsonl": {
+      "bytes": 614,
+      "sha256": "9beb56663f6fc811e7c5ef0a230e3c148c1735da281a3247ac0950aef8be45b3"
+    },
+    "report-preparation-0.2.4.jsonl": {
+      "bytes": 440,
+      "sha256": "c4569c830137e7503163826b23b053dad1f0ee2dd7f9b7d0cef37eed5edb1a83"
+    },
+    "report.jsonl": {
+      "bytes": 10807,
+      "sha256": "3e0ba76389e84c49dd13ee68c45926fbc05fa63144693e67bc5ce457fce786f2"
+    },
+    "screenshots/00-connected-raw.png": {
+      "bytes": 130840,
+      "sha256": "87c4fca19edce5a383b13f82889f3e6b71333b0a0803d3622452d178b6af2f00"
+    },
+    "screenshots/01-old-environment-raw.png": {
+      "bytes": 200587,
+      "sha256": "f5fb8d6fc76d668cec601481f938e639677e4c196255950d76291eb0ff0758f4"
+    },
+    "screenshots/02-installer-hash-raw.png": {
+      "bytes": 187705,
+      "sha256": "695e3e2cfdf283581bcc4b5a6bdac931a168a538302caf454391cd6090cf8ce3"
+    },
+    "screenshots/02-installer-hash.png": {
+      "bytes": 198896,
+      "sha256": "e897002ce9d41ac7e6ad229aa29382f1cf5e6911fbe7d2ce54b8e52fc19dc6a6"
+    },
+    "screenshots/03-preinstall-data-raw.png": {
+      "bytes": 216870,
+      "sha256": "b6883cac3ba15ddd63b7e479998e83bc7280dcaa940d96fc4de59540363d7955"
+    },
+    "screenshots/04-install-ready-raw.png": {
+      "bytes": 238979,
+      "sha256": "70e01b3d4c93208960f8fb7cb02e34be14f15050c9d55ebeedc5d4f846efa5d3"
+    },
+    "screenshots/05-verified-installation-prep-raw.png": {
+      "bytes": 393706,
+      "sha256": "9574d2eb76e036d348c3a610a4ba4bf0c95e3aa90387672b2cd6c2bc1f26bce6"
+    },
+    "screenshots/06-install-progress-raw.png": {
+      "bytes": 157571,
+      "sha256": "3a3dfdbb4bc11942d665822ac541ae4130b955568db16e096bc93e190ae2801c"
+    },
+    "screenshots/07-install-complete-raw.png": {
+      "bytes": 222439,
+      "sha256": "8f2beca6fb3909d3f93ba3b30d8e9d75786ff2c108148abc7d2943c4f8d049a0"
+    },
+    "screenshots/08-new-status-raw.png": {
+      "bytes": 163765,
+      "sha256": "1df6613910cbd33e4e4cecddb79e0ed3064bf9cd34344aa258d2cd3261f847c0"
+    },
+    "screenshots/09-settings-041-raw.png": {
+      "bytes": 62949,
+      "sha256": "18a3abbc847d4b547765967cd789c8ccd162e2cfde5650c1049bcd1ee00f078e"
+    },
+    "screenshots/10-dark-settings-raw.png": {
+      "bytes": 63839,
+      "sha256": "d2cc3396f4b7c7afdb2a5dd8d43a508357a74e61949dadf94298005af75aea80"
+    },
+    "screenshots/10-dark-settled-raw.png": {
+      "bytes": 61486,
+      "sha256": "28ddd8489fca7ac54b98f6fa14a9c8ebd6cc4e9a82c3cad747dd4dfa91104f93"
+    },
+    "screenshots/11-dark-language-menu-desktop.png": {
+      "bytes": 234518,
+      "sha256": "41bb207f3e3a59d806839905a2c3f1aa22f3246f38f478d27f89e3c2f56efd88"
+    },
+    "screenshots/11-dark-language-menu-raw.png": {
+      "bytes": 62939,
+      "sha256": "5800e58bd31b691b66379353e934f289cb96dc5e2843fe3d6a30e1d07f805d9f"
+    },
+    "screenshots/12-dark-zh-settings-raw.png": {
+      "bytes": 57960,
+      "sha256": "49e3b98a31e7f3b63410debf71c897a6d97812272670dc3a340ddd005015a94c"
+    },
+    "screenshots/13-short-window-footer-raw.png": {
+      "bytes": 75367,
+      "sha256": "8ba68984ba297900cae1f2a6e800c55a29566da99e3c4269497c29d645286098"
+    },
+    "screenshots/14-sidebar-scroll-footer-raw.png": {
+      "bytes": 75416,
+      "sha256": "457311a108c9486ab2947f3105bbe1bee1874563a76f475eecbf7250662d084d"
+    },
+    "screenshots/15-windows-app-list-raw.png": {
+      "bytes": 71705,
+      "sha256": "759dbf0bfda168c6ec2ca660eef38a0faefc7445f708c3949aa29b3d944af993"
+    },
+    "screenshots/16-self-app-expanded-raw.png": {
+      "bytes": 68420,
+      "sha256": "226f233f160a2a46e42f84ea702c7a231698bf7ad84c573a5c9b26a659f17986"
+    },
+    "screenshots/17-dark-disabled-hover-raw.png": {
+      "bytes": 68513,
+      "sha256": "b35a425c53a66556321293f396b88e6d06289c335099e243d5ad8890e349b2af"
+    },
+    "screenshots/18-cleaner-scanning-raw.png": {
+      "bytes": 54475,
+      "sha256": "6d4b4e66a1ca397de0428fcd4ffe5f7ccf2e0e5cafaa679a1357b86a9cb41345"
+    },
+    "screenshots/19-cleaner-completed-raw.png": {
+      "bytes": 79280,
+      "sha256": "e6b6c44befcb9188910f9fc0ef78b550311cfa2e8980b42d06900a9760864256"
+    },
+    "screenshots/20-cleaner-stop-attempt-raw.png": {
+      "bytes": 79378,
+      "sha256": "6e4aae2eac74136748d194de543c089e4a3807bf56c079d65d1d8450dcdbabff"
+    },
+    "screenshots/21-photos-empty-raw.png": {
+      "bytes": 37754,
+      "sha256": "4648bd4226e77a95e3616abc3b7765e0edc0fb5b470ff034569ff233c5e6dab4"
+    },
+    "screenshots/22-trae-disabled-before-raw.png": {
+      "bytes": 49792,
+      "sha256": "521e960ed8dd50f24dd018317794b2d4351787b25bcdd922e1d6acb99f9a980a"
+    },
+    "screenshots/23-trae-disabled-hover-raw.png": {
+      "bytes": 49969,
+      "sha256": "36b15eed72a5ff46616c2d1f098a35b57c38dedf9a64009f3b0dae4103746d2a"
+    },
+    "screenshots/24-update-latest-raw.png": {
+      "bytes": 65326,
+      "sha256": "42c5647234d4dea1986991140c3c316f56657962a60a444d34233837d1a0e719"
+    },
+    "screenshots/25-space-ranking-raw.png": {
+      "bytes": 89488,
+      "sha256": "cc57a28b07a64f648d77a9f3287bf5428f422ab8703dd958a12353d423625028"
+    },
+    "screenshots/26-space-expanded-raw.png": {
+      "bytes": 82034,
+      "sha256": "78bda33dcca0358112f49cdfddb733e24b21e954c52b318edd7833543d87f973"
+    },
+    "screenshots/27-app-search-raw.png": {
+      "bytes": 46499,
+      "sha256": "bc3d2306bfebe0c8237be94436934e59d736742f28bbdc7fa9bb37cb5fe607d6"
+    },
+    "screenshots/28-dark-sort-menu-desktop.png": {
+      "bytes": 297450,
+      "sha256": "c2cf65c3b5ce76f9a4d3f8d4b0d35b5a795aeb4715108c633f5304b6cc4085b9"
+    },
+    "screenshots/28-dark-sort-menu-raw.png": {
+      "bytes": 78245,
+      "sha256": "d103b04730f2e949307ec131e0629b6c59af10a12f43524366cdced2fe8e99fb"
+    },
+    "screenshots/29-installed-hash-raw.png": {
+      "bytes": 102522,
+      "sha256": "fca8c5a1747aa3b121d931e9ba8b41825df3c9e60a69962b8a3512f9c22de232"
+    },
+    "screenshots/30-desktop-icon-raw.png": {
+      "bytes": 34257,
+      "sha256": "da394e4f0bdce603300cd6566c17affc528954ed965b58eff21e8d09ac8a6f96"
+    },
+    "screenshots/31-window-moved-raw.png": {
+      "bytes": 65305,
+      "sha256": "9d0f9aa89efdbdc0eba17b754d2e4666544a6b36b6ee980f5df3ae262a92d062"
+    },
+    "screenshots/32-process-exited-raw.png": {
+      "bytes": 107159,
+      "sha256": "8888f08ded1b88445ed4ebd51d32f2220f8a17bc8a778070ce48cb329816bfd8"
+    },
+    "screenshots/33-closed-backup-raw.png": {
+      "bytes": 118127,
+      "sha256": "6972198667cd3a0ce641593ecbaa7e210fb2b26a5343e9f9bccc7f6bdaf42358"
+    },
+    "screenshots/34-restart-dark-zh-raw.png": {
+      "bytes": 93923,
+      "sha256": "b9db75a8c43d3157f62d39ef9e5a1602bcdafe3291c410d741826e43476d0adf"
+    },
+    "screenshots/35-settings-restored-raw.png": {
+      "bytes": 59663,
+      "sha256": "5f97c5ead312c4be4bb19c6b79396c5ba4da50283ffba912494d0cc56b6590de"
+    },
+    "screenshots/36-system-settings-restored-raw.png": {
+      "bytes": 63018,
+      "sha256": "3ceacfada62d559d6d9e5433c01eaad363ac7349c0c6d4a85d061a27767ec5f4"
+    },
+    "screenshots/37-light-disabled-before-raw.png": {
+      "bytes": 56157,
+      "sha256": "91772c5c9f294e21dfb28e5204a67edd0c238b3aaaded7f124e208d010a44fe9"
+    },
+    "screenshots/38-light-disabled-hover-raw.png": {
+      "bytes": 56203,
+      "sha256": "304c127a6ced893abf5b3ede4293a3aba253ee7bffc1a97ddd13679ecea39fad"
+    },
+    "screenshots/39-large-files-completed-raw.png": {
+      "bytes": 51523,
+      "sha256": "1286b7fca1d70c8ebae389fe8650661a102b266ea095ff37b1a2074d37a1bc1b"
+    },
+    "screenshots/40-shortcut-target-raw.png": {
+      "bytes": 125970,
+      "sha256": "fc24b2b99737832d44c6d337bbd3250bf072980db503d661c619a5aa38485ed5"
+    },
+    "screenshots/41-final-system-status-desktop.png": {
+      "bytes": 302727,
+      "sha256": "9e23d24311f5ae5e484c217cff95e7eadf236ae815b61112e08a5c2a00d29041"
+    },
+    "screenshots/41-final-system-status-raw.png": {
+      "bytes": 77223,
+      "sha256": "520b7ce5d12555c0252df00818bbc19eacd04387a56100f2b9d8ea137fa318a6"
+    },
+    "screenshots/42-targeted-icon-notify-raw.png": {
+      "bytes": 32180,
+      "sha256": "127822dce12c6b88edfa0f4b9779a996e977259d11e946eccf1a1cc9180f7a59"
+    },
+    "screenshots/43-after-targeted-notify-raw.png": {
+      "bytes": 32255,
+      "sha256": "01881e941440ffccc8d5284e0028d7e0b6a9e3015549bf1ef4cfe32711e1e543"
+    },
+    "screenshots/44-shell-icon-cache-notify-raw.png": {
+      "bytes": 32301,
+      "sha256": "bd1567f499bdd8cd712b1b573043249d4408e3de75aa678bff0fd2b4eddf2491"
+    },
+    "screenshots/45-after-shell-cache-notify-raw.png": {
+      "bytes": 16327,
+      "sha256": "931ecd214786df2c3e6243bf41162998e23b1ddc5c2d1f8f58d432d33182f504"
+    },
+    "screenshots/46-windows-icon-refresh-raw.png": {
+      "bytes": 32315,
+      "sha256": "fdf7788a3b2689ec57fa1e879477ef72e15c35e4e8297ed0c138f061206f8a33"
+    },
+    "screenshots/47-after-windows-icon-refresh-raw.png": {
+      "bytes": 16334,
+      "sha256": "e31438819f72acf27ad977a9cf9ec17dcf8cad403798ede1e9558109ab5e82a1"
+    },
+    "screenshots/48-explicit-shortcut-icon-raw.png": {
+      "bytes": 32342,
+      "sha256": "1f1c60855e7566001a0273b2a8649d777bb08b09113fbe58e91c468564316313"
+    },
+    "screenshots/49-after-explicit-shortcut-icon-raw.png": {
+      "bytes": 16330,
+      "sha256": "9ddc04d33104b17c630c92e86d1983307f4b98ad98517ed2555b8a8507f0e5f9"
+    },
+    "screenshots/50-after-shortcut-notify-raw.png": {
+      "bytes": 16333,
+      "sha256": "0c532188ea04b7944a24368286e216020441243746790129473b02ebf893e4e4"
+    },
+    "screenshots/51-shell-notify-executed-raw.png": {
+      "bytes": 33958,
+      "sha256": "d2c664f0a7227c358aa27457284e9b4cb8c461e745bf10ac071dd15f771108c4"
+    },
+    "screenshots/52-after-confirmed-shell-notify-raw.png": {
+      "bytes": 16266,
+      "sha256": "ccc3d57a9f0501de48eaa87e701a1222bfb7d06c45d59e807460816af809356b"
+    },
+    "screenshots/53-reopen-after-confirmed-shell-notify-raw.png": {
+      "bytes": 11992,
+      "sha256": "967da49ba2c0942bb2768c178583c81dd64a2510f6e8a130e5056421afef1c32"
+    },
+    "screenshots/54-green-taskbar-after-reopen-raw.png": {
+      "bytes": 32419,
+      "sha256": "4d7ac242d64a5d0b855bfd9ea6a6fa4ab0df71905394441cd26e19fc5411447b"
+    },
+    "test_plan.md": {
+      "bytes": 3941,
+      "sha256": "ce7475b8a1a34df626af199c6322e566af21c32e672dd6141e1794accd2b4e4c"
+    },
+    "test_report.md": {
+      "bytes": 11004,
+      "sha256": "0e34cc9383f1ceda9809889f16c429b3265e5c3f1ad06514ed75a7bc80925346"
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"id": "W01", "environment": "win11-26200-x64-existing-0.2.4", "result": "partial", "summary": "已核实旧版环境、路径和0.4.1安装包哈希；最新版本尚未安装，待即时确认。", "screenshots": ["screenshots/01-old-environment-raw.png", "screenshots/02-installer-hash-raw.png", "screenshots/05-verified-installation-prep-raw.png"], "started_at": "2026-11-04T21:30:00+08:00", "finished_at": "2026-11-04T21:38:00+08:00"}

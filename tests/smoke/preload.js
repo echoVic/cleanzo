@@ -28,6 +28,8 @@
     },
     async waitTheme(dark) {
       await waitFor(() => window.matchMedia("(prefers-color-scheme: dark)").matches === dark);
+      const scheme = getComputedStyle(document.documentElement).colorScheme;
+      if (scheme !== (dark ? "dark" : "light")) throw Error(`smoke: ambiguous native palette ${scheme}`);
       return true;
     },
     async visit(view) {
@@ -49,6 +51,11 @@
         if (failure) throw Error(`smoke: clean scan failed: ${failure.textContent}`);
       }
       await delay(1000);
+      for (const select of root.querySelectorAll("select")) {
+        const scheme = getComputedStyle(select).colorScheme;
+        const wanted = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        if (scheme !== wanted) throw Error(`smoke: ${view} native select palette ${scheme}, wanted ${wanted}`);
+      }
       return true;
     },
   };

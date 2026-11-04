@@ -33,6 +33,7 @@ test("clean tour uses scan controls in both phases and rejects a caught scan err
     const nav = { click() { navigation++; }, classList: { contains: () => false } };
     const root = {
       classList: { contains: () => false },
+      querySelectorAll() { return []; },
       querySelector(selector: string) {
         if (selector === ".cz-react") return {};
         if (selector === ".ha-cta") return idle ? scan : null;
@@ -52,5 +53,20 @@ test("clean tour uses scan controls in both phases and rejects a caught scan err
       expect(navigation).toBe(2);
       expect(scans).toBe(2);
     }
+  }
+});
+
+test("theme readiness rejects an ambiguous native palette", async () => {
+  for (const dark of [false, true]) {
+    const win = Object.assign(new EventTarget(), { matchMedia: () => ({ matches: dark }) }) as EventTarget & {
+      __cleanzoSmoke: { waitTheme(dark: boolean): Promise<boolean> };
+    };
+    let scheme = "light dark";
+    new Function("window", "document", "console", "getComputedStyle", source())(
+      win, { documentElement: {} }, { error() {} }, () => ({ colorScheme: scheme }),
+    );
+    await expect(win.__cleanzoSmoke.waitTheme(dark)).rejects.toThrow("ambiguous native palette");
+    scheme = dark ? "dark" : "light";
+    expect(await win.__cleanzoSmoke.waitTheme(dark)).toBe(true);
   }
 });
