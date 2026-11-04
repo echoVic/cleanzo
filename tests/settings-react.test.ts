@@ -70,6 +70,22 @@ test("Windows settings omit the permission section; macOS keeps its controls", a
   } finally { setPlatformForTest(undefined); }
 });
 
+test("settings page offers system, light and dark appearance modes", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { SettingsPage } = await import("../src/react/settings/SettingsPage");
+  const html = renderToStaticMarkup(createElement(SettingsPage, {
+    callbacks: { changeLanguage: async () => {} },
+    session: 0,
+  }));
+  expect(html).toContain('id="theme-select"');
+  expect(html).toContain("外观");
+  expect(html).toContain("跟随系统");
+  expect(html).toContain("浅色");
+  expect(html).toContain("深色");
+});
+
 test("toggleMenuBarItem keeps the menu bar's order and drops names it doesn't know", () => {
   expect(toggleMenuBarItem(["mem", "cpu"], "gpu", true)).toEqual(["cpu", "mem", "gpu"]);
   expect(toggleMenuBarItem(["cpu", "mem"], "cpu", false)).toEqual(["mem"]);

@@ -1914,11 +1914,14 @@ func newMainWindow() *mygo.Window {
 }
 
 func main() {
+	// Apply the saved appearance before the first window paints.
+	setThemeSource(mygo.ThemeSource(loadThemePreference()))
 	mygo.App.SetLanguages("en", "zh-Hans")
 	// 自动检查更新的频率：4 小时一次（默认一天），新发布的版本当天就能被看到。
 	mygo.Use(updater.New(updater.Options{Interval: 4 * time.Hour}))
 	mygo.Bind(Cleaner{})
 	mygo.Bind(LanguageSettings{})
+	mygo.Bind(ThemeSettings{})
 	registerGrowthLifecycle() // before Run, to hear the notification click that launched the app
 
 	mygo.App.WhenReady(func() {

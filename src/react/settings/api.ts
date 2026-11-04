@@ -1,9 +1,15 @@
-import { Cleaner, events } from "../../mygo";
+import { Cleaner, ThemeSettings, events } from "../../mygo";
 import type { Settings, SystemInfo, AppInfo, GrowthConfigPatch, GrowthSummary, MenuBarState } from "../../mygo";
+
+export type ThemePref = "system" | "light" | "dark";
 
 /** 设置页用到的全部 Cleaner 调用集中在此，组件不直接碰桥。 */
 export const settingsApi = {
   getSettings: (): Promise<Settings> => Cleaner.getSettings(),
+  getTheme: (): Promise<ThemePref> => ThemeSettings.getTheme().then((preference) =>
+    preference === "light" || preference === "dark" ? preference : "system"
+  ),
+  setTheme: (preference: ThemePref): Promise<void> => ThemeSettings.setTheme(preference),
   saveSettings: (s: Settings): Promise<void> => Cleaner.saveSettings(s),
   /** 只读设置和状态，不读记录。 */
   growthSummary: (): Promise<GrowthSummary> => Cleaner.growthSummary(),

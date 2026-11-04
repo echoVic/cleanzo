@@ -546,6 +546,176 @@ func TestCleanAIToolsTRAE(t *testing.T) {
 	}
 }
 
+func TestAITargetsTRAEIDEChatsRetention(t *testing.T) {
+	// Removing the family-wide age/safety check must expose the old DB
+	// alongside a recent or unsafe sidecar, rather than keep every member.
+	for _, tc := range []struct {
+		name, member string
+		age          time.Duration
+		unsafe       string
+		wantKept     int64
+	}{
+		{name: "old family"},
+		{name: "recent DB", member: "database.db", age: 2 * time.Hour, wantKept: 3},
+		{name: "old DB recent WAL", member: "database.db-wal", age: 2 * time.Hour, wantKept: 3},
+		{name: "old DB recent SHM", member: "database.db-shm", age: 2 * time.Hour, wantKept: 3},
+		{name: "WAL exactly at cutoff", member: "database.db-wal", age: 24 * time.Hour, wantKept: 3},
+		{name: "SHM just before cutoff", member: "database.db-shm", age: 24*time.Hour + time.Nanosecond},
+		{name: "future DB", member: "database.db", age: -time.Hour, wantKept: 3},
+		{name: "dangling WAL", member: "database.db-wal", unsafe: "link", wantKept: 3},
+		{name: "SHM directory", member: "database.db-shm", unsafe: "directory", wantKept: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, _ := traeFixture(t)
+			root := filepath.Join(home, "Library/Application Support/Trae CN")
+			dir := filepath.Join(root, "ModularData/ai-agent")
+			family := []string{
+				filepath.Join(dir, "database.db"),
+				filepath.Join(dir, "database.db-shm"),
+				filepath.Join(dir, "database.db-wal"),
+			}
+			if err := os.WriteFile(family[1], []byte("shared memory"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			old := aiNow().Add(-40 * 24 * time.Hour)
+			for _, path := range family {
+				mod := old
+				if filepath.Base(path) == tc.member {
+					mod = aiNow().Add(-tc.age)
+				}
+				if err := os.Chtimes(path, mod, mod); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.unsafe != "" {
+				path := filepath.Join(dir, tc.member)
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if tc.unsafe == "link" {
+					if err := os.Symlink(filepath.Join(home, "missing"), path); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					mustMkdir(t, path)
+					if err := os.Chtimes(path, old, old); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Chtimes(dir, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tool, part, ok := findAIPart("trae", "trae.ide.chats")
+			if !ok {
+				t.Fatal("missing TRAE IDE chats part")
+			}
+			targets, kept, err := aiTargets(root, tool, part, nil)
+			if err != nil || kept != tc.wantKept {
+				t.Fatalf("targets=%v kept=%d err=%v; want kept=%d", targets, kept, err, tc.wantKept)
+			}
+			if tc.wantKept > 0 {
+				if len(targets) != 0 {
+					t.Fatalf("retained family has cleanup targets: %v", targets)
+				}
+			} else if !slices.Equal(targets, family) {
+				t.Fatalf("old family targets=%v, want %v", targets, family)
+			}
+		})
+	}
+}
+
+func TestCleanAIToolsTRAEIDEChatsRetention(t *testing.T) {
+	for _, recent := range []bool{true, false} {
+		name := "old family moves to temporary Trash"
+		if recent {
+			name = "recent WAL keeps old DB and SHM"
+		}
+		t.Run(name, func(t *testing.T) {
+			home, _ := traeFixture(t)
+			dir := filepath.Join(home, "Library/Application Support/Trae CN/ModularData/ai-agent")
+			family := []string{"database.db", "database.db-wal", "database.db-shm"}
+			if err := os.WriteFile(filepath.Join(dir, family[2]), []byte("shared memory"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			old := aiNow().Add(-40 * 24 * time.Hour)
+			for _, member := range family {
+				if recent && member == "database.db-wal" {
+					continue
+				}
+				if err := os.Chtimes(filepath.Join(dir, member), old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			scan, err := (Cleaner{}).ScanAITool(context.Background(), "trae")
+			if err != nil {
+				t.Fatal(err)
+			}
+			chats := aiPart_(t, scan.Tools[0], "trae.ide.chats")
+			if chats.Level != aiSensitive || chats.Files != 3 || len(chats.Groups) != 0 {
+				t.Fatalf("database files must not claim a conversation count: %+v", chats)
+			}
+			res, err := (Cleaner{}).CleanAITools(context.Background(), []AISelection{{Tool: "trae", Part: "trae.ide.chats"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := res.Parts[0]
+			if recent {
+				if r.Kept != 3 || r.Moved != 0 || r.Freed != 0 || res.Freed != 0 || r.Skipped != "in-use" || len(r.Failed) != 0 {
+					t.Fatalf("recent family = %+v", res)
+				}
+			} else if r.Kept != 0 || r.Moved != 3 || r.Freed != chats.Size || res.Freed != chats.Size || r.Skipped != "" || len(r.Failed) != 0 {
+				t.Fatalf("old family = %+v; scanned bytes=%d", res, chats.Size)
+			}
+			for _, member := range family {
+				if fileExists(filepath.Join(dir, member)) != recent || trashed(home, member) == recent {
+					t.Fatalf("%s source/temporary Trash does not match retention=%v", member, recent)
+				}
+			}
+			for _, protected := range []string{".trae/cli/auth.json", ".trae/traecli.toml", "Library/Application Support/Trae CN/User/settings.json", ".trae-cn/extensions/e/package.json"} {
+				if !fileExists(filepath.Join(home, protected)) {
+					t.Fatalf("protected file moved: %s", protected)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanAIToolsTRAEIDEChatsSafety(t *testing.T) {
+	for _, tc := range []struct {
+		name, part, skipped string
+		running, failed     bool
+	}{
+		{name: "running IDE", part: "trae.ide.chats", running: true, skipped: "running"},
+		{name: "failed usage probe", part: "trae.ide.chats", failed: true, skipped: "in-use"},
+		{name: "protected User", part: "trae.ide.user", skipped: "blocked"},
+		{name: "unknown IDE data", part: "unknown:ide", skipped: "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, _ := traeFixture(t)
+			dir := filepath.Join(home, "Library/Application Support/Trae CN/ModularData/ai-agent")
+			old := aiNow().Add(-40 * 24 * time.Hour)
+			for _, member := range []string{"database.db", "database.db-wal"} {
+				if err := os.Chtimes(filepath.Join(dir, member), old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := cleanAIPart(AISelection{Tool: "trae", Part: tc.part}, map[string]bool{"trae:ide": tc.running}, &usageGuard{failed: tc.failed})
+			if r.Skipped != tc.skipped || r.Moved != 0 || r.Freed != 0 || len(r.Failed) != 0 {
+				t.Fatalf("safety result = %+v, want skipped=%s", r, tc.skipped)
+			}
+			if tc.failed && r.Kept != 2 {
+				t.Fatalf("failed usage probe kept=%d, want 2 file items", r.Kept)
+			}
+			for _, member := range []string{"database.db", "database.db-wal"} {
+				if !fileExists(filepath.Join(dir, member)) || trashed(home, member) {
+					t.Fatalf("%s moved despite safety guard", member)
+				}
+			}
+		})
+	}
+}
+
 func TestCleanAIToolsTRAEApps(t *testing.T) {
 	home, _ := traeFixture(t)
 	ide := filepath.Join(home, "Library/Application Support/Trae CN")

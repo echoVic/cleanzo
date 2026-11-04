@@ -10,7 +10,7 @@ import { errText, displayPath, toast } from "../../shared";
 import { ruleName, getPref } from "../../i18n";
 import { markCleanStale } from "../clean/entry";
 import { growthApi } from "../growth/api";
-import { settingsApi } from "./api";
+import { settingsApi, type ThemePref } from "./api";
 import {
   GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
   type GroupId,
@@ -57,6 +57,9 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   const [locked, setLocked] = React.useState(false);
   const [picking, setPicking] = React.useState(false);
   const [langChanging, setLangChanging] = React.useState(false);
+  const [theme, setTheme] = React.useState<ThemePref>("system");
+  const [themeReady, setThemeReady] = React.useState(false);
+  const [themeChanging, setThemeChanging] = React.useState(false);
   const [growth, setGrowth] = React.useState<GrowthConfig | null>(null);
   const [growthBusy, setGrowthBusy] = React.useState(false);
   const growthSeqRef = React.useRef(0);
@@ -136,6 +139,16 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   }, [checkPermission]);
 
   React.useEffect(() => { void load(); }, [session, load]);
+
+  React.useEffect(() => {
+    let current = true;
+    setThemeReady(false);
+    settingsApi.getTheme()
+      .then((preference) => { if (current) setTheme(preference); })
+      .catch(() => {})
+      .finally(() => { if (current) setThemeReady(true); });
+    return () => { current = false; };
+  }, [session]);
 
   /** 每次进入、后端广播变化时重新读增长配置；保存期间的重读排队，保存结束后补上。 */
   const loadGrowth = React.useCallback(async () => {
@@ -320,6 +333,22 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
     }
   };
 
+  const onThemeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const preference = e.target.value as ThemePref;
+    if (preference === theme) return;
+    const previous = theme;
+    setTheme(preference);
+    setThemeChanging(true);
+    try {
+      await settingsApi.setTheme(preference);
+    } catch (err) {
+      setTheme(previous);
+      toast(errText(err), "err");
+    } finally {
+      setThemeChanging(false);
+    }
+  };
+
   const onLangChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const pref = e.target.value as LangPref;
     if (pref === getPref()) return;
@@ -358,6 +387,20 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
       <section className="settings-section">
         <h2>{t("settings.general")}</h2>
         <div className="setting-block card">
+          <div className="setting-row">
+            <label className="setting-label" htmlFor="theme-select">{t("settings.appearance")}</label>
+            <select
+              id="theme-select"
+              className="select"
+              value={theme}
+              disabled={!themeReady || themeChanging}
+              onChange={(e) => void onThemeChange(e)}
+            >
+              <option value="system">{t("settings.themeSystem")}</option>
+              <option value="light">{t("settings.themeLight")}</option>
+              <option value="dark">{t("settings.themeDark")}</option>
+            </select>
+          </div>
           <div className="setting-row">
             <label className="setting-label" htmlFor="lang-select">{t("settings.lang")}</label>
             <select

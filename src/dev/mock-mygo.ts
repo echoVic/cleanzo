@@ -1,6 +1,6 @@
 import type { Runtime, Channel } from "mygo-runtime";
 import type {
-  Cleaner, LanguageSettings, AppInfo, BigItem, CleanResult, DirItem,
+  Cleaner, LanguageSettings, ThemeSettings, AppInfo, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample,
@@ -66,6 +66,7 @@ async function stream<T>(channel: Channel<T>, run: (emit: (value: T, ms?: number
 function createRuntime(): Runtime {
   const now = Math.floor(Date.now() / 1000);
   let settings: Settings = { disabledGroups: [], ignored: [], custom: [] };
+  let theme = "system";
   // 占用增长：ToDesk（/Library 下的 dumps 在涨）和飞书（LarkShell）
   let growthConfig: GrowthConfig = { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [] as string[], asked: true };
   let menuBarItems: string[] = ["cpu", "mem"];
@@ -499,7 +500,9 @@ function createRuntime(): Runtime {
 
   // 绑定签名直接取生成代码；方法名、参数顺序、返回数据都由 TypeScript 核对。
   type Bindings = { [K in keyof typeof Cleaner as `Cleaner.${Capitalize<K>}`]: (typeof Cleaner)[K] }
-    & { "LanguageSettings.SetLanguage": typeof LanguageSettings.setLanguage };
+    & { "LanguageSettings.SetLanguage": typeof LanguageSettings.setLanguage }
+    & { "ThemeSettings.GetTheme": typeof ThemeSettings.getTheme }
+    & { "ThemeSettings.SetTheme": typeof ThemeSettings.setTheme };
   const handlers = {
     "Cleaner.Info": async () => info,
     "Cleaner.MachineInfo": async () => machineInfo,
@@ -680,6 +683,13 @@ function createRuntime(): Runtime {
       await emit({ kind: "__done", path: "960", size: sum(items), trashable: false, isDir: false });
     }),
     "LanguageSettings.SetLanguage": async (_preference) => "zh-Hans",
+    "ThemeSettings.GetTheme": async () => theme,
+    "ThemeSettings.SetTheme": async (preference) => {
+      if (preference !== "system" && preference !== "light" && preference !== "dark") {
+        throw new Error("mock: unsupported theme preference");
+      }
+      theme = preference;
+    },
   } satisfies Partial<Bindings>;
 
   return {

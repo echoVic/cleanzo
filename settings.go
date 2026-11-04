@@ -188,14 +188,19 @@ func writeSettings(s Settings) error {
 
 // writeConfigAtomically replaces the config only after writing a complete copy.
 func writeConfigAtomically(data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(configPath()), 0o755); err != nil {
+	return writeFileAtomically(configPath(), data)
+}
+
+// writeFileAtomically replaces path only after writing a complete copy.
+func writeFileAtomically(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := configPath() + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, configPath())
+	return os.Rename(tmp, path)
 }
 
 // GetSettings returns the saved settings, migrating old categories when needed.

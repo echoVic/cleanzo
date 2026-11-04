@@ -46,8 +46,8 @@ const (
 	aiUnknown   = "unknown"
 )
 
-// aiRecent is how recent a session's last write must be for it to be left
-// alone: the user may still be in it.
+// aiRecent is how recent a session's or conversation database family's last
+// write must be for it to be left alone: the user may still be in it.
 const aiRecent = 24 * time.Hour
 
 // aiPart is one known part of a tool's folder.
@@ -956,7 +956,7 @@ type AIPartResult struct {
 	Part    string   `json:"part"`
 	Moved   int64    `json:"moved"`   // paths moved to the Trash
 	Freed   int64    `json:"freed"`   // bytes
-	Kept    int64    `json:"kept"`    // recent sessions left alone
+	Kept    int64    `json:"kept"`    // sessions or file items left alone
 	Skipped string   `json:"skipped"` // running, blocked, unknown, in-use; "" when cleaned
 	Failed  []string `json:"failed"`
 }
@@ -1065,6 +1065,18 @@ func aiTargets(root string, tool aiTool, part aiPart, groups []string) (targets 
 	}
 	cutoff := aiNow().Add(-aiRecent)
 	switch {
+	case part.ID == "trae.ide.chats":
+		// The encrypted database cannot be split into conversations. Keep
+		// its entire family when any member (including WAL/SHM) is recent
+		// or cannot be safely statted as a regular file.
+		for _, path := range paths {
+			info, err := os.Lstat(path)
+			if err != nil || !info.Mode().IsRegular() || !info.ModTime().Before(cutoff) {
+				// Count retained file items, not conversations in the database.
+				return nil, int64(len(paths)), nil
+			}
+		}
+		return paths, 0, nil
 	case part.Sessions == "trae-projects":
 		// Keys are project folders (absolute). A session goes with its
 		// .lock and .artifacts folder, only when none of them is recent.

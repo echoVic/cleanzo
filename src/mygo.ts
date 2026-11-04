@@ -1343,6 +1343,25 @@ export const LanguageSettings = {
   },
 } as const;
 
+/**
+ * ThemeSettings is callable from the frontend to read and change the app's
+ * appearance.
+ */
+export const ThemeSettings = {
+  /** GetTheme returns the saved appearance mode. */
+  getTheme(): Promise<string> {
+    return call("ThemeSettings.GetTheme");
+  },
+  /**
+   * SetTheme persists and applies a new appearance mode. "system" follows the
+   * desktop, while "light" and "dark" also update the window controls and the
+   * page's prefers-color-scheme.
+   */
+  setTheme(preference: string): Promise<void> {
+    return call("ThemeSettings.SetTheme", preference);
+  },
+} as const;
+
 // ---- Events ----
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */

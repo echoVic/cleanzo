@@ -1,4 +1,4 @@
-import { beforeEach, expect, mock, test } from "bun:test";
+import { beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { setPref, t } from "../src/i18n";
 import type { AppUsage, MachineSample, SSDInfo, StatusSample } from "../src/mygo";
 import {
@@ -561,6 +561,241 @@ test("macOS home numbers change in place; Windows keeps the rolling number", asy
     expect(renderToStaticMarkup(createElement(CpuCard, props))).toContain("<b>23</b>");
   } finally { setPlatformForTest(undefined); }
 });
+
+// 与 Growth/Leftovers 的 harness 一样驱动真实 hooks 和 JSX 回调；只替换 DOM、原生桥和调度。
+// 行、按钮及其移除取自 StatusPage 返回的树，焦点移交仍执行 shared.focusNextAfter。
+async function statusQuitHarness() {
+  await import("./setup-dom");
+  const React = await import("react");
+  const { StatusPage } = await import("../src/react/status/StatusPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const previous = {
+    document: globalThis.document, window: globalThis.window, html: globalThis.HTMLElement,
+    raf: globalThis.requestAnimationFrame, css: globalThis.CSS, mygo: globalThis.mygo,
+  };
+  const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
+  const effects: (() => void)[] = [];
+  const frames: FrameRequestCallback[] = [];
+  let cursor = 0, dirty = true;
+  let tree: React.ReactNode;
+  let resolveQuit!: (ok: boolean) => void;
+  let rejectQuit!: (e: Error) => void;
+  const quitResult = new Promise<boolean>((resolve, reject) => { resolveQuit = resolve; rejectQuit = reject; });
+  let closeWatch!: () => void;
+  const watchDone = new Promise<void>((resolve) => { closeWatch = resolve; });
+  const a = chrome(), b = code(), c = slack(GB);
+  const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
+    !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
+  const effectHook: typeof React.useEffect = (effect, deps) => {
+    const slot = slots[cursor++] ??= {};
+    if (changed(slot.deps, deps)) {
+      slot.deps = deps;
+      effects.push(() => { slot.cleanup?.(); slot.cleanup = effect() || undefined; });
+    }
+  };
+  const spies = [
+    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+      const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial };
+      return [slot.value, (value: unknown) => {
+        const next = typeof value === "function" ? value(slot.value) : value;
+        if (!Object.is(next, slot.value)) { slot.value = next; dirty = true; }
+      }] as never;
+    }),
+    spyOn(React, "useRef").mockImplementation((initial: unknown) =>
+      (slots[cursor++] ??= { value: { current: initial } }).value as never),
+    spyOn(React, "useCallback").mockImplementation((fn: unknown, deps: readonly unknown[]) => {
+      const slot = slots[cursor++] ??= {};
+      if (changed(slot.deps, deps)) { slot.value = fn; slot.deps = deps; }
+      return slot.value as never;
+    }),
+    spyOn(React, "useEffect").mockImplementation(effectHook),
+    spyOn(React, "useLayoutEffect").mockImplementation(effectHook),
+    spyOn(React, "useSyncExternalStore").mockImplementation((_subscribe, snapshot) => snapshot()),
+  ];
+  type Node = React.ReactElement<Record<string, any>>;
+  function nodes(node: React.ReactNode): Node[] {
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    if (!React.isValidElement<Record<string, any>>(node)) return [];
+    return [node, ...nodes(node.props.children)];
+  }
+  class DomElement {
+    button: DomElement | null = null;
+    isConnected = true;
+    constructor(readonly key = "", readonly top = 0, readonly row: DomElement | null = null) {}
+    contains(el: unknown) { return el === this || (!!this.button && el === this.button); }
+    closest(selector: string) { return selector === ".st-row[data-key]" ? this.row : null; }
+    getBoundingClientRect() { return { top: this.top }; }
+    getClientRects() { return [{}]; }
+    focus() { doc.activeElement = this; }
+  }
+  const body = new DomElement();
+  const rows = new Map<string, DomElement>();
+  const toast = { className: "", textContent: "", setAttribute() {} };
+  const main = { querySelectorAll: () => [...rows.values()].flatMap((row) => row.button ? [row.button] : []) };
+  const doc = {
+    body,
+    activeElement: body,
+    querySelector(selector: string) {
+      if (selector === "#toast") return toast;
+      if (selector === "main") return main;
+      return [...rows.values()].find((row) => selector === `.st-row[data-key="${row.key}"]`) ?? null;
+    },
+    querySelectorAll: () => [],
+    addEventListener() {}, removeEventListener() {},
+  };
+  Object.assign(globalThis, {
+    document: doc, HTMLElement: DomElement,
+    window: { setTimeout: () => 1, clearTimeout() {} },
+    requestAnimationFrame: (fn: FrameRequestCallback) => { frames.push(fn); return frames.length; },
+    CSS: { escape: (key: string) => key },
+    mygo: {
+      channel: () => ({
+        onmessage: null, onclose: null, closed: false, close: closeWatch,
+        async *[Symbol.asyncIterator]() { yield sample({ apps: [a, b, c] }); await watchDone; },
+      }),
+      call(method: string, path?: string) {
+        if (method === "Cleaner.WatchStatus") return watchDone;
+        if (method === "Cleaner.QuitApp" && path === a.path) return quitResult;
+        return Promise.reject(new Error(`Unavailable test bridge call: ${method}`));
+      },
+    },
+  });
+  setPlatformForTest("win32");
+  function rowNode(key: string) { return nodes(tree).find((node) => node.props["data-key"] === key)!; }
+  function quitButton(key: string) { return nodes(rowNode(key)).find((node) => node.type === "button")!; }
+  function commitRows() {
+    nodes(tree).filter((node) => typeof node.type === "string" && node.props["data-key"]).forEach((node, i) => {
+      const key = node.props["data-key"] as string;
+      const row = rows.get(key) ?? new DomElement(key, i * 40);
+      rows.set(key, row);
+      if (nodes(node).some((child) => child.type === "button")) row.button ??= new DomElement(key, row.top, row);
+      else {
+        if (row.button) row.button.isConnected = false;
+        if (doc.activeElement === row.button) doc.activeElement = body;
+        row.button = null;
+      }
+    });
+  }
+  return {
+    async settle() {
+      for (let i = 0; i < 20; i++) {
+        if (dirty) {
+          dirty = false; cursor = 0;
+          tree = StatusPage({ active: true, goClean() {}, goProcess() {} });
+          commitRows();
+          for (const effect of effects.splice(0)) effect();
+        }
+        await Promise.resolve();
+      }
+    },
+    async startQuit() {
+      rows.get(a.key)!.button!.focus();
+      quitButton(a.key).props.onClick();
+      await this.settle();
+      nodes(tree).find((node) => node.props.children === t("status.quit.ok") && node.props.onClick)!.props.onClick();
+      await this.settle();
+      // 原生请求未完成，行内忙态按钮仍能获得焦点。
+      expect(quitButton(a.key).props["aria-disabled"]).toBe(true);
+      expect(rows.get(a.key)!.button).not.toBeNull();
+    },
+    focus(key: string) { rows.get(key)!.button!.focus(); },
+    focusBody() { body.focus(); },
+    detachCompletedRow() { rows.get(a.key)!.isConnected = false; },
+    focused() { return doc.activeElement === body ? "body" : doc.activeElement.key; },
+    complete(outcome: "success" | "not-running") {
+      if (outcome === "success") resolveQuit(true);
+      else rejectQuit(new Error(JSON.stringify({ code: "not-running" })));
+    },
+    frame() { for (const fn of frames.splice(0)) fn(0); },
+    done(key: string) {
+      return rowNode(key).props.className.split(" ").includes("quitted") && !rows.get(key)!.button;
+    },
+    close() {
+      for (const slot of slots) slot.cleanup?.();
+      for (const spy of spies) spy.mockRestore();
+      setPlatformForTest(undefined);
+      Object.assign(globalThis, {
+        document: previous.document, window: previous.window, HTMLElement: previous.html,
+        requestAnimationFrame: previous.raf, CSS: previous.css, mygo: previous.mygo,
+      });
+    },
+  };
+}
+
+for (const outcome of ["success", "not-running"] as const) {
+  test(`StatusPage async quit ${outcome}: A pending → focus B → A completes keeps B focused`, async () => {
+    const h = await statusQuitHarness();
+    try {
+      await h.settle();
+      await h.startQuit();
+      h.focus("code");
+      h.complete(outcome);
+      await h.settle();
+      expect(h.done("chrome")).toBe(true);
+      h.frame();
+      expect(h.focused()).toBe("code");
+    } finally { h.close(); }
+  });
+
+  test(`StatusPage async quit ${outcome}: focus still in completed A hands off to B`, async () => {
+    const h = await statusQuitHarness();
+    try {
+      await h.settle();
+      await h.startQuit();
+      h.complete(outcome);
+      await h.settle();
+      expect(h.done("chrome")).toBe(true);
+      expect(h.focused()).toBe("body");
+      h.frame();
+      expect(h.focused()).toBe("code");
+    } finally { h.close(); }
+  });
+
+  test(`StatusPage async quit ${outcome}: focus changes after completion before rAF stays on C`, async () => {
+    const h = await statusQuitHarness();
+    try {
+      await h.settle();
+      await h.startQuit();
+      h.complete(outcome);
+      await h.settle();
+      expect(h.done("chrome")).toBe(true);
+      expect(h.focused()).toBe("body");
+      h.focus("slack");
+      h.frame();
+      expect(h.focused()).toBe("slack");
+    } finally { h.close(); }
+  });
+
+  test(`StatusPage async quit ${outcome}: body focus before own done commit is preserved`, async () => {
+    const h = await statusQuitHarness();
+    try {
+      await h.settle();
+      await h.startQuit();
+      h.complete(outcome);
+      // doQuit 已安排 rAF，但还没提交 done；原按钮仍连接，body 是主动转移的焦点。
+      await Promise.resolve();
+      h.focusBody();
+      h.frame();
+      expect(h.focused()).toBe("body");
+      await h.settle();
+      expect(h.done("chrome")).toBe(true);
+    } finally { h.close(); }
+  });
+
+  test(`StatusPage async quit ${outcome}: detached completed row cannot hand off focus`, async () => {
+    const h = await statusQuitHarness();
+    try {
+      await h.settle();
+      await h.startQuit();
+      h.complete(outcome);
+      await h.settle();
+      expect(h.done("chrome")).toBe(true);
+      h.detachCompletedRow();
+      h.frame();
+      expect(h.focused()).toBe("body");
+    } finally { h.close(); }
+  });
+}
 
 test("status bridge resolves handlers lazily: a handler injected after first mount works without re-entering", async () => {
   await import("./setup-dom");

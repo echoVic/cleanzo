@@ -521,11 +521,18 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   // ---- 退出应用（设计稿 §11：四结果 toast 映射） ----
 
   // done 会立刻摘掉行内退出按钮；焦点还在这一行时，交给下方最近的可聚焦元素，避免掉到 body。
-  const handoffDoneRow = React.useCallback(() => {
-    const rowEl = document.activeElement instanceof HTMLElement
-      ? document.activeElement.closest<HTMLElement>(".st-row[data-key]")
-      : null;
-    if (rowEl) requestAnimationFrame(() => focusNextAfter(rowEl));
+  const markDone = React.useCallback((key: string) => {
+    const rowEl = document.querySelector<HTMLElement>(`.st-row[data-key="${CSS.escape(key)}"]`);
+    const focused = document.activeElement;
+    const focusInRow = !!focused && !!rowEl?.contains(focused);
+    setQuit((prev) => ({ ...prev, done: new Set(prev.done).add(key) }));
+    if (rowEl && focusInRow) requestAnimationFrame(() => {
+      // 提交移除原按钮会让焦点落到 body；等待这一帧期间主动转移的焦点必须保留。
+      if (!rowEl.isConnected) return;
+      if (document.activeElement === focused || (document.activeElement === document.body && !focused.isConnected)) {
+        focusNextAfter(rowEl);
+      }
+    });
   }, []);
 
   const doQuit = React.useCallback(async (app: AppUsage) => {
@@ -535,8 +542,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       const ok = await statusApi.quitApp(app.path);
       if (ok) {
         toast(t("status.toast.quitDone", { name: app.name }));
-        setQuit((prev) => ({ ...prev, done: new Set(prev.done).add(app.key) }));
-        handoffDoneRow();
+        markDone(app.key);
       } else {
         // 5s 超时仍在跑：多半在等未保存内容的确认
         toast(t("status.toast.quitPending", { name: app.name }));
@@ -545,8 +551,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
       const code = quitErrCode(e);
       if (code === "not-running") {
         toast(t("status.toast.notRunning", { name: app.name }));
-        setQuit((prev) => ({ ...prev, done: new Set(prev.done).add(app.key) }));
-        handoffDoneRow();
+        markDone(app.key);
       } else if (code === "cannot-quit") {
         toast(t("status.toast.cannotQuit", { name: app.name }), "err");
       } else {
@@ -560,7 +565,7 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
         return { ...prev, busy };
       });
     }
-  }, [t, handoffDoneRow]);
+  }, [t, markDone]);
 
   // ---- 派生视图 ----
 
