@@ -315,7 +315,7 @@ export function SkillsPage() {
 
           <div className="sk-foot sticky bottom-0 mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[12px] border border-border bg-card px-4 py-3 shadow-card">
             <span className="min-w-0 flex-1 text-xs text-muted">{t("skills.foot")}</span>
-            <Button className="ml-auto" variant="destructive" disabled={plan.paths.length === 0 || busy} onClick={() => setConfirmOpen(true)}>
+            <Button className="ml-auto max-w-full whitespace-normal" variant="destructive" disabled={plan.paths.length === 0 || busy} onClick={() => setConfirmOpen(true)}>
               {t("skills.trash", { n: picked.size, size: human(plan.size) })}
             </Button>
           </div>
@@ -453,14 +453,14 @@ function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasChe
         <Stat label={t("skills.stat.idle")} value={counts.idle} />
         <Stat label={t("skills.stat.issues")} value={counts.issues} />
         <Stat label={t("skills.stat.roots")} value={data.roots.length} />
-        <div className="ml-auto flex flex-wrap justify-end gap-2">
+        <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
           {updatable > 0 && (
-            <Button size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
+            <Button className="max-w-full whitespace-normal" size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
               <ArrowUpToLine className="h-3.5 w-3.5" />{t("skills.updateAll", { n: updatable })}
             </Button>
           )}
           {linkable > 0 && (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={onLinkAll}>
+            <Button className="max-w-full whitespace-normal" size="sm" variant="ghost" disabled={busy} onClick={onLinkAll}>
               <Link2 className="h-3.5 w-3.5" />{t("skills.linkAll", { n: linkable })}
             </Button>
           )}

@@ -40,6 +40,11 @@ if (navEl && typeof MutationObserver !== "undefined") {
     if (active && active.offsetTop !== pillTop) placePill(false);
   }).observe(navEl, { subtree: true, attributes: true, attributeFilter: ["class"] });
 }
+// 文字放大或文案换行会改变导航项高度；按新布局重定位，避免选中底色停在旧位置。
+if (typeof ResizeObserver !== "undefined") {
+  const observer = new ResizeObserver(() => placePill(false));
+  navItems.forEach((item) => observer.observe(item));
+}
 
 // ---- i18n ----
 
@@ -87,7 +92,12 @@ setSettingsLangHandler(changeLanguage);
 
 function switchView(v: View, tool?: string) {
   // AI 工具的几个侧栏项共用一个视图，按 data-tool 区分高亮。
-  navItems.forEach((b) => b.classList.toggle("active", b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool)));
+  navItems.forEach((b) => {
+    const active = b.dataset.view === v && (v !== "aitools" || b.dataset.tool === tool);
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   placePill(pillReady); pillReady = true;
   VIEWS.forEach((k) => $(`#view-${k}`).classList.toggle("hidden", k !== v));
   if (v === "status") showReactStatus(true);

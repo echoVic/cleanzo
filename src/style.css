@@ -224,6 +224,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .sidebar {
   width: 218px;
   flex-shrink: 0;
+  /* 窗口高度不足或页面放大时，底部导航仍可通过滚动和键盘访问。 */
+  overflow-y: auto;
+  scroll-padding-block: 12px;
   background: var(--sidebar);
   backdrop-filter: blur(24px) saturate(170%);
   -webkit-backdrop-filter: blur(24px) saturate(170%);
@@ -324,7 +327,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   text-wrap: balance;
 }
 .view-head p { margin: 3px 0 0; font-size: 13px; }
-.head-actions { display: flex; gap: 8px; }
+.head-actions { display: flex; flex-wrap: wrap; max-width: 100%; gap: 8px; }
 
 /* ---- Buttons ---- */
 .btn {
