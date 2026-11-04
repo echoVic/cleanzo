@@ -656,6 +656,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   padding: 1px 7px;
   border-radius: 999px;
   line-height: 1.5;
+  /* 短标签原子化：窄宽下整枚换行，不逐字断行 */
+  white-space: nowrap;
 }
 .tag.warn { background: var(--danger-soft); color: var(--danger-text); }
 .tag.dim { background: var(--bg-subtle); color: var(--muted); }
@@ -1039,6 +1041,13 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .app-size { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13.5px; }
 .app-used { font-size: 11.5px; }
 .ver { font-size: 11.5px; font-weight: 450; }
+/* 窄宽两行式：第一行图标+名称/路径占满；第二行大小/日期居左、卸载详情居右，避免名称逐字断行 */
+@media (max-width: 700px) {
+  .app-row { flex-wrap: wrap; row-gap: 6px; }
+  .app-row .app-main { flex: 1 1 calc(100% - 51px); }
+  .app-row .app-meta { text-align: left; }
+  .app-row .uninstall-detail { margin-left: auto; }
+}
 
 /* ---- 设置 ---- */
 .setting-block { padding: 6px 16px; margin-bottom: 0; }
