@@ -1,27 +1,24 @@
-// 其他页面对应用卸载页的请求（垃圾页「残留」、进程页的磁盘占用标签「卸载」）；不含 React，测试可直接引入。
-import type { AppsTab } from "./AppsPage";
+// 其他页面对应用页的请求；不含 React，测试可直接引入。
+import type { AppsFilter } from "./updates";
 
-/** 最近一次请求：要切到的 tab、要打开卸载对话框的 App；两个 nonce 变了才执行。 */
+/** 最近一次请求：筛选和要展开的 App；两个版本号变化时才执行。 */
 export interface AppsRequest {
-  tab: AppsTab;
-  tabNonce: number;
+  filter: AppsFilter;
+  filterNonce: number;
   uninstallPath: string | null;
   uninstallNonce: number;
 }
+let req: AppsRequest = { filter: "all", filterNonce: 0, uninstallPath: null, uninstallNonce: 0 };
 
-let req: AppsRequest = { tab: "installed", tabNonce: 0, uninstallPath: null, uninstallNonce: 0 };
-
-/** 外部入口请求切到指定 tab。 */
-export function requestAppsTab(tab: AppsTab) {
-  req = { ...req, tab, tabNonce: req.tabNonce + 1 };
+/** 外部入口只记录筛选请求，不挂载页面。 */
+export function requestAppsFilter(filter: AppsFilter) {
+  req = { ...req, filter, filterNonce: req.filterNonce + 1 };
 }
 
-/** 进程页的磁盘占用标签「卸载」：切到已安装，并打开该 App 的卸载对话框（走现有流程）。 */
+/** 外部卸载入口回到全部，并展开对应的行，等待用户确认。 */
 export function requestAppsUninstall(path: string) {
-  req = { ...req, tab: "installed", tabNonce: req.tabNonce + 1, uninstallPath: path, uninstallNonce: req.uninstallNonce + 1 };
+  req = { ...req, filter: "all", filterNonce: req.filterNonce + 1, uninstallPath: path, uninstallNonce: req.uninstallNonce + 1 };
 }
 
-/** 当前请求，mountApps 渲染时读取。 */
-export function appsRequest(): AppsRequest {
-  return req;
-}
+/** 当前请求，挂载页面时读取。 */
+export function appsRequest(): AppsRequest { return req; }

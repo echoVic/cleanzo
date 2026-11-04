@@ -1,81 +1,65 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../ui/components/tabs";
+import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
+import { Button } from "../../ui/components/button";
+import { segTrigger } from "../../ui/components/seg";
+import { useIndicator } from "../../ui/motion/indicator";
 import { useT } from "../../ui/i18n-react";
 import { setNavBusy } from "../../shared";
-import { InstalledTab } from "./InstalledTab";
+import { AppsList } from "./AppsList";
 import { LeftoversTab } from "./LeftoversTab";
-
-export type AppsTab = "installed" | "leftovers";
+import type { AppsFilter } from "./updates";
 
 interface AppsPageProps {
-  initialTab: AppsTab;
-  /** 外部桥接请求切 tab 的版本号（垃圾页「残留」动作）。 */
+  active: boolean;
+  initialFilter: AppsFilter;
   nonce: number;
-  /** 进程页的磁盘占用标签请求打开卸载对话框的 App。 */
   uninstallPath?: string | null;
-  /** 外部卸载请求的版本号。 */
   uninstallNonce?: number;
 }
 
-export function AppsPage({ initialTab, nonce, uninstallPath = null, uninstallNonce = 0 }: AppsPageProps) {
+export function AppsPage({ active, initialFilter, nonce, uninstallPath = null, uninstallNonce = 0 }: AppsPageProps) {
   const t = useT();
-  const requestedTab = isWindows() ? "installed" : initialTab;
-  const [tab, setTab] = React.useState<AppsTab>(requestedTab);
-  // null = 还没扫过：tab 只显示「残留」，不用 0 误导用户以为没有残留。
+  const win = isWindows();
+  const requestedFilter = win ? "all" : initialFilter;
+  const [filter, setFilter] = React.useState<AppsFilter>(requestedFilter);
   const [orphanCount, setOrphanCount] = React.useState<number | null>(null);
+  const [counts, setCounts] = React.useState<{ updates: number | null; total: number }>({ updates: null, total: 0 });
   const [installedBusy, setInstalledBusy] = React.useState(false);
   const [orphanBusy, setOrphanBusy] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
+  const [recheckNonce, setRecheckNonce] = React.useState(0);
+  const [seenNonce, setSeenNonce] = React.useState(nonce);
+  const tabsId = React.useId();
+  const installedPanelId = `${tabsId}-installed`;
+  const leftoversPanelId = `${tabsId}-leftovers`;
+  const segRef = React.useRef<HTMLDivElement>(null);
+  const segStyle = useIndicator(segRef, '[data-state="active"]');
+  // 外部请求与本次渲染一起应用，列表收到请求时已经回到正确筛选。
+  if (seenNonce !== nonce) { setSeenNonce(nonce); setFilter(requestedFilter); }
 
-  // 外部桥接（垃圾页「残留」）请求切到残留 tab。
-  const firstNonce = React.useRef(nonce);
-  React.useEffect(() => {
-    if (nonce !== firstNonce.current) {
-      firstNonce.current = nonce;
-      setTab(requestedTab);
-    }
-  }, [nonce, requestedTab]);
-
-  // 应用与残留的后台任务共用导航 busy 提示。
-  React.useEffect(() => {
-    setNavBusy("apps", installedBusy || orphanBusy);
-  }, [installedBusy, orphanBusy]);
-
+  React.useEffect(() => { setNavBusy("apps", installedBusy || orphanBusy); }, [installedBusy, orphanBusy]);
+  const currentFilter = win ? "all" : filter;
+  const installed = <AppsList active={active} filter={currentFilter} onBusyChange={setInstalledBusy} onCounts={setCounts} onChecking={setChecking} uninstallPath={uninstallPath} uninstallNonce={uninstallNonce} recheckNonce={recheckNonce} />;
   return (
     <div className="cz-react">
       <header className="view-head">
-        <div>
-          <h1>{t("nav.apps")}</h1>
-          <p className="muted">{t("apps.sub")}</p>
-        </div>
+        <div><h1>{t("nav.apps")}</h1><p className="muted">{t("apps.sub")}</p></div>
+        {!win && <Button variant="ghost" size="sm" onClick={() => setRecheckNonce((n) => n + 1)} disabled={checking}>{t("apps.recheck")}</Button>}
       </header>
-
-      <Tabs value={tab} onValueChange={(v) => setTab(v as AppsTab)}>
-        <TabsList>
-          <TabsTrigger value="installed">{t("apps.tab.installed")}</TabsTrigger>
-          {!isWindows() && <TabsTrigger value="leftovers">
-            {orphanCount === null
-              ? t("apps.tab.leftovers")
-              : t("apps.tab.leftoversCount", { n: orphanCount })}
-          </TabsTrigger>}
+      {win ? installed : <TabsRoot value={currentFilter} onValueChange={(v) => setFilter(v as AppsFilter)}>
+        <TabsList ref={segRef} aria-label={t("apps.filters")} className="relative mb-4 inline-flex gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]">
+          <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
+          <TabsTrigger value="all" id={`${tabsId}-all`} aria-controls={installedPanelId} className={segTrigger}>{t("apps.filter.all", { n: counts.total })}</TabsTrigger>
+          <TabsTrigger value="updates" id={`${tabsId}-updates`} aria-controls={installedPanelId} className={segTrigger}>{counts.updates === null ? t("apps.filter.updates") : t("apps.filter.updatesCount", { n: counts.updates })}</TabsTrigger>
+          <TabsTrigger value="idle" id={`${tabsId}-idle`} aria-controls={installedPanelId} className={segTrigger}>{t("apps.filter.idle")}</TabsTrigger>
+          <TabsTrigger value="leftovers" id={`${tabsId}-leftovers-tab`} aria-controls={leftoversPanelId} className={segTrigger}>{orphanCount === null ? t("apps.tab.leftovers") : t("apps.tab.leftoversCount", { n: orphanCount })}</TabsTrigger>
         </TabsList>
-        {/* 两个面板都常驻挂载，切 tab 不卸载、不重扫（与旧显隐行为一致）。 */}
-        <TabsContent value="installed" forceMount hidden={tab !== "installed" || undefined}>
-          <InstalledTab active={tab === "installed"} onBusyChange={setInstalledBusy} uninstallPath={uninstallPath} uninstallNonce={uninstallNonce} />
-        </TabsContent>
-        {!isWindows() && <TabsContent value="leftovers" forceMount hidden={tab !== "leftovers" || undefined}>
-          <LeftoversTab
-            active={tab === "leftovers"}
-            onCountChange={setOrphanCount}
-            onBusyChange={setOrphanBusy}
-          />
-        </TabsContent>}
-      </Tabs>
-      {isWindows() && (
-        <footer className="muted small mt-4">
-          <a className="mlink" href="ms-settings:appsfeatures" target="_blank" rel="noopener noreferrer">{t("apps.store")}</a>
-        </footer>
-      )}
+        <div id={installedPanelId} role="tabpanel" tabIndex={0} aria-labelledby={`${tabsId}-${currentFilter === "leftovers" ? "all" : currentFilter}`} hidden={currentFilter === "leftovers" || undefined}>{installed}</div>
+        <div id={leftoversPanelId} role="tabpanel" tabIndex={0} aria-labelledby={`${tabsId}-leftovers-tab`} hidden={currentFilter !== "leftovers" || undefined}><LeftoversTab active={active && currentFilter === "leftovers"} onCountChange={setOrphanCount} onBusyChange={setOrphanBusy} /></div>
+      </TabsRoot>}
+      {!win && currentFilter !== "leftovers" && <footer className="muted small mt-4">{t("apps.checkNote")}</footer>}
+      {win && <footer className="muted small mt-4"><a className="mlink" href="ms-settings:appsfeatures" target="_blank" rel="noopener noreferrer">{t("apps.store")}</a></footer>}
     </div>
   );
 }

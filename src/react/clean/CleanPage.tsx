@@ -16,7 +16,7 @@ import { flyText, type Box } from "../../ui/motion/fly";
 import { dur, play } from "../../ui/motion/motion";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { baseName, displayPath, errText, human, setNavBusy, toast } from "../../shared";
-import { showReactApps } from "../apps/entry";
+import { requestAppsFilter } from "../apps/entry";
 import { setCleanStaleHandler, takeStalePending } from "./entry";
 import { cleanApi } from "./api";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
@@ -847,7 +847,7 @@ export function CleanPage() {
                     {!isWindows() && g === "review" && summary && summary.leftovers > 0 && (
                       <div className="junk-leftovers">
                         <span>{t("junk.leftovers", { n: summary.leftovers, size: human(summary.leftoversSize) })}</span>
-                        <button className="btn small ghost" type="button" onClick={() => showReactApps("leftovers")}>
+                        <button className="btn small ghost" type="button" onClick={() => { requestAppsFilter("leftovers"); document.querySelector<HTMLButtonElement>('.nav-item[data-view="apps"]')?.click(); }}>
                           {t("junk.view")}
                         </button>
                       </div>
