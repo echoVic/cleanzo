@@ -288,6 +288,8 @@ export const dict = {
     // a11y
     "a11y.skipMain": "跳到主内容",
     // nav
+    "nav.section.overview": "概览",
+    "nav.section.cleanup": "清理与空间",
     "nav.clean": "垃圾清理",
     "nav.status": "系统状态",
     "nav.fullscan": "空间分析",
@@ -1450,6 +1452,8 @@ export const dict = {
     "rule.review.mail-downloads.desc": "Downloaded attachments; recoverable from the Trash",
     // a11y
     "a11y.skipMain": "Skip to main content",
+    "nav.section.overview": "Overview",
+    "nav.section.cleanup": "Cleanup & Space",
     "nav.clean": "Cleaner",
     "nav.status": "System Status",
     "nav.fullscan": "Space Analysis",

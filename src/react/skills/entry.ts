@@ -11,7 +11,6 @@ export async function initReactSkills() {
     any = false;
   }
   document.querySelector(`.nav-item[data-view="skills"]`)?.classList.toggle("hidden", !any);
-  if (any) document.querySelector("#nav-ai-section")?.classList.remove("hidden");
 }
 
 export function showReactSkills() {

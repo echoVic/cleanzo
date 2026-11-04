@@ -8,6 +8,7 @@
     "build": "mygo build",
     "build:windows": "mygo build -platform windows/amd64",
     "generate": "mygo generate",
+    "generate:icon": "sh scripts/generate-icon.sh",
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",

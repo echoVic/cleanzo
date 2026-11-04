@@ -20,11 +20,15 @@ import { connectLanguage } from "./language";
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 
 // ---- 侧栏选中底色（设计 6.1）：切换时滑到新项；AI 入口显隐导致位置变化时直接跟上 ----
-const navPill = document.querySelector<HTMLElement>(".nav-pill");
+const navPills = Array.from(document.querySelectorAll<HTMLElement>(".nav-pill"));
 let pillReady = false;
 let pillTop = -1;
 function placePill(animate: boolean) {
   const active = navItems.find((b) => b.classList.contains("active"));
+  const navPill = active?.offsetParent ? active.closest("[data-nav-region]")?.querySelector<HTMLElement>(".nav-pill") : undefined;
+  navPills.forEach((pill) => {
+    if (pill !== navPill && pill.classList.contains("placed")) pill.classList.remove("placed");
+  });
   if (!navPill || !active || active.offsetParent === null) return;
   if (!animate) navPill.style.transition = "none";
   pillTop = active.offsetTop;
@@ -35,9 +39,13 @@ function placePill(animate: boolean) {
 }
 const navEl = document.querySelector<HTMLElement>(".nav");
 if (navEl && typeof MutationObserver !== "undefined") {
-  new MutationObserver(() => {
+  new MutationObserver((records) => {
+    // Ignore the highlight's own class changes; hidden groups still need a sync.
+    if (!records.some((record) => !navPills.includes(record.target as HTMLElement))) return;
     const active = navItems.find((b) => b.classList.contains("active"));
-    if (active && active.offsetTop !== pillTop) placePill(false);
+    const regionPill = active?.offsetParent ? active.closest("[data-nav-region]")?.querySelector(".nav-pill") : undefined;
+    const placed = navPills.find((pill) => pill.classList.contains("placed"));
+    if (active?.offsetTop !== pillTop || placed !== regionPill) placePill(false);
   }).observe(navEl, { subtree: true, attributes: true, attributeFilter: ["class"] });
 }
 // 文字放大或文案换行会改变导航项高度；按新布局重定位，避免选中底色停在旧位置。

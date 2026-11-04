@@ -49,6 +49,8 @@ Windows 版提供系统状态、用户目录空间分析、垃圾清理、AI 工
 
 设置中的「外观」可以选择跟随系统、浅色或深色，选择会保存并在下次启动时恢复。
 
+桌面图标、侧边栏标志和网页图标统一以 `public/favicon.svg` 为源文件。修改后运行 `bun run generate:icon` 更新 `resources/icon.png`（需要 librsvg 的 `rsvg-convert`，macOS 可用 `brew install librsvg` 安装）；MyGo 打包时再生成 ICNS 和 ICO。
+
 ```sh
 bun run dev      # 开发模式，带热更新
 ```

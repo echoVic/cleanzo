@@ -224,9 +224,9 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .sidebar {
   width: 218px;
   flex-shrink: 0;
-  /* 窗口高度不足或页面放大时，底部导航仍可通过滚动和键盘访问。 */
-  overflow-y: auto;
-  scroll-padding-block: 12px;
+  /* 仅导航正文滚动，设置和版本固定在窗口底部。 */
+  min-height: 0;
+  overflow: hidden;
   background: var(--sidebar);
   backdrop-filter: blur(24px) saturate(170%);
   -webkit-backdrop-filter: blur(24px) saturate(170%);
@@ -236,7 +236,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   padding: 20px 12px 14px;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 18px; }
+.brand { display: flex; flex: none; align-items: center; gap: 10px; padding: 2px 10px 22px; }
 .logo { flex-shrink: 0; }
 .brand-name {
   font-size: 15px;
@@ -244,24 +244,37 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   letter-spacing: 0.1px;
 }
 
-.nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+.nav-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 6px;
+  padding: 4px 0;
+}
+.nav-main { position: relative; display: flex; flex-direction: column; gap: 16px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-ai-group:not(:has(.nav-item:not(.hidden))) { display: none; }
+.nav-footer { position: relative; flex: none; padding-top: 12px; border-top: 1px solid var(--border); }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 7px 10px;
+  min-height: 36px;
+  padding: 8px 10px;
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   text-align: left;
   transition: background 0.13s ease, color 0.13s ease;
 }
-.nav-item svg { flex-shrink: 0; }
+.nav-item svg { flex-shrink: 0; width: 18px; height: 18px; color: var(--muted); stroke-linejoin: round; }
 .nav-item.busy::after {
   content: "";
   width: 10px;
@@ -279,11 +292,11 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   color: var(--accent-strong);
   font-weight: 600;
 }
-.nav-item.active svg { stroke: var(--accent-strong); }
+.nav-item.active svg { color: var(--accent-strong); stroke: currentColor; }
 
 .sidebar-foot {
   font-size: 11px;
-  padding: 10px 10px 0;
+  padding: 6px 10px 0;
   letter-spacing: 0.1px;
 }
 
@@ -1531,8 +1544,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 }
 
 /* 导航分组与应用页签 */
-.nav-section { margin: 18px 12px 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
-.nav-separator { height: 1px; margin: 14px 10px; background: var(--border); }
+.nav-section { margin: 0 10px 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .apps-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .apps-tab { padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
 .apps-tab.active { color: var(--accent-strong); border-bottom-color: var(--accent); font-weight: 600; }
@@ -2067,9 +2079,8 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .cz-check { width: 12px; height: 12px; flex: none; vertical-align: -1px; overflow: visible; }
 .cz-check path { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; animation: cz-draw var(--t-state) var(--e-out) 30ms both; }
 
-/* 侧栏选中底色：一个底色滑到新项（设计 6.1） */
-.nav { position: relative; }
-.nav-pill { position: absolute; left: 0; right: 0; top: 0; height: 0; border-radius: 8px; background: var(--accent-soft); pointer-events: none; opacity: 0; transition: transform var(--t-layout) var(--e-move), height var(--t-layout) var(--e-move); }
+/* 正文和固定页脚分别定位，只有当前区域的选中底色可见。 */
+.nav-pill { position: absolute; left: 0; right: 0; top: 0; height: 0; border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 70%, transparent); pointer-events: none; opacity: 0; transition: transform var(--t-layout) var(--e-move), height var(--t-layout) var(--e-move); }
 .nav-pill.placed { opacity: 1; }
 .nav-item { position: relative; }
 .nav-item.active, .nav-item.active:hover { background: transparent; }

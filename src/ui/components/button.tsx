@@ -13,7 +13,7 @@ import { cn } from "../cn";
 const buttonVariants = cva(
   "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] border border-transparent bg-btn-bg text-[13px] font-[590] text-foreground " +
     "cz-btn " +
-    "hover:bg-hover active:scale-[0.97] disabled:cursor-default disabled:opacity-45 disabled:active:scale-100 " +
+    "enabled:hover:bg-hover active:scale-[0.97] disabled:cursor-default disabled:opacity-45 disabled:active:scale-100 " +
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] [&_svg]:shrink-0",
   {
     variants: {
@@ -21,7 +21,7 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground enabled:hover:bg-accent-solid-strong",
         destructive: "bg-destructive text-destructive-foreground enabled:hover:bg-danger-solid-strong disabled:border-border disabled:bg-btn-bg disabled:text-muted disabled:opacity-100",
         ghost: "border-border",
-        link: "border-0 bg-transparent text-accent-strong underline-offset-4 hover:bg-transparent hover:underline",
+        link: "border-0 bg-transparent text-accent-strong underline-offset-4 enabled:hover:bg-transparent enabled:hover:underline",
       },
       size: {
         default: "px-[14px] py-[6px]",
@@ -31,7 +31,7 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
-      { variant: "ghost", size: "sm", className: "text-muted hover:text-foreground" },
+      { variant: "ghost", size: "sm", className: "text-muted enabled:hover:text-foreground" },
     ],
     defaultVariants: { variant: "default", size: "default" },
   },

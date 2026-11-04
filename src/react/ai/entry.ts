@@ -12,13 +12,10 @@ export async function initReactAITools() {
   } catch {
     list = [];
   }
-  let any = false;
   for (const info of list) {
     const btn = document.querySelector<HTMLElement>(`.nav-item[data-tool="${info.id}"]`);
     if (btn) btn.classList.toggle("hidden", !info.installed);
-    if (info.installed) any = true;
   }
-  document.querySelector("#nav-ai-section")?.classList.toggle("hidden", !any);
 }
 
 export function showReactAITool(toolId: string, toolName: string) {
