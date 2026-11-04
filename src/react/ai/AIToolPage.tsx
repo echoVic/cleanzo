@@ -35,6 +35,9 @@ interface ConfirmedSelection {
 
 export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const t = useT();
+  const reveal = (path: string) => {
+    void aiApi.reveal(path).catch((e: unknown) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
+  };
   const [tool, setTool] = React.useState<AITool | null>(null);
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [error, setError] = React.useState<string | null>(null);
@@ -305,7 +308,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                 onTogglePart={(on) => togglePart(p, on)}
                 onToggleGroup={(key, on) => toggleGroup(p, key, on)}
                 onExpand={() => toggleExpand(p.id)}
-                onReveal={(path) => aiApi.reveal(path).catch(() => {})}
+                onReveal={reveal}
                 onPickOld={() => pickOld(p)}
                 onWindowChange={changeWindow}
               />
@@ -340,7 +343,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                       onTogglePart={() => {}}
                       onToggleGroup={() => {}}
                       onExpand={() => {}}
-                      onReveal={(path) => aiApi.reveal(path).catch(() => {})}
+                      onReveal={reveal}
                       onPickOld={() => {}}
                       onWindowChange={changeWindow}
                     />

@@ -584,7 +584,7 @@ function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade }: {
         )}
         {c.kind !== "broken" && (
           <button type="button" className="cz-icon-btn cursor-pointer text-muted hover:text-foreground"
-            onClick={() => skillsApi.reveal(c.real || c.path).catch(() => {})} aria-label={t("skills.reveal")}>
+            onClick={() => void skillsApi.reveal(c.real || c.path).catch((e: unknown) => toast(t("fs.revealFail", { msg: errText(e) }), "err"))} aria-label={t("skills.reveal")}>
             <FolderOpen className="h-3.5 w-3.5" />
           </button>
         )}
