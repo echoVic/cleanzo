@@ -43,11 +43,12 @@ type AppUpgradeResult struct {
 // appUpdateAction is what the Update button does for an app. It is only
 // ever built in Go from what a check found.
 type appUpdateAction struct {
-	kind   string // "brew" | "open-store" | "open-app"
-	token  string // brew cask token
-	path   string // the app bundle
-	url    string // macappstore:// link
-	latest string // what the check found, to confirm a brew upgrade
+	kind     string // "brew" | "open-store" | "open-app"
+	token    string // brew cask token
+	path     string // the app bundle
+	url      string // macappstore:// link
+	latest   string // what the check found, to confirm a brew upgrade
+	revision uint64 // distinguishes even identical concurrent publications
 }
 
 // Platform implementations register hooks without putting bound methods in
@@ -245,39 +246,110 @@ func feedReason(err error) string {
 	}
 }
 
-// ---- the last check's actions --------------------------------------------------
+// ---- completed per-app actions ------------------------------------------------
 
-// appUpdateCache keeps what the last check found each app's Update button
-// should do. UpgradeApp only acts on what is here.
+type pendingAppAction struct {
+	id         string
+	generation uint64
+	action     appUpdateAction
+}
+
+// m holds successfully delivered actions, including empty consumed results.
+// Pending sends are separately visible to immediate UpgradeApp calls. A failed
+// send never becomes another send's fallback or changes a committed identity.
 var appUpdateCache = struct {
 	sync.Mutex
-	m map[string]appUpdateAction
-}{m: map[string]appUpdateAction{}}
+	m          map[string]appUpdateAction
+	pending    map[uint64]*pendingAppAction
+	generation uint64
+	next       uint64
+}{m: map[string]appUpdateAction{}, pending: map[uint64]*pendingAppAction{}}
+
+func beginAppUpdateCheck() uint64 {
+	appUpdateCache.Lock()
+	defer appUpdateCache.Unlock()
+	appUpdateCache.generation++
+	return appUpdateCache.generation
+}
+
+func nextAppActionLocked(a appUpdateAction) appUpdateAction {
+	appUpdateCache.next++
+	a.revision = appUpdateCache.next
+	return a
+}
 
 func rememberAppAction(id string, a appUpdateAction) {
 	appUpdateCache.Lock()
 	defer appUpdateCache.Unlock()
-	appUpdateCache.m[id] = a
+	appUpdateCache.m[id] = nextAppActionLocked(a)
+}
+
+// publishAppUpdate makes the action available before Send, so a received update
+// can immediately invoke UpgradeApp. Failed delivery discards only its pending
+// result. Never hold the cache lock across Send: it may wait on the page.
+func publishAppUpdate(ctx context.Context, generation uint64, u AppUpdate, a appUpdateAction, send func(AppUpdate) error) error {
+	appUpdateCache.Lock()
+	if err := ctx.Err(); err != nil {
+		appUpdateCache.Unlock()
+		return err
+	}
+	if generation != appUpdateCache.generation {
+		appUpdateCache.Unlock()
+		return context.Canceled
+	}
+	var pending *pendingAppAction
+	if u.ID != "__done" {
+		a = nextAppActionLocked(a)
+		pending = &pendingAppAction{id: u.ID, generation: generation, action: a}
+		appUpdateCache.pending[a.revision] = pending
+	}
+	appUpdateCache.Unlock()
+	err := send(u)
+	if pending != nil {
+		appUpdateCache.Lock()
+		delete(appUpdateCache.pending, a.revision)
+		if err == nil && generation == appUpdateCache.generation && a.revision > appUpdateCache.m[u.ID].revision {
+			appUpdateCache.m[u.ID] = pending.action
+		}
+		appUpdateCache.Unlock()
+	}
+	return err
 }
 
 func appActionFor(id string) (appUpdateAction, bool) {
 	appUpdateCache.Lock()
 	defer appUpdateCache.Unlock()
-	a, ok := appUpdateCache.m[id]
-	return a, ok
+	a := appUpdateCache.m[id]
+	for _, pending := range appUpdateCache.pending {
+		if pending.id == id && pending.generation == appUpdateCache.generation && pending.action.revision > a.revision {
+			a = pending.action
+		}
+	}
+	return a, a.kind != ""
 }
 
 func resetAppActions() {
 	appUpdateCache.Lock()
 	defer appUpdateCache.Unlock()
+	appUpdateCache.generation++
 	appUpdateCache.m = map[string]appUpdateAction{}
+	appUpdateCache.pending = map[uint64]*pendingAppAction{}
 }
 
 // probeUsageFn is probeUsage's implementation; tests replace it.
 var probeUsageFn = platformUsage
 
-func forgetAppAction(id string) {
+func forgetAppAction(id string, revision uint64) {
 	appUpdateCache.Lock()
 	defer appUpdateCache.Unlock()
-	delete(appUpdateCache.m, id)
+	a := appUpdateCache.m[id]
+	// The upgrade may finish after its pending send has already failed and
+	// been removed. Its revision still consumes any older committed fallback,
+	// while a successfully delivered newer result remains intact.
+	if a.revision <= revision {
+		appUpdateCache.m[id] = appUpdateAction{revision: revision}
+	}
+	if pending := appUpdateCache.pending[revision]; pending != nil && pending.id == id {
+		pending.action = appUpdateAction{revision: revision}
+	}
 }

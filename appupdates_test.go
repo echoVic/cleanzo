@@ -158,6 +158,155 @@ func TestAppActionCacheOnlyHoldsWhatGoRemembered(t *testing.T) {
 	}
 }
 
+func TestAppActionFailedOldDeliveryCannotRollbackFreshResult(t *testing.T) {
+	for _, freshKind := range []string{"brew", ""} {
+		t.Run(freshKind, func(t *testing.T) {
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			id := "/Applications/Overlap.app"
+			rememberAppAction(id, appUpdateAction{kind: "open-store", url: "macappstore://old"})
+			generation := beginAppUpdateCheck()
+			started, release := make(chan struct{}), make(chan struct{})
+			closed := errors.New("channel closed")
+			done := make(chan error, 1)
+			go func() {
+				done <- publishAppUpdate(context.Background(), generation, AppUpdate{ID: id}, appUpdateAction{kind: "open-app"}, func(AppUpdate) error {
+					close(started)
+					<-release
+					return closed
+				})
+			}()
+			<-started
+			fresh := beginAppUpdateCheck()
+			err := publishAppUpdate(context.Background(), fresh, AppUpdate{ID: id}, appUpdateAction{kind: freshKind, token: "fresh"}, func(AppUpdate) error { return nil })
+			close(release)
+			oldErr := <-done
+			if err != nil || !errors.Is(oldErr, closed) {
+				t.Fatalf("fresh=%v old=%v", err, oldErr)
+			}
+			a, ok := appActionFor(id)
+			if freshKind == "" && ok || freshKind != "" && (!ok || a.kind != "brew" || a.token != "fresh") {
+				t.Fatalf("old send rolled back fresh result: %+v %v", a, ok)
+			}
+		})
+	}
+}
+
+func TestAppActionFailedDeliveryCannotResurrectConsumedAction(t *testing.T) {
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	id := "/Applications/Consumed.app"
+	rememberAppAction(id, appUpdateAction{kind: "brew", token: "old"})
+	generation := beginAppUpdateCheck()
+	closed := errors.New("channel closed")
+	err := publishAppUpdate(context.Background(), generation, AppUpdate{ID: id}, appUpdateAction{kind: "brew", token: "new"}, func(AppUpdate) error {
+		a, _ := appActionFor(id)
+		forgetAppAction(id, a.revision)
+		return closed
+	})
+	if !errors.Is(err, closed) {
+		t.Fatal(err)
+	}
+	if a, ok := appActionFor(id); ok {
+		t.Fatalf("failed send resurrected consumed action: %+v", a)
+	}
+}
+
+func TestAppActionPendingConsumptionSurvivesFailedDelivery(t *testing.T) {
+	for _, consumeFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("consume-first=%v", consumeFirst), func(t *testing.T) {
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			id := "/Applications/PendingConsumed.app"
+			rememberAppAction(id, appUpdateAction{kind: "brew", token: "committed"})
+			generation := beginAppUpdateCheck()
+			started, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			closed := errors.New("channel closed")
+			go func() {
+				done <- publishAppUpdate(context.Background(), generation, AppUpdate{ID: id}, appUpdateAction{kind: "brew", token: "pending"}, func(AppUpdate) error {
+					close(started)
+					<-release
+					return closed
+				})
+			}()
+			<-started
+			consumed, ok := appActionFor(id)
+			if !ok || consumed.token != "pending" {
+				t.Errorf("upgrade did not capture pending action: %+v %v", consumed, ok)
+			}
+			if consumeFirst {
+				forgetAppAction(id, consumed.revision)
+			}
+			close(release)
+			if err := <-done; !errors.Is(err, closed) {
+				t.Fatal(err)
+			}
+			if !consumeFirst {
+				forgetAppAction(id, consumed.revision)
+			}
+			if a, ok := appActionFor(id); ok {
+				t.Fatalf("failed send restored older action after pending upgrade completed: %+v", a)
+			}
+		})
+	}
+}
+
+func TestAppActionOverlappingFailedDeliveriesRestoreCommittedAction(t *testing.T) {
+	for _, pendingKind := range []string{"brew", ""} {
+		for _, newestFailsFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("pending=%s/newest-first=%v", pendingKind, newestFailsFirst), func(t *testing.T) {
+				resetAppActions()
+				t.Cleanup(resetAppActions)
+				id := "/Applications/DoubleFailure.app"
+				rememberAppAction(id, appUpdateAction{kind: "brew", token: "committed"})
+				committed, _ := appActionFor(id)
+				startedB, releaseB := make(chan struct{}), make(chan struct{})
+				startedC, releaseC := make(chan struct{}), make(chan struct{})
+				doneB, doneC := make(chan error, 1), make(chan error, 1)
+				closed := errors.New("channel closed")
+				g1 := beginAppUpdateCheck()
+				go func() {
+					doneB <- publishAppUpdate(context.Background(), g1, AppUpdate{ID: id}, appUpdateAction{kind: pendingKind, token: "undelivered-b"}, func(AppUpdate) error {
+						close(startedB)
+						<-releaseB
+						return closed
+					})
+				}()
+				<-startedB
+				g2 := beginAppUpdateCheck()
+				go func() {
+					doneC <- publishAppUpdate(context.Background(), g2, AppUpdate{ID: id}, appUpdateAction{kind: "brew", token: "undelivered-c"}, func(AppUpdate) error {
+						close(startedC)
+						<-releaseC
+						return closed
+					})
+				}()
+				<-startedC
+				var errB, errC error
+				if newestFailsFirst {
+					close(releaseC)
+					errC = <-doneC
+					close(releaseB)
+					errB = <-doneB
+				} else {
+					close(releaseB)
+					errB = <-doneB
+					close(releaseC)
+					errC = <-doneC
+				}
+				if !errors.Is(errB, closed) || !errors.Is(errC, closed) {
+					t.Fatalf("send errors: B=%v C=%v", errB, errC)
+				}
+				a, ok := appActionFor(id)
+				if !ok || a.token != "committed" || a.revision != committed.revision {
+					t.Fatalf("two failed sends did not restore original committed action: %+v %v; original revision=%d", a, ok, committed.revision)
+				}
+			})
+		}
+	}
+}
+
 func TestVersionPartsRejectsSignedSegments(t *testing.T) {
 	for _, version := range []string{"+1.2", "1.+2", "-0.2", "1.-0"} {
 		if got := versionParts(version); got != nil {

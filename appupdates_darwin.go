@@ -29,13 +29,16 @@ type appBundle struct {
 	electron           map[string]string
 }
 
+// appBundlePlistOutput is the external command boundary; tests replace it.
+var appBundlePlistOutput = func(cmd *exec.Cmd) ([]byte, error) { return cmd.Output() }
+
 // readAppBundle reads Info.plist, the App Store receipt and
 // Contents/Resources/app-update.yml; false when Info.plist cannot be read.
-func readAppBundle(path string) (appBundle, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func readAppBundle(ctx context.Context, path string) (appBundle, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(path, "Contents", "Info.plist"))).Output()
-	if err != nil {
+	out, err := appBundlePlistOutput(quietCommand(exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(path, "Contents", "Info.plist"))))
+	if err != nil || ctx.Err() != nil {
 		return appBundle{}, false
 	}
 	m := plistValues(out)
@@ -251,6 +254,10 @@ func installedCasks(ctx context.Context) []brewCask {
 	if tool == "" {
 		return nil
 	}
+	if !appUpgradeMu.lockContext(ctx) {
+		return nil
+	}
+	defer appUpgradeMu.unlock()
 	out, err := runTool(ctx, tool, []string{"info", "--cask", "--installed", "--json=v2"}, time.Minute)
 	if err != nil {
 		return nil
@@ -419,31 +426,42 @@ const appUpdateWorkers = 6
 // checkAppUpdates checks ids (the page's AppInfo IDs), sending each result
 // as it is known and {ID: "__done"} last. Only installed apps are read.
 func checkAppUpdates(ctx context.Context, ids []string, src appUpdateSources, send func(AppUpdate) error) error {
-	resetAppActions()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	generation := beginAppUpdateCheck()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	bundles := make([]appBundle, 0, len(ids))
 	needBrew := false
 	var sendMu sync.Mutex
-	emit := func(u AppUpdate) error {
+	emit := func(u AppUpdate, a appUpdateAction) error {
 		sendMu.Lock()
 		defer sendMu.Unlock()
-		return send(u)
+		return publishAppUpdate(ctx, generation, u, a, send)
 	}
 	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		b, ok := appBundle{}, false
 		if installedApp(id) {
-			b, ok = readAppBundle(id)
+			b, ok = readAppBundle(ctx, id)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if !ok {
-			if err := emit(AppUpdate{ID: id, State: "unknown", Reason: "no-source"}); err != nil {
+			if err := emit(AppUpdate{ID: id, State: "unknown", Reason: "no-source"}, appUpdateAction{}); err != nil {
 				return err
 			}
 			continue
 		}
 		bundles = append(bundles, b)
 		needBrew = needBrew || !b.mas
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	var casks map[string]brewCask
 	if needBrew && src.brew != nil {
@@ -457,18 +475,19 @@ func checkAppUpdates(ctx context.Context, ids []string, src appUpdateSources, se
 		go func() {
 			defer wg.Done()
 			for b := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
 				u, a := checkTarget(ctx, b, src, casks)
 				if ctx.Err() != nil {
 					return
 				}
-				if a.kind != "" {
-					rememberAppAction(b.id, a)
-				}
-				if err := emit(u); err != nil {
+				if err := emit(u, a); err != nil {
 					select {
 					case errs <- err:
 					default:
 					}
+					cancel()
 					return
 				}
 			}
@@ -488,15 +507,15 @@ feed:
 	}
 	close(jobs)
 	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	select {
 	case err := <-errs:
 		return err
 	default:
 	}
-	return emit(AppUpdate{ID: "__done"})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return emit(AppUpdate{ID: "__done"}, appUpdateAction{})
 }
 
 // Register the macOS checker; the bound method stays platform-neutral.
@@ -585,8 +604,38 @@ var openURLCommand = func(target string) error {
 	return nil
 }
 
-// appUpgradeMu lets one brew upgrade run at a time: Homebrew takes a lock.
-var appUpgradeMu sync.Mutex
+// appBrewLock serializes info with upgrades. Checks wait with cancellation;
+// competing upgrades retain the immediate busy response.
+type appBrewLock chan struct{}
+
+func (m appBrewLock) tryLock() bool {
+	select {
+	case m <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m appBrewLock) lock()   { m <- struct{}{} }
+func (m appBrewLock) unlock() { <-m }
+func (m appBrewLock) lockContext(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	select {
+	case m <- struct{}{}:
+		if ctx.Err() != nil {
+			m.unlock()
+			return false
+		}
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+var appUpgradeMu = make(appBrewLock, 1)
 
 // upgradeApp does what the last check found for id (spec section 5).
 func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
@@ -613,12 +662,12 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 		res.Code = "not-checked"
 		return res
 	}
-	if !appUpgradeMu.TryLock() {
+	if !appUpgradeMu.tryLock() {
 		res.Code = "busy"
 		return res
 	}
-	defer appUpgradeMu.Unlock()
-	b, ok := readAppBundle(a.path)
+	defer appUpgradeMu.unlock()
+	b, ok := readAppBundle(ctx, a.path)
 	if !ok {
 		res.Code = "not-checked"
 		return res
@@ -636,11 +685,11 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 		return res
 	}
 	out, err := runTool(ctx, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
-	if after, ok := readAppBundle(a.path); ok {
+	if after, ok := readAppBundle(ctx, a.path); ok {
 		res.Version = after.short
 	}
 	if v, l := versionParts(cleanVersion(res.Version)), versionParts(cleanVersion(a.latest)); v != nil && l != nil && compareVersions(v, l) >= 0 {
-		forgetAppAction(id)
+		forgetAppAction(id, a.revision)
 		res.Done, res.Command = true, ""
 		return res
 	}

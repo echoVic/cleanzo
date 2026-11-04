@@ -218,6 +218,14 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
         ...(currentApp.running !== requestedApp.running ? { running: currentApp.running } : {}),
         ...(currentApp.version !== requestedApp.version ? { version: currentApp.version } : {}),
       } };
+      if (currentApp) {
+        // 列表和展开操作共用这份状态，同时保留列表身份与请求期间完成的动作。
+        const next = appsRef.current.map((a) => a.id === id
+          ? { ...a, running: d.app.running, version: d.app.version }
+          : a);
+        appsRef.current = next;
+        setApps(next);
+      }
       detailsRef.current = { ...detailsRef.current, [id]: d };
       setDetails((prev) => ({ ...prev, [id]: d }));
       setUsage((prev) => ({ ...prev, [id]: splitUsage(d) }));

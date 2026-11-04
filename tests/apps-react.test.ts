@@ -9,6 +9,59 @@ import {
   filterByKind, growthFor, growthTagFor, isIdle, reasonKey, sourceKey, splitUsage, updateCount, versionTag,
 } from "../src/react/apps/updates";
 
+test("macOS app filters reference existing panels and label the active content", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AppsPage } = await import("../src/react/apps/AppsPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  try {
+    setPlatformForTest("darwin");
+    for (const filter of ["all", "updates", "idle", "leftovers"] as const) {
+      const html = renderToStaticMarkup(createElement(AppsPage, { active: false, initialFilter: filter, nonce: 0 }));
+      const tabs = [...html.matchAll(/<button\b[^>]*role="tab"[^>]*>/g)].map((m) => m[0]);
+      expect(tabs).toHaveLength(4);
+      for (const tab of tabs) {
+        const panelId = /aria-controls="([^"]+)"/.exec(tab)![1]!;
+        expect(html).toContain(`id="${panelId}"`);
+      }
+      const selected = tabs.find((tab) => tab.includes('aria-selected="true"'))!;
+      const tabId = /\bid="([^"]+)"/.exec(selected)![1]!;
+      const panelId = /aria-controls="([^"]+)"/.exec(selected)![1]!;
+      const panels = [...html.matchAll(/<div\b[^>]*role="tabpanel"[^>]*>/g)].map((m) => m[0]);
+      const panel = panels.find((p) => p.includes(`id="${panelId}"`))!;
+      expect(panel).toContain(`aria-labelledby="${tabId}"`);
+      expect(panel).not.toContain("hidden");
+      // Switching the filter must retain one installed-list instance and its check state.
+      expect(html.match(/name="app-search"/g)).toHaveLength(1);
+    }
+  } finally { setPlatformForTest(undefined); }
+});
+
+test("fresh app details update running controls in both directions", async () => {
+  for (const running of [true, false]) {
+    const a = app({ name: "Review App", path: "/Applications/Review App.app", running: !running });
+    const stream = updateStream();
+    const h = await appsHarness({
+      listApps: async () => [a],
+      startUpdateCheck: () => stream as any,
+      uninstallDetail: async () => ({
+        app: { ...a, running },
+        items: [{ path: "/fixture/cache", kind: "cache", size: 1024 }],
+        totalSize: 1024,
+      }),
+    });
+    try {
+      await h.flush({ active: true });
+      h.rows()[0].props.onToggle(a.id);
+      await h.flush();
+      expect(h.expanded(a.id).usage.cache).toBe(1024);
+      expect(h.expanded(a.id).app.running).toBe(running);
+      expect(h.rows()[0].props.app.running).toBe(running);
+    } finally { h.dispose(); }
+  }
+});
+
 function app(p: Partial<AppInfo> & { name: string; path: string }): AppInfo {
   return { id: p.path, publisher: "", bundleId: "", version: "", size: 0, lastOpened: 0, running: false, ...p };
 }
@@ -116,10 +169,12 @@ test("Windows Apps cannot mount Leftovers even when requested by an old navigati
   try {
     setPlatformForTest("darwin");
     const mac = renderToStaticMarkup(createElement(AppsPage, { active: false, initialFilter: "leftovers", nonce: 0 }));
-    expect(mac).toContain('content-leftovers');
+    expect(mac).toMatch(/role="tabpanel"[^>]*aria-labelledby="[^"]+-leftovers-tab"/);
+    expect(mac).toContain("leftovers-head");
     setPlatformForTest("win32");
     const win = renderToStaticMarkup(createElement(AppsPage, { active: false, initialFilter: "leftovers", nonce: 0 }));
-    expect(win).not.toContain('content-leftovers');
+    expect(win).not.toContain('role="tabpanel"');
+    expect(win).not.toContain("leftovers-head");
     expect(win).toContain('name="app-search"');
   } finally { setPlatformForTest(undefined); }
 });
@@ -755,6 +810,30 @@ test("页面检查实际接线：懒加载、流式计数、离开取消、返�
     await h.flush({ recheckNonce: 1 }); expect(streams).toHaveLength(3); expect(h.counts.updates).toBeNull(); expect(h.rows()[0].props.update).toBeUndefined();
     h.replayEffects(); await h.flush(); expect(streams).toHaveLength(4);
     streams[3]!.fail(new Error("test bridge failure")); await h.flush(); expect(h.checking).toBe(false); expect(h.nodes().some((n) => n.props.role === "alert")).toBe(true);
+  } finally { h.dispose(); }
+});
+
+test("返回后新结果到达前，保留的更新按钮仍发送原应用 ID", async () => {
+  const a = app({ name: "Arc", path: "/Applications/Arc.app" });
+  const streams: ReturnType<typeof updateStream>[] = [];
+  const upgraded: string[] = [];
+  const h = await appsHarness({
+    listApps: async () => [a],
+    startUpdateCheck() { const s = updateStream(); streams.push(s); return s as any; },
+    upgradeApp: async (id) => { upgraded.push(id); return { id, done: true, version: "2", code: "", detail: "", command: "" }; },
+  });
+  try {
+    await h.flush({ active: true });
+    streams[0]!.emit(upd({ id: a.id, state: "update", source: "brew", action: "brew", latest: "2" }));
+    await h.flush();
+    await h.flush({ active: false });
+    await h.flush({ active: true });
+    expect(streams).toHaveLength(2);
+    expect(h.rows()[0].props.update.action).toBe("brew");
+    h.rows()[0].props.onUpgrade(a.id);
+    await h.flush();
+    expect(upgraded).toEqual([a.id]);
+    expect(h.rows()[0].props.update.state).toBe("current");
   } finally { h.dispose(); }
 });
 

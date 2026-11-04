@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // iTerm2-style: two items, the newer one needs a newer system.
@@ -200,7 +204,7 @@ func TestCheckTargetSources(t *testing.T) {
 	casks := caskIndex(src.brew(context.Background()))
 
 	check := func(path string) (AppUpdate, appUpdateAction) {
-		b, ok := readAppBundle(path)
+		b, ok := readAppBundle(context.Background(), path)
 		if !ok {
 			t.Fatalf("readAppBundle(%s) failed", path)
 		}
@@ -246,7 +250,7 @@ func TestCheckTargetMASFallsBackToUS(t *testing.T) {
 		"https://itunes.apple.com/lookup?bundleId=com.culturedcode.ThingsMac&country=cn&entity=macSoftware": `{"resultCount":0,"results":[]}`,
 		"https://itunes.apple.com/lookup?bundleId=com.culturedcode.ThingsMac&country=us&entity=macSoftware": `{"resultCount":1,"results":[{"trackId":904280696,"version":"3.21","trackViewUrl":"https://apps.apple.com/us/app/things-3/id904280696"}]}`,
 	}, nil)
-	b, _ := readAppBundle(app)
+	b, _ := readAppBundle(context.Background(), app)
 	u, _ := checkTarget(context.Background(), b, src, nil)
 	if u.Source != "mas" || u.State != "current" || u.Latest != "3.21" {
 		t.Fatalf("%+v", u)
@@ -259,7 +263,7 @@ func TestCheckTargetFeedErrors(t *testing.T) {
 	app := fakeBundle(t, filepath.Join(home, "Applications"), "Gone", map[string]string{"CFBundleShortVersionString": "1.0", "SUFeedURL": "https://gone.example.com/x.xml"}, false, "")
 	src, _ := testSources(nil, nil)
 	src.fetch = func(context.Context, string) ([]byte, error) { return nil, errFeedRate }
-	b, _ := readAppBundle(app)
+	b, _ := readAppBundle(context.Background(), app)
 	if u, _ := checkTarget(context.Background(), b, src, nil); u.State != "error" || u.Reason != "rate-limited" {
 		t.Fatalf("%+v", u)
 	}
@@ -269,7 +273,7 @@ func TestCheckTargetFeedErrors(t *testing.T) {
 	}
 	yml := fakeBundle(t, filepath.Join(home, "Applications"), "NoVer", map[string]string{"CFBundleShortVersionString": "1.0"}, false, "provider: generic\nurl: https://x.example.com/\n")
 	src.fetch = func(context.Context, string) ([]byte, error) { return []byte("files: []\n"), nil }
-	b, _ = readAppBundle(yml)
+	b, _ = readAppBundle(context.Background(), yml)
 	if u, _ := checkTarget(context.Background(), b, src, nil); u.State != "error" || u.Reason != "bad-feed" {
 		t.Fatalf("%+v", u)
 	}
@@ -303,8 +307,8 @@ func TestCheckAppUpdatesStreamsRemembersAndEnds(t *testing.T) {
 	if got[outside].Reason != "no-source" {
 		t.Fatalf("outside: %+v", got[outside])
 	}
-	if _, ok := appActionFor("/stale"); ok {
-		t.Fatal("cache not reset")
+	if _, ok := appActionFor("/stale"); !ok {
+		t.Fatal("recheck removed an unvisited action")
 	}
 	if a, ok := appActionFor(chrome); !ok || a.kind != "brew" {
 		t.Fatalf("chrome action %+v %v", a, ok)
@@ -317,6 +321,429 @@ func TestCheckAppUpdatesStreamsRemembersAndEnds(t *testing.T) {
 	cancel()
 	if err := checkAppUpdates(ctx, []string{chrome}, src, func(AppUpdate) error { return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled: %v", err)
+	}
+}
+
+func TestReadAppBundleHonorsParentCancellation(t *testing.T) {
+	app := fakeBundle(t, t.TempDir(), "Canceled", map[string]string{"CFBundleShortVersionString": "1.0"}, false, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, ok := readAppBundle(ctx, app)
+	if ok {
+		t.Fatal("canceled parent still read the bundle")
+	}
+}
+
+func TestCheckAppUpdatesCancelsActiveBundleCommand(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	var ids []string
+	for _, name := range []string{"Active", "Remaining"} {
+		ids = append(ids, fakeBundle(t, filepath.Join(home, "Applications"), name, map[string]string{"CFBundleShortVersionString": "1.0"}, false, ""))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	var calls, canceled atomic.Int32
+	saved := appBundlePlistOutput
+	appBundlePlistOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		if calls.Add(1) > 1 {
+			return nil, errors.New("remaining bundle command started")
+		}
+		// Keep CommandContext's cancellation, but run a harmless controlled child.
+		cmd.Path, cmd.Args = "/bin/sleep", []string{"/bin/sleep", "30"}
+		kill := cmd.Cancel
+		cmd.Cancel = func() error { canceled.Add(1); return kill() }
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		close(started)
+		return nil, cmd.Wait()
+	}
+	t.Cleanup(func() { appBundlePlistOutput = saved })
+	src, _ := testSources(nil, nil)
+	done := make(chan error, 1)
+	var emitted atomic.Int32
+	go func() {
+		done <- checkAppUpdates(ctx, ids, src, func(AppUpdate) error { emitted.Add(1); return nil })
+	}()
+	<-started
+	before := time.Now()
+	cancel()
+	err := <-done
+	if !errors.Is(err, context.Canceled) || time.Since(before) > time.Second || calls.Load() != 1 || canceled.Load() != 1 || emitted.Load() != 0 {
+		t.Fatalf("active cancellation: err=%v duration=%v commands=%d killed=%d emitted=%d", err, time.Since(before), calls.Load(), canceled.Load(), emitted.Load())
+	}
+}
+
+func TestCheckAppUpdatesStopsDuringPreparation(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Later", map[string]string{"CFBundleShortVersionString": "1.0"}, false, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var got []string
+	brewCalls := 0
+	src, _ := testSources(nil, nil)
+	src.brew = func(context.Context) []brewCask { brewCalls++; return nil }
+	err := checkAppUpdates(ctx, []string{"/first", "/second", app}, src, func(u AppUpdate) error {
+		got = append(got, u.ID)
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || strings.Join(got, "|") != "/first" || brewCalls != 0 {
+		t.Fatalf("preparation after cancel: err=%v results=%v brew=%d", err, got, brewCalls)
+	}
+}
+
+func TestCheckAppUpdatesRetainedActionUsableBeforeResumedResult(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	opened := stubOpen(t)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Retained", map[string]string{
+		"CFBundleShortVersionString": "1.0", "SUFeedURL": "https://example.com/feed",
+	}, false, "")
+	src, _ := testSources(map[string]string{"https://example.com/feed": testAppcastITerm}, nil)
+	if err := checkAppUpdates(context.Background(), []string{app}, src, func(AppUpdate) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := checkAppUpdates(ctx, []string{app}, src, func(AppUpdate) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	assertUpgrade := func() {
+		t.Helper()
+		res, err := (Cleaner{}).UpgradeApp(context.Background(), app)
+		if err != nil || !res.Done || res.Code != "" {
+			t.Errorf("retained update before resumed result: %+v %v", res, err)
+		}
+	}
+	assertUpgrade()
+	src.fetch = func(ctx context.Context, _ string) ([]byte, error) {
+		assertUpgrade()
+		cancel()
+		return nil, ctx.Err()
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	emitted := 0
+	if err := checkAppUpdates(ctx, []string{app}, src, func(AppUpdate) error { emitted++; return nil }); !errors.Is(err, context.Canceled) || emitted != 0 {
+		t.Fatalf("canceled resume: err=%v emitted=%d", err, emitted)
+	}
+	assertUpgrade()
+	if len(*opened) != 3 {
+		t.Errorf("retained UpgradeApp calls opened %v, want three opens", *opened)
+	}
+}
+
+func TestCheckAppUpdatesReplacesOnlyDeliveredAppActions(t *testing.T) {
+	for _, state := range []string{"update", "current", "no-source", "unreadable", "network"} {
+		t.Run(state, func(t *testing.T) {
+			home := t.TempDir()
+			setHome(t, home)
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			app := fakeBundle(t, filepath.Join(home, "Applications"), "Fresh", map[string]string{
+				"CFBundleShortVersionString": "1.0", "SUFeedURL": "https://example.com/feed",
+			}, false, "")
+			old := appUpdateAction{kind: "open-store", url: "macappstore://old"}
+			rememberAppAction(app, old)
+			rememberAppAction("/unvisited", old)
+			if state == "unreadable" {
+				if err := os.Remove(filepath.Join(app, "Contents", "Info.plist")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state == "no-source" {
+				writeText(t, filepath.Join(app, "Contents", "Info.plist"), `<plist><dict><key>CFBundleShortVersionString</key><string>1</string></dict></plist>`)
+			}
+			src, _ := testSources(map[string]string{"https://example.com/feed": testAppcastITerm}, nil)
+			if state == "current" {
+				src.fetch = func(context.Context, string) ([]byte, error) {
+					return []byte(`<rss><channel><item><title>1</title></item></channel></rss>`), nil
+				}
+			} else if state == "network" {
+				src.fetch = func(context.Context, string) ([]byte, error) { return nil, errors.New("network") }
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			err := checkAppUpdates(ctx, []string{app}, src, func(u AppUpdate) error {
+				a, ok := appActionFor(app)
+				if state == "update" {
+					if !ok || a.kind != "open-app" || a.path != app || u.Action != "open-app" {
+						t.Errorf("fresh update was not actionable at delivery: %+v %+v", u, a)
+					}
+				} else if ok || u.Action != "" {
+					t.Errorf("fresh %s retained obsolete action: %+v %+v", state, u, a)
+				}
+				cancel()
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			if a, ok := appActionFor("/unvisited"); !ok || a.kind != old.kind {
+				t.Errorf("cancel destroyed unvisited action: %+v %v", a, ok)
+			}
+		})
+	}
+}
+
+func TestCheckAppUpdatesFailedDeliveryPreservesAction(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Undelivered", map[string]string{
+		"CFBundleShortVersionString": "1.0", "SUFeedURL": "https://example.com/feed",
+	}, false, "")
+	rememberAppAction(app, appUpdateAction{kind: "open-store", url: "macappstore://old"})
+	src, _ := testSources(map[string]string{"https://example.com/feed": testAppcastITerm}, nil)
+	closed := errors.New("channel closed")
+	if err := checkAppUpdates(context.Background(), []string{app}, src, func(AppUpdate) error { return closed }); !errors.Is(err, closed) {
+		t.Fatal(err)
+	}
+	if a, ok := appActionFor(app); !ok || a.kind != "open-store" {
+		t.Fatalf("undelivered update replaced retained action: %+v %v", a, ok)
+	}
+}
+
+func TestCheckAppUpdatesStaleRunCannotPublish(t *testing.T) {
+	for _, freshState := range []string{"update", "current"} {
+		t.Run(freshState, func(t *testing.T) {
+			home := t.TempDir()
+			setHome(t, home)
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			app := fakeBundle(t, filepath.Join(home, "Applications"), "Overlap", map[string]string{
+				"CFBundleShortVersionString": "1.0", "SUFeedURL": "https://example.com/feed",
+			}, false, "")
+			started, release := make(chan struct{}), make(chan struct{})
+			src, _ := testSources(nil, nil)
+			src.fetch = func(context.Context, string) ([]byte, error) {
+				close(started)
+				<-release
+				return []byte(testAppcastITerm), nil
+			}
+			oldDone := make(chan error, 1)
+			var oldResults []AppUpdate
+			go func() {
+				oldDone <- checkAppUpdates(context.Background(), []string{app}, src, func(u AppUpdate) error {
+					oldResults = append(oldResults, u)
+					return nil
+				})
+			}()
+			<-started
+			fresh, _ := testSources(map[string]string{"https://example.com/feed": testAppcastITerm}, nil)
+			fresh.brew = func(context.Context) []brewCask {
+				version := "2.0"
+				if freshState == "current" {
+					version = "1.0"
+				}
+				return []brewCask{{token: "fresh", version: version, apps: []string{"Overlap.app"}}}
+			}
+			err := checkAppUpdates(context.Background(), []string{app}, fresh, func(AppUpdate) error { return nil })
+			close(release)
+			oldErr := <-oldDone
+			if err != nil || !errors.Is(oldErr, context.Canceled) || len(oldResults) != 0 {
+				t.Errorf("overlap: fresh err=%v old err=%v old results=%v", err, oldErr, oldResults)
+			}
+			a, ok := appActionFor(app)
+			if freshState == "update" && (!ok || a.kind != "brew" || a.token != "fresh") {
+				t.Errorf("stale check overwrote fresh action: %+v %v", a, ok)
+			}
+			if freshState == "current" && ok {
+				t.Errorf("stale check recreated removed action: %+v", a)
+			}
+		})
+	}
+}
+
+func TestInstalledCasksWaitsForUpgradeAndCancels(t *testing.T) {
+	bin := t.TempDir()
+	log := filepath.Join(bin, "log")
+	fakeTool(t, bin, "brew", `echo "$@" >> `+shellPath(log)+`
+echo '`+testBrewInfo+`'`)
+	saved := toolDirs
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs = saved })
+	appUpgradeMu.lock()
+	locked := true
+	defer func() {
+		if locked {
+			appUpgradeMu.unlock()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan []brewCask, 1)
+	go func() { done <- installedCasks(ctx) }()
+	got := <-done
+	cancel()
+	appUpgradeMu.unlock()
+	locked = false
+	if len(got) != 0 {
+		t.Errorf("brew info ran under upgrade lock: %+v", got)
+	}
+	if data, _ := os.ReadFile(log); len(data) != 0 {
+		t.Errorf("canceled brew info ran: %q", data)
+	}
+	if got := installedCasks(context.Background()); len(got) != 3 {
+		t.Errorf("brew info did not run after release: %+v", got)
+	}
+}
+
+func TestInstalledCasksSerializesWithUpgrade(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Busy", map[string]string{"CFBundleShortVersionString": "1.0"}, false, "")
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "busy", path: app, latest: "2.0"})
+	bin := t.TempDir()
+	started, release := filepath.Join(bin, "started"), filepath.Join(bin, "release")
+	fakeTool(t, bin, "brew", `touch `+shellPath(started)+`
+while [ ! -f `+shellPath(release)+` ]; do sleep 0.01; done
+echo '`+testBrewInfo+`'`)
+	saved := toolDirs
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs = saved })
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan []brewCask, 1)
+	go func() { done <- installedCasks(ctx) }()
+	deadline := time.Now().Add(time.Second)
+	for !exists(started) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !exists(started) {
+		cancel()
+		<-done
+		t.Fatal("fixture brew info did not start")
+	}
+	// Fail closed if broken locking permits upgrade; never run the fixture as
+	// upgrade and never probe native processes.
+	stubUsage(t, &usageGuard{failed: true})
+	res, err := (Cleaner{}).UpgradeApp(context.Background(), app)
+	writeText(t, release, "release")
+	casks := <-done
+	if err != nil || res.Code != "busy" || len(casks) != 3 {
+		t.Fatalf("info/upgrade serialization: %+v %v casks=%d", res, err, len(casks))
+	}
+}
+
+func TestUpgradeAppCompletionPreservesConcurrentFreshAction(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Concurrent", map[string]string{"CFBundleShortVersionString": "2.0"}, false, "")
+	bin := t.TempDir()
+	fakeTool(t, bin, "brew", `echo "fixture upgrade"`)
+	savedDirs, savedRead := toolDirs, appBundlePlistOutput
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs, appBundlePlistOutput = savedDirs, savedRead })
+	stubUsage(t, &usageGuard{})
+	action := appUpdateAction{kind: "brew", token: "concurrent", path: app, latest: "2.0"}
+	rememberAppAction(app, action)
+	reads := 0
+	appBundlePlistOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		out, err := cmd.Output()
+		reads++
+		if reads == 2 {
+			// Even an identical fresh action is a new publication.
+			rememberAppAction(app, action)
+		}
+		return out, err
+	}
+	res, err := (Cleaner{}).UpgradeApp(context.Background(), app)
+	if err != nil || !res.Done {
+		t.Fatalf("upgrade fixture: %+v %v", res, err)
+	}
+	if a, ok := appActionFor(app); !ok || a.token != "concurrent" {
+		t.Fatalf("old upgrade removed concurrent fresh action: %+v %v", a, ok)
+	}
+}
+
+func TestUpgradeAppConsumedActionNotRestoredByFailedRecheck(t *testing.T) {
+	for _, upgradeFinishesFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("upgrade-first=%v", upgradeFinishesFirst), func(t *testing.T) {
+			home := t.TempDir()
+			setHome(t, home)
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			app := fakeBundle(t, filepath.Join(home, "Applications"), "Consumed", map[string]string{"CFBundleShortVersionString": "2.0"}, false, "")
+			bin := t.TempDir()
+			log := filepath.Join(bin, "log")
+			fakeTool(t, bin, "brew", `echo "$@" >> `+shellPath(log))
+			savedDirs, savedRead := toolDirs, appBundlePlistOutput
+			toolDirs = func() []string { return []string{bin} }
+			t.Cleanup(func() { toolDirs, appBundlePlistOutput = savedDirs, savedRead })
+			stubUsage(t, &usageGuard{})
+			rememberAppAction(app, appUpdateAction{kind: "brew", token: "committed", path: app, latest: "2.0"})
+			original, _ := appActionFor(app)
+			upgradeStarted, releaseUpgrade := make(chan struct{}), make(chan struct{})
+			var reads atomic.Int32
+			appBundlePlistOutput = func(cmd *exec.Cmd) ([]byte, error) {
+				out, err := cmd.Output()
+				if reads.Add(1) == 1 {
+					close(upgradeStarted)
+					<-releaseUpgrade
+				}
+				return out, err
+			}
+			upgradeDone := make(chan AppUpgradeResult, 1)
+			go func() {
+				res, _ := (Cleaner{}).UpgradeApp(context.Background(), app)
+				upgradeDone <- res
+			}()
+			<-upgradeStarted
+			src, _ := testSources(nil, []brewCask{{token: "pending", version: "3.0", apps: []string{"Consumed.app"}}})
+			sendStarted, releaseSend := make(chan struct{}), make(chan struct{})
+			checkDone := make(chan error, 1)
+			closed := errors.New("channel closed")
+			go func() {
+				checkDone <- checkAppUpdates(context.Background(), []string{app}, src, func(AppUpdate) error {
+					close(sendStarted)
+					<-releaseSend
+					return closed
+				})
+			}()
+			<-sendStarted
+			var res AppUpgradeResult
+			var checkErr error
+			if upgradeFinishesFirst {
+				close(releaseUpgrade)
+				res = <-upgradeDone
+				if a, ok := appActionFor(app); !ok || a.token != "pending" {
+					t.Errorf("old upgrade removed newer pending action: %+v %v", a, ok)
+				}
+				close(releaseSend)
+				checkErr = <-checkDone
+			} else {
+				close(releaseSend)
+				checkErr = <-checkDone
+				if a, ok := appActionFor(app); !ok || a.revision != original.revision {
+					t.Errorf("failed recheck changed committed action identity: %+v %v; original revision=%d", a, ok, original.revision)
+				}
+				close(releaseUpgrade)
+				res = <-upgradeDone
+			}
+			if !res.Done || !errors.Is(checkErr, closed) {
+				t.Fatalf("upgrade=%+v recheck=%v", res, checkErr)
+			}
+			if a, ok := appActionFor(app); ok {
+				t.Errorf("failed recheck restored consumed action: %+v", a)
+			}
+			again, _ := (Cleaner{}).UpgradeApp(context.Background(), app)
+			data, _ := os.ReadFile(log)
+			if again.Code != "not-checked" || string(data) != "upgrade --cask committed\n" {
+				t.Errorf("consumed update ran again: %+v commands=%q", again, data)
+			}
+		})
 	}
 }
 
@@ -380,7 +807,7 @@ func TestCheckTargetElectronMatchingFeed(t *testing.T) {
 				"CFBundleExecutable":         tc.executable,
 				"CFBundleShortVersionString": tc.current,
 			}, false, "provider: generic\nurl: https://download.example.com/releases/\n")
-			b, ok := readAppBundle(app)
+			b, ok := readAppBundle(context.Background(), app)
 			if !ok {
 				t.Fatalf("readAppBundle(%s) failed", app)
 			}
@@ -503,9 +930,9 @@ echo "==> Upgrading ghostty"`)
 	}
 
 	// Only one brew upgrade may run at a time.
-	appUpgradeMu.Lock()
+	appUpgradeMu.lock()
 	res, _ = Cleaner{}.UpgradeApp(context.Background(), app)
-	appUpgradeMu.Unlock()
+	appUpgradeMu.unlock()
 	if res.Code != "busy" {
 		t.Fatalf("busy: %+v", res)
 	}
