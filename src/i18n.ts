@@ -8,6 +8,7 @@ export type LangPref = "system" | Lang;
 
 export const dict = {
   zh: {
+    "settings.trash.permission@win": "需要访问回收站的权限。",
     "apps.sub@win": "通过应用自己的卸载器卸载应用。",
     "apps.body@win": "将打开应用自己的卸载器，请按其提示完成卸载。",
     "apps.confirm@win": "打开卸载程序",
@@ -1041,7 +1042,7 @@ export const dict = {
     "settings.menubar.item.temp": "芯片温度",
     "settings.menubar.item.battery": "电池电量",
     "settings.menubar.login": "开机时启动（只显示菜单栏）",
-    "settings.menubar.loginOff": "打开一个菜单栏读数或后台监控后，才能开机启动。",
+    "settings.menubar.loginOff": "打开一个菜单栏读数、后台监控或废纸篓提醒后，才能开机启动。",
     "settings.scope": "扫描范围",
     "settings.reviewItems": "需要确认的项目",
     "settings.ignored": "不再清理的项目",
@@ -1173,6 +1174,7 @@ export const dict = {
     "desc.xcode": "DerivedData 编译数据，清理后要重新编译",
   },
   en: {
+    "settings.trash.permission@win": "Permission to access the Recycle Bin is required.",
     "apps.sub@win": "Uninstall apps using each app’s own uninstaller.",
     "apps.body@win": "The app’s own uninstaller will open. Follow its prompts to finish uninstalling.",
     "apps.confirm@win": "Open Uninstaller",
@@ -2200,7 +2202,7 @@ export const dict = {
     "settings.menubar.item.temp": "Chip temperature",
     "settings.menubar.item.battery": "Battery charge",
     "settings.menubar.login": "Open at login (menu bar only)",
-    "settings.menubar.loginOff": "Turn on a menu bar reading or background monitoring to open at login.",
+    "settings.menubar.loginOff": "Turn on a menu bar reading, background monitoring, or Trash reminders to open at login.",
     "settings.scope": "Scan Scope",
     "settings.reviewItems": "Items to Review",
     "settings.ignored": "Ignored Items",

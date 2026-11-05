@@ -4,6 +4,21 @@ import {
   baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
 } from "../src/react/settings/settings-helpers";
 
+test("trash reminder controls expose threshold and permission, and hide when unsupported", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { TrashReminderControls } = await import("../src/react/settings/TrashReminderSection");
+  const props = { state: { supported: true, fda: false, config: { enabled: true, thresholdGB: 2 } }, busy: false, onChange: () => {} };
+  const html = renderToStaticMarkup(createElement(TrashReminderControls, props));
+  expect(html).toContain('id="trash-threshold"');
+  expect(html).toContain('value="2" selected=""');
+  expect(html).toContain('完全磁盘访问权限');
+  expect(renderToStaticMarkup(createElement(TrashReminderControls, { ...props, state: { ...props.state, supported: false } }))).toBe("");
+  const disabled = renderToStaticMarkup(createElement(TrashReminderControls, { ...props, state: { ...props.state, config: { enabled: false, thresholdGB: 2 } } }));
+  expect(disabled).toMatch(/<select[^>]+disabled/);
+});
+
 function settings(over: Partial<Settings> = {}): Settings {
   return { disabledGroups: ["dev"], ignored: ["app:com.foo", "rule.sys.trash"], custom: [], ...over };
 }

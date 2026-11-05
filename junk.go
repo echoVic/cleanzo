@@ -984,6 +984,8 @@ func measureItems(ctx context.Context, specs []itemSpec, env junkEnv, measuring 
 
 // cleanJunk cleans selections in order, taking a fresh look before each item.
 func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, scannedAt time.Time, hooks cleanHooks) []CleanResult {
+	trashCleanupGate.Lock()
+	defer trashCleanupGate.Unlock()
 	env.ctx = ctx
 	env.observe = false
 	specs, _ := expandItems(&env)
@@ -1162,6 +1164,9 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			continue
 		}
 		permanent := !spec.item.Trash || inTrash
+		if hooks.beforeRemove != nil && !hooks.beforeRemove(e.path) || ctx.Err() != nil {
+			continue
+		}
 		if permanent {
 			err = removeAll(e.path)
 		} else {

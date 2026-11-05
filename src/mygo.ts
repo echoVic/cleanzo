@@ -1011,6 +1011,18 @@ export interface TopItem {
   size: number;
 }
 
+/** TrashReminderConfig is independent of junk selection and growth monitoring. */
+export interface TrashReminderConfig {
+  enabled: boolean;
+  thresholdGB: number;
+}
+
+export interface TrashReminderState {
+  supported: boolean;
+  config: TrashReminderConfig;
+  fda: boolean;
+}
+
 /** TrashResult reports what TrashPath moved to the Trash. */
 export interface TrashResult {
   moved: number;
@@ -1299,6 +1311,10 @@ export const Cleaner = {
   saveSettings(s: Settings): Promise<void> {
     return call("Cleaner.SaveSettings", s);
   },
+  /** SaveTrashReminder keeps the persisted cooldown, which a page cannot reset. */
+  saveTrashReminder(c: TrashReminderConfig): Promise<void> {
+    return call("Cleaner.SaveTrashReminder", c);
+  },
   /** ScanAITool measures one tool's folder; each tool has its own page. */
   scanAITool(id: string): Promise<AIScanResult> {
     return call("Cleaner.ScanAITool", id);
@@ -1330,6 +1346,9 @@ export const Cleaner = {
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {
     return call("Cleaner.TrashPath", path);
+  },
+  trashReminder(): Promise<TrashReminderState> {
+    return call("Cleaner.TrashReminder");
   },
   /**
    * TrashSkills moves skill entries to the Trash. A link moves as a link; its

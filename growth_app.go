@@ -40,11 +40,11 @@ var growthApply func(GrowthConfig) error
 func init() { growthApply = applyGrowthLifecycle }
 
 // registerGrowthLifecycle installs the handlers that keep the app open without
-// windows while monitoring is on or the menu bar shows a reading (growth spec
-// §六, menubar spec §七). It runs before Run, as App.OnNotificationClick must
+// windows while monitoring, a menu bar reading, or Trash reminders are on
+// (growth spec §六, menubar spec §七). It runs before Run, as App.OnNotificationClick must
 // for the click that launched the app.
 //
-// With both off, closing the last window quits, as it always did. On Windows,
+// With all three off, closing the last window quits. On Windows,
 // growthSupported is false, so the app quits too.
 func registerGrowthLifecycle() {
 	mygo.App.OnWindowAllClosed(func() {
@@ -66,7 +66,7 @@ func registerGrowthLifecycle() {
 	})
 	// Quitting closes every window first: a panel held open for a quit under
 	// way must not cancel it, nor the logout it may be part of.
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { menuBarReleaseAll() })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { markTrashReminderQuitting(); menuBarReleaseAll() })
 	// The menu's labels, the tooltips and the readings' labels follow the
 	// app's language. mygo calls this on the main thread.
 	mygo.App.OnLocaleChanged(func(string) {
@@ -76,8 +76,10 @@ func registerGrowthLifecycle() {
 }
 
 // residentOn tells whether Cleanzo stays open without windows: monitoring is
-// on, or the menu bar shows a reading.
-func residentOn() bool { return loadGrowthConfig(growthDir()).Enabled || menuBarOn() }
+// on, the menu bar shows a reading, or Trash reminders are enabled.
+func residentOn() bool {
+	return loadGrowthConfig(growthDir()).Enabled || menuBarOn() || trashReminderOn()
+}
 
 // growthKeepRunning tells whether closing the last window leaves the app
 // running: it does where the monitor runs and resident says so. resident is
@@ -104,7 +106,7 @@ func startResident() bool {
 	}
 	cfg := loadGrowthConfig(growthDir())
 	mb := menuBarConfigNow()
-	resident := cfg.Enabled || len(mb.Items) > 0
+	resident := cfg.Enabled || len(mb.Items) > 0 || trashReminderOn()
 	atLogin := resident && mygo.App.WasOpenedAtLogin()
 	if atLogin {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
@@ -120,6 +122,7 @@ func startResident() bool {
 		go refreshGrowthTray()
 	}
 	growth.start()
+	startTrashReminder()
 	if atLogin && growthTray.Load() == nil && !menuBarShowing() {
 		mygo.App.SetActivationPolicy(mygo.ActivationPolicyRegular) // the window comes with its Dock icon
 		return false
@@ -190,7 +193,7 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 	if !growthSupported() || !mygo.App.IsReady() {
 		return nil
 	}
-	resident := g.Enabled || len(mb.Items) > 0
+	resident := g.Enabled || len(mb.Items) > 0 || trashReminderOn()
 	var model []growthMenuItem
 	var tip string
 	if resident {
@@ -274,7 +277,7 @@ func refreshGrowthTray() {
 		return
 	}
 	on := loadGrowthConfig(growthDir()).Enabled
-	if !on && !menuBarOn() {
+	if !on && !menuBarOn() && !trashReminderOn() {
 		return
 	}
 	model, tip := residentMenu(on)
@@ -425,7 +428,7 @@ func turnOffGrowth() {
 	growthConfigMu.Lock()
 	cfg := withSystemLoginItem(loadGrowthConfig(growthDir()))
 	cfg.Enabled = false
-	cfg.OpenAtLogin = cfg.OpenAtLogin && menuBarOn()
+	cfg.OpenAtLogin = cfg.OpenAtLogin && (menuBarOn() || trashReminderOn())
 	err := saveGrowthConfig(growthDir(), cfg)
 	if err == nil {
 		if applyErr := growthApply(cfg); applyErr != nil {

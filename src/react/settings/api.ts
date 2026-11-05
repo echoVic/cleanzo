@@ -1,10 +1,12 @@
 import { Cleaner, ThemeSettings, events } from "../../mygo";
-import type { Settings, SystemInfo, AppInfo, GrowthConfigPatch, GrowthSummary, MenuBarState } from "../../mygo";
+import type { Settings, SystemInfo, AppInfo, GrowthConfigPatch, GrowthSummary, MenuBarState, TrashReminderConfig, TrashReminderState } from "../../mygo";
 
 export type ThemePref = "system" | "light" | "dark";
 
 /** 设置页用到的全部 Cleaner 调用集中在此，组件不直接碰桥。 */
 export const settingsApi = {
+  trashReminder: (): Promise<TrashReminderState> => Cleaner.trashReminder(),
+  saveTrashReminder: (config: TrashReminderConfig): Promise<void> => Cleaner.saveTrashReminder(config),
   getSettings: (): Promise<Settings> => Cleaner.getSettings(),
   getTheme: (): Promise<ThemePref> => ThemeSettings.getTheme().then((preference) =>
     preference === "light" || preference === "dark" ? preference : "system"

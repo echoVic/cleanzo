@@ -200,7 +200,7 @@ func (Cleaner) SaveGrowthConfig(p GrowthConfigPatch) error {
 	// The settings as the page shows them: a patch that leaves the login item
 	// alone must not bring back one the user removed in System Settings.
 	cur := withSystemLoginItem(loadGrowthConfig(dir))
-	clean, err := validateGrowthConfig(p.apply(cur), menuBarOn())
+	clean, err := validateGrowthConfig(p.apply(cur), menuBarOn() || trashReminderOn())
 	if err != nil {
 		return err
 	}

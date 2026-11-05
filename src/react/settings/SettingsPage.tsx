@@ -1,6 +1,6 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { CustomFolder, GrowthConfig, GrowthConfigPatch, MenuBarState, Settings } from "../../mygo";
+import type { CustomFolder, GrowthConfig, GrowthConfigPatch, MenuBarState, Settings, TrashReminderConfig, TrashReminderState } from "../../mygo";
 import { Button, buttonVariants } from "../../ui/components/button";
 import { Checkbox } from "../../ui/components/checkbox";
 import { cn } from "../../ui/cn";
@@ -11,6 +11,7 @@ import { ruleName, getPref } from "../../i18n";
 import { markCleanStale } from "../clean/entry";
 import { growthApi } from "../growth/api";
 import { settingsApi, type ThemePref } from "./api";
+import { TrashReminderControls } from "./TrashReminderSection";
 import {
   GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
   type GroupId,
@@ -69,6 +70,11 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   const growthReloadRef = React.useRef(false);
   const [menuBar, setMenuBar] = React.useState<MenuBarState | null>(null);
   const [menuBarBusy, setMenuBarBusy] = React.useState(false);
+  const [trash, setTrash] = React.useState<TrashReminderState | null>(null);
+  const [trashBusy, setTrashBusy] = React.useState(false);
+  const [trashError, setTrashError] = React.useState<unknown>(null);
+  const trashSeq = React.useRef(0);
+  const trashSaving = React.useRef(false);
   const menuBarSeqRef = React.useRef(0);
   const menuBarSavingRef = React.useRef(false);
   const [sectionHl, setSectionHl] = React.useState(false);
@@ -178,6 +184,31 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
   React.useEffect(() => { void loadGrowth(); }, [session, loadGrowth]);
   // 菜单栏关掉监控、增长页改了设置都会广播：重读，免得本页拿着旧值显示。
   React.useEffect(() => growthApi.onUpdated(() => { void loadGrowth(); }), [loadGrowth]);
+
+  const loadTrash = React.useCallback(async () => {
+    if (isWindows() || trashSaving.current) return;
+    const seq = ++trashSeq.current;
+    setTrashBusy(true);
+    try {
+      const state = await settingsApi.trashReminder();
+      if (seq === trashSeq.current) { setTrash(state); setTrashError(null); }
+    } catch (e) { if (seq === trashSeq.current) setTrashError(e); }
+    finally { if (seq === trashSeq.current) setTrashBusy(false); }
+  }, []);
+  React.useEffect(() => {
+    void loadTrash();
+    return () => { trashSeq.current++; };
+  }, [session, loadTrash]);
+
+  const saveTrash = async (config: TrashReminderConfig) => {
+    if (trashSaving.current) return;
+    trashSaving.current = true;
+    ++trashSeq.current;
+    setTrashBusy(true);
+    try { await settingsApi.saveTrashReminder(config); }
+    catch (e) { toast(errText(e), "err"); }
+    finally { trashSaving.current = false; await loadTrash(); void loadGrowth(); }
+  };
 
   /**
    * 只发这个控件改的字段；保存后回读后端值，失败也回读（开机启动出错时其余设置已保存并生效）。
@@ -541,12 +572,12 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
                 <label className="check">
                   <Checkbox
                     checked={growth.openAtLogin}
-                    disabled={growthBusy || menuBarBusy || !(growth.enabled || menuBar.items.length > 0)}
+                    disabled={growthBusy || menuBarBusy || trashBusy || !(growth.enabled || menuBar.items.length > 0 || trash?.config.enabled)}
                     onCheckedChange={(v) => void saveGrowth({ openAtLogin: v === true })}
                   />
                   <span>{t("settings.menubar.login")}</span>
                 </label>
-                {!(growth.enabled || menuBar.items.length > 0) && <p className="muted small">{t("settings.menubar.loginOff")}</p>}
+                {!(growth.enabled || menuBar.items.length > 0 || trash?.config.enabled) && <p className="muted small">{t("settings.menubar.loginOff")}</p>}
               </div>
             )}
           </div>
@@ -581,6 +612,12 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
           </div>
         </section>
       )}
+
+      {!isWindows() && trash && <TrashReminderControls state={{ ...trash, fda: access ?? trash.fda }} busy={trashBusy} onChange={(c) => void saveTrash(c)} />}
+      {!isWindows() && trashError != null && <div role="alert" className="setting-row">
+        <span>{errText(trashError)}</span>
+        <Button variant="ghost" disabled={trashBusy} onClick={() => void loadTrash()}>{t("settings.trash.retry")}</Button>
+      </div>}
 
       <PermissionsSection access={access} permissionKey={permissionKey as DictKey} permissionError={permissionError}
         onOpen={() => { void settingsApi.openFullDiskAccessSettings().catch((e) => setPermissionError(e)); }} />

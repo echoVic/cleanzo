@@ -164,7 +164,7 @@ func (Cleaner) SaveMenuBar(items []string) error {
 		return err
 	}
 	g := withSystemLoginItem(loadGrowthConfig(growthDir()))
-	loginOff := len(next.Items) == 0 && !g.Enabled && g.OpenAtLogin
+	loginOff := len(next.Items) == 0 && !g.Enabled && !trashReminderOn() && g.OpenAtLogin
 	var saveErr error
 	if loginOff {
 		g.OpenAtLogin = false

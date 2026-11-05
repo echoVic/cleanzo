@@ -65,6 +65,10 @@ func TestGrowthDeferral(t *testing.T) {
 func stubGrowth(t *testing.T, now *time.Time, size *int64, sent *[]GrowthAlert) {
 	t.Helper()
 	setHome(t, t.TempDir())
+	// These tests isolate growth/reading residency from the trash reminder.
+	if err := saveTrashReminder(trashReminderDir(), TrashReminderConfig{ThresholdGB: 1}); err != nil {
+		t.Fatal(err)
+	}
 	n, m, notify, changed, owner, power := growthNow, growthMeasure, growthNotify, growthChanged, growthOwnerOf, growthPower
 	t.Cleanup(func() {
 		growthNow, growthMeasure, growthNotify, growthChanged, growthOwnerOf, growthPower = n, m, notify, changed, owner, power
