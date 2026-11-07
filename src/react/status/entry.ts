@@ -4,6 +4,7 @@ import { mountStatus } from "./mount";
 
 const goClean: { fn: () => void } = { fn: () => {} };
 const goProcess: { fn: (tab: ProcessTab, focusKey?: string) => void } = { fn: () => {} };
+const goAISpace: { fn: () => void } = { fn: () => {} };
 
 /** 告警 / 磁盘卡的「去清理」：与点侧栏「垃圾清理」同一条路径（main.ts 注入）。 */
 export function setGoCleanHandler(fn: () => void) {
@@ -13,6 +14,11 @@ export function setGoCleanHandler(fn: () => void) {
 /** 增长提示的「查看」、内存提示的「看谁在占内存」：打开进程页的某个标签（main.ts 注入）。 */
 export function setGoProcessHandler(fn: (tab: ProcessTab, focusKey?: string) => void) {
   goProcess.fn = fn;
+}
+
+/** 概览页「AI 与开发工具」入口带：打开 AI 空间页（main.ts 注入）。 */
+export function setGoAISpaceHandler(fn: () => void) {
+  goAISpace.fn = fn;
 }
 
 /** 进入系统状态视图传 true（开 2s 采样流），离开传 false（关 Channel）。root 复用。 */
@@ -27,6 +33,7 @@ export function showReactStatus(active: boolean) {
       active,
       () => goClean.fn(),
       (tab, focusKey) => goProcess.fn(tab, focusKey),
+      () => goAISpace.fn(),
     );
   }
 }

@@ -57,6 +57,10 @@
               </div>
               <div class="nav-group nav-ai-group" role="group" aria-labelledby="nav-ai-section">
                 <div id="nav-ai-section" class="nav-section" data-i18n="nav.section.ai">AI 工具</div>
+                <button class="nav-item" data-view="aispace" type="button">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="18" height="17" rx="3"/><path d="M8 9.5h8M8 13h5"/><circle cx="15.4" cy="15.4" r="1.9"/></svg>
+                  <span data-i18n="nav.aispace">AI 空间</span>
+                </button>
                 <button class="nav-item hidden" data-view="aitools" data-tool="claude" type="button">
                   <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>
                   <span translate="no">Claude Code</span>
@@ -101,6 +105,11 @@
         <!-- 垃圾清理（React 页面，内容由 React 挂载） -->
         <section id="view-clean" class="view hidden">
           <div id="clean-react-root"></div>
+        </section>
+
+        <!-- AI 空间（React 页面，内容由 React 挂载） -->
+        <section id="view-aispace" class="view hidden">
+          <div id="aispace-react-root" class="relative"></div>
         </section>
 
         <!-- AI 工具（React 页面，内容由 React 挂载） -->

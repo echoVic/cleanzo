@@ -6,6 +6,7 @@ import type {
   ProcessRow, ProcessSample,
   Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate,
   AIGroup, AIPart, AIScanResult, AITool, AIToolInfo,
+  AIModelEntry, AIModelSource, AIModelSourceInfo, AIModelsResult,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -93,7 +94,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.4.2", os: "darwin", arch: "arm64", goVersion: "go1.27.3",
+    version: "0.5.0", os: "darwin", arch: "arm64", goVersion: "go1.27.3",
     chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
@@ -495,6 +496,48 @@ function createRuntime(): Runtime {
     return { tools: [structuredClone(tool)], scannedAt: nowSec() };
   };
 
+  const scanAITools = async (): Promise<AIScanResult> => {
+    await wait(800);
+    return { tools: structuredClone(aiTools), scannedAt: nowSec() };
+  };
+
+  // ── 本地模型：Ollama 共享 blob、HuggingFace 目录、LM Studio 目录各来一份 ──
+  const mkModel = (name: string, path: string, size: number, ageDays: number): AIModelEntry => ({
+    name, path, size, last: now - ageDays * DAY, kind: "", blobs: [],
+  });
+  const modelSources: AIModelSource[] = [
+    {
+      id: "ollama", name: "Ollama", path: home("~/.ollama/models"), installed: true,
+      size: 42.6 * GB, files: 31, last: now - 2 * DAY,
+      models: [
+        mkModel("qwen3-coder:30b", home("~/.ollama/models/manifests/registry.ollama.ai/library/qwen3-coder/30b"), 18.2 * GB, 2),
+        mkModel("llama4:scout", home("~/.ollama/models/manifests/registry.ollama.ai/library/llama4/scout"), 12.4 * GB, 8),
+        mkModel("gemma3:27b", home("~/.ollama/models/manifests/registry.ollama.ai/library/gemma3/27b"), 8.6 * GB, 41),
+        mkModel("phi4:14b", home("~/.ollama/models/manifests/registry.ollama.ai/library/phi4/14b"), 2.1 * GB, 62),
+        mkModel("qwen2.5-coder:7b", home("~/.ollama/models/manifests/registry.ollama.ai/library/qwen2.5-coder/7b"), 1.0 * GB, 96),
+        mkModel("nomic-embed-text", home("~/.ollama/models/manifests/registry.ollama.ai/library/nomic-embed-text/latest"), 274 * MB, 0),
+      ],
+    },
+    {
+      id: "huggingface", name: "HuggingFace", path: home("~/.cache/huggingface/hub"), installed: true,
+      size: 18.9 * GB, files: 128, last: now - 14 * DAY,
+      models: [
+        mkModel("Qwen/Qwen3-Coder-30B", home("~/.cache/huggingface/hub/models--Qwen--Qwen3-Coder-30B"), 12.1 * GB, 14),
+        mkModel("sentence-transformers/all-MiniLM-L6-v2", home("~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2"), 6.8 * GB, 47),
+      ],
+    },
+    {
+      id: "lmstudio", name: "LM Studio", path: home("~/.lmstudio/models"), installed: true,
+      size: 0.9 * GB, files: 4, last: now - 74 * DAY,
+      models: [mkModel("lmstudio-community/Qwen2.5-7B-GGUF", home("~/.lmstudio/models/lmstudio-community/Qwen2.5-7B-GGUF"), 0.9 * GB, 74)],
+    },
+  ];
+  const modelSourceInfos: AIModelSourceInfo[] = modelSources.map(({ id, name, installed }) => ({ id, name, installed }));
+  const scanAIModels = async (): Promise<AIModelsResult> => {
+    await wait(900);
+    return { sources: structuredClone(modelSources), scannedAt: nowSec() };
+  };
+
   const detail = (path: string): UninstallDetail => {
     const a = apps.find((a) => a.path === path);
     if (!a) throw new Error("mock: app not found");
@@ -617,6 +660,10 @@ function createRuntime(): Runtime {
       return { items, moved: items.length, freed };
     },
     "Cleaner.ScanAITool": async (id) => scanAITool(id),
+    "Cleaner.ScanAITools": async () => scanAITools(),
+    "Cleaner.ListAIModelSources": async () => modelSourceInfos,
+    "Cleaner.ScanAIModels": async () => scanAIModels(),
+    "Cleaner.CleanAIModels": async () => ({ parts: [], freed: 0 }),
     "Cleaner.CleanAITools": async (sels) => {
       await wait(700);
       let freed = 0;

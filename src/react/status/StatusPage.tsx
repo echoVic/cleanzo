@@ -18,6 +18,7 @@ import { scrollBehavior } from "../../ui/motion/motion";
 import { Leave, usePresence } from "../../ui/motion/presence";
 import { errText, focusNextAfter, human, toast } from "../../shared";
 import { statusApi } from "./api";
+import { aiSpaceApi } from "../aispace/api";
 import { SparkSvg } from "./Spark";
 import { crashDumps, oversized } from "../list/crash-dumps";
 import { growthApi } from "../growth/api";
@@ -345,9 +346,11 @@ export interface StatusPageProps {
   goClean: () => void;
   /** 增长提示的「查看」、内存提示的「看谁在占内存」（macOS）：打开进程页的某个标签，可带磁盘占用标签里要定位的行（main.ts 注入）。 */
   goProcess: (tab: ProcessTab, focusKey?: string) => void;
+  /** 概览页顶部的「AI 与开发工具」入口带：打开 AI 空间页（main.ts 注入）。 */
+  goAISpace: () => void;
 }
 
-export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
+export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPageProps) {
   const t = useT();
   const [sample, setSample] = React.useState<StatusSample | null>(null);
   const [sysInfo, setSysInfo] = React.useState<SystemInfo | null>(null);
@@ -396,6 +399,24 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
   const machineSeqRef = React.useRef(0);
   const goCleanRef = React.useRef(goClean);
   goCleanRef.current = goClean;
+  const goAISpaceRef = React.useRef(goAISpace);
+  goAISpaceRef.current = goAISpace;
+  /** 这台机器上有哪些 AI / 开发工具：只查一次，没有就整条不显示，避免对普通用户制造噪音。 */
+  const [aiSources, setAISources] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    let live = true;
+    Promise.all([aiSpaceApi.listTools(), aiSpaceApi.listModelSources()])
+      .then(([tools, models]) => {
+        if (!live) return;
+        const names = [
+          ...tools.filter((x) => x.installed).map((x) => x.name),
+          ...models.filter((x) => x.installed).map((x) => x.name),
+        ];
+        setAISources([...new Set(names)]);
+      })
+      .catch(() => { if (live) setAISources([]); });
+    return () => { live = false; };
+  }, []);
   /** 冻结期间的行集合与顺序（只更新数字）；重开采样时清空。 */
   const frozenRowsRef = React.useRef<AppUsage[]>([]);
   const listHeadRef = React.useRef<HTMLDivElement | null>(null);
@@ -644,6 +665,27 @@ export function StatusPage({ active, goClean, goProcess }: StatusPageProps) {
           </div>
         )}
       </header>
+
+      {aiSources.length > 0 && (
+        <button type="button" className="ai-entry" onClick={() => goAISpaceRef.current()}>
+          <span className="ai-entry-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3.5" width="18" height="17" rx="3" />
+              <path d="M8 9.5h8M8 13h5" />
+              <circle cx="15.4" cy="15.4" r="1.9" />
+            </svg>
+          </span>
+          <span className="ai-entry-body">
+            <span className="ai-entry-title">{t("nav.section.ai")}</span>
+            <span className="ai-entry-sub">{t("aispace.band.sub")}</span>
+            <span className="ai-entry-chips">
+              {aiSources.slice(0, 5).map((n) => <span key={n} className="ai-entry-chip">{n}</span>)}
+              {aiSources.length > 5 && <span className="ai-entry-chip">+{aiSources.length - 5}</span>}
+            </span>
+          </span>
+          <span className="ai-entry-go">{t("aispace.band.open")} ›</span>
+        </button>
+      )}
 
       {!isWindows() && !error && (sample ? sample.machine && <HealthStrip m={sample.machine} t={t} /> : <SkHealth />)}
 

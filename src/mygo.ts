@@ -42,6 +42,61 @@ export interface AIGroup {
   path: string;
 }
 
+/** AIModelEntry is one model as the page lists it. */
+export interface AIModelEntry {
+  /** model name, such as qwen3-coder:30b or org/name */
+  name: string;
+  /** absolute path: the unit cleaning moves */
+  path: string;
+  /** bytes the model alone accounts for, shared blobs once */
+  size: number;
+  /** newest modification, unix seconds; 0 when unknown */
+  last: number;
+  /** aiModelKindManifest when blobs must go with the model */
+  kind: string;
+  /** for a manifest: the blobs this model accounts for */
+  blobs: string[];
+}
+
+/** AIModelSelection picks the models of one runtime to clean. */
+export interface AIModelSelection {
+  source: string;
+  /** AIModelEntry.Path values */
+  models: string[];
+}
+
+/** AIModelSource is one runtime's model folder as the page lists it. */
+export interface AIModelSource {
+  /** "ollama", "huggingface" or "lmstudio" */
+  id: string;
+  /** display name */
+  name: string;
+  /** absolute root folder */
+  path: string;
+  /** the root folder exists */
+  installed: boolean;
+  /** bytes the models account for */
+  size: number;
+  /** files those bytes are in */
+  files: number;
+  /** newest model modification, unix seconds */
+  last: number;
+  models: AIModelEntry[];
+}
+
+/** AIModelSourceInfo is one supported runtime as the sidebar lists it. */
+export interface AIModelSourceInfo {
+  id: string;
+  name: string;
+  installed: boolean;
+}
+
+/** AIModelsResult is what ScanAIModels returns. */
+export interface AIModelsResult {
+  sources: AIModelSource[];
+  scannedAt: number;
+}
+
 /** AIPart is one part of a tool's folder as the page lists it. */
 export interface AIPart {
   /** known part id, or "unknown:<name>" */
@@ -1093,6 +1148,15 @@ export const Cleaner = {
     return call("Cleaner.CheckSkillUpdates");
   },
   /**
+   * CleanAIModels moves the selected models to the Trash. A model's blobs only
+   * go when no manifest left behind still names them, so a digest shared with
+   * a model that stays does not break it. Paths outside a runtime's own model
+   * folder are refused, and nothing is ever deleted.
+   */
+  cleanAIModels(sels: AIModelSelection[]): Promise<AICleanResult> {
+    return call("Cleaner.CleanAIModels", sels);
+  },
+  /**
    * CleanAITools moves the selected parts to the Trash. While a tool runs only
    * its run-safe parts (old releases, sessions, leftovers) are cleaned; files
    * it has open are still left alone. Protected and unknown parts are refused;
@@ -1213,6 +1277,14 @@ export const Cleaner = {
     return call("Cleaner.LinkSkillCopy", path, target);
   },
   /**
+   * ListAIModelSources reports which runtimes keep models on disk, without
+   * measuring anything, so the sidebar can show one entry per installed
+   * runtime at start.
+   */
+  listAIModelSources(): Promise<AIModelSourceInfo[]> {
+    return call("Cleaner.ListAIModelSources");
+  },
+  /**
    * ListAITools reports which supported tools have a folder (any of them), without measuring
    * anything, so the sidebar can show one entry per installed tool at start.
    */
@@ -1314,6 +1386,10 @@ export const Cleaner = {
   /** SaveTrashReminder keeps the persisted cooldown, which a page cannot reset. */
   saveTrashReminder(c: TrashReminderConfig): Promise<void> {
     return call("Cleaner.SaveTrashReminder", c);
+  },
+  /** ScanAIModels measures the models of every supported runtime. */
+  scanAIModels(): Promise<AIModelsResult> {
+    return call("Cleaner.ScanAIModels");
   },
   /** ScanAITool measures one tool's folder; each tool has its own page. */
   scanAITool(id: string): Promise<AIScanResult> {

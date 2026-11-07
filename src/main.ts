@@ -1,4 +1,5 @@
 import { initReactAITools, showReactAITool } from "./react/ai/entry";
+import { showReactAISpace } from "./react/aispace/entry";
 import { initReactSkills, showReactSkills } from "./react/skills/entry";
 import { requestSettingsSection, setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
 import { showReactLarge } from "./react/large/entry";
@@ -8,7 +9,7 @@ import { showReactProcess, openReactProcess, setProcessHandlers } from "./react/
 import { isWindows } from "./platform";
 import { showReactFullScan } from "./react/fullscan/entry";
 import { showReactClean } from "./react/clean/entry";
-import { setGoCleanHandler, setGoProcessHandler, showReactStatus } from "./react/status/entry";
+import { setGoAISpaceHandler, setGoCleanHandler, setGoProcessHandler, showReactStatus } from "./react/status/entry";
 import { setCrashGoClean } from "./react/list/crash-dumps";
 import { bumpLang } from "./ui/i18n-react";
 import { $, toast, VIEWS, type View } from "./shared";
@@ -115,6 +116,7 @@ function switchView(v: View, tool?: string) {
     const names: Record<string, string> = { claude: "Claude Code", codex: "Codex", trae: "TRAE" };
     showReactAITool(tool, names[tool] ?? tool);
   }
+  if (v === "aispace") showReactAISpace();
   if (v === "skills") showReactSkills();
   if (v === "fullscan") showReactFullScan();
   showReactProcess(v === "process"); showReactApps(v === "apps");
@@ -132,6 +134,7 @@ void initReactAITools().then(initReactSkills);
 setGoProcessHandler((tab, key) => { openReactProcess(tab, key ?? null); switchView("process"); });
 switchView("status");
 setGoCleanHandler(() => switchView("clean"));
+setGoAISpaceHandler(() => switchView("aispace"));
 setCrashGoClean(() => switchView("clean"));
 setProcessHandlers({
   goLeftovers: () => { requestAppsFilter("leftovers"); switchView("apps"); },

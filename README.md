@@ -49,6 +49,7 @@ Windows 版提供系统状态、用户目录空间分析、垃圾清理、AI 工
 - 应用缓存按应用合并 `~/Library/Caches`、沙盒容器和 Application Support 下的 Electron/Chromium 缓存；优先显示已安装应用的名字，认不出时显示目录名。Spotify、网易云音乐、QQ 音乐的缓存默认不勾选
 - 浏览器规则只清缓存，不碰历史、Cookie、登录和书签；更新残留覆盖 ShipIt、Sparkle 和 updater 暂存目录
 - 开发工具覆盖 npm/npx、pnpm、Yarn、Bun、uv、pip、Cargo、Go、Xcode 等缓存；下载代价大的 Playwright、Puppeteer、Go 模块、Gradle、Maven 缓存默认不勾选
+- AI 空间（macOS、Windows）：把本地 AI 模型（Ollama、HuggingFace 缓存、LM Studio）、agent 会话（Claude Code、Codex、TRAE）和缓存分开算，先看总数和拆分再逐项决定；模型默认不勾选，会话按项目展开且今天在用的不可勾，所有内容只进废纸篓
 - 工具自己管理的数据交给 `brew cleanup --prune=30`、`pnpm store prune`、`go clean -modcache`、`xcrun simctl delete unavailable`；报告估算或大小上限，工具缺失、忙碌、失败或超时不阻塞其他条目
 - 需要确认的备份、固件、Xcode Archives、DeviceSupport、安装包、未完成下载、邮件附件和不可用模拟器默认不勾选；备份、归档等可展开逐个选择，DeviceSupport 各平台最新版默认保留
 - 安装包递归扫描下载、桌面和文稿里的 DMG、PKG、MPKG、XIP（不区分扩展名大小写），所有年龄都列出且默认不勾选，最近变动天数仅作提示，不再用 30 天硬拦截；不进入软链、隐藏目录、应用和文档包内部，旧式 PKG/MPKG 目录整体移到废纸篓，普通文件夹不会作为安装包移走

@@ -1768,6 +1768,56 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .st-htile .v.ok { color: var(--accent-strong); }
 .st-htile .v.warn { color: var(--warn-text); }
 .st-htile .v.crit { color: var(--danger-text); }
+
+/* ---- 概览页「AI 与开发工具」入口带（设计 2026-11-07） ----
+   只做入口、不显示体积：进页面不扫盘，没检测到任何 AI 工具时整条不渲染。
+   整条可点，hover 抬起；配色全部走 token，暗色自动成立。 */
+.ai-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.14s ease;
+}
+.ai-entry:hover { box-shadow: var(--shadow-lift); }
+.ai-entry:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+.ai-entry-ico {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.ai-entry-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-entry-title { font-size: 13.5px; font-weight: 650; letter-spacing: 0.1px; }
+.ai-entry-sub { font-size: 12.5px; color: var(--muted); }
+.ai-entry-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ai-entry-chip {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+.ai-entry-go { flex: none; color: var(--accent-strong); font-size: 12.5px; font-weight: 600; }
+@media (max-width: 760px) {
+  .ai-entry { flex-wrap: wrap; }
+  .ai-entry-go { margin-left: auto; }
+}
 .st-htile.st-skel .sk-line { margin-top: 0; }
 .st-htile.st-skel .sk-line + .sk-line { margin-top: 10px; height: 16px; }
 /* 卡片标题右侧的说明（网络的连接方式） */
