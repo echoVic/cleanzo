@@ -1,17 +1,41 @@
 # Cleanzo
 
-一个 **macOS / Windows 清理工具**：按规则扫描本机的垃圾，逐项查看和选择后清理；还能分析磁盘空间、整理大文件和相似照片、卸载应用及清理残留。
-原生 Go 桌面应用，单二进制约 8 MB。
+**看得懂 AI 和开发工具吃了多少空间，删了还能拿回来的 macOS / Windows 清理器。**
 
-## 下载
+免费开源（MIT）· 原生 Go 单二进制约 8 MB · 不需要管理员权限 · 没有账号、没有遥测 · 清理前列出每一类，随时可以停
 
-在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载已签名、经苹果公证的 dmg，打开后把 Cleanzo 拖进「应用程序」。需要 macOS 12 或更高版本，目前只支持 Apple 芯片（M 系列）的 Mac。
+[![Release](https://img.shields.io/github/v/release/echoVic/cleanzo?label=release&color=2ea043)](https://github.com/echoVic/cleanzo/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![macOS 12+ Apple Silicon](https://img.shields.io/badge/macOS-12%2B%20Apple%20Silicon-black)
+![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%2F11%20x64-0078D6)
+
+![垃圾清理：按分组列出可清理的内容，勾选后确认](docs/screenshots/0.4.1/clean-light.png)
+
+## 为什么用它
+
+| | |
+|---|---|
+| **先看清，再动手** | 扫描结果按分组排列、可逐项展开；清理前列出「直接删除」和「移到废纸篓」两部分，确认后才动手，中途可以停。 |
+| **删了能拿回来** | 缓存、日志直接删；**你自己的文件只会移进废纸篓**。钥匙串、iCloud 云盘、邮件、信息、照片图库、`~/.ssh` 一律不碰。 |
+| **AI 和开发工具** | 看清 Claude Code、Codex、TRAE 的会话、旧版本和缓存各占多少；技能目录有没有重复、失效，或者被改花了。 |
+| **不止清理** | Mac 上还能看系统状态、菜单栏读数、进程，以及「哪个 App 正在偷偷变大」，检查应用更新并在行内升级。 |
+
+![技能：同一个技能被几个工具使用、有没有失效软链或改花的副本](docs/screenshots/0.4.1/skills-light.png)
+
+## 安装
+
+```sh
+brew install --cask echoVic/tap/cleanzo
+```
+
+没有 Homebrew，或者要装 Windows 版，从 [Releases](https://github.com/echoVic/cleanzo/releases) 下载：
+
+- **macOS 12+（Apple 芯片）**：`cleanzo-<版本>-arm64.dmg`，打开后把 Cleanzo 拖进「应用程序」。DMG 已用 Developer ID 签名并经 Apple 公证。目前只支持 Apple 芯片（M 系列）的 Mac。
+- **Windows 10/11 x64**：`cleanzo-setup-<版本>-amd64.exe`，按用户安装到 `%LOCALAPPDATA%\Programs\Cleanzo`。
+
+Windows 需要 WebView2 Runtime（Windows 11 内置）；缺少时应用会提示并提供官方下载链接。未签名的构建可能触发 SmartScreen，确认下载来源后选择 **More info → Run anyway**（更多信息 → 仍要运行）。
 
 ## Windows
-
-支持 Windows 10/11 x64。在 [Releases](https://github.com/echoVic/cleanzo/releases) 下载 `cleanzo-setup-<v>-amd64.exe` 并运行，按用户安装到 `%LOCALAPPDATA%\Programs\Cleanzo`。
-
-需要 WebView2 Runtime（Windows 11 内置）；缺少时应用会提示并提供官方下载链接。未签名的构建可能触发 SmartScreen，确认下载来源后选择 **More info → Run anyway**（更多信息 → 仍要运行）。
 
 Windows 版提供系统状态、用户目录空间分析、垃圾清理、AI 工具、技能、大文件、相似照片和已安装应用列表。卸载应用会打开该注册表条目声明的卸载器；Cleanzo 不会删除或回收 InstallLocation，卸载结束后请刷新列表。
 
