@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -651,7 +652,8 @@ func aiModelInsideRoot(root, target string) bool {
 // runtime's root, and returns the bytes the entry took.
 func aiModelTrash(ctx context.Context, root, target string) (int64, error) {
 	if !aiModelInsideRoot(root, target) || !safeToClean(target) || !platformRemovalSafe(target) {
-		return 0, errAIModelBlocked
+		// TEMP diag
+		return 0, fmt.Errorf("%w inside=%v safe=%v platform=%v home=%q root=%q", errAIModelBlocked, aiModelInsideRoot(root, target), safeToClean(target), platformRemovalSafe(target), homeDir(), root)
 	}
 	info, err := os.Lstat(target)
 	if err != nil {
