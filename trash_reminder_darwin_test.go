@@ -12,9 +12,9 @@ import (
 )
 
 func TestTrashReminderPopupFlow(t *testing.T) {
-	started, cancelled, closed := 0, 0, 0
-	p := &trashReminderPopup{size: 2 * gb, text: panelViewText, start: func() { started++ }, cancel: func() { cancelled++ }, close: func() { closed++ }}
-	tt := ui.NewTester(p.view, 520, 280)
+	started, cancelled, closed, resized := 0, 0, 0, 0
+	p := &trashReminderPopup{size: 2 * gb, text: panelViewText, start: func() { started++ }, cancel: func() { cancelled++ }, close: func() { closed++ }, resize: func() { resized++ }}
+	tt := ui.NewTester(p.view, trashPopupWidth, trashPopupHeight(p.phase))
 	if !tt.HasText("清空废纸篓？") || !tt.HasText("清空（永久删除）") {
 		t.Fatal("missing confirmation")
 	}
@@ -27,16 +27,25 @@ func TestTrashReminderPopupFlow(t *testing.T) {
 	if started != 1 || p.phase != "cleaning" {
 		t.Fatal("did not start")
 	}
+	if resized != 1 {
+		t.Fatal("did not resize for the progress")
+	}
 	if err := tt.Click("取消"); err != nil {
 		t.Fatal(err)
 	}
 	if cancelled != 1 || p.phase != "stopping" {
 		t.Fatal("did not cancel")
 	}
+	if resized != 2 {
+		t.Fatal("did not resize for the cancel")
+	}
 	p.finish(CleanResult{Freed: gb}, true)
 	tt.Frame()
 	if !tt.HasText("已停止清理") {
 		t.Fatal("cancellation reported as success")
+	}
+	if resized != 3 {
+		t.Fatal("did not resize for the result")
 	}
 	if err := tt.Click("关闭"); err != nil {
 		t.Fatal(err)
@@ -70,7 +79,7 @@ func TestTrashReminderPopupPreviews(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = png.Encode(f, ui.Render(p.view, 520, 280, 2))
+				err = png.Encode(f, ui.Render(p.view, trashPopupWidth, trashPopupHeight(phase), 2))
 				closeErr := f.Close()
 				if err != nil {
 					t.Fatal(err)
@@ -86,7 +95,7 @@ func TestTrashReminderPopupPreviews(t *testing.T) {
 func TestTrashReminderPopupPartialAndLater(t *testing.T) {
 	closed := 0
 	p := &trashReminderPopup{size: gb, text: panelViewText, close: func() { closed++ }}
-	tt := ui.NewTester(p.view, 520, 280)
+	tt := ui.NewTester(p.view, trashPopupWidth, trashPopupHeight(p.phase))
 	if err := tt.Click("暂不清理"); err != nil {
 		t.Fatal(err)
 	}
@@ -100,5 +109,35 @@ func TestTrashReminderPopupPartialAndLater(t *testing.T) {
 	}
 	for i := 0; i < 3; i++ {
 		tt.Frame()
+	}
+}
+
+// TestTrashReminderPopupFit checks that every phase's longest real content
+// still leaves the button row inside the window at the height
+// trashPopupHeight gives it, so a wrapped line can't push the button out.
+func TestTrashReminderPopupFit(t *testing.T) {
+	buttonKeys := map[string]string{
+		"":          "trash.popup.empty",
+		"cleaning":  "trash.popup.cancel",
+		"done":      "trash.popup.close",
+		"partial":   "trash.popup.close",
+		"cancelled": "trash.popup.close",
+	}
+	for _, lang := range []string{"zh", "en"} {
+		text := func(key string, vars map[string]string) string { return nativeTextFor(lang, key, vars) }
+		for _, phase := range []string{"", "cleaning", "done", "partial", "cancelled"} {
+			p := &trashReminderPopup{size: 2 * gb, freed: gb, phase: phase, text: text, dark: func() bool { return false }}
+			h := trashPopupHeight(phase)
+			tt := ui.NewTester(p.view, trashPopupWidth, h)
+			button, ok := tt.Find(text(buttonKeys[phase], nil))
+			if !ok {
+				t.Fatalf("%s %q: button missing", lang, phase)
+			}
+			// The row keeps its 20-point bottom padding; a line wrapped by a
+			// wider real rendering would push it past that.
+			if bottom := button.Y + button.H; bottom > float32(h-20) {
+				t.Errorf("%s %q: button reaches %.1f, past the bottom padding at height %d", lang, phase, bottom, h)
+			}
+		}
 	}
 }

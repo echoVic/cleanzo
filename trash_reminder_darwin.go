@@ -19,6 +19,29 @@ type trashReminderPopup struct {
 	text                 panelText
 	dark                 func() bool
 	start, cancel, close func()
+	// resize gives the window the height the phase needs; set with the window.
+	resize func()
+}
+
+const (
+	trashPopupWidth = 520
+	// Heights of the popup's content, not of the window: the window takes
+	// the height of its content (UseContentSize), so a progress window is
+	// not as tall as the confirmation whose explanation wraps to two lines.
+	trashPopupCompactHeight = 170
+	// The partial and cancelled results add the line explaining what was
+	// kept, which wraps to two lines in English.
+	trashPopupResultHeight = 210
+)
+
+// trashPopupHeight fits the popup to the phase it shows, so the dialog is
+// as tall as what it has to say: the confirmation and the progress share
+// the compact height, and only a result that explains what was kept grows.
+func trashPopupHeight(phase string) int {
+	if phase == "partial" || phase == "cancelled" {
+		return trashPopupResultHeight
+	}
+	return trashPopupCompactHeight
 }
 
 func (p *trashReminderPopup) finish(r CleanResult, cancelled bool) {
@@ -29,6 +52,9 @@ func (p *trashReminderPopup) finish(r CleanResult, cancelled bool) {
 	} else if len(r.Failed) > 0 || r.Skipped != "" || r.InUse > 0 || r.Freed < p.size {
 		p.phase = "partial"
 	}
+	if p.resize != nil {
+		p.resize()
+	}
 }
 
 func (p *trashReminderPopup) stop() {
@@ -38,6 +64,9 @@ func (p *trashReminderPopup) stop() {
 	p.phase = "stopping"
 	if p.cancel != nil {
 		p.cancel()
+	}
+	if p.resize != nil {
+		p.resize()
 	}
 }
 
@@ -62,7 +91,7 @@ func (p *trashReminderPopup) view(c *ui.Context) {
 	case "cancelled":
 		key = "cancelled"
 	}
-	ui.Column(c).Fill().Padding(24).Gap(12).Background(t.Background).Children(func() {
+	ui.Column(c).Fill().Padding(20).Gap(10).Background(t.Background).Children(func() {
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "♻").FontSize(32).TextColor(t.Accent)
 			ui.Text(c, text("trash.popup."+key, nil)).FontSize(19).Bold().Grow(1).MinWidth(0)
@@ -86,6 +115,9 @@ func (p *trashReminderPopup) view(c *ui.Context) {
 						return
 					}
 					p.phase = "cleaning"
+					if p.resize != nil {
+						p.resize()
+					}
 					if p.start != nil {
 						p.start()
 					}
@@ -111,10 +143,18 @@ func showTrashReminder(s trashReminderSnapshot, closed func()) {
 		}
 		p := &trashReminderPopup{size: s.Size, text: nativeText, dark: menuBarAppDark}
 		w := mygo.NewWindow(mygo.WindowOptions{
-			Title: nativeText("trash.popup.title", nil), Width: 520, Height: 310,
+			Title: nativeText("trash.popup.title", nil),
+			Width: trashPopupWidth, Height: trashPopupHeight(""), UseContentSize: true,
 			DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 			Content: ui.View(p.view),
 		})
+		// The window takes the height each phase needs: it changes only when
+		// a result explains what was kept, and stays put while cleaning.
+		p.resize = func() {
+			if _, h := w.ContentSize(); h != trashPopupHeight(p.phase) {
+				w.SetContentSize(trashPopupWidth, trashPopupHeight(p.phase))
+			}
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		var alive atomic.Bool
 		alive.Store(true)
