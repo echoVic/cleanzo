@@ -650,10 +650,17 @@ func aiModelInsideRoot(root, target string) bool {
 
 // aiModelTrash moves target to the Trash when it is a real path inside the
 // runtime's root, and returns the bytes the entry took.
+// aiModelTrash moves one known model file or folder to the Trash.
+//
+// It checks the path itself (inside this runtime's folder, a clean path, no
+// symlink at the target) but deliberately skips platformRemovalSafe: that
+// helper refuses a whole folder when a reparse point or cloud placeholder sits
+// inside it, which is right for a structural delete and wrong here. A model
+// folder may hold HuggingFace's snapshot links, and moving the folder to the
+// Trash is reversible either way.
 func aiModelTrash(ctx context.Context, root, target string) (int64, error) {
-	if !aiModelInsideRoot(root, target) || !safeToClean(target) || !platformRemovalSafe(target) {
-		// TEMP diag
-		return 0, fmt.Errorf("%w inside=%v safe=%v platform=%v home=%q root=%q", errAIModelBlocked, aiModelInsideRoot(root, target), safeToClean(target), platformRemovalSafe(target), homeDir(), root)
+	if !aiModelInsideRoot(root, target) || !safeToClean(target) {
+		return 0, errAIModelBlocked
 	}
 	info, err := os.Lstat(target)
 	if err != nil {
