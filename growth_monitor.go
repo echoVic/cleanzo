@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -405,6 +406,26 @@ var nativeTexts = sync.OnceValue(func() map[string]map[string]string {
 	return m
 })
 
+// nativePlural matches the page's plural placeholder, {n|one/many}: the value
+// of n picks the form, as package i18n does for the page's strings.
+var nativePlural = regexp.MustCompile(`\{([^{}|]+)\|([^{}/]*)/([^{}]*)\}`)
+
+// fillNativePlural fills the plural placeholders of text from vars, leaving
+// one alone whose n vars doesn't hold.
+func fillNativePlural(text string, vars map[string]string) string {
+	return nativePlural.ReplaceAllStringFunc(text, func(match string) string {
+		parts := nativePlural.FindStringSubmatch(match)
+		n, err := strconv.Atoi(vars[parts[1]])
+		if err != nil {
+			return match
+		}
+		if n == 1 {
+			return parts[2]
+		}
+		return parts[3]
+	})
+}
+
 // nativeTextFor translates key for locale, where zh-* is Chinese and
 // anything else English, and fills {name}-style placeholders from vars. It
 // fills them in one pass, so a value that looks like a placeholder stays as
@@ -418,7 +439,7 @@ func nativeTextFor(locale, key string, vars map[string]string) string {
 	for k, v := range vars {
 		pairs = append(pairs, "{"+k+"}", v)
 	}
-	return strings.NewReplacer(pairs...).Replace(nativeTexts()[lang][key])
+	return strings.NewReplacer(pairs...).Replace(fillNativePlural(nativeTexts()[lang][key], vars))
 }
 
 // nativeText translates key for the app's language.

@@ -112,3 +112,25 @@ func TestMenuBarLabelsAreTranslated(t *testing.T) {
 		}
 	}
 }
+
+// The page's plural placeholders, {n|one/many}, pick a form in the native
+// strings too: the menubar panel counts GPU cores with status.cpu.cores.
+func TestNativeTextFillsPluralForms(t *testing.T) {
+	for _, tc := range []struct {
+		locale, n, want string
+	}{
+		{"en", "1", "1 core"},
+		{"en", "8", "8 cores"},
+		{"zh-Hans", "1", "1 核"},
+		{"zh-Hans", "8", "8 核"},
+	} {
+		if got := nativeTextFor(tc.locale, "status.cpu.cores", map[string]string{"n": tc.n}); got != tc.want {
+			t.Errorf("%s n=%s: %q, want %q", tc.locale, tc.n, got, tc.want)
+		}
+	}
+	// A plural whose number is missing stays as it is, so a caller that forgot
+	// it sees the placeholder rather than a wrong form.
+	if got := nativeTextFor("en", "status.cpu.cores", nil); got != "{n} {n|core/cores}" {
+		t.Errorf("unfilled plural = %q", got)
+	}
+}
