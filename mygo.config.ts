@@ -12,6 +12,7 @@ export default defineConfig({
   slug: "cleanzo",
   identifier: "com.cleanzo.app",
   version,
+  license: "MIT",
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
   // buildCommand and embeds frontendDist into the app.
   devUrl: "http://localhost:5173",
