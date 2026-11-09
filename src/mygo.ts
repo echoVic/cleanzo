@@ -1323,7 +1323,8 @@ export const Cleaner = {
   /**
    * OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
    * System Settings, where the user can let Cleanzo read protected folders
-   * such as the Trash.
+   * such as the Trash. The system's guide to the page keeps the panel to drag
+   * Cleanzo into the list under the window of System Settings.
    */
   openFullDiskAccessSettings(): Promise<void> {
     return call("Cleaner.OpenFullDiskAccessSettings");
