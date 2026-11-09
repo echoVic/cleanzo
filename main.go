@@ -34,6 +34,7 @@ import (
 
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/locales/zh-Hans"
+	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/plugins/updater"
 )
 
@@ -403,14 +404,28 @@ type cleanHooks struct {
 	finished     func(res CleanResult)                // an item is done, or stopped
 }
 
+// guideFullDiskAccess shows the system's guide to Full Disk Access: System
+// Settings at its page, and the panel to drag Cleanzo into the list. Tests
+// replace it, so they never open System Settings.
+var guideFullDiskAccess = func(ctx context.Context, options permissionflow.GuideOptions) error {
+	_, err := permissionflow.Guide(ctx, permissionflow.FullDiskAccess, options)
+	return err
+}
+
 // OpenFullDiskAccessSettings opens Privacy & Security > Full Disk Access in
 // System Settings, where the user can let Cleanzo read protected folders
-// such as the Trash.
+// such as the Trash. The system's guide to the page keeps the panel to drag
+// Cleanzo into the list under the window of System Settings.
 func (Cleaner) OpenFullDiskAccessSettings() error {
 	if runtime.GOOS == "windows" {
 		return errUnsupported
 	}
-	return quietCommand(exec.Command("/usr/bin/open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")).Run()
+	go func() {
+		if err := guideFullDiskAccess(context.Background(), permissionflow.GuideOptions{Name: "Cleanzo"}); err != nil {
+			log.Print("完全磁盘访问授权引导未完成：", err)
+		}
+	}()
+	return nil
 }
 
 // Info returns basic system information, including the About This Mac
@@ -1900,6 +1915,9 @@ func newMainWindow() *mygo.Window {
 		opts.Page.PreloadScript = smokeScript
 	}
 	w := mygo.NewWindow(opts)
+	w.Page().OnContextMenu(func(e *mygo.ContextMenuEvent) {
+		cleanzoContextMenu(e, mygo.App.Locale())
+	})
 	if runtime.GOOS == "windows" {
 		w.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
 			if req.URL == "ms-settings:appsfeatures" || strings.HasPrefix(req.URL, "https://") || strings.HasPrefix(req.URL, "http://") {
@@ -1912,6 +1930,25 @@ func newMainWindow() *mygo.Window {
 		startSmoke(w, smokeDir)
 	}
 	return w
+}
+
+// cleanzoContextMenu keeps the web view's editing items but hides the page's
+// own navigation items, and opens a link in the user's browser instead of
+// navigating the app's page away.
+func cleanzoContextMenu(e *mygo.ContextMenuEvent, locale string) {
+	if e.Menu == nil {
+		return
+	}
+	e.Menu.Remove(mygo.ContextMenuBack, mygo.ContextMenuForward, mygo.ContextMenuReload, mygo.ContextMenuStop)
+	if !strings.HasPrefix(e.LinkURL, "https://") && !strings.HasPrefix(e.LinkURL, "http://") {
+		return
+	}
+	e.Menu.Append(mygo.Separator(), &mygo.MenuItem{
+		Label: nativeTextFor(locale, "contextMenu.openLink", nil),
+		Click: func(*mygo.MenuItem, *mygo.Window) {
+			go mygo.Shell.OpenExternal(e.LinkURL)
+		},
+	})
 }
 
 func main() {
