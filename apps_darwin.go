@@ -125,6 +125,10 @@ func uninstallApp(path string) UninstallResult {
 		res.Failed = append(res.Failed, path+": "+errInUse.Error())
 		return res
 	}
+	// The uninstall goes ahead, so its record is dropped here. A bundle that
+	// then fails to move ends it with nothing moved, and the record is gone
+	// all the same: a retry without reading the detail again moves what it
+	// finds, as with no detail on record.
 	if listed, ok := takeUninstallListed(path); ok {
 		items = slices.DeleteFunc(items, func(it UninstallItem) bool { return !listed[it.Path] })
 	}

@@ -17,11 +17,14 @@ func TestStatusBatteryEndsWithAChildHoldingItsOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		script  func(json string) string
+		timeout time.Duration
 		percent int // 0: no reading
 	}{
 		// exec: the leader is sleep itself, which the deadline kills.
-		{"runs past the timeout", func(string) string { return "exec sleep 30" }, 0},
-		{"exits", func(json string) string { return "cat " + shellPath(json) }, 84},
+		{"runs past the timeout", func(string) string { return "exec sleep 30" }, time.Second, 0},
+		// Time enough to print and exit under load; the read still ends about
+		// a second after the exit, well inside the guard below.
+		{"exits", func(json string) string { return "cat " + shellPath(json) }, 5 * time.Second, 84},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bin := t.TempDir()
@@ -41,7 +44,7 @@ echo $! > `+shellPath(pidFile)+`
 					}
 				}
 			})
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
 			defer cancel()
 			done := make(chan *BatteryStatus, 1)
 			go func() { done <- statusBattery(ctx) }()
