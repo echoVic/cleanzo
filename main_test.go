@@ -517,6 +517,124 @@ func TestSimilarKeepPicksLargest(t *testing.T) {
 	}
 }
 
+// writeStepPNG draws the 9x8 luminance grid dHashImage reads, each cell k
+// pixels square: a row starts at mid-grey and each cell is 0.05 brighter
+// than the one to its left where up[y][x] is set, darker elsewhere, so the
+// hash's bits are exactly up. Without compression, every grid of one k has
+// the same file size.
+func writeStepPNG(t *testing.T, path string, k int, up [8][8]bool, compress bool) {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, 9*k, 8*k))
+	for y := range 8 {
+		lum := 0.5
+		for x := range 9 {
+			if x > 0 {
+				if up[y][x-1] {
+					lum += 0.05
+				} else {
+					lum -= 0.05
+				}
+			}
+			v := color.Gray{Y: uint8(lum*255 + 0.5)}
+			for py := y * k; py < (y+1)*k; py++ {
+				for px := x * k; px < (x+1)*k; px++ {
+					img.SetGray(px, py, v)
+				}
+			}
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	enc := png.Encoder{}
+	if !compress {
+		enc.CompressionLevel = png.NoCompression
+	}
+	if err := enc.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stepGrid is a grid of all rising cells with the first n cells of the
+// given rows falling.
+func stepGrid(n int, rows ...int) (g [8][8]bool) {
+	for y := range g {
+		for x := range g[y] {
+			g[y][x] = true
+		}
+	}
+	for _, y := range rows {
+		for x := range n {
+			g[y][x] = false
+		}
+	}
+	return g
+}
+
+// TestSimilarClustersFollowPathOrder: complete linkage depends on the order
+// photos join, so the clusters follow the paths' order, not which photo
+// finished decoding first. a≈b and b≈c but a≠c: a, the slowest to decode,
+// still pairs with b.
+func TestSimilarClustersFollowPathOrder(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	a, b, c := filepath.Join(pics, "a.png"), filepath.Join(pics, "b.png"), filepath.Join(pics, "c.png")
+	writeStepPNG(t, a, 512, stepGrid(0), true)   // hash a: all bits set
+	writeStepPNG(t, b, 16, stepGrid(4, 0), true) // 4 bits from a
+	writeStepPNG(t, c, 16, stepGrid(4, 0, 1), true)
+	res := buildSimilarPhotos(context.Background(), []string{pics}, nil)
+	if len(res.Clusters) != 1 || len(res.Clusters[0].Items) != 2 {
+		t.Fatalf("want one cluster of two, got %+v", res.Clusters)
+	}
+	if got := []string{res.Clusters[0].Items[0].Path, res.Clusters[0].Items[1].Path}; !slices.Equal(got, []string{a, b}) {
+		t.Fatalf("cluster = %v, want [a b] as the paths' order gives", got)
+	}
+}
+
+// TestSimilarTiesBreakByPath: clusters of equal waste are ordered, and the
+// copies of a cluster listed, by path, and a full tie keeps the first path,
+// on every run.
+func TestSimilarTiesBreakByPath(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	pics := filepath.Join(home, "Pictures")
+	mustMkdir(t, pics)
+	same := time.Now().Add(-time.Hour)
+	var paths []string
+	for i, grid := range [][8][8]bool{stepGrid(4, 2), stepGrid(4, 5)} {
+		first := filepath.Join(pics, fmt.Sprintf("p%d-a.png", i+1))
+		writeStepPNG(t, first, 16, grid, false)
+		second := filepath.Join(pics, fmt.Sprintf("p%d-b.png", i+1))
+		copyFile(t, first, second)
+		paths = append(paths, first, second)
+	}
+	for _, p := range paths {
+		if err := os.Chtimes(p, same, same); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for run := range 10 {
+		res := buildSimilarPhotos(context.Background(), []string{pics}, nil)
+		if len(res.Clusters) != 2 || res.Clusters[0].Waste != res.Clusters[1].Waste {
+			t.Fatalf("run %d: want two exact clusters of equal waste, got %+v", run, res.Clusters)
+		}
+		for i, cl := range res.Clusters {
+			var got []string
+			for _, it := range cl.Items {
+				got = append(got, fmt.Sprintf("%s keep=%v", filepath.Base(it.Path), it.Keep))
+			}
+			want := []string{filepath.Base(paths[2*i]) + " keep=true", filepath.Base(paths[2*i+1]) + " keep=false"}
+			if cl.ID != i+1 || !slices.Equal(got, want) {
+				t.Fatalf("run %d: cluster %d = id %d %v, want id %d %v", run, i, cl.ID, got, i+1, want)
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Junk cleaning safety
 // ---------------------------------------------------------------------------

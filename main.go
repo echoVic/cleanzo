@@ -1826,20 +1826,28 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 		}(p)
 	}
 	wg.Wait()
+	// Rows arrive in the order decoding finished; the clusters, the keep
+	// pick and the IDs follow the paths instead, so a rerun gives the same.
+	sort.Slice(rows, func(i, j int) bool { return rows[i].item.Path < rows[j].item.Path })
 
-	// 1) Exact duplicates: same size + same sha1.
+	// 1) Exact duplicates: same size + same sha1, each listed in path order.
 	type exactKey struct {
 		size int64
 		sha  string
 	}
 	byExact := map[exactKey][]int{}
+	var exactOrder []exactKey
 	for i := range rows {
 		k := exactKey{rows[i].size, rows[i].sha}
+		if byExact[k] == nil {
+			exactOrder = append(exactOrder, k)
+		}
 		byExact[k] = append(byExact[k], i)
 	}
 	used := map[int]bool{}
 	var builders []clusterIdx
-	for _, idxs := range byExact {
+	for _, k := range exactOrder {
+		idxs := byExact[k]
 		if len(idxs) < 2 {
 			continue
 		}
@@ -1865,6 +1873,7 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 	}
 
 	// 3) Materialize clusters, pick the recommended keep copy, compute waste.
+	// A full tie keeps the first path.
 	clusters := make([]PhotoCluster, 0, len(builders))
 	for _, b := range builders {
 		best := 0
@@ -1891,7 +1900,13 @@ func buildSimilarPhotos(ctx context.Context, roots []string, onProgress func(don
 		cl.Waste = cl.TotalSize - cl.Items[best].Size
 		clusters = append(clusters, cl)
 	}
-	sort.Slice(clusters, func(i, j int) bool { return clusters[i].Waste > clusters[j].Waste })
+	// Equal waste orders by the first path; every photo is in one cluster.
+	sort.Slice(clusters, func(i, j int) bool {
+		if clusters[i].Waste != clusters[j].Waste {
+			return clusters[i].Waste > clusters[j].Waste
+		}
+		return clusters[i].Items[0].Path < clusters[j].Items[0].Path
+	})
 	for i := range clusters {
 		clusters[i].ID = i + 1
 	}
