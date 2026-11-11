@@ -27,3 +27,9 @@ export function groupSelectable(p: AIPart, g: AIGroup, windowDays: WindowDays, n
   const DAY = 86400;
   return g.count > g.recent && now - g.last > windowDays * DAY;
 }
+
+/** 这一部分能不能勾：非空、没被运行中的应用锁住；分组的部分还要有一组在当前窗口下可选。 */
+export function canPick(p: AIPart, windowDays: WindowDays, now: number): boolean {
+  if (p.size <= 0 || blockedByRun(p)) return false;
+  return p.groups.length === 0 || p.groups.some((g) => groupSelectable(p, g, windowDays, now));
+}

@@ -11,7 +11,7 @@ import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { errText, toast } from "../../shared";
 import { human } from "./format";
-import { offered, groupSelectable, blockedByRun, type WindowDays } from "./types";
+import { offered, groupSelectable, blockedByRun, canPick, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
 import { aiApi } from "./api";
 import { codexSize, crashDumps, goCleanForCrashDumps } from "../list/crash-dumps";
@@ -51,18 +51,21 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const [busy, setBusy] = React.useState(false); // 清理进行中：按钮不能再点出第二次清理
   const [scannedAt, setScannedAt] = React.useState(0);
   // Codex 桌面版的崩溃转储不在 ~/.codex 里，由垃圾清理的「应用崩溃转储」负责；这里只提示。
-  const [crashBytes, setCrashBytes] = React.useState(0);
-  const [crashThreshold, setCrashThreshold] = React.useState(Infinity);
-  React.useEffect(() => {
+  // 进入页面和每次扫描都读一次：垃圾清理清掉转储后缓存失效，提示跟着重新量。
+  const [crash, setCrash] = React.useState({ bytes: 0, threshold: Infinity });
+  const crashSeq = React.useRef(0);
+  const readCrash = React.useCallback(() => {
     if (toolId !== "codex") return;
-    let live = true;
+    const seq = ++crashSeq.current;
     void crashDumps().then((s) => {
-      if (!live || !s) return;
-      setCrashBytes(codexSize(s));
-      setCrashThreshold(s.threshold);
+      if (seq !== crashSeq.current) return;
+      setCrash(s ? { bytes: codexSize(s), threshold: s.threshold } : { bytes: 0, threshold: Infinity });
     });
-    return () => { live = false; };
   }, [toolId]);
+  React.useEffect(() => {
+    readCrash();
+    return () => { crashSeq.current++; };
+  }, [readCrash]);
 
   const parts = tool?.parts ?? [];
   const visible = parts.filter(offered);
@@ -86,8 +89,10 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   };
   const chosenTotal = parts.reduce((n, p) => n + chosenSize(p), 0);
 
-  const scan = React.useCallback(async () => {
+  /** 扫描并换上新列表；失败时显示错误并返回 false。 */
+  const scan = React.useCallback(async (): Promise<boolean> => {
     setPhase("scanning"); setError(null); setLastClean(null);
+    readCrash();
     try {
       const res = await aiApi.scanTool(toolId);
       const s = res.tools[0];
@@ -112,14 +117,17 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       }
       setPicked(np); setPickedGroups(ng);
       setPhase("scanned");
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPhase("idle");
+      return false;
     }
-  }, [toolId]);
+  }, [toolId, readCrash]);
 
   // 不自动扫描；进入页面保持 idle。
-  const selectable = (p: AIPart) => p.size > 0 && !blockedByRun(p);
+  // 分组的部分在当前窗口下一组都选不了时也不能勾，免得勾出一个 0 B 的对勾。
+  const selectable = (p: AIPart) => canPick(p, windowDays, scannedAt);
 
   const togglePart = (p: AIPart, on: boolean) => {
     if (!selectable(p)) return;
@@ -193,11 +201,18 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
     setBusy(true);
     try {
       const res = await aiApi.clean(selections.map(({ tool, part, groups }) => ({ tool, part, groups })));
-      const kept = res.parts.reduce((n, r) => n + r.kept, 0);
-      const skipped = res.parts.filter((r) => r.skipped || r.failed.length).length;
-      await scan();
-      setPhase("cleaned");
-      setLastClean({ freed: res.freed, kept, skipped });
+      const done = {
+        freed: res.freed,
+        kept: res.parts.reduce((n, r) => n + r.kept, 0),
+        skipped: res.parts.filter((r) => r.skipped || r.failed.length).length,
+      };
+      // 重扫成功才把结果写在新列表上；重扫失败页面显示失败，清理结果用提示告诉用户。
+      if (await scan()) {
+        setPhase("cleaned");
+        setLastClean(done);
+      } else {
+        toast(doneText(done, t));
+      }
     } catch (e) {
       toast(errText(e), "err");
     } finally {
@@ -225,13 +240,13 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
         </div>
       </header>
 
-      {crashBytes >= CRASH_NOTE_BYTES && (
+      {crash.bytes >= CRASH_NOTE_BYTES && (
         <div
           className="mb-4 flex items-center justify-between gap-3 rounded-[10px] px-4 py-2.5 text-[12.5px] leading-relaxed text-warning-text"
           style={{ background: "var(--warning-soft)" }}
           role="status"
         >
-          <span>{t(crashBytes >= crashThreshold ? "ai.crash.big" : "ai.crash.some", { size: human(crashBytes) })}</span>
+          <span>{t(crash.bytes >= crash.threshold ? "ai.crash.big" : "ai.crash.some", { size: human(crash.bytes) })}</span>
           <Button variant="ghost" size="sm" className="shrink-0" onClick={goCleanForCrashDumps}>{t("ai.crash.clean")}</Button>
         </div>
       )}
@@ -277,11 +292,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                 <span className="text-[26px] font-semibold tabular-nums tracking-[-0.4px]">{human(tool.size)}</span>
               </div>
               <div className="mt-[2px] text-xs text-muted">
-                {lastClean
-                  ? [t("ai.done", { size: human(lastClean.freed) }),
-                     lastClean.kept > 0 ? t("ai.done.kept", { n: lastClean.kept }) : "",
-                     lastClean.skipped > 0 ? t("ai.done.skipped", { n: lastClean.skipped }) : ""].filter(Boolean).join(" · ")
-                  : t("ai.sub.scanned", { size: human(cleanable) })}
+                {lastClean ? doneText(lastClean, t) : t("ai.sub.scanned", { size: human(cleanable) })}
               </div>
             </div>
             <Button variant="default" size="lg" disabled={chosenTotal === 0 || busy} onClick={() => setConfirmOpen(true)}>
@@ -372,6 +383,15 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       />
     </div>
   );
+}
+
+/** 一次清理的结果：释放了多少，另有几项留下、几部分跳过。 */
+function doneText(done: { freed: number; kept: number; skipped: number }, t: (k: DictKey, v?: Record<string, string | number>) => string) {
+  return [
+    t("ai.done", { size: human(done.freed) }),
+    done.kept > 0 ? t("ai.done.kept", { n: done.kept }) : "",
+    done.skipped > 0 ? t("ai.done.skipped", { n: done.skipped }) : "",
+  ].filter(Boolean).join(" · ");
 }
 
 /** TRAE 有 IDE 和 CLI 两个应用，提示里说清是哪个在运行。 */
