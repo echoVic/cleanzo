@@ -1,5 +1,5 @@
 import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
 import { fmtMem, fmtPct } from "../src/react/status/format";
 
@@ -288,4 +288,118 @@ test("sortRows follows fmtMem and fmtPct across display boundaries", () => {
 
   checkPairs(memory, "memory", fmtMem);
   checkPairs(cpu, "cpu", fmtPct);
+});
+
+test("sortRows and sortChildren compare names with one shared collator", () => {
+  const spy = spyOn(String.prototype, "localeCompare");
+  try {
+    const rows = Array.from({ length: 40 }, (_, i) => row({ key: `k${i}`, name: `n${i % 7}`, cpu: i % 3 }));
+    const kids = rows.map((r) => ({ name: r.name, count: 1, cpu: r.cpu, memory: 0, estimated: false }));
+    const sorted = sortRows(rows, "cpu");
+    sortChildren(kids, "mem");
+    expect(spy).not.toHaveBeenCalled();
+    expect(sorted.map((r) => r.name).slice(0, 3)).toEqual(["n0", "n0", "n1"]);
+  } finally { spy.mockRestore(); }
+});
+
+test("rows: a closed row does not build its child rows", async () => {
+  let built = 0;
+  const kids = [
+    { name: "Google Chrome Helper (Renderer)", count: 61, cpu: 38.2, memory: 24.1 * GB, estimated: false },
+    { name: "Google Chrome", count: 1, cpu: 4, memory: 0.9 * GB, estimated: false },
+  ];
+  const counted = new Proxy(kids, {
+    get(target, prop, receiver) {
+      if (prop === Symbol.iterator || prop === "map" || prop === "slice") built++;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const app = { ...chrome, procs: 62, children: counted };
+  expect(await rowHtml({ row: app, open: false })).not.toContain("× 61");
+  expect(built).toBe(0);
+  expect(await rowHtml({ row: app, open: true })).toContain("Google Chrome Helper (Renderer) × 61");
+  expect(built).toBeGreaterThan(0);
+});
+
+/** 采样通道的替身：push 一条，页面的 for await 就收到一条。 */
+function fakeChannel() {
+  const queue: ProcessSample[] = [];
+  let wake: (() => void) | null = null;
+  let closed = false;
+  return {
+    push(s: ProcessSample) { queue.push(s); wake?.(); },
+    close() { closed = true; wake?.(); },
+    async *[Symbol.asyncIterator]() {
+      while (!closed) {
+        const s = queue.shift();
+        if (s) { yield s; continue; }
+        await new Promise<void>((r) => { wake = r; });
+        wake = null;
+      }
+    },
+  };
+}
+
+async function processPage() {
+  await import("./setup-dom");
+  const { pageHarness } = await import("./page-harness");
+  const { ProcessPage } = await import("../src/react/process/ProcessPage");
+  const { GrowthPanel } = await import("../src/react/growth/GrowthPage");
+  const { processApi } = await import("../src/react/process/api");
+  const { growthApi } = await import("../src/react/growth/api");
+  const ch = fakeChannel();
+  const g = globalThis as { mygo?: unknown };
+  const previous = g.mygo;
+  g.mygo = { channel: () => ch };
+  const spies = [
+    spyOn(processApi, "watch").mockImplementation(() => new Promise<void>(() => {})),
+    spyOn(growthApi, "summary").mockImplementation(async () => summary()),
+    spyOn(growthApi, "onUpdated").mockImplementation(() => () => {}),
+  ];
+  const page = pageHarness(ProcessPage, {
+    active: true, visit: 1, request: { tab: null, focusKey: null, nonce: 0 }, goLeftovers() {}, goUninstall() {},
+  });
+  await page.settle();
+  return {
+    page, ch,
+    rows() { return page.all().filter((el) => "onToggle" in el.props && el.props.row); },
+    tab(v: string) { page.find((el) => typeof el.props.onValueChange === "function")!.props.onValueChange(v); },
+    growth() { return page.ofType(GrowthPanel)[0]; },
+    close() { page.close(); for (const s of spies) s.mockRestore(); g.mygo = previous; },
+  };
+}
+
+test("page: rows are sorted once per sample and sort key, not on every render", async () => {
+  const pp = await processPage();
+  try {
+    let reads = 0;
+    const rows = [node, chrome, lark];
+    pp.ch.push({ ...sample(), get rows() { reads++; return rows; } } as ProcessSample);
+    await pp.page.settle();
+    expect(pp.rows().map((r) => r.props.row.name)).toEqual(["Google Chrome", "Lark", "node"]);
+    reads = 0;
+    pp.rows()[0]!.props.onToggle();
+    await pp.page.settle();
+    expect(pp.rows()[0]!.props.open).toBe(true);
+    expect(reads).toBe(0);
+    pp.tab("mem");
+    await pp.page.settle();
+    expect(reads).toBeGreaterThan(0);
+  } finally { pp.close(); }
+});
+
+test("page: the disk tab keeps its panel while CPU or memory is shown", async () => {
+  const pp = await processPage();
+  try {
+    pp.tab("disk");
+    await pp.page.settle();
+    expect(pp.growth()?.props.active).toBe(true);
+    pp.tab("cpu");
+    await pp.page.settle();
+    // 面板留着（隐藏、不刷新），回到磁盘占用标签时还是上次的内容，不从空白开始。
+    expect(pp.growth()?.props.active).toBe(false);
+    pp.tab("disk");
+    await pp.page.settle();
+    expect(pp.growth()?.props.active).toBe(true);
+  } finally { pp.close(); }
 });

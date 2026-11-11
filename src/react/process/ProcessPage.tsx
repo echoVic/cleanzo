@@ -2,7 +2,7 @@ import * as React from "react";
 import { Pause, Play } from "lucide-react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { GrowthSummary, ProcessRow, ProcessSample } from "../../mygo";
+import type { GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -57,10 +57,28 @@ export interface ProcessRowViewProps {
   onTag: (key: string) => void;
 }
 
+/** 数字列：估算值另加一个类。 */
+const numClass = (estimated: boolean) => `st-col num${estimated ? " pr-est" : ""}`;
+
+/** 展开后的进程列表。单独成组件：Collapse 挂上内容时才排序、生成，收着的行不做这些。 */
+function ProcessChildren({ items, sortBy }: { items: readonly ProcessChild[]; sortBy: "cpu" | "mem" }) {
+  return (
+    <ul className="pr-children">
+      {sortChildren(items, sortBy).map((c) => (
+        <li key={c.name} className="pr-child">
+          <span className="pr-child-name" title={c.name}>{c.count > 1 ? `${c.name} × ${c.count}` : c.name}</span>
+          <span className={numClass(c.estimated)}>{est(fmtPct(c.cpu), c.estimated)}</span>
+          <span className={numClass(c.estimated)}>{est(fmtMem(c.memory), c.estimated)}</span>
+          <span className="st-act pr-act" />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** 一行：App、命令行程序或系统程序；有不止一个进程时能展开，同名的合成一条。 */
 export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, t, onToggle, onQuit, onForce, onTag }: ProcessRowViewProps) {
   const expandable = row.children.length > 1 || (row.children[0]?.count ?? 0) > 1;
-  const num = (estimated: boolean) => `st-col num${estimated ? " pr-est" : ""}`;
   const label = (
     <>
       <span className="pr-chev" aria-hidden="true">{expandable ? (open ? "▾" : "›") : ""}</span>
@@ -85,8 +103,8 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
           )}
           {tag && <button type="button" className="pr-tag" onClick={() => onTag(tag.key)}>{tagText(tag, t)}</button>}
         </div>
-        <span className={num(row.estimated)}>{est(fmtPct(row.cpu), row.estimated)}</span>
-        <span className={num(row.estimated)}>{est(fmtMem(row.memory), row.estimated)}</span>
+        <span className={numClass(row.estimated)}>{est(fmtPct(row.cpu), row.estimated)}</span>
+        <span className={numClass(row.estimated)}>{est(fmtMem(row.memory), row.estimated)}</span>
         <span className="st-act pr-act">
           {row.quit && !done && (stuck ? (
             <>
@@ -102,16 +120,7 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
       </div>
       {expandable && (
         <Collapse open={open}>
-          <ul className="pr-children">
-            {sortChildren(row.children, sortBy).map((c) => (
-              <li key={c.name} className="pr-child">
-                <span className="pr-child-name" title={c.name}>{c.count > 1 ? `${c.name} × ${c.count}` : c.name}</span>
-                <span className={num(c.estimated)}>{est(fmtPct(c.cpu), c.estimated)}</span>
-                <span className={num(c.estimated)}>{est(fmtMem(c.memory), c.estimated)}</span>
-                <span className="st-act pr-act" />
-              </li>
-            ))}
-          </ul>
+          <ProcessChildren items={row.children} sortBy={sortBy} />
         </Collapse>
       )}
     </div>
@@ -320,13 +329,15 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   const sortBy: "cpu" | "mem" = tab === "mem" ? "mem" : "cpu";
   // 只在确认框开着、正在退出时冻结行和顺序；鼠标停在列表上不冻结，想停下来看用「暂停」（spec §三）。
   const freezing = quit.busy.size > 0 || quitTarget !== null || forceTarget !== null;
+  // 每条采样、每次换排序只排一次；展开一行、高亮这类重渲染沿用上次的顺序。
+  const sorted = React.useMemo(() => (sample ? sortRows(sample.rows, sortBy) : []), [sample, sortBy]);
   let rows: ProcessRow[] = [];
   if (sample) {
-    rows = freezing && frozenRef.current.length > 0 ? refreshFrozen(frozenRef.current, sample) : sortRows(sample.rows, sortBy);
+    rows = freezing && frozenRef.current.length > 0 ? refreshFrozen(frozenRef.current, sample) : sorted;
     if (!freezing || frozenRef.current.length === 0) frozenRef.current = rows;
   }
   const tags = growthTags(growth);
-  const diag = tab === "disk" ? null : diagnose(sample, cpuHist);
+  const diag = React.useMemo(() => (tab === "disk" ? null : diagnose(sample, cpuHist)), [tab, sample, cpuHist]);
   const busyCount = quit.busy.size + (quitTarget !== null ? 1 : 0) + (forceTarget !== null ? 1 : 0);
   // 读屏里程碑：播报监控状态 + 当前标签；退出/诊断等细节由 toast 和页面自身结构承担。
   const liveMsg = sample
@@ -336,6 +347,12 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setFocus((f) => ({ key, nonce: f.nonce + 1 }));
     setTab("disk");
   };
+  // 磁盘占用面板一直挂着，在 CPU、内存标签时只是藏起来、不刷新：回来时还是上次的内容，不从空白开始。
+  // 元素按它自己的 props 记住，采样带来的重渲染不会把藏着的面板也重画一遍。
+  const onDisk = tab === "disk";
+  const diskPanel = React.useMemo(() => (
+    <GrowthPanel active={active && onDisk} visit={visit} focusKey={focus.key} focusNonce={focus.nonce} goLeftovers={goLeftovers} goUninstall={goUninstall} />
+  ), [active, onDisk, visit, focus.key, focus.nonce, goLeftovers, goUninstall]);
 
   // 菜单栏面板点名字进来：等这一行画在 CPU 或内存表里，滚到中间、高亮 900ms，只定位一次；
   // 先切到了磁盘占用标签就等着，回到 CPU、内存标签再定位。
@@ -405,9 +422,8 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
 
       <span className="sr-only" role="status">{liveMsg}</span>
 
-      {tab === "disk" ? (
-        <GrowthPanel active={active} visit={visit} focusKey={focus.key} focusNonce={focus.nonce} goLeftovers={goLeftovers} goUninstall={goUninstall} />
-      ) : (
+      <div hidden={!onDisk}>{diskPanel}</div>
+      {!onDisk && (
         <>
           {diag && (
             <div className="pr-diag">

@@ -25,14 +25,17 @@ function shownMem(n: number): number {
   return n >= GiB ? (Math.round((n / GiB) * 10) / 10) * GiB : Math.round(n / MiB) * MiB;
 }
 
+/** 同值按名字比：共用一个 Collator，和不带参数的 localeCompare 同一个顺序，但不必每次比较都重新取本地化规则。 */
+const byName = new Intl.Collator().compare;
+
 /** 按 CPU 或内存从高到低，比的是页面上显示的数，同值按名字；返回新数组，不改采样。 */
 export function sortRows(rows: readonly ProcessRow[], by: "cpu" | "mem"): ProcessRow[] {
-  return [...rows].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || a.name.localeCompare(b.name));
+  return [...rows].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || byName(a.name, b.name));
 }
 
 /** 展开后的进程：和表一样按当前标签、按显示的数排。 */
 export function sortChildren(children: readonly ProcessChild[], by: "cpu" | "mem"): ProcessChild[] {
-  return [...children].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || a.name.localeCompare(b.name));
+  return [...children].sort((a, b) => (by === "cpu" ? shownCpu(b.cpu) - shownCpu(a.cpu) : shownMem(b.memory) - shownMem(a.memory)) || byName(a.name, b.name));
 }
 
 /** 冻结期间（确认框开着、正在退出）行和顺序不变，按 key 换上新数字；这一轮没有的行停在上一轮。 */
