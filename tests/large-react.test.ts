@@ -169,6 +169,29 @@ test("threshold buckets are the four persisted tiers", () => {
   expect([...LARGE_THRESHOLDS]).toEqual([104857600, 524288000, 1073741824, 5368709120]);
 });
 
+test("a large-file scan that fails while its stream is open shows the error and leaves no unhandled rejection", async () => {
+  const { pageHarness, fakeStream } = await import("./list-page-harness");
+  const { LargePage } = await import("../src/react/large/LargePage");
+  const { largeApi } = await import("../src/react/large/api");
+  const { setPref } = await import("../src/i18n");
+  const saved = { ...largeApi };
+  const stream = fakeStream<never>();
+  Object.assign(largeApi, { startScan: () => stream });
+  setPref("zh");
+  const h = pageHarness(LargePage, {});
+  try {
+    await h.flush();
+    h.find((n) => n.type?.name === "EmptyGuide")!.props.onCta();
+    await h.flush();
+    stream.fail(new Error("disk denied"));
+    await h.settle();
+    stream.end();
+    await h.flush();
+    const alert = h.find((n) => n.props.role === "alert");
+    expect(alert && h.text(alert)).toContain("disk denied");
+  } finally { h.dispose(); Object.assign(largeApi, saved); setPref("system"); }
+});
+
 test("human and displayPath match the rest of the UI", () => {
   expect(human(0)).toBe("0 B");
   expect(human(1024)).toBe("1.0 KB");

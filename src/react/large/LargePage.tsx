@@ -14,6 +14,7 @@ import {
   type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, type ListRowData } from "../list/ListRows";
+import { settled } from "../list/stream";
 import { largeApi } from "./api";
 import {
   barWidth, displayPath, human, LARGE_THRESHOLDS, readThreshold, saveThreshold,
@@ -75,6 +76,7 @@ export function LargePage() {
     setSelection(emptySelection());
     setScanning(true);
     const { ch, done } = largeApi.startScan(thr);
+    const finished = settled(done);
     chanRef.current = ch;
     try {
       for await (const ev of ch) {
@@ -90,7 +92,7 @@ export function LargePage() {
           scannedThresholdRef.current = ev.result.threshold;
         }
       }
-      await done;
+      await finished();
     } catch (e) {
       if (runRef.current !== myRun) return;
       if (!stoppedRef.current) {

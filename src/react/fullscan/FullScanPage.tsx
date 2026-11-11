@@ -12,6 +12,7 @@ import {
   applyRemovalToItems, collapseRow, keepShown, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, PathTypeHint, type ListRowData } from "../list/ListRows";
+import { settled } from "../list/stream";
 import { DiskCard } from "./DiskCard";
 import { fullscanApi } from "./api";
 import { loadChildren } from "./children";
@@ -94,6 +95,7 @@ export function FullScanPage() {
     setSelection(emptySelection());
     setScanning(true);
     const { ch, done } = fullscanApi.startScan();
+    const finished = settled(done);
     chanRef.current = ch;
     try {
       for await (const ev of ch) {
@@ -110,7 +112,7 @@ export function FullScanPage() {
           setDisk(ev.result.disk);
         }
       }
-      await done;
+      await finished();
     } catch (e) {
       if (runRef.current !== myRun) return;
       if (!stoppedRef.current) {

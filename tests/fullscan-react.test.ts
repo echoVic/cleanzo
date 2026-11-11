@@ -303,6 +303,31 @@ test("ticking a folder never ticks the children that cannot be moved", () => {
   expect([...rest.sel]).toEqual([]);
 });
 
+test("a scan that fails while its stream is open shows the error and leaves no unhandled rejection", async () => {
+  const { pageHarness, fakeStream } = await import("./list-page-harness");
+  const { FullScanPage } = await import("../src/react/fullscan/FullScanPage");
+  const { fullscanApi } = await import("../src/react/fullscan/api");
+  const saved = { ...fullscanApi };
+  const stream = fakeStream<never>();
+  Object.assign(fullscanApi, { startScan: () => stream, disk: async () => ({ total: 0, used: 0, free: 0 }) });
+  setPref("zh");
+  const h = pageHarness(FullScanPage, {});
+  try {
+    await h.flush();
+    h.find((n) => n.type?.name === "EmptyGuide")!.props.onCta();
+    await h.flush();
+    stream.emit({ kind: "item", path: "/h/big", size: 10, trashable: true } as never);
+    await h.flush();
+    // 桥接先报错，通道过一会儿才关：这段时间里拒绝必须已经有人接住。
+    stream.fail(new Error("disk denied"));
+    await h.settle();
+    stream.end();
+    await h.flush();
+    const alert = h.find((n) => n.props.role === "alert");
+    expect(alert && h.text(alert)).toContain("disk denied");
+  } finally { h.dispose(); Object.assign(fullscanApi, saved); setPref("system"); }
+});
+
 test("error codes read the same whether Go sends them plain or as JSON", () => {
   setLang("zh");
   for (const code of ["unsupported", "not-app", "in-use"]) {
