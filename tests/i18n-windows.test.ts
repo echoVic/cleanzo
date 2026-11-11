@@ -40,6 +40,14 @@ test("Windows overrides precede the glossary; interpolation does not rewrite pat
   expect(ruleName("sys.trash")).toBe("Trash");
 });
 
+test("Windows says the process page is not available there yet", () => {
+  setPlatformForTest("win32");
+  setPref("zh");
+  expect(t("process.unsupported")).toBe("进程页暂时不支持 Windows。");
+  setPref("en");
+  expect(t("process.unsupported")).toBe("The process page isn't available on Windows yet.");
+});
+
 test("Recycle Bin refusal codes explain retained and connected files in both languages", async () => {
   const previous = globalThis.document;
   Object.assign(globalThis, { document: previous ?? { querySelectorAll: () => [] } });
