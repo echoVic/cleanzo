@@ -1184,3 +1184,89 @@ test("残留扫描成功：tab 角标实时为残留数量", async () => {
     expect(h.hasAlert()).toBe(false);
   } finally { h.close(); }
 });
+
+// ---- 残留页接线：展开文件夹与流式扫描（页面 hooks 由 page-harness 驱动） ----
+
+function deferredOf<T>() {
+  let resolve!: (value: T) => void, reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function leftoversPage(overrides: Record<string, unknown> = {}) {
+  const { pageHarness, fakeStream } = await import("./list-page-harness");
+  const { LeftoversTab } = await import("../src/react/apps/LeftoversTab");
+  const { appsApi } = await import("../src/react/apps/api");
+  const { setPref } = await import("../src/i18n");
+  setPref("zh");
+  const saved = { ...appsApi };
+  const stream = fakeStream<OrphanItem>();
+  Object.assign(appsApi, { startOrphanScan: () => stream, ...overrides });
+  const h = pageHarness(LeftoversTab, { active: true, onCountChange() {}, onBusyChange() {} });
+  await h.flush();
+  return {
+    h, stream,
+    rows: () => h.find((n) => n.type?.name === "ListRows")!.props,
+    dispose() { h.dispose(); Object.assign(appsApi, saved); setPref("system"); },
+  };
+}
+
+test("残留：收起后才到的子项列表不再填回这一行，也不把子项勾上", async () => {
+  const listing = deferredOf<unknown>();
+  const p = await leftoversPage({ dirChildren: () => listing.promise });
+  try {
+    p.stream.emit(orphan({ path: "/u/Library/Old", size: 4096, isDir: true }));
+    p.stream.finish();
+    await p.h.flush();
+    p.rows().onToggleRow("/u/Library/Old", true);
+    p.rows().onExpand("/u/Library/Old");
+    await p.h.flush();
+    p.rows().onExpand("/u/Library/Old");
+    await p.h.flush();
+    listing.resolve({ items: [{ name: "a", path: "/u/Library/Old/a", size: 10, isDir: false, trashable: true }], total: 1 });
+    await p.h.flush();
+    const st = p.rows().selection;
+    expect(st.expanded.has("/u/Library/Old")).toBe(false);
+    expect(st.children.has("/u/Library/Old")).toBe(false);
+    expect([...st.sel]).toEqual(["/u/Library/Old"]);
+  } finally { p.dispose(); }
+});
+
+test("残留：展开后量出大小未知的子文件夹，并按大小重排", async () => {
+  const measured = deferredOf<number>();
+  const asked: string[] = [];
+  const p = await leftoversPage({
+    dirChildren: async () => ({ items: [
+      { name: "small", path: "/u/Library/Old/small", size: 1024, isDir: false, trashable: true },
+      { name: "slow", path: "/u/Library/Old/slow", size: -1, isDir: true, trashable: true },
+    ], total: 2 }),
+    dirSize: (path: string) => { asked.push(path); return measured.promise; },
+  });
+  try {
+    p.stream.emit(orphan({ path: "/u/Library/Old", size: 8192, isDir: true }));
+    p.stream.finish();
+    await p.h.flush();
+    p.rows().onExpand("/u/Library/Old");
+    await p.h.flush();
+    expect(asked).toEqual(["/u/Library/Old/slow"]);
+    const listed = () => p.rows().selection.children.get("/u/Library/Old").items as { path: string; size: number; measuring?: boolean }[];
+    expect(listed().find((it) => it.path.endsWith("slow"))?.measuring).toBe(true);
+    measured.resolve(4096);
+    await p.h.flush();
+    expect(listed().map((it) => [it.path, it.size, !!it.measuring])).toEqual([
+      ["/u/Library/Old/slow", 4096, false], ["/u/Library/Old/small", 1024, false],
+    ]);
+  } finally { p.dispose(); }
+});
+
+test("残留扫描在通道还开着时失败：显示错误，不留下未处理的 rejection", async () => {
+  const p = await leftoversPage();
+  try {
+    p.stream.fail(new Error("leftovers denied"));
+    await p.h.settle();
+    p.stream.end();
+    await p.h.flush();
+    const alert = p.h.find((n) => n.props.role === "alert");
+    expect(alert && p.h.text(alert)).toContain("leftovers denied");
+  } finally { p.dispose(); }
+});

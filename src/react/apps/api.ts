@@ -25,6 +25,7 @@ export const appsApi = {
   growthSummary: (): Promise<GrowthSummary> => Cleaner.growthSummary(),
   growthState: (): Promise<GrowthState> => Cleaner.growthState(),
   dirChildren: (path: string) => Cleaner.dirChildren(path),
+  dirSize: (path: string) => Cleaner.dirSize(path),
   trashPath: (path: string) => Cleaner.trashPath(path),
   cleanPaths: (paths: string[]) => Cleaner.cleanPaths(paths),
   reveal: (path: string) => Cleaner.revealInFinder(path),

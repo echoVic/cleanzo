@@ -2,7 +2,6 @@ import { shortHome } from "../../platform";
 import * as React from "react";
 import type { OrphanItem } from "../../mygo";
 import { Button } from "../../ui/components/button";
-import { EmptyGuide } from "../../ui/components/empty-guide";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
@@ -15,6 +14,8 @@ import {
   applyRemovalToItems, collapseRow, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, type ListRowData } from "../list/ListRows";
+import { settled } from "../list/stream";
+import { loadChildren } from "../fullscan/children";
 import { appsApi } from "./api";
 import { barWidth, orphanFootAfterRemoval, parseDoneEv, sortOrphans } from "./helpers";
 
@@ -58,6 +59,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   const stoppedRef = React.useRef(false);
   const scanningRef = React.useRef(false);
   const autoStartedRef = React.useRef(false);
+  /** 每一行最近一次展开的请求：只有它的列表和大小能写回。 */
+  const expansionsRef = React.useRef(new Map<string, symbol>());
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
   scanningRef.current = scanning;
@@ -66,6 +69,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   React.useEffect(() => {
     return () => {
       runRef.current++;
+      expansionsRef.current.clear();
       chanRef.current?.close();
       chanRef.current = null;
       // 开发模式 StrictMode 卸载重挂：刚关掉的自动扫描要重新开始。
@@ -75,6 +79,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
 
   const startScan = React.useCallback(async () => {
     const myRun = ++runRef.current;
+    expansionsRef.current.clear();
     stoppedRef.current = false;
     setTried(true);
     setItems([]);
@@ -84,6 +89,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     setSelection(emptySelection());
     setScanning(true);
     const { ch, done } = appsApi.startOrphanScan();
+    const finished = settled(done);
     chanRef.current = ch;
     try {
       for await (const o of ch) {
@@ -94,7 +100,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
         }
         setItems((prev) => [...prev, o]);
       }
-      await done;
+      await finished();
     } catch (e) {
       if (runRef.current !== myRun) return;
       if (!stoppedRef.current) {
@@ -167,28 +173,14 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   const onExpand = async (path: string) => {
     if (busy || isGone(selection, path)) return;
     const collapsing = selection.expanded.has(path);
+    const request = Symbol(path);
+    if (collapsing) expansionsRef.current.delete(path);
+    else expansionsRef.current.set(path, request);
     // 收起时连同藏进去的子项勾选一起去掉：看不见的不能还选着。
     setSelection((prev) => (collapsing ? collapseRow(prev, path) : { ...prev, expanded: new Set([...prev.expanded, path]) }));
     if (collapsing) return;
-    try {
-      const r = await appsApi.dirChildren(path);
-      setSelection((prev) => {
-        if (isGone(prev, path)) return prev;
-        const children = new Map(prev.children);
-        children.set(path, { items: r.items, total: r.total });
-        // 整行已勾时：新展开的子项一并勾上。
-        let next: ListSelection = { ...prev, children };
-        if (prev.sel.has(path)) next = toggleRow(next, path, true);
-        return next;
-      });
-    } catch (e) {
-      setSelection((prev) => {
-        if (isGone(prev, path)) return prev;
-        const children = new Map(prev.children);
-        children.set(path, { error: errText(e) });
-        return { ...prev, children };
-      });
-    }
+    // 与空间分析同一套加载：收起或重新展开后，晚到的列表和大小都不再写回。
+    await loadChildren(path, appsApi, setSelection, () => expansionsRef.current.get(path) === request);
   };
 
   const onReveal = (path: string) => {
@@ -268,7 +260,6 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
       ? t("fs.rescan")
       : t("orphans.scanBtn");
 
-  const showIdle = !scanning && !error && !tried;
   const showEmptyScanned = !scanning && !error && !stopped && visible.length === 0 && tried;
   const showStoppedEmpty = !scanning && stopped && visible.length === 0;
   const summary = doneMs !== null
@@ -318,19 +309,6 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
           </div>
           <div className="muted small">{t("orphans.safeNote")}</div>
         </div>
-      )}
-
-      {showIdle && (
-        <EmptyGuide
-          gradId="eg-orphans-grad"
-          title={t("orphans.idle.title")}
-          desc={t("orphans.idle.desc")}
-          ctaText={t("orphans.idle.cta")}
-          onCta={() => void startScan()}
-        >
-          <path d="M4.8 9V7h5l2 2h7.4v9H4.8z" />
-          <path d="M9.5 13.5h5" strokeDasharray="1 2" />
-        </EmptyGuide>
       )}
 
       {!scanning && error && (
