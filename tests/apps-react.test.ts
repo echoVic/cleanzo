@@ -1304,6 +1304,35 @@ test("残留：收起后才到的子项列表不再填回这一行，也不把�
   } finally { env.restore(); }
 });
 
+test("残留：收起又展开后才到的第一次列表丢掉，只写回最近一次展开的列表", async () => {
+  const first = deferredOf<unknown>(), second = deferredOf<unknown>();
+  const listings = [first.promise, second.promise];
+  const asked: string[] = [];
+  const env = (await import("./page-harness")).changes();
+  try {
+    const p = await leftoversPage(env, {
+      dirChildren: () => listings.shift()!,
+      dirSize: (path: string) => { asked.push(path); return new Promise<number>(() => {}); },
+    });
+    p.stream.emit(orphan({ path: "/u/Library/Old", size: 4096, isDir: true }));
+    p.stream.finish();
+    await p.h.settle();
+    for (let i = 0; i < 3; i++) { // 展开、收起、再展开：两次展开的列表都还没回来
+      p.rows().onExpand("/u/Library/Old");
+      await p.h.settle();
+    }
+    first.resolve({ items: [{ name: "stale", path: "/u/Library/Old/stale", size: -1, isDir: true, trashable: true }], total: 1 });
+    await p.h.settle();
+    const st = () => p.rows().selection;
+    expect(st().expanded.has("/u/Library/Old")).toBe(true);
+    expect(st().children.has("/u/Library/Old")).toBe(false);
+    expect(asked).toEqual([]);
+    second.resolve({ items: [{ name: "fresh", path: "/u/Library/Old/fresh", size: 10, isDir: false, trashable: true }], total: 1 });
+    await p.h.settle();
+    expect(st().children.get("/u/Library/Old").items.map((it: { path: string }) => it.path)).toEqual(["/u/Library/Old/fresh"]);
+  } finally { env.restore(); }
+});
+
 test("残留：展开后量出大小未知的子文件夹，并按大小重排", async () => {
   const measured = deferredOf<number>();
   const asked: string[] = [];
