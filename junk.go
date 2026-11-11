@@ -96,6 +96,7 @@ type junkEnv struct {
 	lstat                 func(string) (fs.FileInfo, error)
 	observe               bool            // scanning only: measure excluded capacity, never create extra deletion entries
 	walked                map[string]bool // cleaning only: the rules whose recursiveFiles targets are walked; nil walks every rule's
+	unwalked              []string        // cleaning only: the folders (comparison form) of the recursiveFiles targets left unwalked
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
@@ -526,6 +527,13 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		var reserve []string
 		for _, target := range r.Targets {
 			if target.Mode == recursiveFiles && env.walked != nil && !env.walked[r.ID] {
+				// Finding the folders is a glob, not a walk: cleanJunk compares
+				// them with the selected rows.
+				for _, root := range env.resolve(target.Pattern) {
+					if !claims.claimed(root) {
+						env.unwalked = append(env.unwalked, canonical(root))
+					}
+				}
 				continue
 			}
 			for _, root := range env.resolve(target.Pattern) {
@@ -1026,21 +1034,26 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 	env.ctx = ctx
 	env.observe = false
 	// A rule that walks whole folders (the installers in Downloads, Desktop
-	// and Documents) is expanded only when it is selected, or when a custom
-	// folder is, whose entries the rule's claims keep apart: the walk takes
-	// half a minute in a large Documents folder.
-	env.walked = map[string]bool{}
+	// and Documents) is walked only when it is selected, or when a selected
+	// row reaches into those folders: the walk takes half a minute in a large
+	// Documents folder, and its claims keep the installers it finds out of
+	// such a row.
+	env.walked, env.unwalked = map[string]bool{}, nil
 	for _, sel := range selections {
-		if strings.HasPrefix(sel.ID, "custom:") {
-			env.walked = nil
-			break
-		}
 		env.walked[sel.ID] = true
 	}
 	specs, _ := expandItems(&env)
 	byID := make(map[string]itemSpec, len(specs))
 	for _, s := range specs {
 		byID[s.item.ID] = s
+	}
+	if slices.ContainsFunc(selections, func(sel JunkSelection) bool { return reachesInto(byID[sel.ID], env.unwalked) }) {
+		env.walked, env.unwalked = nil, nil
+		specs, _ = expandItems(&env)
+		clear(byID)
+		for _, s := range specs {
+			byID[s.item.ID] = s
+		}
 	}
 	ordered := append([]JunkSelection(nil), selections...)
 	slices.SortStableFunc(ordered, func(a, b JunkSelection) int {
@@ -1116,6 +1129,19 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 		}
 	}
 	return results
+}
+
+// reachesInto reports whether a row's folders or candidates overlap one of
+// dirs (in comparison form): they lie inside it, or hold it.
+func reachesInto(spec itemSpec, dirs []string) bool {
+	if len(dirs) == 0 {
+		return false
+	}
+	overlaps := func(key string) bool {
+		return slices.ContainsFunc(dirs, func(dir string) bool { return within(key, dir) || within(dir, key) })
+	}
+	// Candidates are resolved paths already; only their case differs.
+	return slices.ContainsFunc(spec.roots, overlaps) || slices.ContainsFunc(spec.cands, func(c junkCand) bool { return overlaps(strings.ToLower(c.path)) })
 }
 
 // cleanItem measures and removes an item's currently eligible entries.

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // windowsReviewEnv exercises the Windows catalog and sources on either host.
@@ -57,6 +58,24 @@ func TestWindowsCrashpadMatchedOnce(t *testing.T) {
 		return
 	}
 	t.Fatal("missing Crashpad row")
+}
+
+// TestWindowsPartialDownloadKeepsTheInstallerInside: cleaning partial
+// downloads alone still leaves an installer the scan listed under the
+// installer row, even inside a .partial folder, which is otherwise recycled
+// whole.
+func TestWindowsPartialDownloadKeepsTheInstallerInside(t *testing.T) {
+	env := windowsReviewEnv(t)
+	installerTestClock(t)
+	folder := filepath.Join(env.home, "Downloads", "x.partial")
+	setup := filepath.Join(folder, "setup.exe")
+	part := filepath.Join(folder, "chunk.bin")
+	writeFile(t, setup, 100)
+	writeFile(t, part, 100)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.partial-downloads"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || !exists(setup) || exists(part) {
+		t.Fatalf("result = %+v, installer kept %v", res, exists(setup))
+	}
 }
 
 // TestWindowsInstallersExcludeUninstallers keeps portable applications' uninstall programs intact.

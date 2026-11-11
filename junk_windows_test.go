@@ -404,3 +404,20 @@ func TestWindowsRealProfileScanGate(t *testing.T) {
 		t.Fatalf("unsafe escape hatch accepted: %v %s", err, out)
 	}
 }
+
+// TestWindowsTempInsideDownloadsKeepsInstallers: with TEMP inside
+// Downloads, cleaning the temporary files alone, which removes for good,
+// still leaves an installer the scan listed under the installer row.
+func TestWindowsTempInsideDownloadsKeepsInstallers(t *testing.T) {
+	env := windowsReviewEnv(t)
+	installerTestClock(t)
+	env.tmp = filepath.Join(env.home, "Downloads", "Temp")
+	setup := filepath.Join(env.tmp, "tool-setup.exe")
+	old := filepath.Join(env.tmp, "old.tmp")
+	writeFile(t, setup, 100)
+	writeFile(t, old, 100)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.temp"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Freed != 100 || !exists(setup) || exists(old) {
+		t.Fatalf("result = %+v, installer kept %v", res, exists(setup))
+	}
+}

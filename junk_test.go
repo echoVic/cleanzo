@@ -478,6 +478,30 @@ func blockFolder(t *testing.T, env *junkEnv, dir string) func() {
 	return unblock
 }
 
+// TestCleanJunkKeepsInstallersARowReachesInto: a row whose folder lies inside
+// one the installer rule walks is cleaned with the installers' claims in
+// place, so it never removes an installer the scan listed under the installer
+// row, which is not selected.
+func TestCleanJunkKeepsInstallersARowReachesInto(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	var installers Rule
+	for _, r := range darwinJunkRules {
+		if r.ID == "review.installers" {
+			installers = r
+		}
+	}
+	env.rules = []Rule{installers, {ID: "test.downloads-tmp", Group: groupSystem, Targets: []Target{{Pattern: "Downloads/tmp", Mode: entriesOf}}}}
+	dmg := filepath.Join(env.home, "Downloads/tmp/old.dmg")
+	log := filepath.Join(env.home, "Downloads/tmp/old.log")
+	writeFile(t, dmg, 100)
+	writeFile(t, log, 100)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "test.downloads-tmp"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Freed != 100 || !exists(dmg) || exists(log) {
+		t.Fatalf("result = %+v, installer kept %v", res, exists(dmg))
+	}
+}
+
 // TestInstallersSkipNodeModules: installers inside node_modules are packages'
 // own files, not downloads; everything else is still found at any depth.
 func TestInstallersSkipNodeModules(t *testing.T) {
@@ -510,8 +534,9 @@ func TestInstallersSkipNodeModules(t *testing.T) {
 
 // TestCleanJunkWalksInstallerFoldersOnlyWhenNeeded: the installer rule walks
 // all of Downloads, Desktop and Documents, which took half a minute on a real
-// Mac. A clean walks them for that rule, or for a custom folder, whose
-// entries the installers' claims keep apart, and for nothing else.
+// Mac. A clean walks them for that rule, or for a row reaching into them
+// (here a custom folder), whose entries the installers' claims keep apart,
+// and for nothing else.
 func TestCleanJunkWalksInstallerFoldersOnlyWhenNeeded(t *testing.T) {
 	env := testEnv(t)
 	installerTestClock(t)
@@ -524,7 +549,7 @@ func TestCleanJunkWalksInstallerFoldersOnlyWhenNeeded(t *testing.T) {
 	documents := filepath.Join(resolvePath(env.home), "Documents")
 	walked := false
 	env.lstat = func(path string) (fs.FileInfo, error) {
-		if within(resolvePath(path), documents) {
+		if p := resolvePath(path); p != documents && within(p, documents) {
 			walked = true
 		}
 		return os.Lstat(path)
