@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -375,20 +376,107 @@ func TestInstallersReportBlockedSubfolderAndAllowOtherCandidates(t *testing.T) {
 	writeFile(t, filepath.Join(blocked, "keep.dmg"), 100)
 	ready := filepath.Join(env.home, "Documents/visible/ready.pkg")
 	writeFile(t, ready, 100)
-	blockedResolved := resolvePath(blocked)
-	env.lstat = func(path string) (fs.FileInfo, error) {
-		if path == blockedResolved {
-			return nil, fs.ErrPermission
-		}
-		return os.Lstat(path)
-	}
+	unblock := blockFolder(t, &env, blocked)
 	items, _ := scanJunk(context.Background(), env, nil, nil)
 	if len(items) != 1 || !items[0].Denied || len(items[0].Subs) != 1 || items[0].Subs[0].Path != resolvePath(ready) {
 		t.Fatalf("blocked folder hidden or traversed: %+v", items)
 	}
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers", Paths: []string{ready, filepath.Join(blocked, "keep.dmg")}}}, time.Time{}, cleanHooks{})
+	unblock()
 	if res[0].Trashed != 100 || len(res[0].Failed) == 0 || !exists(filepath.Join(blocked, "keep.dmg")) {
 		t.Fatalf("blocked selection result: %+v", res)
+	}
+}
+
+// blockFolder makes a folder unreadable: through its permissions, or on
+// Windows, whose installer walk checks each folder before entering it,
+// through the lstat seam. The returned function lifts the block.
+func blockFolder(t *testing.T, env *junkEnv, dir string) func() {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		resolved := resolvePath(dir)
+		env.lstat = func(path string) (fs.FileInfo, error) {
+			if path == resolved {
+				return nil, fs.ErrPermission
+			}
+			return os.Lstat(path)
+		}
+		return func() {}
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("permissions do not stop root")
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	unblock := func() { os.Chmod(dir, 0o755) }
+	t.Cleanup(unblock)
+	return unblock
+}
+
+// TestInstallersSkipNodeModules: installers inside node_modules are packages'
+// own files, not downloads; everything else is still found at any depth.
+func TestInstallersSkipNodeModules(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	listed := filepath.Join(env.home, "Documents/app/dist/deep/App.dmg")
+	writeFile(t, listed, 100)
+	inside := []string{
+		filepath.Join(env.home, "Documents/app/node_modules/pkg/test/fixture.dmg"),
+		filepath.Join(env.home, "Downloads/tool/vendor/Node_Modules/x/setup.pkg"),
+		filepath.Join(env.home, "Desktop/node_modules/y.xip"),
+	}
+	for _, p := range inside {
+		writeFile(t, p, 500)
+	}
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || len(items[0].Subs) != 1 || items[0].Subs[0].Path != resolvePath(listed) || items[0].Size != 100 {
+		t.Fatalf("installer row = %+v", items)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || exists(listed) {
+		t.Fatalf("clean = %+v", res)
+	}
+	for _, p := range inside {
+		if !exists(p) {
+			t.Fatalf("%s left node_modules", p)
+		}
+	}
+}
+
+// TestCleanJunkWalksInstallerFoldersOnlyWhenNeeded: the installer rule walks
+// all of Downloads, Desktop and Documents, which took half a minute on a real
+// Mac. A clean walks them for that rule, or for a custom folder, whose
+// entries the installers' claims keep apart, and for nothing else.
+func TestCleanJunkWalksInstallerFoldersOnlyWhenNeeded(t *testing.T) {
+	env := testEnv(t)
+	installerTestClock(t)
+	writeFile(t, filepath.Join(env.home, ".npm/_npx/a/x"), 100)
+	tools := filepath.Join(env.home, "Documents/tools")
+	setup := filepath.Join(tools, "setup.pkg")
+	note := filepath.Join(tools, "notes.txt")
+	writeFile(t, setup, 100)
+	writeFile(t, note, 100)
+	documents := filepath.Join(resolvePath(env.home), "Documents")
+	walked := false
+	env.lstat = func(path string) (fs.FileInfo, error) {
+		if within(resolvePath(path), documents) {
+			walked = true
+		}
+		return os.Lstat(path)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.npx"}}, time.Time{}, cleanHooks{})
+	if walked || len(res) != 1 || res[0].Freed != 100 {
+		t.Fatalf("a clean of npx walked Documents=%v: %+v", walked, res)
+	}
+	env.settings.Custom = []CustomFolder{{Name: "tools", Path: tools, Enabled: true}}
+	res = cleanJunk(context.Background(), env, []JunkSelection{{ID: "custom:" + tools}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || exists(note) || !exists(setup) {
+		t.Fatalf("custom folder took the installer: %+v", res)
+	}
+	res = cleanJunk(context.Background(), env, []JunkSelection{{ID: "review.installers"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || exists(setup) {
+		t.Fatalf("installers = %+v", res)
 	}
 }
 

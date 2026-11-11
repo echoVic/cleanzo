@@ -94,7 +94,8 @@ type junkEnv struct {
 	refreshGuard          func() *usageGuard
 	commandClaims         map[string]claimSet
 	lstat                 func(string) (fs.FileInfo, error)
-	observe               bool // scanning only: measure excluded capacity, never create extra deletion entries
+	observe               bool            // scanning only: measure excluded capacity, never create extra deletion entries
+	walked                map[string]bool // cleaning only: the rules whose recursiveFiles targets are walked; nil walks every rule's
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
@@ -385,14 +386,25 @@ func (env junkEnv) collectRecursiveFiles(dir string, names []string, age time.Du
 	if !safeResolved(key) && !slices.Contains(protectedHomeDirs, strings.TrimPrefix(key, home)) {
 		return
 	}
-	entries, err := os.ReadDir(dir) // all prefixes were checked above
+	env.walkRecursiveFiles(dir, resolvePath(dir), names, age, claims, spec) // all prefixes were checked above
+}
+
+// walkRecursiveFiles lists a folder that collectRecursiveFiles checked, as
+// resolved. Entries are judged from the listing: on macOS a folder that is
+// not a link is entered without another look, since an lstat per folder
+// made walking a large Documents folder take tens of seconds; one that
+// cannot be read is reported when its listing fails. On Windows each
+// folder is checked in full before it is entered, as its reparse and cloud
+// placeholder attributes are not in the listing's type. node_modules
+// folders hold packages' own files, not downloads, and are not entered.
+func (env junkEnv) walkRecursiveFiles(dir, resolved string, names []string, age time.Duration, claims claimSet, spec *itemSpec) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			spec.item.Denied = true
 		}
 		return
 	}
-	parent := resolvePath(dir)
 	for _, entry := range entries {
 		if env.toolContext().Err() != nil {
 			return
@@ -407,10 +419,10 @@ func (env junkEnv) collectRecursiveFiles(dir string, names []string, age time.Du
 		if !entry.IsDir() && !matches {
 			continue
 		}
-		if entry.IsDir() && (isPackage(entry.Name()) || ext == ".download" || ext == ".crdownload" || ext == ".part") {
+		if entry.IsDir() && (isPackage(entry.Name()) || ext == ".download" || ext == ".crdownload" || ext == ".part" || strings.EqualFold(entry.Name(), "node_modules")) {
 			continue
 		}
-		path := filepath.Join(parent, entry.Name())
+		path := filepath.Join(resolved, entry.Name())
 		key := strings.ToLower(path)
 		if !safeResolved(key) || env.protectedKey(key) || claims.claimedKey(key) {
 			continue
@@ -424,7 +436,11 @@ func (env junkEnv) collectRecursiveFiles(dir string, names []string, age time.Du
 				}
 				continue
 			}
-			env.collectRecursiveFiles(path, names, age, claims, spec)
+			if runtime.GOOS == "windows" {
+				env.collectRecursiveFiles(path, names, age, claims, spec)
+			} else {
+				env.walkRecursiveFiles(path, path, names, age, claims, spec)
+			}
 		} else if matches && entry.Type().IsRegular() {
 			env.collect(path, age, claims, spec)
 		}
@@ -488,6 +504,9 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 		var reserve []string
 		for _, target := range r.Targets {
+			if target.Mode == recursiveFiles && env.walked != nil && !env.walked[r.ID] {
+				continue
+			}
 			for _, root := range env.resolve(target.Pattern) {
 				if claims.claimed(root) {
 					continue
@@ -988,6 +1007,18 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 	defer trashCleanupGate.Unlock()
 	env.ctx = ctx
 	env.observe = false
+	// A rule that walks whole folders (the installers in Downloads, Desktop
+	// and Documents) is expanded only when it is selected, or when a custom
+	// folder is, whose entries the rule's claims keep apart: the walk takes
+	// half a minute in a large Documents folder.
+	env.walked = map[string]bool{}
+	for _, sel := range selections {
+		if strings.HasPrefix(sel.ID, "custom:") {
+			env.walked = nil
+			break
+		}
+		env.walked[sel.ID] = true
+	}
 	specs, _ := expandItems(&env)
 	byID := make(map[string]itemSpec, len(specs))
 	for _, s := range specs {
