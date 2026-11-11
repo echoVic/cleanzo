@@ -6,7 +6,8 @@ import { cn } from "../cn";
  * 逐项对齐原生 .btn（style.css）：
  * - 基础：13px / 590、padding 6px 14px、圆角 8px、1px 透明描边（所有按钮同高）、
  *   底色 var(--btn-bg) 半透明白、hover var(--hover)、active scale(0.97)、disabled 0.45。
- * - ghost = .btn.ghost：描边 var(--border)，底色仍是 var(--btn-bg)（不是透明）。
+ * - ghost = .btn.ghost：描边 var(--border-strong)，即 style.css 给交互控件定的、满足非文本对比度的描边；
+ *   底色仍是 var(--btn-bg)（不是透明）。
  * - sm = .btn.small：4px 10px / 12px / 圆角 7px；sm + ghost 时文字为 muted，hover 回到前景色。
  * - lg = .btn.big：11px 30px / 14px / 圆角 10px。
  */
@@ -20,7 +21,7 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground enabled:hover:bg-accent-solid-strong",
         destructive: "bg-destructive text-destructive-foreground enabled:hover:bg-danger-solid-strong disabled:border-border disabled:bg-btn-bg disabled:text-muted disabled:opacity-100",
-        ghost: "border-border",
+        ghost: "border-border-strong",
         link: "border-0 bg-transparent text-accent-strong underline-offset-4 enabled:hover:bg-transparent enabled:hover:underline",
       },
       size: {

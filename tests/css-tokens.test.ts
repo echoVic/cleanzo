@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
+import { cn } from "../src/ui/cn";
+import { buttonVariants } from "../src/ui/components/button";
 
 /**
  * CSS 防回归：
@@ -12,6 +14,7 @@ import { readFileSync, readdirSync } from "node:fs";
  * c) 读到的变量都有定义：未定义的变量只剩 fallback，换主题时不跟着变。
  * d) 同一规则里 gap 简写不写在 row-gap / column-gap 之后，否则会把它们改回去。
  * e) 写死时长的 transform 过渡（不走 --t-* 令牌）在减弱动态效果时要逐个关掉。
+ * f) React 的 ghost 按钮和 .btn.ghost 用同一个描边令牌。
  */
 
 const indexCss = readFileSync(new URL("../src/ui/index.css", import.meta.url), "utf8");
@@ -181,4 +184,15 @@ test("写死时长的 transform 过渡在减弱动态效果时关掉", () => {
     }
   }
   expect(missing).toEqual([]);
+});
+
+test("React 的 ghost 按钮和 .btn.ghost 用同一个描边令牌", () => {
+  const token = /\.btn\.ghost\s*\{[^}]*border-color:\s*var\((--[\w-]+)\)/.exec(stripComments(styleCss))?.[1];
+  expect(token).toBe("--border-strong");
+  // Tailwind 颜色名来自 index.css 的 --color-<名>: var(<令牌>)。
+  const color = new RegExp(`--color-([\\w-]+):\\s*var\\(${token}\\)`).exec(stripComments(indexCss))?.[1];
+  expect(color).toBeDefined();
+  for (const size of ["default", "sm", "lg"] as const) {
+    expect(cn(buttonVariants({ variant: "ghost", size })).split(" ")).toContain(`border-${color}`);
+  }
 });
