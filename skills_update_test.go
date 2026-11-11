@@ -330,6 +330,45 @@ func TestCCSwitchOriginIsReadOnly(t *testing.T) {
 	}
 }
 
+// fakeCCSwitch stands in for CC Switch's database with the given rows.
+func fakeCCSwitch(t *testing.T, home, rows string) {
+	t.Helper()
+	writeSkillFile(t, filepath.Join(home, ".cc-switch/cc-switch.db"), "")
+	saved := ccSwitchQuery
+	ccSwitchQuery = func(context.Context, string) ([]byte, error) { return []byte(rows), nil }
+	t.Cleanup(func() { ccSwitchQuery = saved })
+}
+
+// TestCCSwitchNameMatchNeedsForce: without a CC Switch store to tell its
+// folders apart, a folder that only shares a CC Switch skill's name and
+// differs from the source counts as modified, so upgrading it needs Force.
+func TestCCSwitchNameMatchNeedsForce(t *testing.T) {
+	home := skillFixture(t)
+	noOpenFiles(t)
+	newFakeGitHub(t, map[string]string{"skills/lark-doc/SKILL.md": "upstream\n"})
+	dir := filepath.Join(home, ".agents/skills/lark-doc")
+	writeSkill(t, dir, "my own\n")
+	fakeCCSwitch(t, home, `[{"directory":"lark-doc","repo_owner":"acme","repo_name":"skills","repo_branch":"main","readme_url":"https://github.com/acme/skills/blob/main/skills/lark-doc/SKILL.md"}]`)
+	ups, err := Cleaner{}.CheckSkillUpdates(context.Background())
+	if err != nil || len(ups) != 1 || ups[0].Origin.Kind != originCCSwitch || ups[0].Status != "update" || !ups[0].Modified {
+		t.Fatalf("name match = %+v, %v", ups, err)
+	}
+	res, _ := Cleaner{}.UpgradeSkills(context.Background(), []SkillUpgradeRequest{{Path: dir}})
+	if res[0].Error != "modified" {
+		t.Fatalf("unforced = %+v", res[0])
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != "my own\n" {
+		t.Fatal("a folder that only shares the name was replaced without Force")
+	}
+	res, _ = Cleaner{}.UpgradeSkills(context.Background(), []SkillUpgradeRequest{{Path: dir, Force: true}})
+	if res[0].Error != "" {
+		t.Fatalf("forced = %+v", res[0])
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != "upstream\n" {
+		t.Fatalf("forced upgrade left %q", b)
+	}
+}
+
 func TestGitCloneOriginAndUpgrade(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

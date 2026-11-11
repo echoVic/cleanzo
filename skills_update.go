@@ -38,7 +38,8 @@ import (
 //               repository, the SKILL.md path and the folder's git tree hash
 //   git         a skill folder that is itself a git clone
 //   cc-switch   ~/.cc-switch/cc-switch.db, read only: the repository and
-//               the SKILL.md path from its readme URL
+//               the SKILL.md path from its readme URL, for a folder in its
+//               store ~/.cc-switch/skills (or, without a store, of that name)
 //
 // A folder's version is its git tree hash, the hash GitHub reports for the
 // folder, computed locally the same way. A skill has an update when the
@@ -46,7 +47,9 @@ import (
 // when the folder no longer matches the tree it was installed at; such a
 // skill is upgraded only when the user confirms overwriting it. Without a
 // recorded installed tree (CC Switch keeps a hash of its own) the local
-// folder is compared with the source directly.
+// folder is compared with the source directly; a CC Switch folder known by
+// its name alone counts as modified when it differs, as it may be the
+// user's own. A folder identical to its source is current and unmodified.
 //
 // Upgrading downloads the repository archive from codeload.github.com,
 // checks that the extracted folder has exactly the tree GitHub reported,
@@ -364,6 +367,24 @@ func loadCCSwitch(ctx context.Context) map[string]SkillOrigin {
 	return out
 }
 
+// ccSwitchStore is the folder CC Switch keeps its skills in, resolved, and
+// whether there is one. CC Switch links or copies them from there into the
+// tools' skills folders; before it had a store it installed into those
+// folders directly, where its folders only have their names to go by.
+func ccSwitchStore() (string, bool) {
+	dir := filepath.Join(homeDir(), ".cc-switch", "skills")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", false
+	}
+	return resolvePath(dir), true
+}
+
+// ccSwitchStoreHolds reports whether folder (resolved) is in CC Switch's store.
+func ccSwitchStoreHolds(folder string) bool {
+	store, ok := ccSwitchStore()
+	return ok && filepath.Dir(folder) == store
+}
+
 // skillFolderOf turns "skills/x/SKILL.md" into "skills/x".
 func skillFolderOf(skillPath string) string {
 	p := path.Clean(strings.TrimPrefix(skillPath, "/"))
@@ -419,6 +440,7 @@ func skillOrigins(ctx context.Context, skills []Skill) map[string]SkillOrigin {
 	records := loadSkillRecords()
 	lock := loadSkillLock()
 	cc := loadCCSwitch(ctx)
+	_, ccStore := ccSwitchStore()
 	out := map[string]SkillOrigin{}
 	for _, s := range skills {
 		for _, c := range s.Copies {
@@ -441,7 +463,9 @@ func skillOrigins(ctx context.Context, skills []Skill) map[string]SkillOrigin {
 				out[c.Real] = o
 				continue
 			}
-			if o, ok := cc[filepath.Base(c.Real)]; ok {
+			// With a store, a CC Switch row names a folder in it; a folder
+			// elsewhere that shares the name is not CC Switch's.
+			if o, ok := cc[filepath.Base(c.Real)]; ok && (!ccStore || ccSwitchStoreHolds(c.Real)) {
 				out[c.Real] = o
 			}
 		}
@@ -719,6 +743,11 @@ func checkOneForPlatform(ctx context.Context, folder, name string, o SkillOrigin
 		// to lose, whatever tree was recorded at install.
 		u.Status, u.Modified = "current", false
 		return u
+	}
+	if o.Kind == originCCSwitch && o.Tree == "" && !ccSwitchStoreHolds(folder) {
+		// Matched to CC Switch by its name alone, the folder may be the
+		// user's own: a difference from the source is a local change.
+		u.Modified = true
 	}
 	base := o.Tree
 	if base == "" {

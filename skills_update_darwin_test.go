@@ -152,6 +152,30 @@ func TestDSStoreCountsWhereTheSourceHasOne(t *testing.T) {
 	}
 }
 
+// TestCCSwitchOriginNeedsItsStore: once CC Switch keeps its own store, its
+// rows give an origin only to the store's folders, reached through a link
+// from a skills folder; a folder of the user's that shares a name gets none.
+func TestCCSwitchOriginNeedsItsStore(t *testing.T) {
+	home := skillFixture(t)
+	store := filepath.Join(home, ".cc-switch/skills/lark-doc")
+	writeSkill(t, store, "from cc switch\n")
+	mustMkdir(t, filepath.Join(home, ".claude/skills"))
+	if err := os.Symlink(store, filepath.Join(home, ".claude/skills/lark-doc")); err != nil {
+		t.Fatal(err)
+	}
+	writeSkill(t, filepath.Join(home, ".agents/skills/mine"), "my own\n")
+	fakeCCSwitch(t, home, `[
+		{"directory":"lark-doc","repo_owner":"larksuite","repo_name":"cli","readme_url":"https://github.com/larksuite/cli/blob/main/skills/lark-doc/SKILL.md"},
+		{"directory":"mine","repo_owner":"someone","repo_name":"skills","readme_url":"https://github.com/someone/skills/blob/main/mine/SKILL.md"}]`)
+	ups, err := Cleaner{}.ListSkillOrigins(context.Background())
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("origins = %+v, %v", ups, err)
+	}
+	if ups[0].Path != resolvePath(store) || ups[0].Origin.Kind != originCCSwitch || ups[0].Origin.Repo != "larksuite/cli" {
+		t.Fatalf("origin = %+v", ups[0])
+	}
+}
+
 func TestCheckAndUpgradeLockedSkill(t *testing.T) {
 	home := skillFixture(t)
 	noOpenFiles(t)
