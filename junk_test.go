@@ -79,6 +79,54 @@ func TestChromeShaderCachesIncludeRootAndProfilesButNeverStorage(t *testing.T) {
 	t.Fatal("Chrome cache rule missing")
 }
 
+// TestNameFiltersIgnoreCase: a firmware file named in capitals is still the
+// file the rule looks for.
+func TestNameFiltersIgnoreCase(t *testing.T) {
+	env := testEnv(t)
+	dir := filepath.Join(env.home, "Library/iTunes/iPhone Software Updates")
+	writeFile(t, filepath.Join(dir, "X.IPSW"), 100)
+	writeFile(t, filepath.Join(dir, "notes.txt"), 100)
+	specs, _ := expandItems(&env)
+	for _, s := range specs {
+		if s.item.ID != "review.ipsw" {
+			continue
+		}
+		if len(s.cands) != 1 || filepath.Base(s.cands[0].path) != "X.IPSW" {
+			t.Fatalf("candidates = %+v", s.cands)
+		}
+		return
+	}
+	t.Fatalf("no review.ipsw row in %v", itemIDs(specs))
+}
+
+// TestAppChromiumCachesMatchTheBrowsers: an Electron or Chromium app's
+// Application Support folder offers the same GPU and code caches the browser
+// rules clean in each profile.
+func TestAppChromiumCachesMatchTheBrowsers(t *testing.T) {
+	env := testEnv(t)
+	app := filepath.Join(env.home, "Library/Application Support/SomeApp")
+	for _, d := range []string{"ShaderCache", "GraphiteDawnCache", "GPUCache"} {
+		writeFile(t, filepath.Join(app, d, "data"), 100)
+	}
+	writeFile(t, filepath.Join(app, "IndexedDB", "keep"), 100)
+	specs, _ := expandItems(&env)
+	for _, s := range specs {
+		if s.item.ID != "app:dir:someapp" {
+			continue
+		}
+		var names []string
+		for _, c := range s.cands {
+			names = append(names, filepath.Base(filepath.Dir(c.path)))
+		}
+		slices.Sort(names)
+		if !slices.Equal(names, []string{"GPUCache", "GraphiteDawnCache", "ShaderCache"}) {
+			t.Fatalf("app caches = %v", names)
+		}
+		return
+	}
+	t.Fatalf("no app row in %v", itemIDs(specs))
+}
+
 // TestProtectedAndCustom checks junk expansion.
 func TestProtectedAndCustom(t *testing.T) {
 	env := testEnv(t)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"slices"
 	"time"
 )
 
@@ -182,11 +183,16 @@ var darwinJunkRules = []Rule{
 	{ID: "sys.apple", Group: groupSystem, Default: true, Targets: []Target{{Pattern: "Library/Caches/com.apple.*", Mode: matched}}},
 }
 
+// chromiumCompiledCaches are the folders of compiled scripts and GPU shaders
+// Chromium keeps in each browser profile and Electron apps keep in their
+// data folder.
+var chromiumCompiledCaches = []string{"Code Cache", "GPUCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "GraphiteDawnCache"}
+
 // chromiumProfileCaches are the cache folders Chromium keeps in each profile
 // under profiles, a pattern such as ".../Google/Chrome/*".
 func chromiumProfileCaches(profiles string) []Target {
 	var ts []Target
-	for _, d := range []string{"Code Cache", "GPUCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "GraphiteDawnCache"} {
+	for _, d := range chromiumCompiledCaches {
 		ts = append(ts, Target{Pattern: profiles + "/" + d, Mode: entriesOf}) // slash-ok: rule patterns always use slash-separated components
 	}
 	return ts
@@ -230,7 +236,7 @@ var unselectedApps = map[string]bool{"com.spotify.client": true, "com.netease.16
 
 // chromiumCacheDirs are the cache folders Electron and Chromium apps keep in
 // their Application Support folder.
-var chromiumCacheDirs = []string{"Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache", "CachedData", "logs"}
+var chromiumCacheDirs = slices.Concat([]string{"Cache"}, chromiumCompiledCaches, []string{"CachedData", "logs"})
 
 // junkRules selects the host catalog without changing the macOS table.
 var junkRules = func() []Rule {

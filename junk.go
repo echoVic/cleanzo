@@ -304,11 +304,13 @@ func (s *itemSpec) addRoot(env junkEnv, p string) {
 	}
 }
 
-// nameMatches accepts a target's optional name filters.
+// nameMatches accepts a target's optional name filters, which are lower case
+// and match a name without regard to case (X.IPSW, Setup.DMG).
 func nameMatches(name string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
+	name = strings.ToLower(name)
 	return slices.ContainsFunc(patterns, func(pattern string) bool { hit, _ := filepath.Match(pattern, name); return hit })
 }
 
@@ -421,7 +423,7 @@ func (env junkEnv) walkRecursiveFiles(dir, resolved string, names []string, age 
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		matches := nameMatches(strings.ToLower(entry.Name()), names)
+		matches := nameMatches(entry.Name(), names)
 		// A nonmatching file cannot become a candidate. Avoid resolving and
 		// guarding every source, dependency and media file in large folders.
 		if !entry.IsDir() && !matches {
@@ -535,7 +537,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			}
 		}
 		if len(r.ExcludeNames) > 0 {
-			spec.cands = slices.DeleteFunc(spec.cands, func(c junkCand) bool { return nameMatches(strings.ToLower(filepath.Base(c.path)), r.ExcludeNames) })
+			spec.cands = slices.DeleteFunc(spec.cands, func(c junkCand) bool { return nameMatches(filepath.Base(c.path), r.ExcludeNames) })
 		}
 		for _, c := range spec.cands {
 			claims.claim(c.path)
