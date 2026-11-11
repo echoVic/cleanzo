@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"time"
 )
@@ -68,10 +69,11 @@ var batteryProfiler = "/usr/sbin/system_profiler"
 func statusBattery(ctx context.Context) *BatteryStatus {
 	cmd := exec.CommandContext(ctx, batteryProfiler, "-json", "SPPowerDataType")
 	// A child that keeps the output open is not waited for: the read ends a
-	// second after the deadline or system_profiler's exit.
+	// second after the deadline or system_profiler's exit. ErrWaitDelay means
+	// system_profiler exited zero, so what it printed is whole.
 	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return nil
 	}
 	b := parseBatteryJSON(out)
