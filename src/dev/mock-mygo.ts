@@ -3,7 +3,7 @@ import type {
   Cleaner, LanguageSettings, ThemeSettings, AppInfo, AppUpdate, BigItem, CleanResult, DirItem,
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
-  ProcessRow, ProcessSample,
+  ProcessRow, ProcessSample, TrashReminderConfig,
   Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate,
   AIGroup, AIPart, AIScanResult, AITool, AIToolInfo,
   AIModelEntry, AIModelSource, AIModelSourceInfo, AIModelsResult,
@@ -71,6 +71,8 @@ function createRuntime(): Runtime {
   // 占用增长：ToDesk（/Library 下的 dumps 在涨）和飞书（LarkShell）
   let growthConfig: GrowthConfig = { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [] as string[], asked: true };
   let menuBarItems: string[] = ["cpu", "mem"];
+  // 废纸篓提醒：和 Go 的默认一样，打开、超过 1 GB 提醒。
+  let trashReminder: TrashReminderConfig = { enabled: true, thresholdGB: 1 };
   const nowSec = () => Math.floor(Date.now() / 1000);
   const growthApps = (): GrowthApp[] => [
     { key: "app:com.youqu.todesk.mac", name: "ToDesk", kind: "app", orphan: false, appPath: "/Applications/ToDesk.app",
@@ -582,6 +584,13 @@ function createRuntime(): Runtime {
       menuBarItems = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"].filter((it) => items.includes(it));
       if (menuBarItems.length === 0 && !growthConfig.enabled) growthConfig = { ...growthConfig, openAtLogin: false };
     },
+    "Cleaner.TrashReminder": async () => ({ supported: true, config: trashReminder, fda: true }),
+    // 和 Go 一样只收 1 / 2 / 5 / 10 GB；提醒、后台监控、菜单栏读数都关着时取消开机启动。
+    "Cleaner.SaveTrashReminder": async (c) => {
+      if (![1, 2, 5, 10].includes(c.thresholdGB)) throw new Error("invalid trash reminder threshold");
+      trashReminder = { enabled: c.enabled, thresholdGB: c.thresholdGB };
+      if (!c.enabled && !growthConfig.enabled && menuBarItems.length === 0) growthConfig = { ...growthConfig, openAtLogin: false };
+    },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
       await emit(sample());
       for (;;) { await wait(200); await emit(sample()); }
@@ -727,6 +736,8 @@ function createRuntime(): Runtime {
       if (!cl) throw new Error("mock: photo not found");
       return svg(cl.id, cl.kind === "exact" ? 0 : cl.items.findIndex((it) => it.path === path), 1200, 900);
     },
+    // 没有图标：页面一直显示名字首字母，和 Go 取不到图标时一样。
+    "Cleaner.AppIcon": async (_path) => "",
     "Cleaner.ListApps": async () => apps.filter((a) => !isGone(a.path)),
     "Cleaner.CheckAppUpdates": async (ids, ch) => stream(ch, async (emit) => {
       for (const id of ids) {
@@ -771,7 +782,7 @@ function createRuntime(): Runtime {
       }
       theme = preference;
     },
-  } satisfies Partial<Bindings>;
+  } satisfies Bindings;
 
   return {
     async call<T>(method: string, ...args: unknown[]): Promise<T> {
