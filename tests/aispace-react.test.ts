@@ -136,7 +136,29 @@ test("a clean with failed entries names the first reason in its toast and keeps 
   expect(text).toContain(t("aispace.done", { size: human(1024) }));
   expect(text).toContain(t("aispace.done.kept", { n: 2 }));
   expect(text).toContain(t("aispace.done.skipped", { n: 2 }));
-  expect(text).toContain(unreadable);
+  expect(text).toContain("~/.ollama/models/manifests/registry.ollama.ai/library/llama3/latest: 读不出来");
+  expect(text).not.toContain("unreadable");
   expect(text).not.toContain("in-use");
   expect(cleanToastText(cleanReport([{ freed: 0, parts: [] }]), t, human)).toBe(t("aispace.done", { size: human(0) }));
+});
+
+test("the first failure in the toast keeps its path and reads its code in the interface language", () => {
+  const first = (failed: string) =>
+    cleanToastText(cleanReport([{ freed: 0, parts: [{ tool: "claude", part: "claude.cache", moved: 0, freed: 0, kept: 0, skipped: "", failed: [failed] }] }]), t, human)
+      .split(" · ").at(-1);
+  try {
+    setLang("en");
+    expect(first("~/.ollama/models/manifests/x/latest: unreadable")).toBe("~/.ollama/models/manifests/x/latest: could not be read");
+    expect(first("~/.claude/cache: in-use")).toBe(`~/.claude/cache: ${t("fs.inUse")}`);
+    expect(first("~/.claude/cache: blocked")).toBe(`~/.claude/cache: ${t("fs.blocked")}`);
+    expect(first('~/.claude/cache: {"code":"gone"}')).toBe(`~/.claude/cache: ${t("fs.gone")}`);
+    // 路径里有「: 」也照原样，只翻最后的代码。
+    expect(first("~/Notes: old/x: not-recycled")).toBe(`~/Notes: old/x: ${t("fs.notRecycled")}`);
+    setLang("zh");
+    expect(first("~/.claude/cache: in-use")).toBe(`~/.claude/cache: ${t("fs.inUse")}`);
+    expect(first("~/.claude/cache: in-use")).not.toContain("in-use");
+    // 不认识的代码、系统的错误原文：照原样显示。
+    expect(first("~/.claude/cache: weird-code")).toBe("~/.claude/cache: weird-code");
+    expect(first("~/.claude/cache: open /Users/a/.claude/cache: permission denied")).toBe("~/.claude/cache: open /Users/a/.claude/cache: permission denied");
+  } finally { setLang("zh"); }
 });

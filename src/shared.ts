@@ -16,6 +16,7 @@ function errText(e: unknown): string {
     "not-recycled": "fs.notRecycled",
     "connected-files": "fs.connectedFiles",
     gone: "fs.gone",
+    unreadable: "fs.unreadable",
     unsupported: "fs.unsupported",
     "not-app": "fs.notApp",
     "launch-failed": "apps.launchFailed",

@@ -1,4 +1,5 @@
 import type { AICleanResult, AIPart, AITool } from "../../mygo";
+import { errText } from "../../shared";
 
 /** 一个工具的一个部分：页面上的行都由它们合成。 */
 export interface PartRow {
@@ -144,11 +145,21 @@ export function cleanReport(results: readonly (AICleanResult | null)[]): CleanRe
 
 type DoneKey = "aispace.done" | "aispace.done.kept" | "aispace.done.skipped";
 
+/**
+ * 一条失败「路径: 代码」：路径照原样，代码按当前语言说出来。代码取最后一个「: 」之后的部分，
+ * 路径里带「: 」也不受影响；不认识的代码和系统的错误原文照原样显示。
+ */
+function failureText(entry: string): string {
+  const at = entry.lastIndexOf(": ");
+  if (at < 0) return errText(entry);
+  return `${entry.slice(0, at)}: ${errText(entry.slice(at + 2))}`;
+}
+
 /** 清理完成的提示：移走的大小，再加保留和跳过的计数；有失败时附上第一条，说清是哪个文件、为什么。 */
 export function cleanToastText(report: CleanReport, t: (key: DoneKey, vars?: Record<string, string | number>) => string, human: (n: number) => string): string {
   const lines = [t("aispace.done", { size: human(report.freed) })];
   if (report.kept > 0) lines.push(t("aispace.done.kept", { n: report.kept }));
   if (report.skipped > 0) lines.push(t("aispace.done.skipped", { n: report.skipped }));
-  if (report.failed) lines.push(report.failed);
+  if (report.failed) lines.push(failureText(report.failed));
   return lines.join(" · ");
 }
