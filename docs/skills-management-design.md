@@ -1,7 +1,8 @@
 # Cleanzo 新模块设计 · 技能管理（Agent Skills）
 
 > 版本：v0.1 ｜ 日期：2026-10-18
-> 代码：`skills.go`、`skills_test.go`、`src/react/skills/`、`tests/skills-react.test.ts`
+> 代码：`skills.go`、`skills_update.go`、`skills_*_test.go`、`src/react/skills/`、`tests/skills-react.test.ts`
+> 现状：检查更新与升级（`skills_update.go`）是后来加的，本文没有覆盖，以代码为准。
 > 定位一句话：**把散在各个 AI 工具目录里的技能汇总成一份清单，用对话记录里的真实调用说明哪些在用、哪些久未使用，标出重复、分叉和失效的副本；清理只进废纸篓，合并只做内容完全相同的副本。**
 
 ---

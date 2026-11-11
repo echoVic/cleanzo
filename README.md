@@ -2,7 +2,7 @@
 
 **看得懂 AI 和开发工具吃了多少空间，删了还能拿回来的 macOS / Windows 清理器。**
 
-免费开源（MIT）· 原生 Go 单二进制约 8 MB · 不需要管理员权限 · 没有账号、没有遥测 · 清理前列出每一类，随时可以停
+免费开源（MIT）· 原生 Go 单二进制，安装包约 5 MB · 不需要管理员权限 · 没有账号、没有遥测 · 清理前列出每一类，随时可以停
 
 [![Release](https://img.shields.io/github/v/release/echoVic/cleanzo?label=release&color=2ea043)](https://github.com/echoVic/cleanzo/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)

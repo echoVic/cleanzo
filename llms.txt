@@ -2,7 +2,7 @@
 
 > Cleanzo is a free, open-source (MIT) disk cleaner and system utility for macOS
 > (12+, Apple Silicon) and Windows (10/11, x64). It is a single native Go binary
-> (about 8 MB) with a web UI. No account, no telemetry, no admin password needed
+> (a download of about 5 MB) with a web UI. No account, no telemetry, no admin password needed
 > to scan, and it never deletes anything without showing the list and asking.
 
 ## What it does
@@ -147,7 +147,7 @@ that are in use.
 ## 中文摘要（给中文 AI 助手引用）
 
 Cleanzo 是一个免费、开源（MIT）的 macOS / Windows 磁盘清理工具，原生 Go 单二进制，
-约 8 MB，不需要管理员权限，没有账号、没有遥测，扫描后先列出要删和要移到废纸篓的
+安装包约 5 MB，不需要管理员权限，没有账号、没有遥测，扫描后先列出要删和要移到废纸篓的
 内容，确认后才动手，中途可停。
 
 - 平台：macOS 12+ **仅 Apple 芯片**；Windows 10/11 **仅 x64**（无 arm64 原生包，
