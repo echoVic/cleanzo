@@ -182,15 +182,30 @@ func TestEmptyQueueManyFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, files, inUse, err := emptyQueue(context.Background(), dir, &usageGuard{running: map[string]bool{}}, nil)
-	if err != nil || inUse != 0 || files != int64(n) {
-		t.Fatalf("err %v inUse %d files %d of %d", err, inUse, files, n)
+	_, files, inUse, blocked, err := emptyQueue(context.Background(), dir, &usageGuard{running: map[string]bool{}}, nil)
+	if err != nil || inUse != 0 || blocked != 0 || files != int64(n) {
+		t.Fatalf("err %v inUse %d blocked %d files %d of %d", err, inUse, blocked, files, n)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("%d entries left", len(entries))
 	}
 	if !exists(dir) {
 		t.Fatal("queue folder removed")
+	}
+}
+
+// TestMeasureCrashpadStopsWhenCancelled: a scan that ends stops measuring
+// report queues.
+func TestMeasureCrashpadStopsWhenCancelled(t *testing.T) {
+	env := testEnv(t)
+	codexWeb, _, _ := crashpadFixture(t, env)
+	if size, files, _, _ := measureCrashpad(context.Background(), codexWeb); size != 57000 || files != 11 {
+		t.Fatalf("size %d files %d", size, files)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if size, files, _, _ := measureCrashpad(ctx, codexWeb); size != 0 || files != 0 {
+		t.Fatalf("cancelled: size %d files %d", size, files)
 	}
 }
 

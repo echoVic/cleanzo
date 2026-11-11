@@ -43,15 +43,19 @@ func crashThresholdNow() int64 {
 }
 
 // measureCrashpad sums the report queues of a Crashpad database, leaving
-// settings.dat out, so a database with nothing queued measures zero.
-func measureCrashpad(db string) (size, files int64, newest time.Time, readErrors int) {
+// settings.dat out, so a database with nothing queued measures zero. It stops
+// between queues when ctx ends.
+func measureCrashpad(ctx context.Context, db string) (size, files int64, newest time.Time, readErrors int) {
 	for _, q := range crashpadQueues {
+		if ctx.Err() != nil {
+			return
+		}
 		dir := filepath.Join(db, q)
 		info, err := os.Lstat(dir)
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		s, f, n, e := measureChecked(dir)
+		s, f, n, e := measureChecked(dir, ctx)
 		size, files, readErrors = size+s, files+f, readErrors+e
 		if n.After(newest) {
 			newest = n
@@ -70,42 +74,50 @@ const crashpadBatch = 4096
 
 // emptyCrashpad removes what the report queues of db hold, keeping the
 // queue folders and anything a process has open. progress is called after
-// each batch with the bytes freed so far.
-func emptyCrashpad(ctx context.Context, db string, guard *usageGuard, progress func(freed int64)) (freed, files, inUse int64, err error) {
+// each batch with the bytes freed so far. blocked counts the entries that
+// could not be removed.
+func emptyCrashpad(ctx context.Context, db string, guard *usageGuard, progress func(freed int64)) (freed, files, inUse, blocked int64, err error) {
 	for _, q := range crashpadQueues {
 		dir := filepath.Join(db, q)
 		info, lerr := os.Lstat(dir)
 		if lerr != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 			continue
 		}
-		f, n, u, qerr := emptyQueue(ctx, dir, guard, func(b int64) {
+		f, n, u, b, qerr := emptyQueue(ctx, dir, guard, func(b int64) {
 			if progress != nil {
 				progress(freed + b)
 			}
 		})
-		freed, files, inUse = freed+f, files+n, inUse+u
+		freed, files, inUse, blocked = freed+f, files+n, inUse+u, blocked+b
 		if qerr != nil {
-			return freed, files, inUse, qerr
+			return freed, files, inUse, blocked, qerr
 		}
 	}
-	return freed, files, inUse, ctx.Err()
+	return freed, files, inUse, blocked, ctx.Err()
 }
 
 // emptyQueue removes a queue folder's entries in batches. Entries a removal
-// skips (in use) are counted once; a pass that removes nothing ends it.
-func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress func(int64)) (freed, files, inUse int64, err error) {
+// skips (in use) and entries it cannot remove (blocked) are counted once,
+// what disappeared meanwhile not at all; a pass that removes nothing ends it.
+func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress func(int64)) (freed, files, inUse, blocked int64, err error) {
 	real := resolvePath(dir)
 	kept := map[string]bool{}
+	failed := func(name string, err error) {
+		kept[name] = true
+		if !errors.Is(err, fs.ErrNotExist) {
+			blocked++
+		}
+	}
 	for {
 		removed := false
 		d, oerr := os.Open(dir)
 		if oerr != nil {
-			return freed, files, inUse, oerr
+			return freed, files, inUse, blocked, oerr
 		}
 		for {
 			if ctx.Err() != nil {
 				d.Close()
-				return freed, files, inUse, ctx.Err()
+				return freed, files, inUse, blocked, ctx.Err()
 			}
 			entries, rerr := d.ReadDir(crashpadBatch)
 			for _, e := range entries {
@@ -124,14 +136,14 @@ func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress fun
 					if info, ierr := e.Info(); ierr == nil && info.Mode().IsRegular() {
 						size, n = onDisk(info), 1
 					}
-					if os.Remove(p) != nil {
-						kept[name] = true
+					if rerr := os.Remove(p); rerr != nil {
+						failed(name, rerr)
 						continue
 					}
 				} else {
-					size, n, _, _ = measureChecked(p)
-					if removeAll(p) != nil {
-						kept[name] = true
+					size, n, _, _ = measureChecked(p, ctx)
+					if rerr := removeAll(p); rerr != nil {
+						failed(name, rerr)
 						continue
 					}
 				}
@@ -145,13 +157,13 @@ func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress fun
 			}
 			if rerr != nil {
 				d.Close()
-				return freed, files, inUse, rerr
+				return freed, files, inUse, blocked, rerr
 			}
 		}
 		d.Close()
 		// Removing while reading may leave entries the listing skipped.
 		if !removed {
-			return freed, files, inUse, nil
+			return freed, files, inUse, blocked, nil
 		}
 	}
 }

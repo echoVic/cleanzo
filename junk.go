@@ -768,9 +768,14 @@ candidates:
 			if measuring != nil {
 				measuring(c.path)
 			}
-			size, files, changed, failures := measureChecked(c.path, ctx)
+			var size, files int64
+			var changed time.Time
+			var failures int
 			if contents {
-				size, files, changed, failures = measureCrashpad(c.path)
+				// A Crashpad database counts its report queues only.
+				size, files, changed, failures = measureCrashpad(ctx, c.path)
+			} else {
+				size, files, changed, failures = measureChecked(c.path, ctx)
 			}
 			measured[i], newest[i], errorsSeen[i] = cleanEntry{c.path, size, files}, changed, failures
 		}()
@@ -1172,7 +1177,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 				continue
 			}
 			base := *cleaned
-			freed, files, inUse, err := emptyCrashpad(ctx, e.path, env.guard, func(b int64) {
+			freed, files, inUse, blocked, err := emptyCrashpad(ctx, e.path, env.guard, func(b int64) {
 				if hooks.removed != nil {
 					hooks.removed(spec.item.ID, e.path, base+b)
 				}
@@ -1181,7 +1186,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			res.Files += files
 			res.InUse += inUse
 			*cleaned += freed
-			if err != nil && ctx.Err() == nil {
+			if blocked > 0 || err != nil && ctx.Err() == nil {
 				res.Failed = append(res.Failed, "blocked")
 			}
 			continue
