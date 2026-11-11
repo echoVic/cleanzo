@@ -61,6 +61,97 @@ func TestGitTreeHashMatchesGit(t *testing.T) {
 	}
 }
 
+// gitListing lists a folder as GitHub's tree API does, from git itself: every
+// tree and blob with its hash and mode. Nothing is ignored, so a .DS_Store
+// in the folder is part of the listing as it is of a commit.
+func gitListing(dir string) (any, error) {
+	home, err := os.MkdirTemp("", "gitlisting")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(home)
+	git := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+home, "XDG_CONFIG_HOME="+home)
+		out, err := cmd.Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := git("init", "-q"); err != nil {
+		return nil, err
+	}
+	if _, err := git("add", "-A"); err != nil {
+		return nil, err
+	}
+	root, err := git("write-tree")
+	if err != nil {
+		return nil, err
+	}
+	out, err := git("ls-tree", "-r", "-t", "-z", root)
+	if err != nil {
+		return nil, err
+	}
+	tree := []map[string]string{}
+	for _, line := range strings.Split(out, "\x00") {
+		meta, name, ok := strings.Cut(line, "\t")
+		if f := strings.Fields(meta); ok && len(f) == 3 {
+			tree = append(tree, map[string]string{"mode": f[0], "type": f[1], "sha": f[2], "path": name})
+		}
+	}
+	return map[string]any{"sha": root, "tree": tree, "truncated": false}, nil
+}
+
+// TestDSStoreCountsWhereTheSourceHasOne: a .DS_Store the repository commits
+// is part of the skill, so the folder is unmodified and its upgrade matches;
+// one Finder left where the source has none is still left out.
+func TestDSStoreCountsWhereTheSourceHasOne(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	home := skillFixture(t)
+	noOpenFiles(t)
+	gh := newFakeGitHub(t, map[string]string{
+		"skills/doc/SKILL.md":       "v1\n",
+		"skills/doc/.DS_Store":      "committed\n",
+		"skills/doc/scripts/run.sh": "#!/bin/sh\n",
+	})
+	gh.listing = gitListing
+	listed, err := gitListing(gh.materialize(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree1 := ""
+	for _, e := range listed.(map[string]any)["tree"].([]map[string]string) {
+		if e["path"] == "skills/doc" {
+			tree1 = e["sha"]
+		}
+	}
+	dir := installLocked(t, home, "doc", map[string]string{
+		"SKILL.md": "v1\n", ".DS_Store": "committed\n", "scripts/run.sh": "#!/bin/sh\n", "scripts/.DS_Store": "finder\n",
+	}, tree1)
+
+	ups, _ := Cleaner{}.CheckSkillUpdates(context.Background())
+	if len(ups) != 1 || ups[0].Status != "current" || ups[0].Modified || ups[0].Local != tree1 {
+		t.Fatalf("committed .DS_Store: %+v (want local %s)", ups, tree1)
+	}
+	gh.files["skills/doc/SKILL.md"] = "v2\n"
+	ups, _ = Cleaner{}.CheckSkillUpdates(context.Background())
+	if ups[0].Status != "update" || ups[0].Modified {
+		t.Fatalf("after upstream change: %+v", ups[0])
+	}
+	res, err := Cleaner{}.UpgradeSkills(context.Background(), []SkillUpgradeRequest{{Path: dir}})
+	if err != nil || len(res) != 1 || res[0].Error != "" || res[0].Tree != ups[0].Remote {
+		t.Fatalf("upgrade = %+v, %v", res, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ".DS_Store")); string(b) != "committed\n" {
+		t.Fatalf(".DS_Store = %q", b)
+	}
+	ups, _ = Cleaner{}.CheckSkillUpdates(context.Background())
+	if ups[0].Origin.Kind != originCleanzo || ups[0].Status != "current" || ups[0].Modified {
+		t.Fatalf("after upgrade = %+v", ups[0])
+	}
+}
+
 func TestCheckAndUpgradeLockedSkill(t *testing.T) {
 	home := skillFixture(t)
 	noOpenFiles(t)

@@ -129,20 +129,24 @@ var (
 
 // gitTreeHash computes the hash git gives a folder as a tree: files are
 // blobs (100644, or 100755 when executable), links are 120000 with their
-// target, folders are subtrees; .git and .DS_Store are left out, as are
-// empty folders, which git cannot hold.
+// target, folders are subtrees; .git is left out, as are empty folders,
+// which git cannot hold. recorded is the source's listing of the folder's
+// files (relative path -> Git mode), when known.
 func gitTreeHash(dir string, recorded ...map[string]string) (string, error) {
 	var modes map[string]string
 	if runtime.GOOS == "windows" {
 		modes = loadSkillRecords()[resolvePath(dir)].Modes
-		if len(recorded) > 0 {
-			modes = recorded[0]
-		}
+	}
+	if len(recorded) > 0 {
+		modes = recorded[0]
 	}
 	return skillTreeHashWithModes(dir, modes, runtime.GOOS == "windows")
 }
 
-// skillTreeHashWithModes hashes source-recorded modes independently of the host filesystem.
+// skillTreeHashWithModes hashes a folder against the source's listing of its
+// files (modes): on Windows the listing gives the executable bit the file
+// system lacks, and everywhere a .DS_Store counts only where the listing has
+// one, so Finder's own files are left out.
 func skillTreeHashWithModes(dir string, modes map[string]string, windows bool) (string, error) {
 	h, empty, err := gitTreeWithModes(dir, dir, modes, windows)
 	if err != nil {
@@ -167,10 +171,15 @@ func gitTreeWithModes(dir, base string, modes map[string]string, windows bool) (
 	var list []entry
 	for _, e := range entries {
 		name := e.Name()
-		if name == ".git" || name == ".DS_Store" {
+		if name == ".git" {
 			continue
 		}
 		p := filepath.Join(dir, name)
+		if name == ".DS_Store" {
+			if rel, _ := filepath.Rel(base, p); modes[filepath.ToSlash(rel)] == "" {
+				continue
+			}
+		}
 		info, err := os.Lstat(p)
 		if err != nil {
 			return "", false, err
@@ -642,6 +651,12 @@ func checkOneForPlatform(ctx context.Context, folder, name string, o SkillOrigin
 		} else if o.Repo != "" && modes == nil {
 			// Offline origins remain unknown until source modes can be checked.
 			return u
+		}
+	} else if o.Kind != originGit && o.Repo != "" && online {
+		// The source's listing says which .DS_Store files belong to the
+		// skill. A listing that fails is reported below.
+		if listed, err := cache.get(ctx, o.Repo, o.Ref); err == nil {
+			tree, modes = listed, cache.sourceModes(o)
 		}
 	}
 	local, err := skillTreeHashWithModes(folder, modes, windows)

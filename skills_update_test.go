@@ -81,6 +81,9 @@ type fakeGitHub struct {
 	tarCalls  atomic.Int32
 	status    int // forced status for the tree API
 	lie       bool
+	// listing, when set, lists the written repository instead of hashing it
+	// with the code under test.
+	listing func(dir string) (any, error)
 }
 
 func newFakeGitHub(t *testing.T, files map[string]string) *fakeGitHub {
@@ -129,6 +132,15 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 				mode = 0o755
 			}
 			os.WriteFile(full, []byte(body), mode)
+		}
+		if f.listing != nil {
+			body, err := f.listing(dir)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(body)
+			return
 		}
 		type entry struct {
 			Path string `json:"path"`
