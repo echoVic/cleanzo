@@ -266,6 +266,30 @@ func TestWindowsUninstallFailsClosed(t *testing.T) {
 	}
 }
 
+// TestWindowsUninstallLaunchFailed: an allowed uninstaller that Windows does
+// not start, such as a declined elevation prompt, is launch-failed, not
+// blocked by the safety rules.
+func TestWindowsUninstallLaunchFailed(t *testing.T) {
+	roots := testUninstallRegistry(t)
+	exe := filepath.Join(t.TempDir(), "uninstall.exe")
+	writeFile(t, exe, 16)
+	seedUninstallKey(t, roots[0], "declined", map[string]string{"DisplayName": "Declined", "UninstallString": windows.EscapeArg(exe) + " /S"})
+	saved := runUninstaller
+	var launched []uninstallCommand
+	runUninstaller = func(c uninstallCommand) error {
+		launched = append(launched, c)
+		return windows.ERROR_CANCELLED
+	}
+	t.Cleanup(func() { runUninstaller = saved })
+	result := (Cleaner{}).UninstallApp("hkcu:declined")
+	if result.Launched || !reflect.DeepEqual(result.Failed, []string{"hkcu:declined: launch-failed"}) {
+		t.Fatalf("result=%+v", result)
+	}
+	if len(launched) != 1 || launched[0].exe != exe || launched[0].args != "/S" {
+		t.Fatalf("launched %+v", launched)
+	}
+}
+
 // TestWindowsUninstallNativeLayout checks every pointer-sensitive SHELLEXECUTEINFOW field.
 func TestWindowsUninstallNativeLayout(t *testing.T) {
 	info := shellExecuteInfo{}

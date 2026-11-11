@@ -179,12 +179,19 @@ func uninstallApp(id string) UninstallResult {
 	if err != nil {
 		return fail(errBlocked)
 	}
-	if err := launchUninstaller(command); err != nil {
-		return fail(errBlocked)
+	if err := runUninstaller(command); err != nil {
+		return fail(errLaunchFailed)
 	}
 	result.Launched = true
 	return result
 }
+
+// errLaunchFailed is the error for an allowed uninstaller that Windows did not
+// start, such as when the elevation prompt is declined; the UI translates it.
+var errLaunchFailed = errors.New("launch-failed")
+
+// runUninstaller starts the parsed uninstaller. Tests replace it.
+var runUninstaller = launchUninstaller
 
 // shellExecuteInfo mirrors SHELLEXECUTEINFOW; Windows tests assert its 64-bit layout.
 type shellExecuteInfo struct {
