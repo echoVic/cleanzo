@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -160,7 +161,8 @@ func TestWeekWindowBoundaries(t *testing.T) {
 		{"3 days minus 1 second", 3*24*time.Hour - time.Second, 0},
 		{"3 days", 3 * 24 * time.Hour, 1},
 		{"7 days", 7 * 24 * time.Hour, 1},
-		{"7 days plus 1 second", 7*24*time.Hour + time.Second, 0},
+		{"7 days 12 hours", 7*24*time.Hour + 12*time.Hour, 1},
+		{"7 days 12 hours plus 1 second", 7*24*time.Hour + 12*time.Hour + time.Second, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := []growthSnapshot{at(-tc.age, true, done(todesk, 0))}
@@ -174,10 +176,36 @@ func TestWeekWindowBoundaries(t *testing.T) {
 			if len(week) != tc.want {
 				t.Fatalf("week alerts = %+v, want %d", week, tc.want)
 			}
-			if tc.want == 1 && (week[0].Bytes != 12*gb || week[0].Days != int(tc.age/(24*time.Hour))) {
+			if tc.want == 1 && (week[0].Bytes != 12*gb || week[0].Days != int(math.Round(tc.age.Hours()/24))) {
 				t.Fatalf("week growth and actual days: %+v", week)
 			}
 		})
+	}
+}
+
+// Daily runs drift a little later each day. Seven runs back is then a bit more
+// than seven days old, and it is still the week's base; thirty runs back is
+// still the month's.
+func TestWindowsHoldDailyRunsThatDrift(t *testing.T) {
+	const runs = 31
+	step := 24*time.Hour + 15*time.Minute
+	var h []growthSnapshot
+	for i := runs - 1; i >= 0; i-- { // oldest first; 1.5 GB a day
+		h = append(h, at(-time.Duration(i)*step, true, done(todesk, int64(runs-1-i)*3*gb/2)))
+	}
+	cur := h[len(h)-1]
+	var week []GrowthAlert
+	for _, a := range evaluateGrowth(h[:len(h)-1], cur, cfg2(), byBase) {
+		if a.Window == "week" {
+			week = append(week, a)
+		}
+	}
+	if len(week) != 1 || week[0].Bytes != 21*gb/2 || week[0].Days != 7 {
+		t.Fatalf("1.5 GB a day reaches the 10 GB weekly alert over seven runs: %+v", week)
+	}
+	apps := buildGrowthApps(h, cfg2(), byBase, "/h", time.UTC)
+	if len(apps) != 1 || apps[0].Week == nil || apps[0].Week.Days != 7 || apps[0].Month == nil || apps[0].Month.Days != 30 || apps[0].Month.Bytes != 45*gb {
+		t.Fatalf("week %+v, month %+v", apps[0].Week, apps[0].Month)
 	}
 }
 

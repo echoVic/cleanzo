@@ -59,10 +59,15 @@ type GrowthFolder struct {
 
 // growthBase finds the record cur is compared with (spec §五), or nil:
 //   - "day": the latest record 20 to 28 hours older;
-//   - "week": the earliest record at most 7 days older and at least 3 days;
-//   - "month": the earliest record at most 30 days older and at least 8 days.
+//   - "week": the earliest record at most 7 days and 12 hours older and at
+//     least 3 days;
+//   - "month": the earliest record at most 30 days and 12 hours older and at
+//     least 8 days.
 //
-// Records taken with a different Full Disk Access never count.
+// Daily runs start a little later each day, so the run seven or thirty days
+// back is a little more than that old: the upper bounds allow for it, as the
+// day's 28 hours do. Records taken with a different Full Disk Access never
+// count.
 func growthBase(history []growthSnapshot, cur growthSnapshot, window string) *growthSnapshot {
 	var lo, hi time.Duration
 	latest := false
@@ -70,9 +75,9 @@ func growthBase(history []growthSnapshot, cur growthSnapshot, window string) *gr
 	case "day":
 		lo, hi, latest = 20*time.Hour, 28*time.Hour, true
 	case "week":
-		lo, hi = 3*24*time.Hour, 7*24*time.Hour
+		lo, hi = 3*24*time.Hour, 7*24*time.Hour+12*time.Hour
 	case "month":
-		lo, hi = 8*24*time.Hour, 30*24*time.Hour
+		lo, hi = 8*24*time.Hour, 30*24*time.Hour+12*time.Hour
 	default:
 		return nil
 	}
@@ -211,8 +216,8 @@ func memoGrowthOwner(owner func(growthEntry) growthOwner) func(growthEntry) grow
 // evaluateGrowth lists the owners whose growth in cur passes the thresholds
 // (spec §五):
 //   - a day, against the latest record 20 to 28 hours older;
-//   - seven days, against the earliest record within a week that is at least
-//     three days old.
+//   - seven days, against the earliest record within seven days and 12 hours
+//     that is at least three days old.
 //
 // The first record is a baseline only. Ignored owners and shrinking never
 // alert. The alerts come largest first.
