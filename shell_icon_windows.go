@@ -20,9 +20,11 @@ func refreshApplicationIcon() {
 		if err := shellChangeNotify.Find(); err != nil {
 			return err
 		}
-		// SHCNE_ASSOCCHANGED | SHCNF_IDLIST | SHCNF_FLUSH. No files, pins,
-		// associations or OS settings are changed. The API returns void.
-		shellChangeNotify.Call(0x08000000, 0x2000, 0, 0)
+		// SHCNE_ASSOCCHANGED (0x08000000) with SHCNF_IDLIST (0) |
+		// SHCNF_FLUSHNOWAIT (0x3000, shlobj.h): the flush starts without
+		// holding up the first window. No files, pins, associations or OS
+		// settings are changed. The API returns void.
+		shellChangeNotify.Call(0x08000000, 0x3000, 0, 0)
 		return nil
 	})
 	if err != nil {
