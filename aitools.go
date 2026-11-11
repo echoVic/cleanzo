@@ -500,10 +500,11 @@ func aiRunningApps(running map[string]bool, tool aiTool) []string {
 
 // scanAIRoot measures the parts of one of a tool's folders and adds them to
 // out. What the table does not know is listed as unknown, never offered:
-// entry by entry in the tool's own folder, as one item in another app's
-// folder (an Electron app keeps dozens of its own).
+// per top-level entry in the tool's own folder (what cli/ holds beside its
+// known parts counts as "cli"), as one item in another app's folder (an
+// Electron app keeps dozens of its own).
 func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool, out *AITool) error {
-	claimed := map[string]bool{} // top-level entries a known part accounts for
+	var covered []string // paths a known part accounts for
 	for _, part := range tool.Parts {
 		if part.Root != key {
 			continue
@@ -516,7 +517,7 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 			continue
 		}
 		for _, p := range paths {
-			claimed[strings.SplitN(strings.TrimPrefix(p, root+string(filepath.Separator)), string(filepath.Separator), 2)[0]] = true
+			covered = append(covered, filepath.Clean(p))
 		}
 		// A nested known part (plugins/cache) is measured on its own; its
 		// parent (plugins) reports the rest.
@@ -553,14 +554,7 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 		}
 		out.Parts = append(out.Parts, p)
 	}
-	entries, _ := os.ReadDir(root)
-	var rest []string
-	for _, e := range entries {
-		if claimed[e.Name()] || e.Name() == ".DS_Store" {
-			continue
-		}
-		rest = append(rest, filepath.Join(root, e.Name()))
-	}
+	rest := aiUncovered(root, covered)
 	add := func(id, name, path string, paths []string) {
 		var size, files, last int64
 		for _, p := range paths {
@@ -574,8 +568,22 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 		out.Parts = append(out.Parts, AIPart{ID: id, Name: name, Path: path, Level: aiUnknown, Size: size, Files: files, Last: last, Groups: []AIGroup{}, Top: top, More: more, Running: running})
 	}
 	if key == "" {
+		// Grouped by the top-level entry they are in, in folder order.
+		var tops []string
+		byTop := map[string][]string{}
 		for _, p := range rest {
-			add("unknown:"+filepath.Base(p), filepath.Base(p), p, []string{p})
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				continue
+			}
+			top := strings.SplitN(rel, string(filepath.Separator), 2)[0]
+			if byTop[top] == nil {
+				tops = append(tops, top)
+			}
+			byTop[top] = append(byTop[top], p)
+		}
+		for _, top := range tops {
+			add("unknown:"+top, top, filepath.Join(root, top), byTop[top])
 		}
 	} else {
 		add("unknown:"+key, filepath.Base(root), root, rest)
@@ -591,6 +599,25 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 		}
 	}
 	return nil
+}
+
+// aiUncovered lists the entries in dir that no covered path is or holds,
+// going into the folders that hold one. Finder's .DS_Store files are left out.
+func aiUncovered(dir string, covered []string) []string {
+	entries, _ := os.ReadDir(dir)
+	var out []string
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if e.Name() == ".DS_Store" || slices.ContainsFunc(covered, func(c string) bool { return within(p, c) }) {
+			continue
+		}
+		if e.IsDir() && slices.ContainsFunc(covered, func(c string) bool { return within(c, p) }) {
+			out = append(out, aiUncovered(p, covered)...)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // aiLevelRank orders parts on the page: what can be cleaned first.
@@ -617,21 +644,28 @@ func aiPartPaths(root string, part aiPart) []string {
 }
 
 // aiNested returns the folders of other known parts inside part's folder,
-// which part's size leaves out.
+// which part's size leaves out. Of a nested releases folder only the old
+// releases are left out: the release in use counts in part.
 func aiNested(tool aiTool, part aiPart, root string) []string {
 	if part.Glob {
 		return nil
 	}
-	base := filepath.Join(root, part.Path)
+	base := filepath.Clean(filepath.Join(root, part.Path))
 	var nested []string
 	for _, other := range tool.Parts {
 		if other.ID == part.ID || other.Glob || other.Root != part.Root {
 			continue
 		}
-		p := filepath.Join(root, other.Path)
-		if p != filepath.Clean(base) && within(p, filepath.Clean(base)) {
-			nested = append(nested, filepath.Clean(p))
+		p := filepath.Clean(filepath.Join(root, other.Path))
+		if p == base || !within(p, base) {
+			continue
 		}
+		if other.Releases {
+			_, old := releaseFolders(p)
+			nested = append(nested, old...)
+			continue
+		}
+		nested = append(nested, p)
 	}
 	return nested
 }
@@ -842,27 +876,41 @@ func traeSessionOf(p string) string {
 // use cannot be told apart.
 func oldReleases(ctx context.Context, dir string) (keep string, groups []AIGroup) {
 	groups = []AIGroup{}
+	keep, old := releaseFolders(dir)
+	for _, p := range old {
+		if ctx.Err() != nil {
+			break
+		}
+		name := filepath.Base(p)
+		size, _, last := measureAI(ctx, p, nil)
+		groups = append(groups, AIGroup{Key: name, Label: strings.SplitN(name, "-", 2)[0], Size: size, Count: 1, Last: last, Path: p})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Key < groups[j].Key })
+	return keep, groups
+}
+
+// releaseFolders returns the release a "current" link next to dir points to
+// and the other release folders in dir, without measuring them. Without a
+// readable link it returns none.
+func releaseFolders(dir string) (keep string, old []string) {
 	target, err := os.Readlink(filepath.Join(filepath.Dir(dir), "current"))
 	if err != nil {
-		return "", groups
+		return "", nil
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(dir), target)
 	}
 	keep = filepath.Base(filepath.Clean(target))
 	if filepath.Dir(filepath.Clean(target)) != filepath.Clean(dir) || !fileExists(target) {
-		return "", groups
+		return "", nil
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if !e.IsDir() || e.Name() == keep || ctx.Err() != nil {
-			continue
+		if e.IsDir() && e.Name() != keep {
+			old = append(old, filepath.Join(dir, e.Name()))
 		}
-		size, _, last := measureAI(ctx, filepath.Join(dir, e.Name()), nil)
-		groups = append(groups, AIGroup{Key: e.Name(), Label: strings.SplitN(e.Name(), "-", 2)[0], Size: size, Count: 1, Last: last, Path: filepath.Join(dir, e.Name())})
 	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].Key < groups[j].Key })
-	return keep, groups
+	return keep, old
 }
 
 // aiTopEntries lists the largest direct entries of a part: a folder's
@@ -1115,7 +1163,7 @@ func aiTargets(root string, tool aiTool, part aiPart, groups []string) (targets 
 		dir := paths[0]
 		keep := ""
 		if part.Releases {
-			keep, _ = oldReleases(context.Background(), dir)
+			keep, _ = releaseFolders(dir)
 			if keep == "" {
 				return nil, 0, errAIRefused
 			}

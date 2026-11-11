@@ -513,6 +513,57 @@ func TestScanAIToolTRAE(t *testing.T) {
 	}
 }
 
+// TestAIPartsAddUp: every file under a tool's folders counts in one part, so
+// the parts add up to the folders. The release in use counts in the protected
+// packages part; what a folder holds next to known parts (TRAE's CLI binary
+// beside its sessions, the IDE's other agent data) is listed as unknown.
+func TestAIPartsAddUp(t *testing.T) {
+	home, _ := traeFixture(t)
+	for rel, size := range map[string]int{
+		".trae/cli/bin/traecli":  16384,
+		".trae/cli/version.json": 100,
+		"Library/Application Support/Trae CN/ModularData/other/state.db": 4096,
+	} {
+		p := filepath.Join(home, rel)
+		mustMkdir(t, filepath.Dir(p))
+		if err := os.WriteFile(p, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	res, err := (Cleaner{}).ScanAITools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range aiTools {
+		var want, got int64
+		for _, key := range aiRootKeys(tool) {
+			if root := aiRootDir(tool, key); root != "" {
+				size, _, _ := measureAI(ctx, root, nil)
+				want += size
+			}
+		}
+		for _, p := range aiTool_(t, res, tool.ID).Parts {
+			got += p.Size
+		}
+		if got != want {
+			t.Errorf("%s: parts add up to %d, folders hold %d", tool.ID, got, want)
+		}
+	}
+	codex := aiTool_(t, res, "codex")
+	current, _, _ := measureAI(ctx, filepath.Join(home, ".codex/packages/app-server-daemon/releases/0.2.0-aarch64-apple-darwin"), nil)
+	if p := aiPart_(t, codex, "codex.packages"); p.Level != aiProtected || p.Files != 1 || p.Size != current {
+		t.Errorf("packages = %+v, want the release in use (%d bytes)", p, current)
+	}
+	trae := aiTool_(t, res, "trae")
+	if p := aiPart_(t, trae, "unknown:cli"); p.Level != aiUnknown || p.Name != "cli" || p.Path != filepath.Join(home, ".trae/cli") || p.Files != 2 {
+		t.Errorf("unknown cli = %+v", p)
+	}
+	if p := aiPart_(t, trae, "unknown:ide"); p.Files != 2 {
+		t.Errorf("unknown ide = %+v", p)
+	}
+}
+
 func TestCleanAIToolsTRAE(t *testing.T) {
 	home, project := traeFixture(t)
 	ide := filepath.Join(home, "Library/Application Support/Trae CN")
