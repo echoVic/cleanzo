@@ -18,6 +18,7 @@ function errText(e: unknown): string {
     gone: "fs.gone",
     unsupported: "fs.unsupported",
     "not-app": "fs.notApp",
+    "launch-failed": "apps.launchFailed",
   };
   if (plain[raw]) return t(plain[raw] as never);
   try {

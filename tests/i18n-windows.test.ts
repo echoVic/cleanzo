@@ -48,6 +48,19 @@ test("Windows says the process page is not available there yet", () => {
   expect(t("process.unsupported")).toBe("The process page isn't available on Windows yet.");
 });
 
+test("an uninstaller that did not start is explained in both languages", async () => {
+  const { errText } = await import("../src/shared");
+  setPlatformForTest("win32");
+  for (const [lang, text] of [
+    ["zh", "卸载程序没有启动，可能是取消了权限确认"],
+    ["en", "The uninstaller did not start; the permission prompt may have been declined"],
+  ] as const) {
+    setPref(lang);
+    expect(errText("launch-failed")).toBe(text);
+    expect(errText(new Error(JSON.stringify({ code: "launch-failed" })))).toBe(text);
+  }
+});
+
 test("Recycle Bin refusal codes explain retained and connected files in both languages", async () => {
   const previous = globalThis.document;
   Object.assign(globalThis, { document: previous ?? { querySelectorAll: () => [] } });
