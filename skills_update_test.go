@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -143,6 +144,26 @@ func noOpenFiles(t *testing.T) {
 	saved := openFilesHook
 	openFilesHook = func() ([]string, error) { return nil, nil }
 	t.Cleanup(func() { openFilesHook = saved })
+}
+
+// TestSkillEndpointsIgnoreEnvironment: skill downloads and the GitHub token
+// go to GitHub whatever the environment names. The endpoints are read in a
+// fresh process started with the variables set.
+func TestSkillEndpointsIgnoreEnvironment(t *testing.T) {
+	if os.Getenv("CLEANZO_ENDPOINT_PROBE") == "1" {
+		fmt.Printf("endpoints=%s %s\n", skillGitHubAPI, skillCodeload)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSkillEndpointsIgnoreEnvironment$", "-test.count=1")
+	cmd.Env = append(os.Environ(), "CLEANZO_ENDPOINT_PROBE=1",
+		"CLEANZO_GITHUB_API=http://127.0.0.1:9/api", "CLEANZO_CODELOAD=http://127.0.0.1:9/load")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("probe: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "endpoints=https://api.github.com https://codeload.github.com\n") {
+		t.Fatalf("endpoints follow the environment:\n%s", out)
+	}
 }
 
 func TestUpgradeRefusesLocalChangesUnlessForced(t *testing.T) {

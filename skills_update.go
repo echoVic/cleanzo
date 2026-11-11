@@ -94,17 +94,6 @@ var (
 	skillCodeload  = "https://codeload.github.com"
 )
 
-func init() {
-	// Test seam: redirect GitHub to a local server without touching the
-	// product code.
-	if u := os.Getenv("CLEANZO_GITHUB_API"); u != "" {
-		skillGitHubAPI = u
-	}
-	if u := os.Getenv("CLEANZO_CODELOAD"); u != "" {
-		skillCodeload = u
-	}
-}
-
 // skillGitCommand runs git; tests replace it.
 var skillGitCommand = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := quietCommand(exec.CommandContext(ctx, "git", args...))
