@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -27,24 +28,18 @@ func TestTrashReminderPopupFlow(t *testing.T) {
 	if started != 1 || p.phase != "cleaning" {
 		t.Fatal("did not start")
 	}
-	if resized != 1 {
-		t.Fatal("did not resize for the progress")
-	}
 	if err := tt.Click("取消"); err != nil {
 		t.Fatal(err)
 	}
 	if cancelled != 1 || p.phase != "stopping" {
 		t.Fatal("did not cancel")
 	}
-	if resized != 2 {
-		t.Fatal("did not resize for the cancel")
-	}
 	p.finish(CleanResult{Freed: gb}, true)
 	tt.Frame()
 	if !tt.HasText("已停止清理") {
 		t.Fatal("cancellation reported as success")
 	}
-	if resized != 3 {
+	if resized != 1 {
 		t.Fatal("did not resize for the result")
 	}
 	if err := tt.Click("关闭"); err != nil {
@@ -52,6 +47,25 @@ func TestTrashReminderPopupFlow(t *testing.T) {
 	}
 	if closed != 1 {
 		t.Fatal("did not close")
+	}
+}
+
+// TestTrashStampFollowsTheListing: moving something to the Trash changes
+// the stamp the reminder compares.
+func TestTrashStampFollowsTheListing(t *testing.T) {
+	home := t.TempDir()
+	if _, ok := trashStamp(home); ok {
+		t.Fatal("stamp without a Trash")
+	}
+	mustMkdir(t, filepath.Join(home, ".Trash"))
+	before, ok := trashStamp(home)
+	if !ok {
+		t.Fatal("no stamp")
+	}
+	time.Sleep(10 * time.Millisecond)
+	writeFile(t, filepath.Join(home, ".Trash", "old.bin"), 10)
+	if after, ok := trashStamp(home); !ok || !after.After(before) {
+		t.Fatalf("stamp %v then %v", before, after)
 	}
 }
 

@@ -197,6 +197,16 @@ type trashReminderMonitor struct {
 	reserve  func(time.Time, int64) bool
 	scan     func(context.Context) (trashReminderSnapshot, error)
 	show     func(trashReminderSnapshot, func())
+	// stamp reads when the Trash's own listing last changed; without it every
+	// tick scans.
+	stamp func() (time.Time, bool)
+	// below is the last scan that found the Trash under the threshold, with
+	// the stamp read before it. Only the tick holding checking uses it.
+	below struct {
+		set   bool
+		stamp time.Time
+		size  int64
+	}
 }
 
 func (m *trashReminderMonitor) tick(now time.Time) {
@@ -211,12 +221,28 @@ func (m *trashReminderMonitor) tick(now time.Time) {
 		return
 	}
 	c := m.load()
-	if !trashReminderDue(c, int64(c.ThresholdGB)*trashReminderGB+1, now) {
+	threshold := int64(c.ThresholdGB) * trashReminderGB
+	if !trashReminderDue(c, threshold+1, now) {
 		return
 	}
+	// Moving something to the Trash or emptying it changes the Trash's own
+	// listing; while that has not changed, a Trash found under the threshold
+	// is still under it, and walking it every five minutes only costs.
+	var stamp time.Time
+	stamped := false
+	if m.stamp != nil {
+		stamp, stamped = m.stamp()
+	}
+	if stamped && m.below.set && m.below.stamp.Equal(stamp) && m.below.size <= threshold {
+		return
+	}
+	m.below.set = false
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s, err := m.scan(ctx)
+	if err == nil && stamped && s.Size <= threshold {
+		m.below.set, m.below.stamp, m.below.size = true, stamp, s.Size
+	}
 	if err != nil || userScans.Load() > 0 || !trashReminderDue(c, s.Size, now) || !m.reserve(now, s.Size) {
 		return
 	}
@@ -248,7 +274,8 @@ func startTrashReminder() {
 			scan: func(ctx context.Context) (trashReminderSnapshot, error) {
 				return scanTrashReminder(ctx, trashReminderEnv(false))
 			},
-			show: showTrashReminder,
+			show:  showTrashReminder,
+			stamp: func() (time.Time, bool) { return trashStamp(homeDir()) },
 		}
 		go func() {
 			timer := time.NewTimer(time.Minute)
@@ -259,6 +286,16 @@ func startTrashReminder() {
 			}
 		}()
 	})
+}
+
+// trashStamp reads when the listing of home's Trash last changed: an entry
+// moved in or removed.
+func trashStamp(home string) (time.Time, bool) {
+	info, err := os.Lstat(filepath.Join(home, ".Trash"))
+	if err != nil || !info.IsDir() {
+		return time.Time{}, false
+	}
+	return changedAt(info), true
 }
 
 func trashReminderEnv(clean bool) junkEnv {

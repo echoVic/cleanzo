@@ -96,6 +96,48 @@ func TestTrashReminderConfigAndCooldown(t *testing.T) {
 	}
 }
 
+// TestTrashReminderMonitorSkipsAnUnchangedTrash: while the Trash's own
+// listing is unchanged since a scan found it below the threshold, the monitor
+// does not walk it again; a changed listing, a failed scan or a lower
+// threshold makes it scan.
+func TestTrashReminderMonitorSkipsAnUnchangedTrash(t *testing.T) {
+	c := TrashReminderConfig{Enabled: true, ThresholdGB: 2}
+	now := time.Now()
+	stamp := now.Add(-time.Hour)
+	scans, shown := 0, 0
+	var scanErr error
+	m := trashReminderMonitor{
+		load:  func() TrashReminderConfig { return c },
+		stamp: func() (time.Time, bool) { return stamp, true },
+		scan: func(context.Context) (trashReminderSnapshot, error) {
+			scans++
+			return trashReminderSnapshot{Size: gb + gb/2}, scanErr
+		},
+		reserve: func(time.Time, int64) bool { return true },
+		show:    func(trashReminderSnapshot, func()) { shown++ },
+	}
+	step := func(want int, why string) {
+		t.Helper()
+		m.tick(now)
+		if scans != want {
+			t.Fatalf("%s: %d scans, want %d", why, scans, want)
+		}
+	}
+	step(1, "first check")
+	step(1, "unchanged Trash")
+	stamp, scanErr = now, os.ErrPermission
+	step(2, "changed Trash")
+	step(3, "after a failed scan")
+	scanErr = nil
+	step(4, "after a failed scan")
+	step(4, "unchanged Trash")
+	c.ThresholdGB = 1
+	step(5, "lower threshold")
+	if shown != 1 {
+		t.Fatalf("shown %d", shown)
+	}
+}
+
 func TestTrashReminderMonitorSuppressesDuplicatesAndDefers(t *testing.T) {
 	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1}
 	now := time.Now()

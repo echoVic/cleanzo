@@ -26,8 +26,8 @@ type trashReminderPopup struct {
 const (
 	trashPopupWidth = 520
 	// Heights of the popup's content, not of the window: the window takes
-	// the height of its content (UseContentSize), so a progress window is
-	// not as tall as the confirmation whose explanation wraps to two lines.
+	// the height of its content (UseContentSize). The confirmation, whose
+	// explanation wraps to two lines, and the progress share this height.
 	trashPopupCompactHeight = 170
 	// The partial and cancelled results add the line explaining what was
 	// kept, which wraps to two lines in English.
@@ -64,9 +64,6 @@ func (p *trashReminderPopup) stop() {
 	p.phase = "stopping"
 	if p.cancel != nil {
 		p.cancel()
-	}
-	if p.resize != nil {
-		p.resize()
 	}
 }
 
@@ -115,9 +112,6 @@ func (p *trashReminderPopup) view(c *ui.Context) {
 						return
 					}
 					p.phase = "cleaning"
-					if p.resize != nil {
-						p.resize()
-					}
 					if p.start != nil {
 						p.start()
 					}
