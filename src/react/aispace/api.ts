@@ -8,5 +8,4 @@ export const aiSpaceApi = {
   listTools: () => Cleaner.listAITools(),
   cleanModels: (s: { source: string; models: string[] }[]) => Cleaner.cleanAIModels(s),
   cleanParts: (s: { tool: string; part: string; groups: string[] }[]) => Cleaner.cleanAITools(s),
-  reveal: (path: string) => Cleaner.revealInFinder(path),
 };

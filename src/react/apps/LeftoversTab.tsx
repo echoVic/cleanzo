@@ -12,7 +12,7 @@ import { kindLabel } from "../../i18n";
 import { errText, toast } from "../../shared";
 import { human } from "../ai/format";
 import {
-  applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
+  applyRemovalToItems, collapseRow, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, type ListRowData } from "../list/ListRows";
 import { appsApi } from "./api";
@@ -167,17 +167,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   const onExpand = async (path: string) => {
     if (busy || isGone(selection, path)) return;
     const collapsing = selection.expanded.has(path);
-    setSelection((prev) => {
-      const expanded = new Set(prev.expanded);
-      const children = new Map(prev.children);
-      if (collapsing) {
-        expanded.delete(path);
-        children.delete(path);
-      } else {
-        expanded.add(path);
-      }
-      return { ...prev, expanded, children };
-    });
+    // 收起时连同藏进去的子项勾选一起去掉：看不见的不能还选着。
+    setSelection((prev) => (collapsing ? collapseRow(prev, path) : { ...prev, expanded: new Set([...prev.expanded, path]) }));
     if (collapsing) return;
     try {
       const r = await appsApi.dirChildren(path);
@@ -213,9 +204,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
   };
 
   const applyItemsRemoval = (removed: string[]) => {
-    const upd = applyRemoval(itemsRef.current, selection, removed);
-    setItems(upd.items);
-    setSelection(upd.selection);
+    setItems(applyRemovalToItems(itemsRef.current, selection, removed));
+    setSelection((prev) => subtractRemoved(prev, removed));
   };
 
   const onTrashRow = (path: string, size: number, isDir = false) => {
@@ -246,10 +236,12 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     setTrashBatchOpen(true);
   };
 
+  const batchRef = React.useRef(false);
   const doTrashBatch = async () => {
     setTrashBatchOpen(false);
     const paths = pickedPaths(selection);
-    if (paths.length === 0) return;
+    if (paths.length === 0 || batchRef.current) return; // 弹窗退场时还能点到：第二次点击不再发一遍
+    batchRef.current = true;
     setBusy(true);
     try {
       const r = await appsApi.cleanPaths(paths);
@@ -265,6 +257,7 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
+      batchRef.current = false;
       setBusy(false);
     }
   };

@@ -324,7 +324,7 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
     if (!a || win || !beginAction(id, "cache")) return;
     try {
       const res = await appsApi.cleanAppCache(id);
-      if (res.moved > 0 && res.failed.length === 0) {
+      if (res.failed.length === 0) { // 没有可移的也算清理完：缓存已经在别处清掉了
         toast(t("apps.cacheCleaned", { name: a.name, size: human(res.freed) }));
         setUsage((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], cache: 0, cachePaths: [] } } : prev);
         // 确认框复用这份详情，清掉缓存路径，避免展示已经移走的文件。
@@ -425,7 +425,7 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
         appsRef.current = appsRef.current.filter((a) => a.id !== res.path);
         setApps((prev) => prev.filter((a) => a.id !== res.path));
         setUpdates((prev) => { const next = new Map(prev); next.delete(res.path); return next; });
-        setOpenId(null);
+        setOpenId((open) => (open === res.path ? null : open)); // 卸载期间点开的另一行不收起
       }
     } catch (e) {
       toast(t("apps.fail", { msg: errText(e) }), "err");
@@ -480,11 +480,11 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
           {growthEnabled && <option value="growth">{t("apps.sortGrowth")}</option>}
         </select>
       </div>
-      {!win && filter === "updates" && !progress.finished && !loading && !loadError && shownRows.length > 0 && <p className="muted small" role="status">{t("apps.checking", { done: progress.done, total: progress.total })}</p>}
+      {!win && filter === "updates" && !progress.finished && !checkError && !loading && !loadError && shownRows.length > 0 && <p className="muted small" role="status">{t("apps.checking", { done: progress.done, total: progress.total })}</p>}
       {checkError && <div className="empty err" role="alert">{t("apps.reason.network")}: {checkError}</div>}
       {loading && <div className="app-list">{Array.from({ length: 8 }, (_, i) => <div className="skeleton card" key={i} />)}</div>}
       {!loading && loadError && <div className="empty err" role="alert"><div className="err-icon">⚠</div><div>{t("apps.loadFail", { msg: loadError })}</div><button className="btn ghost retry-btn" type="button" onClick={() => void loadApps()}>{t("btn.retry")}</button></div>}
-      {!loading && !loadError && shownRows.length === 0 && (
+      {!loading && !loadError && shownRows.length === 0 && !(checkError && emptyKind && filter !== "idle") && (
         <div className="empty">{emptyKind ? (filter === "idle" ? t("apps.noIdle") : progress.finished ? t("apps.noUpdates") : t("apps.checking", { done: progress.done, total: progress.total })) : apps.length === 0 ? t("apps.empty") : t("apps.noMatch", { q: q.trim() })}</div>
       )}
       {!loading && !loadError && shownRows.length > 0 && <div className="app-list" ref={listRef}>

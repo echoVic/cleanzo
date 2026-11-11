@@ -39,6 +39,8 @@ function errText(e: unknown): string {
         "growth-threshold": "settings.growth.thresholdBad",
       };
       const entry = key[parsed.code];
+      // Go 也会把上面那些单词代码包成 JSON 发来（如 {"code":"unsupported"}）：同样翻译，不显示原文。
+      if (!entry && plain[parsed.code]) return t(plain[parsed.code] as never);
       if (entry) {
         const args = parsed.args ?? [];
         const vars: Record<string, string> = parsed.code === "dup-path"

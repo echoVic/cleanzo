@@ -200,10 +200,12 @@ export function PhotosPage() {
     }, Math.max(dur("layout"), dur("fade")) + 120);
   }, []);
 
+  const batchRef = React.useRef(false);
   const doTrashBatch = async () => {
     setTrashOpen(false);
     const paths = liveSel(selection);
-    if (paths.length === 0) return;
+    if (paths.length === 0 || batchRef.current) return; // 弹窗退场时还能点到：第二次点击不再发一遍
+    batchRef.current = true;
     setBusy(true);
     try {
       const r = await photosApi.cleanPaths(paths);
@@ -219,6 +221,7 @@ export function PhotosPage() {
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
+      batchRef.current = false;
       setBusy(false);
       recoverFocusAfterTrash();
     }

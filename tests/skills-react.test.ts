@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import type { Skill, SkillCopy } from "../src/mygo";
-import { daysAgo, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, windowDays } from "../src/react/skills/helpers";
+import type { Skill, SkillCopy, SkillUpdate } from "../src/mygo";
+import { daysAgo, linkCandidates, matchFilter, matchQuery, mergeOrigins, sortSkills, trashPlan, windowDays } from "../src/react/skills/helpers";
 
 const DAY = 86400;
 const NOW = 1_790_000_000;
@@ -142,4 +142,22 @@ test("Windows Skills empty guide uses a native agents path in zh/en", async () =
     setPlatformForTest("darwin");
     expect(t("skills.idle.guide")).toContain("~/.agents");
   } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
+function update(path: string, over: Partial<SkillUpdate> = {}): SkillUpdate {
+  return { path, name: path, origin: {}, local: "tree-1", remote: "", status: "unknown", modified: false, error: "", checkedAt: 0, ...over } as SkillUpdate;
+}
+
+test("a rescan keeps what the last update check found for folders that did not change", () => {
+  const checked = {
+    "/s/a": update("/s/a", { status: "update", remote: "tree-2", checkedAt: NOW }),
+    "/s/b": update("/s/b", { status: "current", remote: "tree-1", checkedAt: NOW }),
+    "/s/gone": update("/s/gone", { status: "update", remote: "tree-2", checkedAt: NOW }),
+  };
+  // 扫描后的离线来源：每个文件夹都是「未检查」
+  const next = mergeOrigins(checked, [update("/s/a"), update("/s/b", { local: "tree-9" }), update("/s/new")]);
+  expect(next["/s/a"]?.status).toBe("update"); // 没动过：保留检查结果
+  expect(next["/s/b"]?.status).toBe("unknown"); // 内容变了：上次的结论作废
+  expect(next["/s/new"]?.status).toBe("unknown");
+  expect(next["/s/gone"]).toBeUndefined(); // 文件夹没了：不再留着它的状态
 });

@@ -460,6 +460,7 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
     frozenRowsRef.current = [];
     void loadInfo();
     void loadMachine();
+    chanRef.current?.close(); // 上一轮还开着（比如进入视图和窗口重新可见先后都来启动）：先关掉，Go 那边才会停
     const ch = new Channel<StatusSample>();
     chanRef.current = ch;
     try {
@@ -501,7 +502,7 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
 
   React.useEffect(() => {
     activeRef.current = active;
-    if (active) void startWatch();
+    if (active && !document.hidden) void startWatch(); // 窗口藏着时等它回来再开（见下面的 visibilitychange）
     else stopWatch();
   }, [active, startWatch, stopWatch]);
 

@@ -48,6 +48,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const [showLocked, setShowLocked] = React.useState(false);
   const [lastClean, setLastClean] = React.useState<{ freed: number; kept: number; skipped: number } | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false); // 清理进行中：按钮不能再点出第二次清理
   const [scannedAt, setScannedAt] = React.useState(0);
   // Codex 桌面版的崩溃转储不在 ~/.codex 里，由垃圾清理的「应用崩溃转储」负责；这里只提示。
   const [crashBytes, setCrashBytes] = React.useState(0);
@@ -187,7 +188,9 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   });
 
   const doClean = async () => {
+    if (busy) return;
     setConfirmOpen(false);
+    setBusy(true);
     try {
       const res = await aiApi.clean(selections.map(({ tool, part, groups }) => ({ tool, part, groups })));
       const kept = res.parts.reduce((n, r) => n + r.kept, 0);
@@ -197,6 +200,8 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
       setLastClean({ freed: res.freed, kept, skipped });
     } catch (e) {
       toast(errText(e), "err");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -212,7 +217,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
         </div>
         <div className="head-actions">
           {tool && (
-            <Button variant="ghost" size="sm" onClick={scan} disabled={phase === "scanning"}>
+            <Button variant="ghost" size="sm" onClick={scan} disabled={phase === "scanning" || busy}>
               <RefreshCw className={cn("h-3.5 w-3.5", phase === "scanning" && "animate-spin")} />
               {phase === "scanning" ? t("scan.busy") : t("fs.rescan")}
             </Button>
@@ -279,7 +284,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                   : t("ai.sub.scanned", { size: human(cleanable) })}
               </div>
             </div>
-            <Button variant="default" size="lg" disabled={chosenTotal === 0} onClick={() => setConfirmOpen(true)}>
+            <Button variant="default" size="lg" disabled={chosenTotal === 0 || busy} onClick={() => setConfirmOpen(true)}>
               {t("ai.clean", { size: human(chosenTotal) })}
             </Button>
           </Card>

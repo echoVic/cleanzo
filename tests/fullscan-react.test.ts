@@ -9,7 +9,7 @@ import { ListRows, ListToolbar } from "../src/react/list/ListRows";
 import { pathHintKind } from "../src/react/list/type-hint";
 import type { BigItem } from "../src/mygo";
 import {
-  applyRemoval, emptySelection, isGone, knownSizes, pickedPaths, toggleChild,
+  applyRemoval, collapseRow, emptySelection, isGone, keepShown, knownSizes, pickedPaths, toggleChild, toggleRow,
   type ListSelection,
 } from "../src/react/list/selection";
 import {
@@ -254,4 +254,59 @@ test("a collapsed expansion ignores a late initial child listing", async () => {
   await loaded;
   expect(fixture.state).toBe(before);
   expect(measures).toBe(0);
+});
+
+
+// ---- 看不见的勾选不能留着：发给后端的只能是页面上还显示的 ----
+
+const kid = (path: string, trashable = true) => ({ path, size: 10, isDir: false, trashable }) as never;
+function withKids(st: ListSelection, parent: string, kids: ReturnType<typeof kid>[]): ListSelection {
+  return { ...st, expanded: new Set([...st.expanded, parent]), children: new Map([...st.children, [parent, { items: kids, total: kids.length }]]) };
+}
+
+test("a ticked row that falls out of the list is no longer selected", () => {
+  let st = toggleRow(emptySelection(), "/h/Old", true);
+  st = toggleRow(st, "/h/Big", true);
+  // 更大的目录陆续到来，/h/Old 被挤出前 N 名
+  const shown = keepShown(st, ["/h/Big", "/h/Bigger"]);
+  expect(pickedPaths(shown)).toEqual(["/h/Big"]);
+});
+
+test("ticked children stay selected only while their folder is shown and expanded", () => {
+  let st = withKids(emptySelection(), "/h/Docs", [kid("/h/Docs/a"), kid("/h/Docs/b")]);
+  st = toggleChild(st, "/h/Docs", "/h/Docs/a", true);
+  expect(pickedPaths(keepShown(st, ["/h/Docs"]))).toEqual(["/h/Docs/a"]);
+  expect(pickedPaths(keepShown(st, ["/h/Other"]))).toEqual([]);
+  // 没有变化时返回原对象，避免无谓重渲染
+  expect(keepShown(st, ["/h/Docs"])).toBe(st);
+});
+
+test("collapsing a folder drops the picks hidden inside it, but keeps the folder's own tick", () => {
+  let st = withKids(emptySelection(), "/h/Docs", [kid("/h/Docs/a"), kid("/h/Docs/b")]);
+  st = toggleChild(st, "/h/Docs", "/h/Docs/a", true);
+  const closed = collapseRow(st, "/h/Docs");
+  expect(closed.expanded.has("/h/Docs")).toBe(false);
+  expect(closed.children.has("/h/Docs")).toBe(false);
+  expect(pickedPaths(closed)).toEqual([]);
+
+  const whole = collapseRow(toggleRow(st, "/h/Docs", true), "/h/Docs");
+  expect(pickedPaths(whole)).toEqual(["/h/Docs"]);
+});
+
+test("ticking a folder never ticks the children that cannot be moved", () => {
+  const st = withKids(emptySelection(), "/h/Movies", [kid("/h/Movies/clip.mov"), kid("/h/Movies/Lib.photoslibrary", false)]);
+  const all = toggleRow(st, "/h/Movies", true);
+  expect(all.sel.has("/h/Movies/Lib.photoslibrary")).toBe(false);
+  // 取消其中一项：改为勾其余能移走的子项，资料库仍然不在里面
+  const rest = toggleChild(all, "/h/Movies", "/h/Movies/clip.mov", false);
+  expect([...rest.sel]).toEqual([]);
+});
+
+test("error codes read the same whether Go sends them plain or as JSON", () => {
+  setLang("zh");
+  for (const code of ["unsupported", "not-app", "in-use"]) {
+    const plain = errText(new Error(code));
+    expect(plain).not.toBe(code);
+    expect(errText(new Error(JSON.stringify({ code })))).toBe(plain);
+  }
 });

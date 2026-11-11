@@ -43,6 +43,12 @@ export function loadedKids(st: ListSelection, path: string): string[] {
   return c && "items" in c ? c.items.filter((i) => !isGone(st, i.path)).map((i) => i.path) : [];
 }
 
+/** 展开文件夹里能勾的子项：已加载、仍存在，而且能移走（资料库这类 trashable=false 的勾不上）。 */
+function pickableKids(st: ListSelection, path: string): string[] {
+  const c = st.children.get(path);
+  return c && "items" in c ? c.items.filter((i) => i.trashable !== false && !isGone(st, i.path)).map((i) => i.path) : [];
+}
+
 /**
  * 勾选一整行：文件夹连同已加载的子项一起勾上或取消。
  * 取消时把它内部所有勾选项一并移除。
@@ -52,7 +58,7 @@ export function toggleRow(st: ListSelection, path: string, on: boolean): ListSel
   const sel = new Set(st.sel);
   if (on) {
     sel.add(path);
-    for (const p of loadedKids(st, path)) sel.add(p);
+    for (const p of pickableKids(st, path)) sel.add(p);
   } else {
     for (const p of [...sel]) if (under(p, path)) sel.delete(p);
   }
@@ -70,11 +76,41 @@ export function toggleChild(st: ListSelection, parent: string, child: string, on
     sel.add(child);
   } else {
     if (sel.delete(parent)) {
-      for (const k of loadedKids(st, parent)) sel.add(k);
+      for (const k of pickableKids(st, parent)) sel.add(k);
     }
     sel.delete(child);
   }
   return { ...st, sel };
+}
+
+/**
+ * 收起一行：不再显示它的子项，藏在里面的勾选也一并去掉——看不见的不能还选着。
+ * 这一行自己的勾选不动。
+ */
+export function collapseRow(st: ListSelection, path: string): ListSelection {
+  const expanded = new Set(st.expanded);
+  const children = new Map(st.children);
+  expanded.delete(path);
+  children.delete(path);
+  const sel = new Set([...st.sel].filter((p) => p === path || !under(p, path)));
+  return { ...st, sel, expanded, children };
+}
+
+/**
+ * 只留页面上还显示着的勾选：rows 是当前列出的行；子项要它所在的行还列着、
+ * 展开着、并且已经加载出来才算。扫描中被挤出前 N 名的行不再选着。
+ * 没有变化时返回原对象。
+ */
+export function keepShown(st: ListSelection, rows: readonly string[]): ListSelection {
+  if (st.sel.size === 0) return st;
+  const shown = new Set(rows);
+  for (const row of rows) {
+    if (!st.expanded.has(row)) continue;
+    const c = st.children.get(row);
+    if (c && "items" in c) for (const it of c.items) shown.add(it.path);
+  }
+  const sel = new Set([...st.sel].filter((p) => shown.has(p)));
+  return sel.size === st.sel.size ? st : { ...st, sel };
 }
 
 /** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项。 */

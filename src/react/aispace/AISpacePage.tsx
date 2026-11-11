@@ -6,9 +6,10 @@ import { Button } from "../../ui/components/button";
 import { Card } from "../../ui/components/card";
 import { Checkbox } from "../../ui/components/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../ui/components/dialog";
-import { useT } from "../../ui/i18n-react";
-import { human, toast } from "../../shared";
+import { useT, type DictKey } from "../../ui/i18n-react";
+import { errText, human, toast } from "../../shared";
 import { aiSpaceApi } from "./api";
+import { partKey, pickable, pickedBytes, relTime, rowsChecked, selectionsFor, splitParts, toggleRows, type PartRow, type Picks } from "./selection";
 
 type Phase = "idle" | "scanning" | "scanned";
 type Filter = "all" | "models" | "sessions" | "caches";
@@ -16,27 +17,13 @@ type Filter = "all" | "models" | "sessions" | "caches";
 /** 批量选择用的窗口：模型与会话共用「90 天」，用户只需要记一个数字。 */
 const OLD = 90 * 24 * 3600;
 
-interface PartRow {
-  tool: AITool;
-  part: AIPart;
+/** 部分的名字：和逐工具页用同一套文案，未识别的显示文件名。 */
+function partName(t: (key: DictKey) => string, part: AIPart): string {
+  if (part.id.startsWith("unknown:")) return part.name;
+  const key = `ai.part.${part.id}.name` as DictKey;
+  const s = t(key);
+  return s === key ? part.id : s;
 }
-
-/** 相对时间：今天 / 昨天 / N 天前 / N 个月前；0 表示不知道。 */
-function relTime(ts: number, now: number): string {
-  if (!ts) return "—";
-  const d = Math.floor((now - ts) / 86400);
-  if (d <= 0) return "今天";
-  if (d === 1) return "昨天";
-  if (d < 31) return `${d} 天前`;
-  if (d < 365) return `${Math.max(1, Math.round(d / 30))} 个月前`;
-  return `${Math.round(d / 365)} 年前`;
-}
-
-const levelBadge = {
-  safe: { key: "aispace.level.safe", variant: "safe" },
-  optional: { key: "aispace.level.optional", variant: "optional" },
-  sensitive: { key: "aispace.level.sensitive", variant: "warn" },
-} as const;
 
 export function AISpacePage() {
   const t = useT();
@@ -56,11 +43,15 @@ export function AISpacePage() {
 
   const now = scannedAt || Math.floor(Date.now() / 1000);
 
-  const sessionRows = React.useMemo<PartRow[]>(() => {
-    const out: PartRow[] = [];
-    for (const tool of tools) for (const part of tool.parts) if (part.level === "sensitive") out.push({ tool, part });
-    return out;
-  }, [tools]);
+  const split = React.useMemo(() => splitParts(tools), [tools]);
+  const sessionRows = split.sessions;
+  const cacheRows = split.caches;
+  const optionalRows = split.optional;
+  const picks: Picks = React.useMemo(() => ({ parts: pickedParts, groups: pickedGroups }), [pickedParts, pickedGroups]);
+  const setPicks = (next: Picks) => {
+    setPickedParts(next.parts);
+    setPickedGroups(next.groups);
+  };
   /** 会话按工具合并成一行：同一个工具散在几个 part 里也只占一行，展开看项目。 */
   const sessionByTool = React.useMemo(() => {
     const m = new Map<string, { tool: AITool; parts: PartRow[] }>();
@@ -71,13 +62,6 @@ export function AISpacePage() {
     }
     return [...m.values()];
   }, [sessionRows]);
-  const cacheRows = React.useMemo<PartRow[]>(() => {
-    const out: PartRow[] = [];
-    for (const tool of tools)
-      for (const part of tool.parts)
-        if (part.level === "safe" || part.level === "optional" || part.level === "unknown") out.push({ tool, part });
-    return out;
-  }, [tools]);
   /** 缓存按「日志与缓存 / 旧版本」两个桶合并：总览页只做决定，细节留给展开和逐工具页。 */
   const cacheBuckets = React.useMemo(() => {
     const mk = () => ({ size: 0, byTool: new Map<string, { toolName: string; size: number; parts: PartRow[] }>() });
@@ -93,24 +77,15 @@ export function AISpacePage() {
     }
     return { logs, releases };
   }, [cacheRows]);
-  const bucketSelected = (parts: PartRow[]) => {
-    const pickable = parts.filter((r) => (r.part.groups.length > 0 ? pickedGroups.get(partKey(r))?.size : pickedParts.has(partKey(r))));
-    if (pickable.length === 0) return false;
-    return pickable.length >= parts.length ? true : "indeterminate";
-  };
-  const keptSize = React.useMemo(
-    () => tools.reduce((n, tool) => n + tool.parts.filter((p) => p.level === "protected").reduce((m, p) => m + p.size, 0), 0),
-    [tools],
-  );
+  const keptSize = split.kept;
   const modelSources = React.useMemo(() => sources.filter((s) => s.installed && s.models.length > 0), [sources]);
   const modelTotal = modelSources.reduce((n, s) => n + s.size, 0);
   const sessionTotal = sessionRows.reduce((n, r) => n + r.part.size, 0);
   const cacheTotal = cacheRows.reduce((n, r) => n + r.part.size, 0);
-  const total = modelTotal + sessionTotal + cacheTotal;
+  const optionalTotal = optionalRows.reduce((n, r) => n + r.part.size, 0);
+  const total = modelTotal + sessionTotal + cacheTotal + optionalTotal;
 
-  const partKey = (r: PartRow) => `${r.tool.id}:${r.part.id}`;
   const groupPicked = (r: PartRow, key: string) => pickedGroups.get(partKey(r))?.has(key) ?? false;
-  const partPicked = (r: PartRow) => (r.part.groups.length > 0 ? (pickedGroups.get(partKey(r))?.size ?? 0) > 0 : pickedParts.has(partKey(r)));
   const modelPicked = (sourceId: string, path: string) => pickedModels.get(sourceId)?.has(path) ?? false;
   const sourcePicked = (s: AIModelSource) => {
     const set = pickedModels.get(s.id);
@@ -122,18 +97,10 @@ export function AISpacePage() {
     (n, s) => n + s.models.filter((m) => modelPicked(s.id, m.path)).reduce((m, x) => m + x.size, 0),
     0,
   );
-  const chosenPartBytes = React.useMemo(() => {
-    let n = 0;
-    for (const r of [...sessionRows, ...cacheRows]) {
-      if (r.part.groups.length > 0) {
-        const keys = pickedGroups.get(partKey(r));
-        if (!keys || keys.size === 0) continue;
-        for (const g of r.part.groups) if (keys.has(g.key) && g.recent === 0) n += g.size;
-      } else if (pickedParts.has(partKey(r))) n += r.part.size;
-    }
-    return n;
-  }, [sessionRows, cacheRows, pickedParts, pickedGroups]);
-  const chosenTotal = chosenModelBytes + chosenPartBytes;
+  const chosenSessionBytes = pickedBytes(picks, sessionRows);
+  const chosenCacheBytes = pickedBytes(picks, cacheRows);
+  const chosenOptionalBytes = pickedBytes(picks, optionalRows);
+  const chosenTotal = chosenModelBytes + chosenSessionBytes + chosenCacheBytes + chosenOptionalBytes;
 
   const scan = React.useCallback(async () => {
     setPhase("scanning");
@@ -144,27 +111,16 @@ export function AISpacePage() {
       setSources(mr.sources ?? []);
       setTools(tr.tools ?? []);
       setScannedAt(tr.scannedAt || Math.floor(Date.now() / 1000));
-      // 默认只勾「可安全清理」：缓存与旧版本。模型和会话一律不预选。
-      const np = new Set<string>();
-      const ng = new Map<string, Set<string>>();
-      for (const tool of tr.tools ?? []) {
-        for (const part of tool.parts) {
-          if (part.level !== "safe" || part.running) continue;
-          if (part.groups.length > 0) {
-            const keys = part.groups.filter((g) => g.recent === 0).map((g) => g.key);
-            if (keys.length > 0) ng.set(`${tool.id}:${part.id}`, new Set(keys));
-          } else if (part.size > 0) {
-            np.add(`${tool.id}:${part.id}`);
-          }
-        }
-      }
-      setPickedParts(np);
-      setPickedGroups(ng);
+      // 默认只勾「可安全清理」：缓存与旧版本。模型、会话和「看你需要」的一律不预选。
+      const idle = splitParts(tr.tools ?? []).caches.filter((r) => !r.part.running);
+      const preset = toggleRows({ parts: new Set(), groups: new Map() }, idle, true);
+      setPickedParts(preset.parts);
+      setPickedGroups(preset.groups);
       setPickedModels(new Map());
       setExpanded(new Set());
       setPhase("scanned");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errText(e));
       setPhase("idle");
     }
   }, []);
@@ -186,22 +142,8 @@ export function AISpacePage() {
       return next;
     });
   };
-  const togglePart = (r: PartRow, on: boolean) => {
-    if (r.part.groups.length > 0) {
-      setPickedGroups((m) => {
-        const next = new Map(m);
-        next.set(partKey(r), on ? new Set(r.part.groups.filter((g) => g.recent === 0).map((g) => g.key)) : new Set());
-        return next;
-      });
-      return;
-    }
-    setPickedParts((p) => {
-      const next = new Set(p);
-      if (on) next.add(partKey(r));
-      else next.delete(partKey(r));
-      return next;
-    });
-  };
+  /** 一行的复选框只动这一行底下能勾的部分；工具在运行时用着的部分勾不上。 */
+  const toggleParts = (rows: PartRow[], on: boolean) => setPicks(toggleRows(picks, rows, on));
   const toggleGroup = (r: PartRow, key: string, on: boolean) => {
     setPickedGroups((m) => {
       const next = new Map(m);
@@ -238,9 +180,9 @@ export function AISpacePage() {
     setPickedGroups((m) => {
       const next = new Map(m);
       for (const r of sessionRows) {
-        if (r.part.groups.length === 0) continue;
+        if (r.part.groups.length === 0 || !pickable(r.part)) continue;
         const set = new Set(next.get(partKey(r)) ?? []);
-        for (const g of r.part.groups) if (g.recent === 0 && g.last < now - OLD) set.add(g.key);
+        for (const g of r.part.groups) if (g.recent === 0 && g.last > 0 && g.last < now - OLD) set.add(g.key);
         next.set(partKey(r), set);
       }
       return next;
@@ -254,28 +196,31 @@ export function AISpacePage() {
       const models = modelSources
         .map((s) => ({ source: s.id, models: s.models.filter((m) => modelPicked(s.id, m.path)).map((m) => m.path) }))
         .filter((x) => x.models.length > 0);
-      const parts: { tool: string; part: string; groups: string[] }[] = [];
-      for (const r of [...sessionRows, ...cacheRows]) {
-        if (r.part.groups.length > 0) {
-          const keys = [...(pickedGroups.get(partKey(r)) ?? [])];
-          if (keys.length > 0) parts.push({ tool: r.tool.id, part: r.part.id, groups: keys });
-        } else if (pickedParts.has(partKey(r))) {
-          parts.push({ tool: r.tool.id, part: r.part.id, groups: [] });
+      const parts = selectionsFor(picks, [...sessionRows, ...cacheRows, ...optionalRows]);
+      const report = { freed: 0, kept: 0, skipped: 0 };
+      try {
+        for (const res of [
+          models.length > 0 ? await aiSpaceApi.cleanModels(models) : null,
+          parts.length > 0 ? await aiSpaceApi.cleanParts(parts) : null,
+        ]) {
+          if (!res) continue;
+          report.freed += res.freed ?? 0;
+          for (const r of res.parts ?? []) {
+            report.kept += r.kept;
+            if (r.skipped || r.failed.length > 0) report.skipped++;
+          }
         }
+      } finally {
+        // 中途失败也重新统计：已经移走的不能还列在页面上。
+        await scan();
       }
-      let freed = 0;
-      if (models.length > 0) {
-        const res = await aiSpaceApi.cleanModels(models);
-        freed += res.freed ?? 0;
-      }
-      if (parts.length > 0) {
-        const res = await aiSpaceApi.cleanParts(parts);
-        freed += res.freed ?? 0;
-      }
-      setDone({ freed, kept: 0, skipped: 0 });
-      await scan();
+      setDone(report);
+      const lines = [t("aispace.done", { size: human(report.freed) })];
+      if (report.kept > 0) lines.push(t("aispace.done.kept", { n: report.kept }));
+      if (report.skipped > 0) lines.push(t("aispace.done.skipped", { n: report.skipped }));
+      toast(lines.join(" · "), report.skipped > 0 ? "err" : "ok");
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), "err");
+      toast(errText(e), "err");
     } finally {
       setBusy(false);
     }
@@ -365,7 +310,7 @@ export function AISpacePage() {
               badge={<Badge variant="optional">{t("aispace.level.optional")}</Badge>}
               path={s.path}
               sub={t("aispace.modelsOf", { n: s.models.length })}
-              last={relTime(s.last, now)}
+              last={relTime(s.last, now, t)}
               size={human(s.size)}
               expanded={expanded.has(key)}
               onExpand={() => toggleExpand(key)}
@@ -376,7 +321,7 @@ export function AISpacePage() {
                   <div key={m.path} className="flex items-center gap-2 py-1 text-[12.5px]">
                     <Checkbox checked={modelPicked(s.id, m.path)} onCheckedChange={(v) => toggleModel(s, m.path, v === true)} aria-label={m.name} />
                     <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{m.name}</span>
-                    <span className="w-[110px] text-right text-xs text-muted tabular-nums">{relTime(m.last, now)}</span>
+                    <span className="w-[110px] text-right text-xs text-muted tabular-nums">{relTime(m.last, now, t)}</span>
                     <span className="w-[70px] text-right text-xs tabular-nums">{human(m.size)}</span>
                   </div>
                 ))}
@@ -405,19 +350,20 @@ export function AISpacePage() {
       const key = `tool:${group.tool.id}`;
       const parts = group.parts;
       const groups = parts.flatMap((r) => r.part.groups.map((g) => ({ r, g })));
+      const whole = parts.filter((r) => r.part.groups.length === 0);
       const total = parts.reduce((n, r) => n + r.part.size, 0);
       rows.push({
         kind: "sessions",
         node: (
           <div key={key} className="border-b border-border last:border-b-0">
             <RowLine
-              checked={bucketSelected(parts)}
-              onToggle={(on) => parts.forEach((r) => togglePart(r, on))}
+              checked={rowsChecked(picks, parts)}
+              onToggle={(on) => toggleParts(parts, on)}
               name={group.tool.name}
               badge={<Badge variant="warn">{t("aispace.level.sensitive")}</Badge>}
               path={parts[0]?.part.path ?? ""}
               sub={t("aispace.groupsOf", { n: groups.length, m: groups.reduce((x, y) => x + y.g.count, 0) })}
-              last={relTime(Math.max(...parts.map((r) => r.part.last)), now)}
+              last={relTime(Math.max(...parts.map((r) => r.part.last)), now, t)}
               size={human(total)}
               expanded={expanded.has(key)}
               onExpand={() => toggleExpand(key)}
@@ -432,11 +378,15 @@ export function AISpacePage() {
                         onCheckedChange={(v) => toggleGroup(r, g.key, v === true)} aria-label={g.label} />
                       <span className={locked ? "min-w-0 flex-1 truncate text-muted" : "min-w-0 flex-1 truncate"}>{g.label}</span>
                       {locked && <Badge variant="protected">{t("aispace.inUse")}</Badge>}
-                      <span className="w-[110px] text-right text-xs text-muted tabular-nums">{relTime(g.last, now)}</span>
+                      <span className="w-[110px] text-right text-xs text-muted tabular-nums">{relTime(g.last, now, t)}</span>
                       <span className="w-[70px] text-right text-xs tabular-nums">{human(g.size)}</span>
                     </div>
                   );
                 })}
+                {whole.map((r) => (
+                  <PartLine key={r.part.id} row={r} name={partName(t, r.part)} picks={picks} onToggle={(on) => toggleParts([r], on)}
+                    runningLabel={t("aispace.running")} last={relTime(r.part.last, now, t)} />
+                ))}
               </div>
             )}
           </div>
@@ -445,10 +395,10 @@ export function AISpacePage() {
     }
   }
 
-  if (showCaches && cacheRows.length > 0) {
+  if (showCaches && cacheRows.length + optionalRows.length > 0) {
     const buckets = [
-      { key: "logs", title: t("aispace.cache.logs"), note: t("aispace.group.cachesNote"), data: cacheBuckets.logs },
-      { key: "releases", title: t("aispace.cache.releases"), note: t("aispace.cache.releasesNote"), data: cacheBuckets.releases },
+      { key: "logs", title: t("aispace.cache.logs"), data: cacheBuckets.logs },
+      { key: "releases", title: t("aispace.cache.releases"), data: cacheBuckets.releases },
     ].filter((b) => b.data.size > 0);
     buckets.forEach((b, i) => {
       const parts = [...b.data.byTool.values()].flatMap((x) => x.parts);
@@ -463,8 +413,8 @@ export function AISpacePage() {
             )}
             <div className="border-b border-border last:border-b-0">
               <RowLine
-                checked={bucketSelected(parts)}
-                onToggle={(on) => parts.forEach((r) => togglePart(r, on))}
+                checked={rowsChecked(picks, parts)}
+                onToggle={(on) => toggleParts(parts, on)}
                 name={b.title}
                 badge={<Badge variant="safe">{t("aispace.level.safe")}</Badge>}
                 path={tools.map((x) => x.toolName).join(" · ")}
@@ -490,9 +440,44 @@ export function AISpacePage() {
         ),
       });
     });
+    if (optionalRows.length > 0) {
+      const key = "bucket:optional";
+      rows.push({
+        kind: "caches",
+        node: (
+          <React.Fragment key={key}>
+            <GroupHeader title={t("aispace.cache.optional")} size={optionalTotal} note={t("aispace.cache.optionalNote")} />
+            <div className="border-b border-border last:border-b-0">
+              <RowLine
+                checked={rowsChecked(picks, optionalRows)}
+                onToggle={(on) => toggleParts(optionalRows, on)}
+                name={t("aispace.cache.optional")}
+                badge={<Badge variant="optional">{t("aispace.level.optional")}</Badge>}
+                path={[...new Set(optionalRows.map((r) => r.tool.name))].join(" · ")}
+                sub={t("aispace.cache.optionalNote")}
+                last="—"
+                size={human(optionalTotal)}
+                expanded={expanded.has(key)}
+                onExpand={() => toggleExpand(key)}
+              />
+              {expanded.has(key) && (
+                <div className="border-t border-dashed border-border px-4 pb-2 pt-1 pl-[70px]">
+                  {optionalRows.map((r) => (
+                    <PartLine key={partKey(r)} row={r} name={`${r.tool.name} · ${partName(t, r.part)}`} picks={picks} onToggle={(on) => toggleParts([r], on)}
+                      runningLabel={t("aispace.running")} last={relTime(r.part.last, now, t)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </React.Fragment>
+        ),
+      });
+    }
   }
 
-  const counts = { models: modelSources.length, sessions: sessionByTool.length, caches: cacheBuckets.logs.byTool.size + cacheBuckets.releases.byTool.size };
+  // 筛选按钮上的数字是这一类有几行。
+  const cacheRowCount = [cacheBuckets.logs.size, cacheBuckets.releases.size, optionalTotal].filter((n) => n > 0).length;
+  const counts = { models: modelSources.length, sessions: sessionByTool.length, caches: cacheRowCount };
 
   return (
     <div className="cz-react">
@@ -518,7 +503,7 @@ export function AISpacePage() {
           <Stat label={t("aispace.stat.total")} value={human(total)} strong />
           <Stat label={t("aispace.stat.models")} value={human(modelTotal)} />
           <Stat label={t("aispace.stat.sessions")} value={human(sessionTotal)} />
-          <Stat label={t("aispace.stat.caches")} value={human(cacheTotal)} />
+          <Stat label={t("aispace.stat.caches")} value={human(cacheTotal + optionalTotal)} />
           <div className="ml-auto text-xs text-muted">
             {t("aispace.stat.kept")} {human(keptSize)} {t("aispace.stat.keptNote")}
           </div>
@@ -526,7 +511,7 @@ export function AISpacePage() {
         <div className="mt-3 flex h-[10px] w-full overflow-hidden rounded-[5px] bg-bg-subtle">
           <i style={{ width: `${total > 0 ? (modelTotal / total) * 100 : 0}%`, background: "var(--accent-solid)" }} />
           <i style={{ width: `${total > 0 ? (sessionTotal / total) * 100 : 0}%`, background: "var(--warn)" }} />
-          <i style={{ width: `${total > 0 ? (cacheTotal / total) * 100 : 0}%`, background: "var(--muted)" }} />
+          <i style={{ width: `${total > 0 ? ((cacheTotal + optionalTotal) / total) * 100 : 0}%`, background: "var(--muted)" }} />
         </div>
         <div className="mt-2 text-xs text-muted">{t("aispace.hint")}</div>
       </Card>
@@ -571,7 +556,9 @@ export function AISpacePage() {
           </DialogHeader>
           <ul className="mt-3 space-y-1 text-xs">
             {chosenModelBytes > 0 && <li>{t("aispace.stat.models")} · {human(chosenModelBytes)}</li>}
-            {sessionRows.length > 0 && pickedGroups.size > 0 && <li>{t("aispace.stat.sessions")} · {human(chosenPartBytes)}</li>}
+            {chosenSessionBytes > 0 && <li>{t("aispace.stat.sessions")} · {human(chosenSessionBytes)}</li>}
+            {chosenCacheBytes > 0 && <li>{t("aispace.group.caches")} · {human(chosenCacheBytes)}</li>}
+            {chosenOptionalBytes > 0 && <li>{t("aispace.cache.optional")} · {human(chosenOptionalBytes)}</li>}
           </ul>
           <p className="mt-3 text-xs text-muted">{t("aispace.confirm.safety")}</p>
           <div className="mt-4 flex justify-end gap-2">
@@ -580,6 +567,28 @@ export function AISpacePage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** 展开后的一行：一个整块清理的部分，看得见才勾得上。 */
+function PartLine({ row, name, picks, onToggle, runningLabel, last }: {
+  row: PartRow;
+  name: string;
+  picks: Picks;
+  onToggle: (on: boolean) => void;
+  runningLabel: string;
+  last: string;
+}) {
+  const open = pickable(row.part);
+  const blocked = row.part.running && !row.part.runSafe;
+  return (
+    <div className="flex items-center gap-2 py-1 text-[12.5px]">
+      <Checkbox checked={open && picks.parts.has(partKey(row))} disabled={!open} onCheckedChange={(v) => onToggle(v === true)} aria-label={name} />
+      <span className={open ? "min-w-0 flex-1 truncate" : "min-w-0 flex-1 truncate text-muted"}>{name}</span>
+      {blocked && <Badge variant="protected">{runningLabel}</Badge>}
+      <span className="w-[110px] text-right text-xs text-muted tabular-nums">{last}</span>
+      <span className="w-[70px] text-right text-xs tabular-nums">{human(row.part.size)}</span>
     </div>
   );
 }

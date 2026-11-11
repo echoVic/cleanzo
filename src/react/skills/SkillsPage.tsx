@@ -13,10 +13,7 @@ import { useT, type DictKey } from "../../ui/i18n-react";
 import { currentLang } from "../../i18n";
 import { errText, setNavBusy, toast } from "../../shared";
 import { human, displayPath } from "../ai/format";
-import {
-  daysAgo, isFolder, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, windowDays,
-  type SkillFilter, type SkillSort,
-} from "./helpers";
+import { daysAgo, isFolder, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, windowDays, type SkillFilter, type SkillSort, mergeOrigins } from "./helpers";
 import { skillsApi } from "./api";
 
 type Phase = "idle" | "scanning" | "scanned";
@@ -77,7 +74,7 @@ export function SkillsPage() {
     let cancelled = false;
     skillsApi.origins().then((ups) => {
       if (cancelled) return;
-      setUpdates(mergeUpdates(updates, ups));
+      setUpdates((prev) => mergeOrigins(prev, ups));
     }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

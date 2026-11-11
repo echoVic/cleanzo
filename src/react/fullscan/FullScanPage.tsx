@@ -9,7 +9,7 @@ import { useT } from "../../ui/i18n-react";
 import { Collapse } from "../../ui/motion/Collapse";
 import { errText, toast } from "../../shared";
 import {
-  applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
+  applyRemovalToItems, collapseRow, keepShown, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, PathTypeHint, type ListRowData } from "../list/ListRows";
 import { DiskCard } from "./DiskCard";
@@ -152,6 +152,11 @@ export function FullScanPage() {
     ),
   }));
   const selectableRows = rows.filter((r) => r.trashable && !isGone(selection, r.path)).map((r) => r.path);
+  // 只留还列着的勾选：扫描中被挤出前 N 名的行不再选着，否则会在看不见的情况下被移走。
+  const rowKey = rows.map((r) => r.path).join("\u0000");
+  React.useEffect(() => {
+    setSelection((prev) => keepShown(prev, rowKey ? rowKey.split("\u0000") : []));
+  }, [rowKey]);
   const sizeOf = (path: string) =>
     items.find((it) => it.path === path)?.size ?? childSize(selection, path);
 
@@ -166,17 +171,8 @@ export function FullScanPage() {
     const request = Symbol(path);
     if (collapsing) expansionsRef.current.delete(path);
     else expansionsRef.current.set(path, request);
-    setSelection((prev) => {
-      const expanded = new Set(prev.expanded);
-      const children = new Map(prev.children);
-      if (collapsing) {
-        expanded.delete(path);
-        children.delete(path);
-      } else {
-        expanded.add(path);
-      }
-      return { ...prev, expanded, children };
-    });
+    // 收起时连同藏进去的子项勾选一起去掉：看不见的不能还选着。
+    setSelection((prev) => (collapsing ? collapseRow(prev, path) : { ...prev, expanded: new Set([...prev.expanded, path]) }));
     if (collapsing) return;
     await loadChildren(path, fullscanApi, setSelection, () => expansionsRef.current.get(path) === request);
   };
@@ -194,10 +190,11 @@ export function FullScanPage() {
   };
 
   const applyItemsRemoval = (removed: string[]) => {
-    const upd = applyRemoval(itemsRef.current, selection, removed);
-    setItems(upd.items);
-    setSelection(upd.selection);
-    if (result) setResult((r) => (r ? { ...r, items: upd.items } : r));
+    // 勾选状态按最新的来收敛：等待移动期间到达的子项大小、列表不能被点击时的旧状态盖回去。
+    const left = applyRemovalToItems(itemsRef.current, selection, removed);
+    setItems(left);
+    setSelection((prev) => subtractRemoved(prev, removed));
+    if (result) setResult((r) => (r ? { ...r, items: left } : r));
     // 删除后磁盘容量变化，刷新磁盘卡（本页独有）。
     void refreshDisk();
   };
@@ -231,10 +228,12 @@ export function FullScanPage() {
     setTrashBatchOpen(true);
   };
 
+  const batchRef = React.useRef(false);
   const doTrashBatch = async () => {
     setTrashBatchOpen(false);
     const paths = pickedPaths(selection);
-    if (paths.length === 0) return;
+    if (paths.length === 0 || batchRef.current) return; // 弹窗退场时还能点到：第二次点击不再发一遍
+    batchRef.current = true;
     setBusy(true);
     setActionErrors([]);
     try {
@@ -256,6 +255,7 @@ export function FullScanPage() {
       setActionErrors([errText(e)]);
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
+      batchRef.current = false;
       setBusy(false);
     }
   };

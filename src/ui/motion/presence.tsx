@@ -1,5 +1,5 @@
 import * as React from "react";
-import { EASE, dur, motionLevel, play } from "./motion";
+import { EASE, dur, motionLevel } from "./motion";
 
 /** 列表里的一项：leaving 表示正在离场，只为播放收起动画而保留。 */
 export interface Presence<T> {
@@ -72,41 +72,67 @@ function goneSince<T>(before: readonly T[], items: readonly T[], keyOf: (item: T
   return gone;
 }
 
-/** 行收起：高度、内边距、边框归零并淡出；父容器有 gap 时用负外边距抵掉，移除时不再跳一下。 */
-export function collapseOut(el: HTMLElement | null): void {
-  if (!el) return;
+/** 离场动画：播到最后一帧并停在那里；返回的对象用来在这一行又回来时撤掉它。 */
+function leaveAnim(el: HTMLElement, keyframes: Keyframe[], ms: number, easing: string): Animation | null {
+  if (!(ms > 0) || typeof el.animate !== "function") return null;
+  return el.animate(keyframes, { duration: ms, easing, fill: "forwards" });
+}
+
+/** 撤掉离场动画和它留下的内联样式：这一行在动画期间又被列出来时，要恢复成正常的一行。 */
+function undoLeave(el: HTMLElement, anims: (Animation | null)[]): () => void {
+  return () => {
+    for (const a of anims) a?.cancel();
+    el.style.pointerEvents = "";
+    el.style.overflow = "";
+  };
+}
+
+const noUndo = () => {};
+
+/**
+ * 行收起：高度、内边距、边框归零并淡出；父容器有 gap 时用负外边距抵掉，移除时不再跳一下。
+ * 返回撤销函数。
+ */
+export function collapseOut(el: HTMLElement | null): () => void {
+  if (!el) return noUndo;
   el.style.pointerEvents = "none";
   const ms = dur("layout");
   if (!(ms > 0)) {
-    void play(el, [{ opacity: 1 }, { opacity: 0 }], dur("fade"), "linear", { fill: "forwards" });
-    return;
+    return undoLeave(el, [leaveAnim(el, [{ opacity: 1 }, { opacity: 0 }], dur("fade"), "linear")]);
   }
   const cs = getComputedStyle(el);
   const gap = el.parentElement ? parseFloat(getComputedStyle(el.parentElement).rowGap) || 0 : 0;
   const last = !el.nextElementSibling;
   const height = el.getBoundingClientRect().height;
   el.style.overflow = "hidden";
-  void play(el, [{ opacity: 1 }, { opacity: 0 }], dur("state"), EASE.in, { fill: "forwards" });
-  void play(el, [
-    { height: `${height}px`, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, borderTopWidth: cs.borderTopWidth, borderBottomWidth: cs.borderBottomWidth, marginTop: cs.marginTop, marginBottom: cs.marginBottom },
-    { height: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px", borderBottomWidth: "0px", marginTop: last && gap ? `${-gap}px` : cs.marginTop, marginBottom: !last && gap ? `${-gap}px` : cs.marginBottom },
-  ], ms, EASE.move, { fill: "forwards" });
+  return undoLeave(el, [
+    leaveAnim(el, [{ opacity: 1 }, { opacity: 0 }], dur("state"), EASE.in),
+    leaveAnim(el, [
+      { height: `${height}px`, paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, borderTopWidth: cs.borderTopWidth, borderBottomWidth: cs.borderBottomWidth, marginTop: cs.marginTop, marginBottom: cs.marginBottom },
+      { height: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px", borderBottomWidth: "0px", marginTop: last && gap ? `${-gap}px` : cs.marginTop, marginBottom: !last && gap ? `${-gap}px` : cs.marginBottom },
+    ], ms, EASE.move),
+  ]);
 }
 
-/** 网格项离场：缩小淡出（减弱时只淡出）。 */
-export function popOut(el: HTMLElement | null): void {
-  if (!el) return;
+/** 网格项离场：缩小淡出（减弱时只淡出）。返回撤销函数。 */
+export function popOut(el: HTMLElement | null): () => void {
+  if (!el) return noUndo;
   el.style.pointerEvents = "none";
-  if (dur("state") > 0) void play(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.92)" }], dur("state"), EASE.in, { fill: "forwards" });
-  else void play(el, [{ opacity: 1 }, { opacity: 0 }], dur("fade"), "linear", { fill: "forwards" });
+  const anim = dur("state") > 0
+    ? leaveAnim(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.92)" }], dur("state"), EASE.in)
+    : leaveAnim(el, [{ opacity: 1 }, { opacity: 0 }], dur("fade"), "linear");
+  return undoLeave(el, [anim]);
 }
 
-/** leaving 变为 true 时播放离场动画：collapse 用于列表行，pop 用于网格项。 */
+/**
+ * leaving 变为 true 时播放离场动画：collapse 用于列表行，pop 用于网格项。
+ * 动画期间同一行又被列出来（leaving 变回 false）时撤掉动画，否则它会停在
+ * 高度 0、透明、点不到的最后一帧。
+ */
 export function useLeaveAnimation(ref: React.RefObject<HTMLElement | null>, leaving: boolean, kind: "collapse" | "pop" = "collapse"): void {
   React.useLayoutEffect(() => {
     if (!leaving) return;
-    if (kind === "pop") popOut(ref.current);
-    else collapseOut(ref.current);
+    return kind === "pop" ? popOut(ref.current) : collapseOut(ref.current);
   }, [leaving, kind, ref]);
 }
 

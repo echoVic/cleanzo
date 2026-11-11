@@ -10,7 +10,7 @@ import { useT } from "../../ui/i18n-react";
 import { Collapse } from "../../ui/motion/Collapse";
 import { errText, toast } from "../../shared";
 import {
-  applyRemoval, emptySelection, isGone, pickedPaths, toggleChild, toggleRow,
+  applyRemovalToItems, keepShown, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow,
   type ListSelection,
 } from "../list/selection";
 import { ListRows, ListToolbar, type ListRowData } from "../list/ListRows";
@@ -172,6 +172,11 @@ export function LargePage() {
     ),
   }));
   const selectableRows = rows.filter((r) => r.trashable && !isGone(selection, r.path)).map((r) => r.path);
+  // 只留还列着的勾选：扫描中被挤出前 N 名的行不再选着，否则会在看不见的情况下被移走。
+  const rowKey = rows.map((r) => r.path).join("\u0000");
+  React.useEffect(() => {
+    setSelection((prev) => keepShown(prev, rowKey ? rowKey.split("\u0000") : []));
+  }, [rowKey]);
   const sizeOf = (path: string) => items.find((it) => it.path === path)?.size;
 
   // ---- 勾选 / 展开 / 动作 ----
@@ -194,10 +199,11 @@ export function LargePage() {
   };
 
   const applyItemsRemoval = (removed: string[]) => {
-    const upd = applyRemoval(itemsRef.current, selection, removed);
-    setItems(upd.items);
-    setSelection(upd.selection);
-    if (resultRef.current) setResult((r) => (r ? { ...r, items: upd.items } : r));
+    // 勾选状态按最新的来收敛：等待移动期间改了阈值或重新扫描，不能被点击时的旧状态盖回去。
+    const left = applyRemovalToItems(itemsRef.current, selection, removed);
+    setItems(left);
+    setSelection((prev) => subtractRemoved(prev, removed));
+    if (resultRef.current) setResult((r) => (r ? { ...r, items: left } : r));
   };
 
   const onTrashRow = (path: string, size: number, isDir = false) => {
@@ -227,10 +233,12 @@ export function LargePage() {
     setTrashBatchOpen(true);
   };
 
+  const batchRef = React.useRef(false);
   const doTrashBatch = async () => {
     setTrashBatchOpen(false);
     const paths = pickedPaths(selection);
-    if (paths.length === 0) return;
+    if (paths.length === 0 || batchRef.current) return; // 弹窗退场时还能点到：第二次点击不再发一遍
+    batchRef.current = true;
     setBusy(true);
     try {
       const r = await largeApi.cleanPaths(paths);
@@ -246,6 +254,7 @@ export function LargePage() {
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
     } finally {
+      batchRef.current = false;
       setBusy(false);
     }
   };

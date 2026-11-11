@@ -1,5 +1,5 @@
 import { isWindows } from "../../platform";
-import type { Skill, SkillCopy, SkillSource } from "../../mygo";
+import type { Skill, SkillCopy, SkillSource, SkillUpdate } from "../../mygo";
 
 export type SkillFilter = "all" | "idle" | "issues" | "updates" | "unobserved";
 export type SkillSort = "last" | "count" | "size" | "name";
@@ -119,3 +119,16 @@ export function linkCandidates(s: Skill): { path: string; target: string }[] {
 
 /** 能读到调用记录的来源。 */
 export const okSources = (sources: SkillSource[]) => sources.filter((s) => s.status === "ok");
+
+/**
+ * 扫描后读到的离线来源并入上一次检查的结果：文件夹内容没变的保留检查结论
+ *（有没有更新），变了的、新出现的按「未检查」算，已经不在的不再留。
+ */
+export function mergeOrigins(prev: Record<string, SkillUpdate>, origins: SkillUpdate[]): Record<string, SkillUpdate> {
+  const next: Record<string, SkillUpdate> = {};
+  for (const u of origins) {
+    const was = prev[u.path];
+    next[u.path] = was && was.checkedAt > 0 && was.local === u.local ? was : u;
+  }
+  return next;
+}

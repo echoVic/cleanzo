@@ -12,7 +12,7 @@
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:web": "bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts && bun test tests/skills-react.test.ts && bun test tests/crash-dumps.test.ts && bun test tests/platform.test.ts && bun test tests/i18n-windows.test.ts && bun test tests/motion.test.ts && bun test tests/growth-react.test.ts && bun test tests/process-react.test.ts && bun test tests/app-icon.test.ts && bun test tests/native-i18n.test.ts"
+    "test:web": "bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/aispace-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts && bun test tests/skills-react.test.ts && bun test tests/crash-dumps.test.ts && bun test tests/platform.test.ts && bun test tests/i18n-windows.test.ts && bun test tests/motion.test.ts && bun test tests/growth-react.test.ts && bun test tests/process-react.test.ts && bun test tests/app-icon.test.ts && bun test tests/native-i18n.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.4.1",
@@ -35,6 +35,5 @@
     "tailwindcss": "^4",
     "typescript": "^7",
     "vite": "^8"
-  },
-  "packageManager": "pnpm@12.11.2+sha512.25a51652a196785af5f28bda6dfe8dc582ebefa4ac1d180221ce1390231c5fb76637822ea4b6e4633ce74acdcb0a77f725af11bad38177fdeddaee818a955cb9"
+  }
 }

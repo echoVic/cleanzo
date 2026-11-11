@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DUR, dur, motionLevel, setMotionLevelForTest } from "../src/ui/motion/motion";
-import { mergePresence } from "../src/ui/motion/presence";
+import { collapseOut, mergePresence, popOut } from "../src/ui/motion/presence";
 import { Collapse } from "../src/ui/motion/Collapse";
 import { NumberTicker } from "../src/ui/motion/NumberTicker";
 import { containRect } from "../src/ui/motion/fly";
@@ -56,4 +56,35 @@ test("Collapse appear stays open in static rendering without Web Animations", ()
   expect(motionLevel()).toBe("none");
   expect(renderToStaticMarkup(createElement(Collapse, { open: true, appear: true }, "child")))
     .toBe('<div class="cz-collapse" data-state="open"><div class="cz-collapse-in">child</div></div>');
+});
+
+test("a row that comes back while leaving gets its leave animation undone", () => {
+  const cancelled: string[] = [];
+  const el = {
+    style: {} as Record<string, string>,
+    parentElement: null,
+    nextElementSibling: null,
+    getBoundingClientRect: () => ({ height: 40 }),
+    animate(frames: Keyframe[]) {
+      const name = "height" in frames[0]! ? "size" : "fade";
+      return { finished: new Promise<void>(() => {}), cancel: () => cancelled.push(name) };
+    },
+  };
+  const saved = (globalThis as { getComputedStyle?: unknown }).getComputedStyle;
+  (globalThis as { getComputedStyle?: unknown }).getComputedStyle = () => ({ paddingTop: "8px", paddingBottom: "8px", borderTopWidth: "1px", borderBottomWidth: "1px", marginTop: "0px", marginBottom: "0px", rowGap: "0px" });
+  try {
+    setMotionLevelForTest("full");
+    for (const leave of [collapseOut, popOut]) {
+      cancelled.length = 0;
+      const undo = leave(el as unknown as HTMLElement);
+      expect(el.style.pointerEvents).toBe("none");
+      undo(); // the same row is listed again before the animation ended
+      expect(cancelled.length).toBeGreaterThan(0);
+      expect(el.style.pointerEvents).toBe("");
+      expect(el.style.overflow ?? "").toBe("");
+    }
+  } finally {
+    setMotionLevelForTest(undefined);
+    (globalThis as { getComputedStyle?: unknown }).getComputedStyle = saved;
+  }
 });
