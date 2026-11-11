@@ -1347,7 +1347,8 @@ export const Cleaner = {
    * for them to finish. Returns true when they are all gone. (false, nil)
    * means the quit was sent but an app was still running after the wait
    * (typically an unsaved-work dialog); the errors carry not-running and
-   * cannot-quit, the latter when terminate was refused outright.
+   * cannot-quit, the latter at once when every terminate was refused and the
+   * apps are still there.
    */
   quitApp(path: string): Promise<boolean> {
     return call("Cleaner.QuitApp", path);
@@ -1374,8 +1375,8 @@ export const Cleaner = {
    * SaveMenuBar shows the readings in items, which Settings sends whole, and
    * keeps them for the next launch; names it does not know, and the battery on a
    * Mac without one, are dropped. Turning the last reading off while monitoring
-   * is off turns opening at login off too (spec §七.3). Pages hear
-   * MenuBarUpdated, and GrowthUpdated when the login item changed.
+   * and the Trash reminder are off turns opening at login off too (spec §七.3).
+   * Pages hear MenuBarUpdated, and GrowthUpdated when the login item changed.
    */
   saveMenuBar(items: string[]): Promise<void> {
     return call("Cleaner.SaveMenuBar", items);
