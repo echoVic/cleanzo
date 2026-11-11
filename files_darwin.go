@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// RevealInFinder shows path in Finder: plain folders open in place; files
+// platformReveal shows path in Finder: plain folders open in place; files
 // and packages, which opening would launch or mount, are selected in their
 // parent folder. The call returns an error when the path does not exist.
 func platformReveal(path string) error {
@@ -32,8 +32,9 @@ func platformReveal(path string) error {
 	return nil
 }
 
-// PhotoPreview returns a JPEG data URL of a photo in the home folder, at most
-// 1600 pixels on its longest side, for a closer look than the thumbnails give.
+// platformPhotoPreview returns a JPEG data URL of a photo in the home folder,
+// at most 1600 pixels on its longest side, for a closer look than the
+// thumbnails give.
 func platformPhotoPreview(path string) (string, error) {
 	if !within(canonical(path), canonical(homeDir())) || !photoExts[strings.ToLower(filepath.Ext(path))] {
 		return "", errBlocked
@@ -66,10 +67,10 @@ func platformPhotoPreview(path string) (string, error) {
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// loadPhotoImage decodes a photo for hashing and its thumbnail. cfg is the
-// photo's real size, while img may be a smaller copy (see maxDecodePixels).
-// The returned cleanup removes any temporary file and must be run by the
-// caller.
+// platformLoadPhotoImage decodes a photo for hashing and its thumbnail. cfg
+// is the photo's real size, while img may be a smaller copy (see
+// maxDecodePixels). The returned cleanup removes any temporary file and must
+// be run by the caller.
 func platformLoadPhotoImage(ctx context.Context, path string) (image.Image, image.Config, func(), error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	var cfg image.Config

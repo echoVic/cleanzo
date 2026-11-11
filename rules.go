@@ -84,7 +84,7 @@ var darwinJunkRules = []Rule{
 		Targets: []Target{{Pattern: "Library/Developer/Xcode/Archives/*", Mode: entriesOf, Names: []string{"*.xcarchive"}}}},
 	{ID: "review.device-support", Group: groupReview, Detail: detailDeviceSupport,
 		Targets: []Target{{Pattern: "Library/Developer/Xcode/*DeviceSupport", Mode: entriesOf}}},
-	{ID: "review.simulators", Group: groupReview, Command: &simctlCleanup}, // Task 6
+	{ID: "review.simulators", Group: groupReview, Command: &simctlCleanup},
 	{ID: "review.installers", Group: groupReview, Trash: true, Detail: detailInstallers,
 		Targets: []Target{
 			{Pattern: "Downloads", Mode: recursiveFiles, Names: []string{"*.dmg", "*.pkg", "*.mpkg", "*.xip"}},
@@ -137,7 +137,7 @@ var darwinJunkRules = []Rule{
 	// dev: caches developer tools fetch again on demand
 	{ID: "dev.npm", Group: groupDev, Default: true, Targets: []Target{{Pattern: ".npm/_cacache", Mode: entriesOf}, {Pattern: ".npm/_logs", Mode: entriesOf}}},
 	{ID: "dev.npx", Group: groupDev, Default: true, Targets: []Target{{Pattern: ".npm/_npx", Mode: entriesOf}}},
-	{ID: "dev.pnpm", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/pnpm", Mode: entriesOf}}}, // the store: Task 6
+	{ID: "dev.pnpm", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/pnpm", Mode: entriesOf}}}, // the store: dev.pnpm-store
 	{ID: "dev.yarn", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/Yarn", Mode: entriesOf}, {Pattern: ".yarn/berry/cache", Mode: entriesOf}}},
 	{ID: "dev.bun", Group: groupDev, Default: true, Targets: []Target{{Pattern: ".bun/install/cache", Mode: entriesOf}}},
 	{ID: "dev.corepack", Group: groupDev, Default: true, Targets: []Target{{Pattern: ".cache/node/corepack", Mode: entriesOf}}},
@@ -155,7 +155,7 @@ var darwinJunkRules = []Rule{
 		{Pattern: "miniforge3/pkgs", Mode: entriesOf, Names: []string{"*.conda", "*.tar.bz2"}}}},
 	{ID: "dev.cargo", Group: groupDev, Default: true, Targets: []Target{{Pattern: ".cargo/registry/cache", Mode: entriesOf}, {Pattern: ".cargo/registry/src", Mode: entriesOf}, {Pattern: ".cargo/git/checkouts", Mode: entriesOf}}},
 	{ID: "dev.go-build", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/go-build", Mode: entriesOf}}},
-	{ID: "dev.go-mod", Group: groupDev, Command: &goModCleanup}, // Task 6
+	{ID: "dev.go-mod", Group: groupDev, Command: &goModCleanup},
 	{ID: "dev.xcode", Group: groupDev, Default: true, Owners: []string{"com.apple.dt.Xcode"},
 		Targets: []Target{{Pattern: "Library/Developer/Xcode/DerivedData", Mode: entriesOf}, {Pattern: "Library/Caches/com.apple.dt.Xcode", Mode: entriesOf}}},
 	{ID: "dev.simulator-caches", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Developer/CoreSimulator/Caches", Mode: entriesOf}}},
@@ -168,8 +168,8 @@ var darwinJunkRules = []Rule{
 	// Homebrew's API index and compiled code in the same folder cost a slow
 	// first run to rebuild, so only downloads are cleaned.
 	{ID: "dev.homebrew", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/Homebrew/downloads", Mode: entriesOf}}, Reserve: []string{"Library/Caches/Homebrew"}},
-	{ID: "dev.homebrew-old", Group: groupDev, Default: true, Command: &brewCleanup}, // Task 6
-	{ID: "dev.pnpm-store", Group: groupDev, Default: true, Command: &pnpmPrune},     // Task 6
+	{ID: "dev.homebrew-old", Group: groupDev, Default: true, Command: &brewCleanup},
+	{ID: "dev.pnpm-store", Group: groupDev, Default: true, Command: &pnpmPrune},
 
 	// system
 	// Crash dumps Chromium and Electron apps queue for upload. Codex's desktop
