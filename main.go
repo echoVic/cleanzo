@@ -391,11 +391,10 @@ var trashWithContext = func(_ context.Context, path string) error { return trash
 // cleanHooks report a clean pass's progress. Each may be nil; they are
 // called one at a time.
 type cleanHooks struct {
-	beforeRemove func(path string) bool               // optional final eligibility check immediately before removal
-	started      func(name string)                    // an item starts
-	checking     func(name, path string)              // an entry is measured before removal
-	removed      func(name, path string, bytes int64) // an entry is gone; bytes: cleaned so far in the pass
-	finished     func(res CleanResult)                // an item is done, or stopped
+	started  func(name string)                    // an item starts
+	checking func(name, path string)              // an entry is measured before removal
+	removed  func(name, path string, bytes int64) // an entry is gone; bytes: cleaned so far in the pass
+	finished func(res CleanResult)                // an item is done, or stopped
 }
 
 // guideFullDiskAccess shows the system's guide to Full Disk Access: System

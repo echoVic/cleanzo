@@ -1247,7 +1247,7 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			continue
 		}
 		permanent := !spec.item.Trash || inTrash
-		if hooks.beforeRemove != nil && !hooks.beforeRemove(e.path) || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			continue
 		}
 		if permanent {
