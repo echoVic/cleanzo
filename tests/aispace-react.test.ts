@@ -2,7 +2,10 @@ import { setLang } from "./setup-dom";
 import { expect, test } from "bun:test";
 import type { AIGroup, AIPart, AITool } from "../src/mygo";
 import { t } from "../src/i18n";
+import { human } from "../src/shared";
 import {
+  cleanReport,
+  cleanToastText,
   pickedBytes,
   relTime,
   rowsChecked,
@@ -115,4 +118,25 @@ test("relative times follow the interface language", () => {
   expect(relTime(NOW - 12 * DAY, NOW, t)).toBe("12 days ago");
   expect(relTime(NOW - 31 * DAY, NOW, t)).toBe("1 month ago");
   expect(relTime(NOW - 800 * DAY, NOW, t)).toBe("2 years ago");
+});
+
+test("a clean with failed entries names the first reason in its toast and keeps the counts", () => {
+  setLang("zh");
+  const unreadable = "~/.ollama/models/manifests/registry.ollama.ai/library/llama3/latest: unreadable";
+  const report = cleanReport([
+    { freed: 1024, parts: [
+      { tool: "ollama", part: "llama3", moved: 0, freed: 0, kept: 0, skipped: "", failed: [unreadable] },
+      { tool: "ollama", part: "qwen", moved: 1, freed: 1024, kept: 0, skipped: "", failed: [] },
+    ] },
+    null,
+    { freed: 0, parts: [{ tool: "claude", part: "claude.cache", moved: 0, freed: 0, kept: 2, skipped: "", failed: ["~/.claude/cache: in-use"] }] },
+  ]);
+  expect(report).toMatchObject({ freed: 1024, kept: 2, skipped: 2 });
+  const text = cleanToastText(report, t, human);
+  expect(text).toContain(t("aispace.done", { size: human(1024) }));
+  expect(text).toContain(t("aispace.done.kept", { n: 2 }));
+  expect(text).toContain(t("aispace.done.skipped", { n: 2 }));
+  expect(text).toContain(unreadable);
+  expect(text).not.toContain("in-use");
+  expect(cleanToastText(cleanReport([{ freed: 0, parts: [] }]), t, human)).toBe(t("aispace.done", { size: human(0) }));
 });

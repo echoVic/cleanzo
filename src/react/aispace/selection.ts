@@ -1,4 +1,4 @@
-import type { AIPart, AITool } from "../../mygo";
+import type { AICleanResult, AIPart, AITool } from "../../mygo";
 
 /** 一个工具的一个部分：页面上的行都由它们合成。 */
 export interface PartRow {
@@ -117,4 +117,38 @@ export function relTime(ts: number, now: number, t: (key: RelKey, vars?: Record<
   if (d < 31) return t("aispace.rel.days", { n: d });
   if (d < 365) return t("aispace.rel.months", { n: Math.max(1, Math.round(d / 30)) });
   return t("aispace.rel.years", { n: Math.round(d / 365) });
+}
+
+/** 一次清理的汇总：释放的字节、正在使用而保留的项数、被跳过或有失败的部分数，以及第一条失败（「路径: 原因」）。 */
+export interface CleanReport {
+  freed: number;
+  kept: number;
+  skipped: number;
+  failed: string;
+}
+
+/** 把模型和部分两次清理的结果合成一份汇总；没发出的那次是 null。 */
+export function cleanReport(results: readonly (AICleanResult | null)[]): CleanReport {
+  const report: CleanReport = { freed: 0, kept: 0, skipped: 0, failed: "" };
+  for (const res of results) {
+    if (!res) continue;
+    report.freed += res.freed ?? 0;
+    for (const r of res.parts ?? []) {
+      report.kept += r.kept;
+      if (r.skipped || r.failed.length > 0) report.skipped++;
+      if (!report.failed && r.failed.length > 0) report.failed = r.failed[0]!;
+    }
+  }
+  return report;
+}
+
+type DoneKey = "aispace.done" | "aispace.done.kept" | "aispace.done.skipped";
+
+/** 清理完成的提示：移走的大小，再加保留和跳过的计数；有失败时附上第一条，说清是哪个文件、为什么。 */
+export function cleanToastText(report: CleanReport, t: (key: DoneKey, vars?: Record<string, string | number>) => string, human: (n: number) => string): string {
+  const lines = [t("aispace.done", { size: human(report.freed) })];
+  if (report.kept > 0) lines.push(t("aispace.done.kept", { n: report.kept }));
+  if (report.skipped > 0) lines.push(t("aispace.done.skipped", { n: report.skipped }));
+  if (report.failed) lines.push(report.failed);
+  return lines.join(" · ");
 }

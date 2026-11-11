@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { errText, human, toast } from "../../shared";
 import { aiSpaceApi } from "./api";
-import { partKey, pickable, pickedBytes, relTime, rowsChecked, selectionsFor, splitParts, toggleRows, type PartRow, type Picks } from "./selection";
+import { cleanReport, cleanToastText, partKey, pickable, pickedBytes, relTime, rowsChecked, selectionsFor, splitParts, toggleRows, type CleanReport, type PartRow, type Picks } from "./selection";
 
 type Phase = "idle" | "scanning" | "scanned";
 type Filter = "all" | "models" | "sessions" | "caches";
@@ -39,7 +39,7 @@ export function AISpacePage() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [busy, setBusy] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [done, setDone] = React.useState<{ freed: number; kept: number; skipped: number } | null>(null);
+  const [done, setDone] = React.useState<CleanReport | null>(null);
 
   const now = scannedAt || Math.floor(Date.now() / 1000);
 
@@ -197,28 +197,18 @@ export function AISpacePage() {
         .map((s) => ({ source: s.id, models: s.models.filter((m) => modelPicked(s.id, m.path)).map((m) => m.path) }))
         .filter((x) => x.models.length > 0);
       const parts = selectionsFor(picks, [...sessionRows, ...cacheRows, ...optionalRows]);
-      const report = { freed: 0, kept: 0, skipped: 0 };
+      let report: CleanReport;
       try {
-        for (const res of [
+        report = cleanReport([
           models.length > 0 ? await aiSpaceApi.cleanModels(models) : null,
           parts.length > 0 ? await aiSpaceApi.cleanParts(parts) : null,
-        ]) {
-          if (!res) continue;
-          report.freed += res.freed ?? 0;
-          for (const r of res.parts ?? []) {
-            report.kept += r.kept;
-            if (r.skipped || r.failed.length > 0) report.skipped++;
-          }
-        }
+        ]);
       } finally {
         // 中途失败也重新统计：已经移走的不能还列在页面上。
         await scan();
       }
       setDone(report);
-      const lines = [t("aispace.done", { size: human(report.freed) })];
-      if (report.kept > 0) lines.push(t("aispace.done.kept", { n: report.kept }));
-      if (report.skipped > 0) lines.push(t("aispace.done.skipped", { n: report.skipped }));
-      toast(lines.join(" · "), report.skipped > 0 ? "err" : "ok");
+      toast(cleanToastText(report, t, human), report.skipped > 0 ? "err" : "ok");
     } catch (e) {
       toast(errText(e), "err");
     } finally {
