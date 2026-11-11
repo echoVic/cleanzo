@@ -60,8 +60,11 @@ var (
 		"/desktop", "/documents", "/downloads", "/pictures", "/music", "/videos", "/favorites", "/contacts", "/links", "/searches", "/saved games",
 		"/appdata", "/appdata/local", "/appdata/roaming", "/appdata/locallow",
 	})
+	// CloudStorage holds the folders of cloud providers (OneDrive, Google
+	// Drive, Dropbox), online-only placeholders among them: trashing one
+	// frees nothing here and deletes it from the cloud.
 	protectedHomeTrees = platformPaths([]string{
-		"/library/keychains", "/library/mobile documents", "/library/mail",
+		"/library/keychains", "/library/mobile documents", "/library/cloudstorage", "/library/mail",
 		"/library/messages", "/.ssh", "/.gnupg",
 	}, []string{
 		"/.ssh", "/.gnupg", "/appdata/roaming/microsoft", "/appdata/local/packages", "/appdata/local/programs",
