@@ -24,6 +24,54 @@ func untarSafe(r io.Reader, dest string) (string, error) {
 	return untarSafeModes(r, dest, nil)
 }
 
+// TestUntarSafeStopsAtLimits: an archive stops unpacking with an error once
+// it has written more bytes, or held more entries, than an upgrade allows.
+func TestUntarSafeStopsAtLimits(t *testing.T) {
+	if skillUnpackLimit != 512<<20 || skillEntryLimit != 20000 {
+		t.Fatalf("limits = %d bytes, %d entries", skillUnpackLimit, skillEntryLimit)
+	}
+	savedBytes, savedEntries := skillUnpackLimit, skillEntryLimit
+	skillUnpackLimit, skillEntryLimit = 1000, 10
+	t.Cleanup(func() { skillUnpackLimit, skillEntryLimit = savedBytes, savedEntries })
+	archive := func(files ...int) []byte {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		tw.WriteHeader(&tar.Header{Name: "r/", Typeflag: tar.TypeDir, Mode: 0o755})
+		for i, size := range files {
+			tw.WriteHeader(&tar.Header{Name: fmt.Sprintf("r/f%02d", i), Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(size)})
+			tw.Write(bytes.Repeat([]byte("x"), size))
+		}
+		tw.Close()
+		gz.Close()
+		return buf.Bytes()
+	}
+	written := func(root string) (n int64) {
+		filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				info, _ := d.Info()
+				n += info.Size()
+			}
+			return nil
+		})
+		return n
+	}
+	dest := filepath.Join(t.TempDir(), "x")
+	if _, err := untarSafe(bytes.NewReader(archive(600, 600)), dest); err == nil {
+		t.Fatal("1200 bytes unpacked past a 1000-byte limit")
+	}
+	if n := written(dest); n > 1000 {
+		t.Fatalf("%d bytes written past the limit", n)
+	}
+	if _, err := untarSafe(bytes.NewReader(archive(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)), filepath.Join(t.TempDir(), "x")); err == nil {
+		t.Fatal("11 entries unpacked past a 10-entry limit")
+	}
+	root, err := untarSafe(bytes.NewReader(archive(500, 400, 1, 1, 1, 1, 1, 1, 1)), filepath.Join(t.TempDir(), "x"))
+	if err != nil || written(root) != 907 {
+		t.Fatalf("archive within the limits: %v", err)
+	}
+}
+
 // fakeGitHub serves a repository's tree listing and archive.
 type fakeGitHub struct {
 	server    *httptest.Server

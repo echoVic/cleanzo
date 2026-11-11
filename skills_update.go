@@ -105,12 +105,22 @@ var skillGitCommand = func(ctx context.Context, dir string, args ...string) ([]b
 // skillArchiveLimit bounds a downloaded repository archive.
 const skillArchiveLimit = 256 << 20
 
+// skillUnpackLimit and skillEntryLimit bound what an archive unpacks to: the
+// bytes written and the entries it holds. Tests lower them.
+var (
+	skillUnpackLimit int64 = 512 << 20
+	skillEntryLimit        = 20000
+)
+
 var (
 	errSkillNoOrigin = errors.New("no-origin")
 	errSkillModified = errors.New("modified")
 	errSkillMismatch = errors.New("mismatch")
 	errSkillNotFound = errors.New("not-found")
 	errSkillRate     = errors.New("rate-limited")
+
+	errSkillTooLarge       = errors.New("archive too large")
+	errSkillTooManyEntries = errors.New("archive has too many entries")
 )
 
 // ---------------------------------------------------------------------------
@@ -960,6 +970,8 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 	tr := tar.NewReader(gz)
 	top := ""
 	links := map[string]bool{} // the links this archive made, by entry name
+	var written int64
+	entries := 0
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -970,6 +982,9 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 		}
 		if h.Typeflag == tar.TypeXGlobalHeader {
 			continue
+		}
+		if entries++; entries > skillEntryLimit {
+			return "", errSkillTooManyEntries
 		}
 		name := path.Clean(h.Name)
 		if runtime.GOOS == "windows" && (strings.ContainsAny(h.Name, `\:`) || strings.ContainsAny(h.Linkname, `\:`)) {
@@ -999,6 +1014,9 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 				return "", err
 			}
 		case tar.TypeReg:
+			if h.Size > skillUnpackLimit-written {
+				return "", errSkillTooLarge
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return "", err
 			}
@@ -1017,10 +1035,13 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 			if err != nil {
 				return "", err
 			}
-			_, err = io.Copy(f, tr)
+			n, err := io.Copy(f, io.LimitReader(tr, skillUnpackLimit-written+1))
 			f.Close()
 			if err != nil {
 				return "", err
+			}
+			if written += n; written > skillUnpackLimit {
+				return "", errSkillTooLarge
 			}
 		case tar.TypeSymlink:
 			link := path.Clean(path.Join(path.Dir(name), h.Linkname))
