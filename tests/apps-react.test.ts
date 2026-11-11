@@ -8,6 +8,7 @@ import { appsRequest, requestAppsFilter, requestAppsUninstall } from "../src/rea
 import {
   filterByKind, growthFor, growthTagFor, isIdle, reasonKey, sourceKey, splitUsage, updateCount, versionTag,
 } from "../src/react/apps/updates";
+import type { Changes } from "./page-harness";
 
 test("macOS app filters reference existing panels and label the active content", async () => {
   await import("./setup-dom");
@@ -1265,81 +1266,82 @@ function deferredOf<T>() {
   return { promise, resolve, reject };
 }
 
-async function leftoversPage(overrides: Record<string, unknown> = {}) {
-  const { pageHarness, fakeStream } = await import("./list-page-harness");
+/** 搭好残留页（中文）：改动都记在 env 里，由测试的 finally 还原。 */
+async function leftoversPage(env: Changes, overrides: Record<string, unknown> = {}) {
+  const { fakeStream } = await import("./page-harness");
   const { LeftoversTab } = await import("../src/react/apps/LeftoversTab");
   const { appsApi } = await import("../src/react/apps/api");
-  const { getPref, setPref } = await import("../src/i18n");
-  const savedPref = getPref();
-  setPref("zh");
-  const saved = { ...appsApi };
+  env.lang("zh");
   const stream = fakeStream<OrphanItem>();
-  Object.assign(appsApi, { startOrphanScan: () => stream, ...overrides });
-  const h = pageHarness(LeftoversTab, { active: true, onCountChange() {}, onBusyChange() {} });
-  await h.flush();
+  env.assign(appsApi, { startOrphanScan: () => stream, ...overrides });
+  const h = env.page(LeftoversTab, { active: true, onCountChange() {}, onBusyChange() {} });
+  await h.settle();
   return {
     h, stream,
     rows: () => h.find((n) => n.type?.name === "ListRows")!.props,
-    dispose() { h.dispose(); Object.assign(appsApi, saved); setPref(savedPref); },
   };
 }
 
 test("残留：收起后才到的子项列表不再填回这一行，也不把子项勾上", async () => {
   const listing = deferredOf<unknown>();
-  const p = await leftoversPage({ dirChildren: () => listing.promise });
+  const env = (await import("./page-harness")).changes();
   try {
+    const p = await leftoversPage(env, { dirChildren: () => listing.promise });
     p.stream.emit(orphan({ path: "/u/Library/Old", size: 4096, isDir: true }));
     p.stream.finish();
-    await p.h.flush();
+    await p.h.settle();
     p.rows().onToggleRow("/u/Library/Old", true);
     p.rows().onExpand("/u/Library/Old");
-    await p.h.flush();
+    await p.h.settle();
     p.rows().onExpand("/u/Library/Old");
-    await p.h.flush();
+    await p.h.settle();
     listing.resolve({ items: [{ name: "a", path: "/u/Library/Old/a", size: 10, isDir: false, trashable: true }], total: 1 });
-    await p.h.flush();
+    await p.h.settle();
     const st = p.rows().selection;
     expect(st.expanded.has("/u/Library/Old")).toBe(false);
     expect(st.children.has("/u/Library/Old")).toBe(false);
     expect([...st.sel]).toEqual(["/u/Library/Old"]);
-  } finally { p.dispose(); }
+  } finally { env.restore(); }
 });
 
 test("残留：展开后量出大小未知的子文件夹，并按大小重排", async () => {
   const measured = deferredOf<number>();
   const asked: string[] = [];
-  const p = await leftoversPage({
-    dirChildren: async () => ({ items: [
-      { name: "small", path: "/u/Library/Old/small", size: 1024, isDir: false, trashable: true },
-      { name: "slow", path: "/u/Library/Old/slow", size: -1, isDir: true, trashable: true },
-    ], total: 2 }),
-    dirSize: (path: string) => { asked.push(path); return measured.promise; },
-  });
+  const env = (await import("./page-harness")).changes();
   try {
+    const p = await leftoversPage(env, {
+      dirChildren: async () => ({ items: [
+        { name: "small", path: "/u/Library/Old/small", size: 1024, isDir: false, trashable: true },
+        { name: "slow", path: "/u/Library/Old/slow", size: -1, isDir: true, trashable: true },
+      ], total: 2 }),
+      dirSize: (path: string) => { asked.push(path); return measured.promise; },
+    });
     p.stream.emit(orphan({ path: "/u/Library/Old", size: 8192, isDir: true }));
     p.stream.finish();
-    await p.h.flush();
+    await p.h.settle();
     p.rows().onExpand("/u/Library/Old");
-    await p.h.flush();
+    await p.h.settle();
     expect(asked).toEqual(["/u/Library/Old/slow"]);
     const listed = () => p.rows().selection.children.get("/u/Library/Old").items as { path: string; size: number; measuring?: boolean }[];
     expect(listed().find((it) => it.path.endsWith("slow"))?.measuring).toBe(true);
     measured.resolve(4096);
-    await p.h.flush();
+    await p.h.settle();
     expect(listed().map((it) => [it.path, it.size, !!it.measuring])).toEqual([
       ["/u/Library/Old/slow", 4096, false], ["/u/Library/Old/small", 1024, false],
     ]);
-  } finally { p.dispose(); }
+  } finally { env.restore(); }
 });
 
 test("残留扫描在通道还开着时失败：显示错误，不留下未处理的 rejection", async () => {
-  const p = await leftoversPage();
+  const { changes, textOf } = await import("./page-harness");
+  const env = changes();
   try {
+    const p = await leftoversPage(env);
     p.stream.fail(new Error("leftovers denied"));
     await p.h.settle();
     p.stream.end();
-    await p.h.flush();
+    await p.h.settle();
     const alert = p.h.find((n) => n.props.role === "alert");
-    expect(alert && p.h.text(alert)).toContain("leftovers denied");
-  } finally { p.dispose(); }
+    expect(alert && textOf(alert)).toContain("leftovers denied");
+  } finally { env.restore(); }
 });

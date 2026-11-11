@@ -2,6 +2,7 @@ import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
 import { expect, spyOn, test } from "bun:test";
 import type { GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
 import { fmtMem, fmtPct } from "../src/react/status/format";
+import type { Changes } from "./page-harness";
 
 // i18n 解析读 localStorage，这里钉住中文。
 const storage = new Map([["cleanzo.lang", "zh"]]);
@@ -340,23 +341,18 @@ function fakeChannel() {
   };
 }
 
-async function processPage() {
-  await import("./setup-dom");
-  const { pageHarness } = await import("./page-harness");
+/** 搭好进程页：改动都记在 env 里，由测试的 finally 还原。 */
+async function processPage(env: Changes) {
   const { ProcessPage } = await import("../src/react/process/ProcessPage");
   const { GrowthPanel } = await import("../src/react/growth/GrowthPage");
   const { processApi } = await import("../src/react/process/api");
   const { growthApi } = await import("../src/react/growth/api");
   const ch = fakeChannel();
-  const g = globalThis as { mygo?: unknown };
-  const previous = g.mygo;
-  g.mygo = { channel: () => ch };
-  const spies = [
-    spyOn(processApi, "watch").mockImplementation(() => new Promise<void>(() => {})),
-    spyOn(growthApi, "summary").mockImplementation(async () => summary()),
-    spyOn(growthApi, "onUpdated").mockImplementation(() => () => {}),
-  ];
-  const page = pageHarness(ProcessPage, {
+  env.assign(globalThis as { mygo?: unknown }, { mygo: { channel: () => ch } });
+  env.spy(processApi, "watch").mockImplementation(() => new Promise<void>(() => {}));
+  env.spy(growthApi, "summary").mockImplementation(async () => summary());
+  env.spy(growthApi, "onUpdated").mockImplementation(() => () => {});
+  const page = env.page(ProcessPage, {
     active: true, visit: 1, request: { tab: null, focusKey: null, nonce: 0 }, goLeftovers() {}, goUninstall() {},
   });
   await page.settle();
@@ -365,13 +361,13 @@ async function processPage() {
     rows() { return page.all().filter((el) => "onToggle" in el.props && el.props.row); },
     tab(v: string) { page.find((el) => typeof el.props.onValueChange === "function")!.props.onValueChange(v); },
     growth() { return page.ofType(GrowthPanel)[0]; },
-    close() { page.close(); for (const s of spies) s.mockRestore(); g.mygo = previous; },
   };
 }
 
 test("page: rows are sorted once per sample and sort key, not on every render", async () => {
-  const pp = await processPage();
+  const env = (await import("./page-harness")).changes();
   try {
+    const pp = await processPage(env);
     let reads = 0;
     const rows = [node, chrome, lark];
     pp.ch.push({ ...sample(), get rows() { reads++; return rows; } } as ProcessSample);
@@ -385,12 +381,13 @@ test("page: rows are sorted once per sample and sort key, not on every render", 
     pp.tab("mem");
     await pp.page.settle();
     expect(reads).toBeGreaterThan(0);
-  } finally { pp.close(); }
+  } finally { env.restore(); }
 });
 
 test("page: the disk tab keeps its panel while CPU or memory is shown", async () => {
-  const pp = await processPage();
+  const env = (await import("./page-harness")).changes();
   try {
+    const pp = await processPage(env);
     pp.tab("disk");
     await pp.page.settle();
     expect(pp.growth()?.props.active).toBe(true);
@@ -401,5 +398,5 @@ test("page: the disk tab keeps its panel while CPU or memory is shown", async ()
     pp.tab("disk");
     await pp.page.settle();
     expect(pp.growth()?.props.active).toBe(true);
-  } finally { pp.close(); }
+  } finally { env.restore(); }
 });

@@ -1,8 +1,9 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { Settings } from "../src/mygo";
 import {
   baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
 } from "../src/react/settings/settings-helpers";
+import type { Changes } from "./page-harness";
 
 test("trash reminder controls expose threshold and permission, and hide when unsupported", async () => {
   await import("./setup-dom");
@@ -101,39 +102,41 @@ test("settings page offers system, light and dark appearance modes", async () =>
   expect(html).toContain("深色");
 });
 
-test("after a failed rename the folder-name input shows the saved name again", async () => {
-  await import("./setup-dom");
-  const { pageHarness } = await import("./page-harness");
+/** 搭好设置页，自定义文件夹 Work 的改名总是存不上：改动都记在 env 里，由测试的 finally 还原。 */
+async function renameFailsPage(env: Changes) {
   const { SettingsPage } = await import("../src/react/settings/SettingsPage");
   const { settingsApi } = await import("../src/react/settings/api");
   const { growthApi } = await import("../src/react/growth/api");
   const saved = settings({ custom: [{ name: "Work", path: "/Users/a/Work", enabled: true }] });
-  const spies = [
-    spyOn(settingsApi, "getSettings").mockImplementation(async () => saved),
-    spyOn(settingsApi, "saveSettings").mockImplementation(async () => { throw new Error("disk full"); }),
-    spyOn(settingsApi, "info").mockImplementation(async () => ({ version: "1.0.0" }) as never),
-    spyOn(settingsApi, "fullDiskAccess").mockImplementation(async () => true),
-    spyOn(settingsApi, "getTheme").mockImplementation(async () => "system"),
-    spyOn(settingsApi, "growthSummary").mockImplementation(async () => ({ supported: false }) as never),
-    spyOn(settingsApi, "menuBar").mockImplementation(async () => ({ supported: false }) as never),
-    spyOn(settingsApi, "trashReminder").mockImplementation(async () => ({ supported: false }) as never),
-    spyOn(settingsApi, "onMenuBarUpdated").mockImplementation(() => () => {}),
-    spyOn(growthApi, "onUpdated").mockImplementation(() => () => {}),
-  ];
-  const page = pageHarness(SettingsPage, { callbacks: { changeLanguage: async () => {} }, session: 0 });
+  env.spy(settingsApi, "getSettings").mockImplementation(async () => saved);
+  env.spy(settingsApi, "saveSettings").mockImplementation(async () => { throw new Error("disk full"); });
+  env.spy(settingsApi, "info").mockImplementation(async () => ({ version: "1.0.0" }) as never);
+  env.spy(settingsApi, "fullDiskAccess").mockImplementation(async () => true);
+  env.spy(settingsApi, "getTheme").mockImplementation(async () => "system");
+  env.spy(settingsApi, "growthSummary").mockImplementation(async () => ({ supported: false }) as never);
+  env.spy(settingsApi, "menuBar").mockImplementation(async () => ({ supported: false }) as never);
+  env.spy(settingsApi, "trashReminder").mockImplementation(async () => ({ supported: false }) as never);
+  env.spy(settingsApi, "onMenuBarUpdated").mockImplementation(() => () => {});
+  env.spy(growthApi, "onUpdated").mockImplementation(() => () => {});
+  const page = env.page(SettingsPage, { callbacks: { changeLanguage: async () => {} }, session: 0 });
+  await page.settle();
+  return {
+    page,
+    field() { return page.find((el) => el.props.name === "custom-folder-name")!; },
+  };
+}
+
+test("after a failed rename the folder-name input shows the saved name again", async () => {
+  const env = (await import("./page-harness")).changes();
   try {
-    await page.settle();
-    const field = () => page.find((el) => el.props.name === "custom-folder-name")!;
+    const { page, field } = await renameFailsPage(env);
     expect(field().props.defaultValue).toBe("Work");
     const input = { value: "Renamed" };
     field().props.onBlur({ target: input });
     await page.settle();
     expect(page.text()).toContain("disk full");
     expect(input.value).toBe("Work");
-  } finally {
-    page.close();
-    for (const s of spies) s.mockRestore();
-  }
+  } finally { env.restore(); }
 });
 
 test("toggleMenuBarItem keeps the menu bar's order and drops names it doesn't know", () => {

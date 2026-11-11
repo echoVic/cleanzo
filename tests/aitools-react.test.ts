@@ -1,9 +1,10 @@
 import "./setup-dom";
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { AIGroup, AIPart, AIScanResult, AITool, CrashDumpSummary } from "../src/mygo";
 import { t } from "../src/i18n";
 import { offered, groupSelectable, canPick, type WindowDays } from "../src/react/ai/types";
 import { human, displayPath } from "../src/react/ai/format";
+import type { Changes } from "./page-harness";
 
 const DAY = 86400;
 const NOW = 1_700_000_000;
@@ -103,22 +104,20 @@ function dumps(size: number): CrashDumpSummary {
   return { total: size, threshold: 5 * GB, dirs: size ? [{ app: "Codex", path: "/Users/a/Library/Application Support/Codex/Crashpad", size }] : [] };
 }
 
-async function aiPage(scans: (() => Promise<AIScanResult>)[], crash: CrashDumpSummary[]) {
-  await import("./setup-dom");
-  const { pageHarness } = await import("./page-harness");
+/** 搭好 Codex 页：改动都记在 env 里，由测试的 finally 还原。 */
+async function aiPage(env: Changes, scans: (() => Promise<AIScanResult>)[], crash: CrashDumpSummary[]) {
   const { AIToolPage } = await import("../src/react/ai/AIToolPage");
   const { aiApi } = await import("../src/react/ai/api");
   const { Cleaner } = await import("../src/mygo");
   const { forgetCrashDumps } = await import("../src/react/list/crash-dumps");
+  env.add(forgetCrashDumps);
   forgetCrashDumps();
   const cleaned: { tool: string; part: string; groups: string[] }[][] = [];
   let crashReads = 0;
-  const spies = [
-    spyOn(aiApi, "scanTool").mockImplementation(() => (scans.shift() ?? (() => Promise.reject(new Error("no scan"))))()),
-    spyOn(aiApi, "clean").mockImplementation(async (sel) => { cleaned.push(sel); return { freed: 100, parts: [] }; }),
-    spyOn(Cleaner, "crashDumps").mockImplementation(async () => crash[Math.min(crashReads++, crash.length - 1)]!),
-  ];
-  const page = pageHarness(AIToolPage, { toolId: "codex", toolName: "Codex" });
+  env.spy(aiApi, "scanTool").mockImplementation(() => (scans.shift() ?? (() => Promise.reject(new Error("no scan"))))());
+  env.spy(aiApi, "clean").mockImplementation(async (sel) => { cleaned.push(sel); return { freed: 100, parts: [] }; });
+  env.spy(Cleaner, "crashDumps").mockImplementation(async () => crash[Math.min(crashReads++, crash.length - 1)]!);
+  const page = env.page(AIToolPage, { toolId: "codex", toolName: "Codex" });
   return {
     page, cleaned, forgetCrashDumps,
     /** 空闲页的「扫描」或页头的「重新扫描」。 */
@@ -129,7 +128,6 @@ async function aiPage(scans: (() => Promise<AIScanResult>)[], crash: CrashDumpSu
     part(id: string) { return page.find((el) => el.props.part?.id === id && "onTogglePart" in el.props)!; },
     cleanButton() { return page.find((el) => el.props.size === "lg")!; },
     confirm() { page.find((el) => typeof el.props.onConfirm === "function")!.props.onConfirm(); },
-    close() { page.close(); for (const s of spies) s.mockRestore(); forgetCrashDumps(); },
   };
 }
 
@@ -137,8 +135,9 @@ const scanned = (tool: AITool) => () => Promise.resolve({ tools: [tool], scanned
 
 test("the Codex crash-dump banner is measured again with each scan", async () => {
   const banner = t("ai.crash.big", { size: human(6 * GB) });
-  const ai = await aiPage([scanned(codex([fullPart("codex.cache", "safe")]))], [dumps(6 * GB), dumps(0)]);
+  const env = (await import("./page-harness")).changes();
   try {
+    const ai = await aiPage(env, [scanned(codex([fullPart("codex.cache", "safe")]))], [dumps(6 * GB), dumps(0)]);
     await ai.page.settle();
     expect(ai.page.text()).toContain(banner);
     // 垃圾清理清掉崩溃转储后会让缓存失效；回到这一页再扫描，提示跟着变。
@@ -146,13 +145,14 @@ test("the Codex crash-dump banner is measured again with each scan", async () =>
     ai.scan();
     await ai.page.settle();
     expect(ai.page.text()).not.toContain(banner);
-  } finally { ai.close(); }
+  } finally { env.restore(); }
 });
 
 test("a rescan that fails after a clean shows the failure, not the old list as cleaned", async () => {
   const tool = codex([fullPart("codex.cache", "safe")]);
-  const ai = await aiPage([scanned(tool), () => Promise.reject(new Error("disk gone"))], [dumps(0)]);
+  const env = (await import("./page-harness")).changes();
   try {
+    const ai = await aiPage(env, [scanned(tool), () => Promise.reject(new Error("disk gone"))], [dumps(0)]);
     await ai.page.settle();
     ai.scan();
     await ai.page.settle();
@@ -164,13 +164,14 @@ test("a rescan that fails after a clean shows the failure, not the old list as c
     expect(ai.page.find((el) => el.props.part?.id === "codex.cache")).toBeUndefined();
     // 清理本身成功了：结果另外告诉用户。
     expect(ai.page.toasts.at(-1)).toEqual({ text: t("ai.done", { size: human(100) }), kind: "ok" });
-  } finally { ai.close(); }
+  } finally { env.restore(); }
 });
 
 test("a sessions part with no selectable group cannot be ticked into a checked 0 B", async () => {
   const today = fullPart("codex.sessions", "sensitive", { size: 500, groups: [group({ key: "p", count: 3, recent: 3, last: NOW })] });
-  const ai = await aiPage([scanned(codex([today]))], [dumps(0)]);
+  const env = (await import("./page-harness")).changes();
   try {
+    const ai = await aiPage(env, [scanned(codex([today]))], [dumps(0)]);
     await ai.page.settle();
     ai.scan();
     await ai.page.settle();
@@ -179,5 +180,5 @@ test("a sessions part with no selectable group cannot be ticked into a checked 0
     await ai.page.settle();
     expect(ai.part("codex.sessions").props.picked).toBe(false);
     expect(ai.cleanButton().props.disabled).toBe(true);
-  } finally { ai.close(); }
+  } finally { env.restore(); }
 });

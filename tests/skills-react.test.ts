@@ -1,6 +1,7 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { Skill, SkillCopy, SkillUpdate } from "../src/mygo";
 import { daysAgo, linkCandidates, matchFilter, matchQuery, mergeOrigins, sortSkills, trashPlan, windowDays } from "../src/react/skills/helpers";
+import type { Changes } from "./page-harness";
 
 const DAY = 86400;
 const NOW = 1_790_000_000;
@@ -164,23 +165,21 @@ test("a rescan keeps what the last update check found for folders that did not c
 
 // ---- 页面：升级的确认（无浏览器，见 page-harness.ts） ----
 
-async function skillsPage(skills: Skill[], checked: SkillUpdate[]) {
-  await import("./setup-dom");
-  const { pageHarness, textOf } = await import("./page-harness");
+/** 搭好技能页并查过更新：改动都记在 env 里，由测试的 finally 还原。 */
+async function skillsPage(env: Changes, skills: Skill[], checked: SkillUpdate[]) {
+  const { textOf } = await import("./page-harness");
   const { t } = await import("../src/i18n");
   const { SkillsPage } = await import("../src/react/skills/SkillsPage");
   const { skillsApi } = await import("../src/react/skills/api");
   const upgrades: { path: string; force: boolean }[][] = [];
-  const spies = [
-    spyOn(skillsApi, "scan").mockImplementation(async () => ({ roots: [], skills, sources: [], scannedAt: NOW })),
-    spyOn(skillsApi, "origins").mockImplementation(async () => checked.map((u) => ({ ...u, status: "unknown", checkedAt: 0 }))),
-    spyOn(skillsApi, "checkUpdates").mockImplementation(async () => checked),
-    spyOn(skillsApi, "upgrade").mockImplementation(async (reqs) => {
-      upgrades.push(reqs);
-      return reqs.map((r) => ({ path: r.path, tree: "tree-2", error: "" }));
-    }),
-  ];
-  const page = pageHarness(SkillsPage, {});
+  env.spy(skillsApi, "scan").mockImplementation(async () => ({ roots: [], skills, sources: [], scannedAt: NOW }));
+  env.spy(skillsApi, "origins").mockImplementation(async () => checked.map((u) => ({ ...u, status: "unknown", checkedAt: 0 })));
+  env.spy(skillsApi, "checkUpdates").mockImplementation(async () => checked);
+  env.spy(skillsApi, "upgrade").mockImplementation(async (reqs) => {
+    upgrades.push(reqs);
+    return reqs.map((r) => ({ path: r.path, tree: "tree-2", error: "" }));
+  });
+  const page = env.page(SkillsPage, {});
   await page.settle();
   page.find((el) => typeof el.props.onCta === "function")!.props.onCta();
   await page.settle();
@@ -195,14 +194,14 @@ async function skillsPage(skills: Skill[], checked: SkillUpdate[]) {
       const el = page.find((n) => typeof n.props.onOpenChange === "function" && textOf(n).includes(t("skills.upgradeConfirm.title")));
       return el?.props.open ? textOf(el) : null;
     },
-    close() { page.close(); for (const s of spies) s.mockRestore(); },
   };
 }
 
 test("a row's overwrite asks first, with the same dialog as Upgrade All", async () => {
   const s = skill("a", { copies: [copy({ path: "/s/a", real: "/s/a" })] });
-  const sk = await skillsPage([s], [update("/s/a", { name: "a", status: "update", modified: true, remote: "tree-2", checkedAt: NOW })]);
+  const env = (await import("./page-harness")).changes();
   try {
+    const sk = await skillsPage(env, [s], [update("/s/a", { name: "a", status: "update", modified: true, remote: "tree-2", checkedAt: NOW })]);
     sk.row("a").props.onUpgrade("/s/a", true);
     await sk.page.settle();
     expect(sk.upgrades).toEqual([]);
@@ -212,7 +211,7 @@ test("a row's overwrite asks first, with the same dialog as Upgrade All", async 
     await sk.page.settle();
     expect(sk.upgrades).toEqual([[{ path: "/s/a", force: true }]]);
     expect(sk.dialog()).toBeNull();
-  } finally { sk.close(); }
+  } finally { env.restore(); }
 });
 
 test("Upgrade All counts the folders its dialog lists", async () => {
@@ -222,8 +221,9 @@ test("Upgrade All counts the folders its dialog lists", async () => {
     copy({ tool: "codex", path: "/x/b", real: "/x/b" }),
   ] });
   const ups = ["/c/b", "/x/b", "/gone/z"].map((p) => update(p, { name: "b", status: "update", remote: "tree-2", checkedAt: NOW }));
-  const sk = await skillsPage([s], ups);
+  const env = (await import("./page-harness")).changes();
   try {
+    const sk = await skillsPage(env, [s], ups);
     const n = sk.summary().props.updatable;
     expect(n).toBe(2);
     sk.summary().props.onUpgradeAll();
@@ -232,7 +232,7 @@ test("Upgrade All counts the folders its dialog lists", async () => {
     sk.page.click(sk.t("skills.upgradeConfirm.ok"));
     await sk.page.settle();
     expect(sk.upgrades).toEqual([[{ path: "/c/b", force: false }, { path: "/x/b", force: false }]]);
-  } finally { sk.close(); }
+  } finally { env.restore(); }
 });
 
 test("upgrade error codes read as text in both languages; an unknown error shows as sent", async () => {

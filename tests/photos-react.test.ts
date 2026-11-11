@@ -7,6 +7,7 @@ import {
   allChecked, defaultPickedPaths, liveSel, removeClusters, someChecked,
   visibleClusters, visibleItems, visibleSelectablePaths,
 } from "../src/react/photos/helpers";
+import type { Changes } from "./page-harness";
 
 function item(path: string, size: number, keep = false): PhotoItem {
   return { path, size, width: 100, height: 100, thumb: "data:,", keep };
@@ -168,29 +169,26 @@ test("trashed photos leave the preview cache, and a load still in flight does no
 
 // ---- 页面接线：发去废纸篓的只能是页面上还勾着、还看得见的照片 ----
 
-async function photosPage(overrides: Partial<typeof import("../src/react/photos/api").photosApi> = {}) {
-  const { pageHarness, fakeStream } = await import("./list-page-harness");
+/** 搭好照片页（中文）：改动都记在 env 里，由测试的 finally 还原。 */
+async function photosPage(env: Changes, overrides: Partial<typeof import("../src/react/photos/api").photosApi> = {}) {
+  const { fakeStream } = await import("./page-harness");
   const { PhotosPage } = await import("../src/react/photos/PhotosPage");
   const { photosApi } = await import("../src/react/photos/api");
-  const { getPref, setPref } = await import("../src/i18n");
-  const savedPref = getPref();
-  setPref("zh");
-  const saved = { ...photosApi };
+  env.lang("zh");
   const stream = fakeStream<never>();
-  Object.assign(photosApi, { startScan: () => stream, ...overrides });
-  const h = pageHarness(PhotosPage, {});
-  await h.flush();
+  env.assign(photosApi, { startScan: () => stream, ...overrides });
+  const h = env.page(PhotosPage, {});
+  await h.settle();
   return {
     h, stream,
-    cards: () => h.nodes().filter((n) => n.type?.name === "PhotoClusterCard"),
+    cards: () => h.all().filter((n) => n.type?.name === "PhotoClusterCard"),
     /** 工具栏「移到废纸篓」，再在确认框里确认。 */
     async trash() {
       h.find((n) => n.props.className === "btn danger small")!.props.onClick();
-      await h.flush();
+      await h.settle();
       h.find((n) => n.props.variant === "destructive")!.props.onClick();
-      await h.flush();
+      await h.settle();
     },
-    dispose() { h.dispose(); Object.assign(photosApi, saved); setPref(savedPref); },
   };
 }
 
@@ -201,16 +199,18 @@ test("a photo left alone in a cluster that went away is no longer selected or se
     { moved: 1, freed: 100, files: 1, inUse: 1, failed: ["/a/1.jpg: denied"], removed: ["/a/2.jpg"] },
     { moved: 1, freed: 200, files: 1, inUse: 0, failed: [], removed: ["/b/2.jpg"] },
   ];
-  const p = await photosPage({ cleanPaths: async (paths: string[]) => { sent.push([...paths].sort()); return results[sent.length - 1]!; } });
+  const { changes, textOf } = await import("./page-harness");
+  const env = changes();
   try {
+    const p = await photosPage(env, { cleanPaths: async (paths: string[]) => { sent.push([...paths].sort()); return results[sent.length - 1]!; } });
     p.stream.emit({ kind: "done", result: { scanned: 4, clusters: [
       cluster(1, "exact", [item("/a/1.jpg", 100, true), item("/a/2.jpg", 100)]),
       cluster(2, "exact", [item("/b/1.jpg", 200, true), item("/b/2.jpg", 200)]),
     ] } } as never);
     p.stream.finish();
-    await p.h.flush();
+    await p.h.settle();
     p.cards()[0]!.props.onToggle("/a/1.jpg", true);
-    await p.h.flush();
+    await p.h.settle();
     const api = await import("../src/react/photos/api");
     const restore = stubPreviews();
     try { await api.loadPhotoPreview("/a/2.jpg"); await api.loadPhotoPreview("/b/1.jpg"); } finally { restore(); }
@@ -220,34 +220,37 @@ test("a photo left alone in a cluster that went away is no longer selected or se
     expect(api.cachedPreview("/b/1.jpg")).toBe("data:/b/1.jpg");
     // 簇 1 只剩 /a/1，整簇不再显示：它不能还选着
     expect(p.cards().map((c) => c.props.cluster.id)).toEqual([2]);
-    expect(p.h.text(p.h.find((n) => n.props.className === "fs-toolbar-count"))).toContain("已选 1 张");
+    expect(textOf(p.h.find((n) => n.props.className === "fs-toolbar-count"))).toContain("已选 1 张");
     await p.trash();
     expect(sent[1]).toEqual(["/b/2.jpg"]);
-  } finally { p.dispose(); }
+  } finally { env.restore(); }
 });
 
 test("a batch where some photos could not be moved toasts as an error", async () => {
-  const p = await photosPage({ cleanPaths: async () => ({ moved: 1, freed: 100, files: 1, inUse: 0, failed: ["/a/3.jpg: denied"], removed: ["/a/2.jpg"] }) });
+  const env = (await import("./page-harness")).changes();
   try {
+    const p = await photosPage(env, { cleanPaths: async () => ({ moved: 1, freed: 100, files: 1, inUse: 0, failed: ["/a/3.jpg: denied"], removed: ["/a/2.jpg"] }) });
     p.stream.emit({ kind: "done", result: { scanned: 3, clusters: [
       cluster(1, "exact", [item("/a/1.jpg", 100, true), item("/a/2.jpg", 100), item("/a/3.jpg", 100)]),
     ] } } as never);
     p.stream.finish();
-    await p.h.flush();
+    await p.h.settle();
     await p.trash();
     expect(p.h.toasts.at(-1)?.text).toContain("1 张未能移动");
     expect(p.h.toasts.at(-1)?.kind).toBe("err");
-  } finally { p.dispose(); }
+  } finally { env.restore(); }
 });
 
 test("a photo scan that fails while its stream is open shows the error and leaves no unhandled rejection", async () => {
-  const p = await photosPage();
+  const { changes, textOf } = await import("./page-harness");
+  const env = changes();
   try {
+    const p = await photosPage(env);
     p.stream.fail(new Error("photos denied"));
     await p.h.settle();
     p.stream.end();
-    await p.h.flush();
+    await p.h.settle();
     const alert = p.h.find((n) => n.props.role === "alert");
-    expect(alert && p.h.text(alert)).toContain("photos denied");
-  } finally { p.dispose(); }
+    expect(alert && textOf(alert)).toContain("photos denied");
+  } finally { env.restore(); }
 });

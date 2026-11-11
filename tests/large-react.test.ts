@@ -170,26 +170,25 @@ test("threshold buckets are the four persisted tiers", () => {
 });
 
 test("a large-file scan that fails while its stream is open shows the error and leaves no unhandled rejection", async () => {
-  const { pageHarness, fakeStream } = await import("./list-page-harness");
-  const { LargePage } = await import("../src/react/large/LargePage");
-  const { largeApi } = await import("../src/react/large/api");
-  const { getPref, setPref } = await import("../src/i18n");
-  const saved = { ...largeApi }, savedPref = getPref();
-  const stream = fakeStream<never>();
-  Object.assign(largeApi, { startScan: () => stream });
-  setPref("zh");
-  const h = pageHarness(LargePage, {});
+  const { changes, fakeStream, textOf } = await import("./page-harness");
+  const env = changes();
   try {
-    await h.flush();
+    const { LargePage } = await import("../src/react/large/LargePage");
+    const { largeApi } = await import("../src/react/large/api");
+    const stream = fakeStream<never>();
+    env.assign(largeApi, { startScan: () => stream });
+    env.lang("zh");
+    const h = env.page(LargePage, {});
+    await h.settle();
     h.find((n) => n.type?.name === "EmptyGuide")!.props.onCta();
-    await h.flush();
+    await h.settle();
     stream.fail(new Error("disk denied"));
     await h.settle();
     stream.end();
-    await h.flush();
+    await h.settle();
     const alert = h.find((n) => n.props.role === "alert");
-    expect(alert && h.text(alert)).toContain("disk denied");
-  } finally { h.dispose(); Object.assign(largeApi, saved); setPref(savedPref); }
+    expect(alert && textOf(alert)).toContain("disk denied");
+  } finally { env.restore(); }
 });
 
 test("human and displayPath match the rest of the UI", () => {

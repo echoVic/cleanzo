@@ -1,11 +1,14 @@
 // 无浏览器的页面测试：接管 React 的 hook，把页面组件当函数调用，按依赖执行 effect，
 // 再从返回的元素树里找按钮、读文字、调回调。子组件不执行，只看传给它们的 props。
-// 先 import "./setup-dom"（shared.ts 顶层要 document），再 import 本文件。
+// 桥接由各测试在页面的 api 对象上替换；最小 DOM 不能真正挂载，这里不验证布局、焦点和动画。
+// 测试对全局状态的改动都记在 changes() 里，搭建放进 try，finally 里一次还原。
+import "./setup-dom";
 import * as React from "react";
 import { spyOn } from "bun:test";
+import { getPref, setPref, type LangPref } from "../src/i18n";
 
 type Slot = { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void };
-type El = React.ReactElement<Record<string, any>>;
+type El = React.ReactElement<Record<string, any>> & { type: any };
 
 const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
   !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
@@ -14,7 +17,7 @@ const changed = (before: readonly unknown[] | undefined, after: readonly unknown
 export function nodes(node: React.ReactNode): El[] {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!React.isValidElement<Record<string, any>>(node)) return [];
-  return [node, ...nodes(node.props.children)];
+  return [node as El, ...nodes(node.props.children)];
 }
 
 /** 一个节点里所有的文字。 */
@@ -84,6 +87,8 @@ export function pageHarness<P extends object>(Component: (p: P) => React.ReactNo
   const doc = {
     hidden: false,
     activeElement: null as unknown,
+    /** 窗口有没有焦点：窗口失焦时 activeElement 仍是原来的输入框。 */
+    hasFocus: (): boolean => true,
     body: { appendChild() {} },
     querySelector: (sel: string) => (sel === "#toast" ? toastEl : null),
     querySelectorAll: () => [],
@@ -173,3 +178,80 @@ export function pageHarness<P extends object>(Component: (p: P) => React.ReactNo
     },
   };
 }
+
+/** 一条可控的流：测试发事件，模拟后端正常返回、出错，或页面自己关掉通道。 */
+export function fakeStream<T>() {
+  const queue: T[] = [];
+  let wake: (() => void) | undefined;
+  let closed = false;
+  let resolve!: () => void, reject!: (e: unknown) => void;
+  const done = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  const end = () => { closed = true; wake?.(); };
+  const ch = {
+    get closed() { return closed; },
+    close: end,
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        if (queue.length) { yield queue.shift()!; continue; }
+        if (closed) return;
+        await new Promise<void>((yes) => { wake = yes; });
+      }
+    },
+  };
+  return {
+    ch, done,
+    emit(ev: T) { queue.push(ev); wake?.(); },
+    /** 后端正常返回：关通道，再完成。 */
+    finish() { end(); resolve(); },
+    /** 后端出错：完成 Promise 先拒绝，通道之后才关（调 end）。 */
+    fail(e: unknown) { reject(e); },
+    end,
+  };
+}
+
+/**
+ * 一个测试对全局状态的改动：spy、页面的 api 对象、globalThis 上的成员、界面语言、挂上的页面。
+ * 每改一处先记下怎么还原；restore 按相反顺序全部还原，某一步出错时其余照样还原，最后抛出第一个错误。
+ * 用法：const env = changes(); try { 搭建…断言… } finally { env.restore(); }
+ */
+export function changes() {
+  const undo: (() => void)[] = [];
+  return {
+    /** 记下一处改动怎么还原。 */
+    add(restore: () => void) { undo.push(restore); },
+    /** spyOn，还原时 mockRestore。 */
+    spy<T extends object, K extends keyof T>(obj: T, key: K) {
+      const spy = spyOn(obj, key);
+      undo.push(() => spy.mockRestore());
+      return spy;
+    },
+    /** 换掉对象上的几个成员，还原时放回原来的值。只查成员名：替身（如 fakeStream）不必和原来的类型一致。 */
+    assign<T extends object>(obj: T, over: { [K in keyof T]?: unknown }) {
+      const target = obj as Record<string, unknown>;
+      const saved = Object.fromEntries(Object.keys(over).map((k) => [k, target[k]]));
+      undo.push(() => { Object.assign(target, saved); });
+      Object.assign(obj, over);
+    },
+    /** 切换界面语言，还原时回到原来的偏好。 */
+    lang(pref: LangPref) {
+      const before = getPref();
+      undo.push(() => setPref(before));
+      setPref(pref);
+    },
+    /** 挂上页面（见 pageHarness），还原时关掉。 */
+    page<P extends object>(Component: (p: P) => React.ReactNode, initial: P) {
+      const page = pageHarness(Component, initial);
+      undo.push(page.close);
+      return page;
+    },
+    restore() {
+      const errors: unknown[] = [];
+      for (let restore = undo.pop(); restore; restore = undo.pop()) {
+        try { restore(); } catch (e) { errors.push(e); }
+      }
+      if (errors.length > 0) throw errors[0];
+    },
+  };
+}
+
+export type Changes = ReturnType<typeof changes>;
