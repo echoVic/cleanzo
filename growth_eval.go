@@ -110,17 +110,27 @@ func growthBase(history []growthSnapshot, cur growthSnapshot, window string) (gr
 // growthEarlier is the measurement of path that cur's is compared with, from
 // before, the base's entries by path. It is the base's, unless the base did not
 // measure it to the end: a big folder can run out of time, and a cut run may
-// never reach it. Then it is the latest complete measurement in the window, if
-// there is one.
+// never reach it. Then it is the complete measurement in the window nearest
+// the base, if there is one: the span stays close to the window's, and covers
+// as much of the growth as the records allow.
 func growthEarlier(w growthWindow, before map[string]growthEntry, path string) (growthEntry, bool) {
 	a, ok := before[path]
 	if ok && a.Complete || !ok && !w.base.Cut {
 		return a, ok
 	}
-	for i := len(w.records) - 1; i >= 0; i-- {
-		for _, e := range w.records[i].Entries {
+	var best int64 = -1 // the found measurement's distance from the base, in seconds
+	for _, r := range w.records {
+		d := r.At - w.base.At
+		if d < 0 {
+			d = -d
+		}
+		if best >= 0 && d >= best {
+			continue
+		}
+		for _, e := range r.Entries {
 			if e.Path == path && e.Complete {
-				return e, true
+				a, ok, best = e, true, d
+				break
 			}
 		}
 	}

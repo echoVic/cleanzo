@@ -211,23 +211,24 @@ func TestWindowsHoldDailyRunsThatDrift(t *testing.T) {
 }
 
 // A big folder can run out of time in the record a window picks. It is then
-// compared with its latest complete measurement in that window instead; an
-// entry never measured to the end there still compares with nothing.
-func TestBigFoldersCompareWithTheirLatestCompleteRecord(t *testing.T) {
+// compared with its complete measurement in that window nearest the base
+// instead; an entry never measured to the end there still compares with
+// nothing.
+func TestBigFoldersCompareWithTheCompleteRecordNearestTheBase(t *testing.T) {
 	wechat := filepath.Join("/h", "Library", "Containers", "com.tencent.xinWeChat")
 	cut := func(path string, size int64) growthEntry {
 		return growthEntry{Path: path, Kind: growthHome, Size: size}
 	}
 	h := []growthSnapshot{
-		at(-6*24*time.Hour, true, cut(wechat, 20*gb), cut(todesk, gb)), // the week's base
-		at(-5*24*time.Hour, true, done(wechat, 22*gb), cut(todesk, gb)),
-		at(-4*24*time.Hour, true, done(wechat, 24*gb), cut(todesk, gb)), // WeChat's latest complete one in the week
-		at(-26*time.Hour, true, done(wechat, 31*gb), cut(todesk, gb)),   // a manual run: WeChat's in the day
-		at(-24*time.Hour, true, cut(wechat, 30*gb), cut(todesk, gb)),    // the day's base
+		at(-6*24*time.Hour, true, cut(wechat, 20*gb), cut(todesk, gb)),  // the week's base
+		at(-5*24*time.Hour, true, done(wechat, 22*gb), cut(todesk, gb)), // WeChat's complete one nearest it
+		at(-4*24*time.Hour, true, done(wechat, 24*gb), cut(todesk, gb)),
+		at(-26*time.Hour, true, done(wechat, 31*gb), cut(todesk, gb)), // a manual run: WeChat's in the day
+		at(-24*time.Hour, true, cut(wechat, 30*gb), cut(todesk, gb)),  // the day's base
 	}
 	cur := at(0, true, done(wechat, 36*gb), done(todesk, 9*gb))
 	a := evaluateGrowth(h, cur, cfg2(), byBase)
-	if len(a) != 2 || a[0].Key != "app:com.tencent.xinwechat" || a[0].Window != "week" || a[0].Bytes != 12*gb || a[0].AtLeast ||
+	if len(a) != 2 || a[0].Key != "app:com.tencent.xinwechat" || a[0].Window != "week" || a[0].Bytes != 14*gb || a[0].AtLeast ||
 		a[1].Key != a[0].Key || a[1].Window != "day" || a[1].Bytes != 5*gb || a[1].AtLeast {
 		t.Fatalf("alerts = %+v", a)
 	}
@@ -237,11 +238,37 @@ func TestBigFoldersCompareWithTheirLatestCompleteRecord(t *testing.T) {
 		byKey[r.Key] = r
 	}
 	w := byKey["app:com.tencent.xinwechat"]
-	if w.Day == nil || w.Day.Bytes != 5*gb || w.Week == nil || w.Week.Bytes != 12*gb || len(w.Folders) != 1 || w.Folders[0].Week == nil || w.Folders[0].Week.Bytes != 12*gb {
+	if w.Day == nil || w.Day.Bytes != 5*gb || w.Week == nil || w.Week.Bytes != 14*gb || len(w.Folders) != 1 || w.Folders[0].Week == nil || w.Folders[0].Week.Bytes != 14*gb {
 		t.Fatalf("WeChat: day %+v, week %+v, folders %+v", w.Day, w.Week, w.Folders)
 	}
 	if td := byKey["app:todesk"]; td.Day != nil || td.Week != nil || td.Folders[0].Week != nil {
 		t.Fatalf("ToDesk never finished in a window: day %+v, week %+v", td.Day, td.Week)
+	}
+}
+
+// A cut run may never reach a folder, so the base has no entry for it. The
+// folder then compares with the complete record nearest the base, too.
+func TestACutBaseWithoutAFolderComparesWithItsNearestCompleteRecord(t *testing.T) {
+	base := at(-6*24*time.Hour, true) // the week's base, cut before it reached Codex
+	base.Cut = true
+	h := []growthSnapshot{
+		base,
+		at(-5*24*time.Hour, true, done(codex, 10*gb)), // the complete one nearest the base
+		at(-4*24*time.Hour, true, done(codex, 12*gb)),
+	}
+	cur := at(0, true, done(codex, 21*gb))
+	a := evaluateGrowth(h, cur, cfg2(), byBase)
+	if len(a) != 1 || a[0].Key != "app:codex" || a[0].Window != "week" || a[0].Bytes != 11*gb || a[0].AtLeast {
+		t.Fatalf("alerts = %+v, want Codex's week of 11 GB", a)
+	}
+	var c GrowthApp
+	for _, r := range buildGrowthApps(append(h, cur), cfg2(), byBase, "/h", time.UTC) {
+		if r.Key == "app:codex" {
+			c = r
+		}
+	}
+	if c.Week == nil || c.Week.Bytes != 11*gb || len(c.Folders) != 1 || c.Folders[0].Week == nil || c.Folders[0].Week.Bytes != 11*gb {
+		t.Fatalf("Codex: week %+v, folders %+v", c.Week, c.Folders)
 	}
 }
 
