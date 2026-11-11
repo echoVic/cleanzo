@@ -349,7 +349,7 @@ func (p *menuBarPanel) details(c *ui.Context) {
 	})
 }
 
-// section labels a list and its optional note, as the web panel does.
+// section labels a list and its optional note.
 func (p *menuBarPanel) section(c *ui.Context, title, note string) {
 	ui.Row(c).Shrink(0).Padding(8, 14, 2).FontSize(11).
 		FixedLineHeight(16).TextColor(c.Theme().TextMuted).Children(func() {
@@ -456,7 +456,7 @@ func (p *menuBarPanel) appIcon(c *ui.Context, name, path string, system bool) {
 		})
 }
 
-// menuBarPanelIconPalette is the web's iconColor palette, with its hues.
+// menuBarPanelIconPalette is iconColor's palette, with its hues.
 var menuBarPanelIconPalette = []struct {
 	hue   float64
 	color ui.Color
@@ -499,7 +499,7 @@ func (p *menuBarPanel) name(c *ui.Context, name, key string, system bool, tab st
 	})
 }
 
-// quitControl shows the web's quit state and a hover/focus-only retry.
+// quitControl shows the row's quit step and a hover/focus-only retry.
 func (p *menuBarPanel) quitControl(c *ui.Context, row ProcessRow, step panelQuitStep, hover bool) {
 	t, colors := c.Theme(), menuBarPanelPalettes[c.Theme().Dark]
 	state, key, danger, disabled := "", "status.apps.quit", false, false
@@ -524,8 +524,8 @@ func (p *menuBarPanel) quitControl(c *ui.Context, row ProcessRow, step panelQuit
 		ui.Text(c, p.deps.text(state, nil)).Shrink(0).NoWrap().
 			FontSize(10.5).TextColor(t.TextMuted)
 	}
-	// Idle and retry controls keep room, as the web's transparent buttons do.
-	// The keyboard can still reach them and shows the focused control.
+	// Idle and retry controls keep their room while transparent. The keyboard
+	// can still reach them and shows the focused control.
 	button := ui.Button(c.Key("quit"), p.deps.text(key, nil)).Shrink(0).
 		Padding(1, 7).Radius(5).Border(1, t.Border).Background(colors.button).
 		FontSize(10.5).FixedLineHeight(15).FontWeight(400).TextColor(t.Accent).
@@ -637,7 +637,7 @@ func (p *menuBarPanel) changeBook(next panelQuitBook) {
 }
 
 // quit confirms an action before running it off the main thread; its result
-// returns through update and follows the web's quit and force error states.
+// returns through update as the row's next step: done, stuck or failed.
 func (p *menuBarPanel) quit(row ProcessRow, force bool) {
 	step := p.book.step(row.Key)
 	action, pending := p.deps.quit, panelQuitStep("quitting")
@@ -799,7 +799,8 @@ func menuBarHoldPanel(w *mygo.Window, on bool) {
 }
 
 // menuBarPanelIcons caches icons, including failures, for the app's lifetime.
-// One worker serializes Icon Services with the web pages' appIconDrawing.
+// One worker serializes Icon Services with the pages' icons through
+// appIconDrawing.
 var menuBarPanelIcons = struct {
 	sync.Mutex
 	cache map[string]*ui.Bitmap

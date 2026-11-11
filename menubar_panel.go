@@ -15,7 +15,8 @@ import (
 // panelText is nativeText, or the key-and-vars stand-in in tests.
 type panelText = func(key string, vars map[string]string) string
 
-// The panel limits follow the web's lists, confirmation and histories.
+// The panel limits: listed rows, the quit confirmation, the chart and
+// diagnosis histories and the CPU thresholds.
 const (
 	panelTop            = 5
 	panelQuitConfirm    = 3 * time.Second
@@ -98,7 +99,7 @@ func panelMem(n float64) string {
 	return panelNumber(panelRound(n/panelMiB)) + " MB"
 }
 
-// panelSplitMem is splitMem: the hero's number and its small unit.
+// panelSplitMem is splitMem: the big number and its small unit.
 func panelSplitMem(n float64) (value, unit string) {
 	s := panelMem(n)
 	if i := strings.IndexByte(s, ' '); i > 0 {
@@ -112,7 +113,7 @@ func panelPct(v float64) string {
 	return panelNumber(math.Max(0, panelRound(v))) + "%"
 }
 
-// panelRate is fmtRate: decimal units, promoted at the web's boundaries.
+// panelRate is fmtRate: decimal units, promoted at its boundaries.
 func panelRate(bps float64) (value, unit string) {
 	if !(bps >= 0) {
 		return "—", ""
@@ -212,7 +213,7 @@ func panelSSDWarnings(bits int) []string {
 }
 
 // panelIconHue is iconColor's hue in degrees. The hash uses UTF-16 code
-// units and wraps at 32 bits, as charCodeAt and >>> 0 do on the web.
+// units and wraps at 32 bits, as iconColor's charCodeAt and >>> 0 do.
 func panelIconHue(name string) float64 {
 	var h uint32
 	for _, c := range utf16.Encode([]rune(name)) {
@@ -244,7 +245,7 @@ func panelIconHue(name string) float64 {
 }
 
 // panelSortRows is sortRows: compare displayed numbers, then names ignoring
-// case, then raw names. Ties may differ from the web's localeCompare order.
+// case, then raw names. Ties may differ from sortRows's localeCompare order.
 // It leaves the sample alone.
 func panelSortRows(rows []ProcessRow, by string) []ProcessRow {
 	out := append([]ProcessRow{}, rows...)
@@ -331,10 +332,10 @@ type panelLink struct {
 	Target MenuBarTarget
 }
 
-// panelTitle returns PANEL[item].title, the panel's translation key.
+// panelTitle returns the translation key of item's panel title.
 func panelTitle(item string) string { return "menubar.panel." + item }
 
-// panelLinks returns PANEL[item].links, the panel's footer destinations.
+// panelLinks returns item's panel footer links and the pages they open.
 func panelLinks(item string) []panelLink {
 	switch item {
 	case "cpu", "mem":
@@ -349,7 +350,7 @@ func panelLinks(item string) []panelLink {
 	}
 }
 
-// panelHero is hero: the big number and unit, or a dash when unknown.
+// panelHero returns the panel's big number and unit, or a dash when unknown.
 func panelHero(item string, s *StatusSample) (value, unit string) {
 	if s == nil {
 		return "—", ""
@@ -389,7 +390,8 @@ func panelHero(item string, s *StatusSample) (value, unit string) {
 	return "—", ""
 }
 
-// panelSubLine is subLine: specifications and extra readings, when known.
+// panelSubLine returns the line under the big number: specifications and
+// extra readings, when known.
 func panelSubLine(item string, s *StatusSample, info *MachineInfo, sys *SystemInfo, t panelText) string {
 	parts := []string{}
 	var m *MachineSample
@@ -449,10 +451,10 @@ func panelSubLine(item string, s *StatusSample, info *MachineInfo, sys *SystemIn
 	return strings.Join(parts, " · ")
 }
 
-// panelDiag is diagnosis's text with Tone "ok", "warn" or "crit".
+// panelDiag is a panel's one-line reading with Tone "ok", "warn" or "crit".
 type panelDiag struct{ Tone, Text string }
 
-// panelDiagInput is DiagInput: readings and short histories for diagnosis.
+// panelDiagInput holds the readings and short histories panelDiagnosis reads.
 type panelDiagInput struct {
 	S       *StatusSample
 	Proc    *ProcessSample
@@ -474,8 +476,8 @@ func panelHistAll(hist []float64, matches func(float64) bool) bool {
 	return true
 }
 
-// panelDiagnosis is diagnosis: each panel's one-line reading, or nil until
-// its inputs arrive. CPU's short history still names its largest row.
+// panelDiagnosis returns each panel's one-line reading, or nil until its
+// inputs arrive. CPU's short history still names its largest row.
 func panelDiagnosis(item string, d panelDiagInput, t panelText) *panelDiag {
 	s := d.S
 	var m *MachineSample
@@ -605,7 +607,8 @@ func panelDiagnosis(item string, d panelDiagInput, t panelText) *panelDiag {
 	return nil
 }
 
-// panelChartPoint is chartPoint: skip a reading whose source is unknown.
+// panelChartPoint returns the chart's value from s, and false to skip a
+// reading whose source is unknown.
 func panelChartPoint(item string, s StatusSample) (float64, bool) {
 	m := s.Machine
 	switch item {
@@ -639,7 +642,8 @@ func panelChartPoint(item string, s StatusSample) (float64, bool) {
 	return 0, false
 }
 
-// panelChartMax is chartMax: the recent rate maximum with a floor, or 100.
+// panelChartMax returns the chart's top: the recent rate maximum with a
+// floor, or 100.
 func panelChartMax(item string, hist []float64) float64 {
 	if item == "net" {
 		return panelNetMax(hist)
@@ -654,7 +658,8 @@ func panelChartMax(item string, hist []float64) float64 {
 	return 100
 }
 
-// panelChartTone is chartTone: "accent", "gpu", "net", "warn" or "crit".
+// panelChartTone returns the chart's color: "accent", "gpu", "net", "warn"
+// or "crit".
 func panelChartTone(item string, s *StatusSample) string {
 	if item == "mem" && s != nil {
 		if s.Memory.Pressure == 4 {
@@ -673,7 +678,8 @@ func panelChartTone(item string, s *StatusSample) string {
 	return "accent"
 }
 
-// panelDetailRow is DetailRow: a known reading, with an optional bar or dot.
+// panelDetailRow is one detail line: a known reading, with an optional bar
+// or dot.
 type panelDetailRow struct {
 	Key, Label, Value string
 	Bar               float64 // 0–100, when HasBar
@@ -701,8 +707,8 @@ func panelFansText(m MachineSample, t panelText) string {
 	return ""
 }
 
-// panelDetailRows is detailRows: known values in the web panel's order.
-// Dot names select the native theme's memory segments instead of CSS vars.
+// panelDetailRows returns the panel's detail lines, known values only, in
+// display order. Dot names select the native theme's memory segments.
 func panelDetailRows(item string, s *StatusSample, info *MachineInfo, t panelText) []panelDetailRow {
 	rows := []panelDetailRow{}
 	if s == nil {
@@ -884,7 +890,8 @@ func panelDetailRows(item string, s *StatusSample, info *MachineInfo, t panelTex
 	return rows
 }
 
-// panelMemShares is memShares: each segment's 0–100 share, or false if unknown.
+// panelMemShares returns each memory segment's 0–100 share, or false if
+// unknown.
 func panelMemShares(m MemoryStatus) (app, wired, compressed float64, ok bool) {
 	if m.Total == 0 {
 		return 0, 0, 0, false
@@ -895,7 +902,7 @@ func panelMemShares(m MemoryStatus) (app, wired, compressed float64, ok bool) {
 	return pct(m.App), pct(m.Wired), pct(m.Compressed), true
 }
 
-// panelTopRows is topRows: refresh a frozen list, or return the top five rows.
+// panelTopRows refreshes a frozen list, or returns the top five rows.
 func panelTopRows(s ProcessSample, by string, prev []ProcessRow, frozen bool) []ProcessRow {
 	if frozen && len(prev) > 0 {
 		return panelRefreshFrozen(prev, s)
@@ -904,8 +911,8 @@ func panelTopRows(s ProcessSample, by string, prev []ProcessRow, frozen bool) []
 	return rows[:min(len(rows), panelTop)]
 }
 
-// panelGrowthTop is growthTop: the five largest positive, unignored increases.
-// Ties compare keys ignoring case, then raw keys; web tie order may differ.
+// panelGrowthTop returns the five largest positive, unignored weekly
+// increases. Ties compare keys ignoring case, then raw keys.
 func panelGrowthTop(g *GrowthState) []GrowthApp {
 	out := []GrowthApp{}
 	if g == nil || !g.Supported || !g.Config.Enabled {
@@ -981,7 +988,8 @@ func (b panelQuitBook) pending() bool {
 	return false
 }
 
-// frozen is listFrozen: hover, confirmation or a pending quit holds the list.
+// frozen reports whether hover, a confirmation or a pending quit holds the
+// list.
 func (b panelQuitBook) frozen(hover bool) bool {
 	return hover || b.confirming() || b.pending()
 }
@@ -1002,7 +1010,7 @@ func (b panelQuitBook) revertConfirms() panelQuitBook {
 	return panelQuitBook{steps: steps, gone: b.gone}
 }
 
-// sync is syncBook: return the book with vanished and reopened rows reconciled.
+// sync returns the book with vanished and reopened rows reconciled.
 func (b panelQuitBook) sync(rows []ProcessRow) panelQuitBook {
 	if len(b.steps) == 0 && len(b.gone) == 0 {
 		return b

@@ -127,8 +127,8 @@ func menuBarState(c menuBarConfig) MenuBarState {
 	return MenuBarState{Supported: true, Items: c.Items, Available: menuBarAvailable(menuBarBattery())}
 }
 
-// menuBarIconID names the Cleanzo icon, which shows while monitoring is on and
-// no reading shows (spec §三.4).
+// menuBarIconID names the Cleanzo icon, which shows while monitoring or the
+// Trash reminder is on and no reading shows (spec §三.4).
 const menuBarIconID = "cleanzo"
 
 // menuBarReadingID names item's menu bar item. macOS keeps under the name
@@ -148,8 +148,8 @@ func init() { residentApply = applyResident }
 // SaveMenuBar shows the readings in items, which Settings sends whole, and
 // keeps them for the next launch; names it does not know, and the battery on a
 // Mac without one, are dropped. Turning the last reading off while monitoring
-// is off turns opening at login off too (spec §七.3). Pages hear
-// MenuBarUpdated, and GrowthUpdated when the login item changed.
+// and the Trash reminder are off turns opening at login off too (spec §七.3).
+// Pages hear MenuBarUpdated, and GrowthUpdated when the login item changed.
 func (Cleaner) SaveMenuBar(items []string) error {
 	if !menuBarSupported() {
 		return codeError{Code: "unsupported"}
