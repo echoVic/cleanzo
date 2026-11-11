@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * CSS 防回归：
@@ -9,6 +9,9 @@ import { readFileSync } from "node:fs";
  *    select/textarea/a/p/h1-h6 设置 color 或 font/font-weight：无 layer 规则会压过 Tailwind
  *    工具层，使 React 组件上的字号字重字色工具类失效（字色 currentColor、字重 400）。
  *    原生组件类（.btn、.seg button 等）是类作用域规则，不受影响。
+ * c) 读到的变量都有定义：未定义的变量只剩 fallback，换主题时不跟着变。
+ * d) 同一规则里 gap 简写不写在 row-gap / column-gap 之后，否则会把它们改回去。
+ * e) 写死时长的 transform 过渡（不走 --t-* 令牌）在减弱动态效果时要逐个关掉。
  */
 
 const indexCss = readFileSync(new URL("../src/ui/index.css", import.meta.url), "utf8");
@@ -94,4 +97,88 @@ test("无 layer 的裸元素规则不设置 color/font/font-weight（style.css +
     }
   }
   expect(violations).toEqual([]);
+});
+
+const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+const sheets = [["src/style.css", stripComments(styleCss)], ["src/ui/index.css", stripComments(indexCss)]] as const;
+
+/** 规则体里的声明名，按出现顺序。 */
+function declNames(body: string): string[] {
+  return body.split(";").map((d) => d.split(":")[0]!.trim()).filter(Boolean);
+}
+
+/** 拆出 `@media (prefers-reduced-motion: reduce) { … }` 块：返回块内文本与去掉这些块后的其余部分。 */
+function splitReducedMotion(css: string): { reduced: string; rest: string } {
+  let reduced = "";
+  let rest = "";
+  let i = 0;
+  const re = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/g;
+  for (let m = re.exec(css); m; m = re.exec(css)) {
+    rest += css.slice(i, m.index);
+    let j = m.index + m[0].length;
+    for (let depth = 1; depth > 0; j++) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}") depth--;
+    }
+    reduced += css.slice(m.index + m[0].length, j - 1) + "\n";
+    i = re.lastIndex = j;
+  }
+  return { reduced, rest: rest + css.slice(i) };
+}
+
+/** 页面代码里用字符串写出的变量名（如 style={{ "--cz-i": i }}）。 */
+function varsSetInCode(dir: URL): Set<string> {
+  const out = new Set<string>();
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      for (const v of varsSetInCode(new URL(`${entry.name}/`, dir))) out.add(v);
+    } else if (/\.tsx?$/.test(entry.name)) {
+      for (const m of readFileSync(new URL(entry.name, dir), "utf8").matchAll(/["'`](--[\w-]+)["'`]/g)) out.add(m[1]!);
+    }
+  }
+  return out;
+}
+
+test("读到的 CSS 变量都有定义：样式表里声明，或页面代码里设置", () => {
+  const css = sheets.map(([, s]) => s).join("\n");
+  const declared = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!));
+  const fromCode = varsSetInCode(new URL("../src/", import.meta.url));
+  const read = new Set([...css.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]!));
+  expect([...read].filter((v) => !declared.has(v) && !fromCode.has(v))).toEqual([]);
+});
+
+test("同一规则里 gap 不写在 row-gap / column-gap 之后", () => {
+  const violations: string[] = [];
+  for (const [file, css] of sheets) {
+    for (const [selector, body] of splitRules(css)) {
+      const names = declNames(body);
+      const gap = names.lastIndexOf("gap");
+      for (const longhand of ["row-gap", "column-gap"]) {
+        const at = names.indexOf(longhand);
+        if (at >= 0 && gap > at) violations.push(`${file}: ${selector} { ${longhand} … gap }`);
+      }
+    }
+  }
+  expect(violations).toEqual([]);
+});
+
+test("写死时长的 transform 过渡在减弱动态效果时关掉", () => {
+  const missing: string[] = [];
+  for (const [file, css] of sheets) {
+    const { reduced, rest } = splitReducedMotion(css);
+    const off = new Set<string>();
+    for (const [selector, body] of splitRules(reduced)) {
+      if (/(^|;)\s*transition\s*:\s*none\b/.test(body)) for (const s of selector.split(",")) off.add(s.trim().replace(/\s+/g, " "));
+    }
+    for (const [selector, body] of splitRules(rest)) {
+      const transition = /(?:^|;)\s*transition\s*:([^;]+)/.exec(body)?.[1] ?? "";
+      const fixed = transition.split(",").some((part) => /\btransform\b/.test(part) && /\d+m?s\b/.test(part) && !part.includes("var(--t-"));
+      if (!fixed) continue;
+      for (const s of selector.split(",")) {
+        const name = s.trim().replace(/\s+/g, " ");
+        if (!off.has(name)) missing.push(`${file}: ${name}`);
+      }
+    }
+  }
+  expect(missing).toEqual([]);
 });
