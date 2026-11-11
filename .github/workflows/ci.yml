@@ -17,6 +17,8 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
@@ -85,6 +87,8 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun test tests/smoke
       - run: bun run build -- -platform windows/amd64 -debug
