@@ -1,6 +1,9 @@
 import { beforeEach, expect, test } from "bun:test";
 import { connectLanguage, type LanguageBridge } from "../src/language";
 import { currentLang, dict, getPref, setNativeLocale, setPref, t } from "../src/i18n";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { useT } from "../src/ui/i18n-react";
 
 const storage = new Map<string, string>();
 const local = { getItem: (key: string) => storage.get(key), setItem: (key: string, value: string) => storage.set(key, value) };
@@ -137,4 +140,20 @@ test("Chinese counters never leak plural token syntax", () => {
   const out = t("junk.ignored", { n: 1 });
   expect(out).toBe("· 已忽略 1 项");
   expect(out).not.toContain("|");
+});
+
+test("useT hands out one function per language, so callbacks that depend on it stay put", () => {
+  const seen: ReturnType<typeof useT>[] = [];
+  function Probe() {
+    const tr = useT();
+    seen.push(tr);
+    return createElement("i", null, tr("btn.cancel"));
+  }
+  setPref("zh");
+  expect(renderToStaticMarkup(createElement(Probe))).toBe("<i>取消</i>");
+  renderToStaticMarkup(createElement(Probe));
+  setPref("en");
+  expect(renderToStaticMarkup(createElement(Probe))).toBe("<i>Cancel</i>");
+  expect(seen[1]).toBe(seen[0]);
+  expect(seen[2]).not.toBe(seen[0]);
 });

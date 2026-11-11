@@ -19,9 +19,14 @@ function getSnapshot() {
 
 /** React 侧的翻译 hook：语言切换时自动更新。 */
 export type DictKey = Parameters<typeof t>[0];
-export function useT() {
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return (key: DictKey, vars?: Record<string, string | number>) => t(key, vars);
+type Translate = (key: DictKey, vars?: Record<string, string | number>) => string;
+
+// 同一语言下所有组件拿到同一个函数，依赖 t 的 useCallback / useEffect 只在切换语言时重建。
+let cached: { snapshot: string; translate: Translate } | undefined;
+export function useT(): Translate {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  if (cached?.snapshot !== snapshot) cached = { snapshot, translate: (key, vars) => t(key, vars) };
+  return cached.translate;
 }
 
 export type { LangPref };
