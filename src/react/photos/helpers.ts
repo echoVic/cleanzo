@@ -1,6 +1,6 @@
 // 相似照片页纯逻辑：不依赖 DOM / React，可单测。
 import type { PhotoCluster, PhotoItem } from "../../mygo";
-import { effectiveRemoved, isGone, under, type ListSelection } from "../list/selection";
+import { effectiveRemoved, isGone, keepShown, subtractRemoved, under, type ListSelection } from "../list/selection";
 
 /**
  * 扫描完成后的默认勾选：仅「完全相同」簇里非建议保留的副本；
@@ -50,6 +50,20 @@ export function someChecked(visible: readonly string[], sel: ReadonlySet<string>
 /** 勾选里仍有效（未删除）的路径。 */
 export function liveSel(st: ListSelection): string[] {
   return [...st.sel].filter((p) => !isGone(st, p));
+}
+
+/**
+ * 删除后的勾选：移走的标记为已删除，再只留还显示着的照片。簇只剩一张时整簇不再显示，
+ * 里面没能移走、却还勾着的那张也一并去掉。clusters 是已经收敛过的簇。
+ */
+export function selectionAfterRemoval(
+  clusters: readonly PhotoCluster[],
+  st: ListSelection,
+  removed: string[],
+): ListSelection {
+  const next = subtractRemoved(st, removed);
+  const shown = visibleClusters(clusters, next).flatMap((cl) => visibleItems(cl, next).map((it) => it.path));
+  return keepShown(next, shown);
 }
 
 /**

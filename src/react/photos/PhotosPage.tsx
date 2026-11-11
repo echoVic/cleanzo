@@ -7,12 +7,11 @@ import {
 import { useT } from "../../ui/i18n-react";
 import { errText, toast } from "../../shared";
 import { human } from "../ai/format";
+import { emptySelection, isGone, toggleRow, type ListSelection } from "../list/selection";
+import { settled } from "../list/stream";
+import { photosApi, clearPreviewCache, forgetPreviews } from "./api";
 import {
-  effectiveRemoved, emptySelection, isGone, subtractRemoved, toggleRow, type ListSelection,
-} from "../list/selection";
-import { photosApi, clearPreviewCache } from "./api";
-import {
-  allChecked, defaultPickedPaths, liveSel, removeClusters, someChecked,
+  allChecked, defaultPickedPaths, liveSel, removeClusters, selectionAfterRemoval, someChecked,
   visibleClusters, visibleItems, visibleSelectablePaths,
 } from "./helpers";
 import { PhotoViewer } from "./PhotoViewer";
@@ -76,6 +75,7 @@ export function PhotosPage() {
     setSelection(emptySelection());
     setScanning(true);
     const { ch, done } = photosApi.startScan();
+    const finished = settled(done);
     chanRef.current = ch;
     try {
       for await (const ev of ch) {
@@ -89,7 +89,7 @@ export function PhotosPage() {
           setSelection({ ...emptySelection(), sel: new Set(defaultPickedPaths(ev.result.clusters)) });
         }
       }
-      await done;
+      await finished();
     } catch (e) {
       if (runRef.current !== myRun) return;
       if (!stoppedRef.current) {
@@ -213,10 +213,13 @@ export function PhotosPage() {
       if (r.moved > 0) parts.push(t("photos.trashOk", { n: r.moved, size: human(r.freed) }));
       if (r.inUse > 0) parts.push(t("photos.inUse", { n: r.inUse }));
       if (r.failed.length > 0) parts.push(t("photos.trashFail", { n: r.failed.length }));
-      toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved > 0 ? "ok" : "err");
+      toast(parts.join(t("phrase.sep")) || t("photos.none"), r.moved > 0 && r.failed.length === 0 ? "ok" : "err");
       if (r.removed.length > 0) {
-        setClusters((prev) => removeClusters(prev, r.removed));
-        setSelection((prev) => subtractRemoved(prev, r.removed));
+        // 移动期间页面不能操作，簇就是发出请求时的那份。
+        const left = removeClusters(clustersRef.current, r.removed);
+        setClusters(left);
+        setSelection((prev) => selectionAfterRemoval(left, prev, r.removed));
+        forgetPreviews(r.removed);
       }
     } catch (e) {
       toast(t("fs.actionFail", { msg: errText(e) }), "err");
