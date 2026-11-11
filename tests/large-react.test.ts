@@ -83,6 +83,54 @@ test("pickedPaths collapses a picked folder and drops gone entries", () => {
   expect(isGone(after.selection, "/docs/a")).toBe(true);
 });
 
+/** 记下被整体遍历了几次的集合：用来确认逐项判断时没有反复扫整个集合。 */
+class CountingSet<T> extends Set<T> {
+  passes = 0;
+  override [Symbol.iterator]() { this.passes++; return super[Symbol.iterator](); }
+}
+
+test("pickedPaths walks the selection a fixed number of times, not once per pick", () => {
+  const sel = new CountingSet<string>();
+  for (let i = 0; i < 3000; i++) sel.add(`/h/d${i % 30}/f${i}`);
+  for (let d = 0; d < 10; d++) sel.add(`/h/d${d}`);
+  const picked = pickedPaths({ ...emptySelection(), sel });
+  expect(sel.passes).toBeLessThanOrEqual(2);
+  // 勾了的文件夹带走它里面的文件；其余文件各自发送
+  expect(picked).toHaveLength(10 + 3000 - 1000);
+  expect(picked).toContain("/h/d0");
+  expect(picked).not.toContain("/h/d0/f0");
+  expect(picked).toContain("/h/d10/f10");
+});
+
+test("pickedPaths tells a folder from a sibling that shares its prefix", () => {
+  const st = { ...emptySelection(), sel: new Set(["/a/b/c", "/a-b", "/a", "/ab", "/a/b", "/x/y"]), gone: new Set(["/x"]) };
+  expect(pickedPaths(st).sort()).toEqual(["/a", "/a-b", "/ab"]);
+});
+
+test("pickedPaths on Windows ignores letter case and sends one path per location", async () => {
+  const { setPlatformForTest } = await import("../src/platform");
+  try {
+    setPlatformForTest("win32");
+    const st = { ...emptySelection(), sel: new Set(["C:\\Users\\a\\Docs", "c:\\users\\a\\docs\\x.txt", "C:\\Users\\a\\DOCS", "C:\\Users\\a\\Docs2"]) };
+    expect(pickedPaths(st)).toEqual(["C:\\Users\\a\\Docs", "C:\\Users\\a\\Docs2"]);
+    expect(pickedPaths({ ...st, gone: new Set(["c:\\USERS\\a\\docs\\"]) })).toEqual(["C:\\Users\\a\\Docs2"]);
+    expect(isGone({ ...st, gone: new Set(["C:\\"]) }, "c:\\users")).toBe(true);
+  } finally { setPlatformForTest(undefined); }
+});
+
+test("isGone checks a path against every removal without walking them all", () => {
+  const gone = new CountingSet<string>();
+  for (let i = 0; i < 1000; i++) gone.add(`/h/p/IMG_${i}.jpg`);
+  gone.add("/h/old");
+  const st = { ...emptySelection(), gone };
+  const paths = Array.from({ length: 500 }, (_, i) => `/h/p/IMG_${i * 3}.jpg`);
+  const left = paths.filter((p) => !isGone(st, p));
+  expect(left).toHaveLength(500 - 334);
+  expect(isGone(st, "/h/old/a/b")).toBe(true);
+  expect(isGone(st, "/h/older")).toBe(false);
+  expect(gone.passes).toBeLessThanOrEqual(1);
+});
+
 test("applyRemoval removes rows under roots and shrinks kept rows by known kids", () => {
   const items = [file("/big", 1000), file("/keep", 500)];
   let st = emptySelection();

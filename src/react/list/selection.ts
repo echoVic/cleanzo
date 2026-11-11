@@ -1,4 +1,4 @@
-import { isWithin } from "../../platform";
+import { isWindows, isWithin, pathSep } from "../../platform";
 // 纯选择逻辑：不依赖 DOM / React，等价于旧 main.ts 里 fullscan/large/orphans/photos
 // 共用的 ListState/toggleRow/toggleChild/pickedPaths/subtractRemovedFromState。
 // 改为不可变：每次切换返回新状态对象，便于 React useState 直接使用。
@@ -26,15 +26,53 @@ export function under(path: string, ancestor: string): boolean {
   return isWithin(path, ancestor);
 }
 
+/** 作为上级比较时的键，规则同 isWithin：Windows 不分大小写，也不计末尾的分隔符。 */
+function rootKey(path: string): string {
+  return isWindows() ? path.toLowerCase().replace(/\\+$/, "") : path;
+}
+
+function rootKeys(paths: Iterable<string>): Set<string> {
+  const keys = new Set<string>();
+  for (const p of paths) keys.add(rootKey(p));
+  return keys;
+}
+
+/**
+ * path 是否等于 keys 里的某个路径或在它里面，结果与逐个 under 相同。只沿 path 自己的
+ * 各级上级去查，用时与 keys 有多少无关。self 为 false 时 path 自己不算。
+ */
+function underAny(path: string, keys: ReadonlySet<string>, self = true): boolean {
+  if (keys.size === 0) return false;
+  const c = isWindows() ? path.toLowerCase() : path;
+  const own = rootKey(path);
+  if (self && keys.has(c)) return true;
+  const sep = pathSep();
+  for (let i = c.lastIndexOf(sep); i >= 0; i = i === 0 ? -1 : c.lastIndexOf(sep, i - 1)) {
+    const prefix = c.slice(0, i);
+    if ((self || prefix !== own) && keys.has(prefix)) return true;
+  }
+  return false;
+}
+
 /** 删掉「父子都被选中」时重复的子路径，只留根。 */
 export function effectiveRemoved(paths: string[]): string[] {
   return [...new Set(paths)].filter((p, _, all) => !all.some((other) => other !== p && under(p, other)));
 }
 
+// 已删除集合的比较键按集合对象缓存：同一份 gone 在一次渲染里要查成百上千次。
+const goneKeys = new WeakMap<ReadonlySet<string>, { win: boolean; size: number; keys: ReadonlySet<string> }>();
+
 /** path 是否已经在某次删除里被移走。 */
 export function isGone(st: ListSelection, path: string): boolean {
-  for (const g of st.gone) if (under(path, g)) return true;
-  return false;
+  if (st.gone.size === 0) return false;
+  const win = isWindows();
+  let k = goneKeys.get(st.gone);
+  if (!k || k.win !== win || k.size !== st.gone.size) {
+    // macOS 的键就是路径本身，直接用这份集合。
+    k = { win, size: st.gone.size, keys: win ? rootKeys(st.gone) : st.gone };
+    goneKeys.set(st.gone, k);
+  }
+  return underAny(path, k.keys);
 }
 
 /** 展开文件夹里已经加载、且仍存在的子项路径。 */
@@ -113,11 +151,21 @@ export function keepShown(st: ListSelection, rows: readonly string[]): ListSelec
   return sel.size === st.sel.size ? st : { ...st, sel };
 }
 
-/** 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项。 */
+/**
+ * 要移到废纸篓的路径：勾选的文件夹已经包含它里面的子项。只指同一个位置的几条
+ * （Windows 上只差大小写）留第一条。
+ */
 export function pickedPaths(st: ListSelection): string[] {
-  return [...st.sel].filter(
-    (p) => !isGone(st, p) && ![...st.sel].some((q) => q !== p && under(p, q)),
-  );
+  const keys = rootKeys(st.sel);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of st.sel) {
+    const own = rootKey(p);
+    if (seen.has(own)) continue;
+    seen.add(own);
+    if (!isGone(st, p) && !underAny(p, keys, false)) out.push(p);
+  }
+  return out;
 }
 
 /** 某行是否处于半选（未整行勾，但有已加载子项被勾）。等价旧 applyIndeterminate。 */
