@@ -24,16 +24,9 @@ function errText(e: unknown): string {
     const parsed = JSON.parse(raw) as { code?: string; args?: unknown[] };
     if (parsed && typeof parsed.code === "string") {
       const key: Record<string, string> = {
-        "empty-name": "settings.emptyName",
-        "dup-name": "settings.dupName",
-        "no-paths": "settings.noPaths",
-        "empty-path": "settings.emptyPath",
-        "protected-path": "settings.protectedPath",
-        "dup-path": "settings.dupPath",
         "folder-empty": "settings.folderEmpty",
         "folder-protected": "settings.folderProtected",
         "folder-dup": "settings.folderDup",
-        "folder-missing": "settings.folderMissing",
         "group-unknown": "settings.groupUnknown",
         "growth-login": "settings.growth.loginFail",
         "growth-threshold": "settings.growth.thresholdBad",
@@ -42,11 +35,8 @@ function errText(e: unknown): string {
       // Go 也会把上面那些单词代码包成 JSON 发来（如 {"code":"unsupported"}）：同样翻译，不显示原文。
       if (!entry && plain[parsed.code]) return t(plain[parsed.code] as never);
       if (entry) {
-        const args = parsed.args ?? [];
-        const vars: Record<string, string> = parsed.code === "dup-path"
-          ? { path: String(args[0] ?? ""), owner: String(args[1] ?? ""), name: String(args[2] ?? "") }
-          : { name: String(args[0] ?? ""), path: String(args[0] ?? ""), group: String(args[0] ?? "") };
-        return t(entry as never, vars);
+        const arg = String(parsed.args?.[0] ?? "");
+        return t(entry as never, { name: arg, path: arg, group: arg });
       }
     }
   } catch {

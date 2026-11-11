@@ -33,7 +33,7 @@ test("Windows overrides precede the glossary; interpolation does not rewrite pat
   expect(t("fs.reveal")).toBe("Show in File Explorer");
   expect(ruleName("sys.trash")).toBe("Recycle Bin");
   expect(ruleDesc("review.installers")).toContain("MSI");
-  expect(t("ai.notFound", { name: "Finder.app" })).toBe("Finder.app wasn't found on this PC.");
+  expect(t("fs.trash.ok", { path: "~\\Trash\\Finder.app", size: "1 KB" })).toBe("Moved to Recycle Bin: ~\\Trash\\Finder.app (1 KB)");
   expect(ruleName("unknown")).toBe("unknown");
   setPlatformForTest("darwin");
   expect(t("status.mem.wired")).toBe("Wired Memory");
