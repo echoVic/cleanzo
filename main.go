@@ -203,13 +203,14 @@ func measure(p string) (size, files int64, newest time.Time) {
 	return
 }
 
-// measureChecked preserves partial byte counts and reports every traversal failure.
+// measureChecked preserves partial byte counts and reports every traversal
+// failure. The walk stops once the optional context is canceled.
 func measureChecked(p string, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int) {
 	if runtime.GOOS == "windows" && !platformCleanPath(p) {
 		return 0, 0, time.Time{}, 1
 	}
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
-		if runtime.GOOS == "windows" && len(contexts) > 0 && contexts[0] != nil && contexts[0].Err() != nil {
+		if len(contexts) > 0 && contexts[0] != nil && contexts[0].Err() != nil {
 			return contexts[0].Err()
 		}
 		if err != nil || d == nil {
@@ -569,9 +570,12 @@ func plistValues(data []byte) map[string]string {
 	}
 }
 
-// lastOpened returns the last-used unix time from Spotlight metadata.
+// lastOpened returns the last-used unix time from Spotlight metadata, or 0
+// when mdls fails or takes more than five seconds.
 func lastOpened(appPath string) int64 {
-	out, err := quietCommand(exec.Command("/usr/bin/mdls", "-name", "kMDItemLastUsedDate", "-raw", appPath)).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/mdls", "-name", "kMDItemLastUsedDate", "-raw", appPath)).Output()
 	if err != nil {
 		return 0
 	}

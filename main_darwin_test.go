@@ -568,6 +568,23 @@ func TestUsageGuardInUse(t *testing.T) {
 	}
 }
 
+// TestMeasureCheckedStopsWhenCanceled: a canceled scan stops the walks it
+// started instead of measuring them to the end.
+func TestMeasureCheckedStopsWhenCanceled(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 20 {
+		writeFile(t, filepath.Join(dir, fmt.Sprintf("d%02d", i), "f"), 100)
+	}
+	if size, files, _, _ := measureChecked(dir, context.Background()); size != 2000 || files != 20 {
+		t.Fatalf("live walk measured %d bytes in %d files, want 2000 in 20", size, files)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if size, files, _, _ := measureChecked(dir, ctx); size != 0 || files != 0 {
+		t.Fatalf("canceled walk measured %d bytes in %d files, want none", size, files)
+	}
+}
+
 // TestUninstallProbeFailureIsNotInUse: when lsof or lsappinfo fails, the
 // uninstall refuses with usage-unknown, not with "quit the app first".
 func TestUninstallProbeFailureIsNotInUse(t *testing.T) {
