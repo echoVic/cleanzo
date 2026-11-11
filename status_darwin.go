@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os/exec"
+	"time"
 )
 
 // realStatusSource wires the loop to the native reads in native.go and
@@ -56,13 +57,19 @@ func readSwapUsage() (used, total uint64) {
 	return su.Used, su.Total
 }
 
+// batteryProfiler is the system_profiler statusBattery runs; tests replace it.
+var batteryProfiler = "/usr/sbin/system_profiler"
+
 // statusBattery runs system_profiler, whose JSON is the only source that
 // matches System Settings (it rounds Maximum Capacity itself). Slow, so it
 // lives behind a context deadline and refreshes only once a minute. The
 // battery's temperature and the adapter's watts, which it leaves out, come
 // from AppleSmartBattery.
 func statusBattery(ctx context.Context) *BatteryStatus {
-	cmd := exec.CommandContext(ctx, "/usr/sbin/system_profiler", "-json", "SPPowerDataType")
+	cmd := exec.CommandContext(ctx, batteryProfiler, "-json", "SPPowerDataType")
+	// A child that keeps the output open is not waited for: the read ends a
+	// second after the deadline or system_profiler's exit.
+	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
