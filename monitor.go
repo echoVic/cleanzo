@@ -123,8 +123,10 @@ var (
 	statusFirstBudget  = 3 * time.Second        // first sample overall
 	statusInterval     = 2 * time.Second
 	statusBatteryEvery = 60 * time.Second
-	statusQuitTimeout  = 5 * time.Second
-	statusQuitPoll     = 100 * time.Millisecond
+	// A refresh that takes longer is given up, and the last reading stays.
+	statusBatteryTimeout = 10 * time.Second
+	statusQuitTimeout    = 5 * time.Second
+	statusQuitPoll       = 100 * time.Millisecond
 )
 
 // memoryFromVM converts page counts into Activity Monitor's categories:
@@ -852,8 +854,14 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 			case b := <-batDone: // a late result waits for the next round
 				latest = b
 			case <-batTimer.C: // refresh in the background, never blocking sampling
+				timeout := statusBatteryTimeout
 				go func() {
-					b := src.battery(ctx)
+					rctx, cancel := context.WithTimeout(ctx, timeout)
+					defer cancel()
+					b := src.battery(rctx)
+					if rctx.Err() != nil {
+						return // given up or stopped: the samples keep the last reading
+					}
 					select {
 					case batDone <- b:
 					case <-ctx.Done():
@@ -899,8 +907,9 @@ func buildSample(prevProcs, curProcs map[int32]procSample, prevCPU, curCPU cpuTi
 	if src.procs != nil {
 		sample.Apps = mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed, src.group)
 	}
-	if d := curCPU.Total - prevCPU.Total; d > 0 && prevCPU.Total > 0 {
-		sample.CPU.Usage = clampPct(float64(curCPU.Busy-prevCPU.Busy) / float64(d) * 100)
+	// Counters that went backwards wrapped or were reset: no usage this round.
+	if curCPU.Total > prevCPU.Total && prevCPU.Total > 0 && curCPU.Busy >= prevCPU.Busy {
+		sample.CPU.Usage = clampPct(float64(curCPU.Busy-prevCPU.Busy) / float64(curCPU.Total-prevCPU.Total) * 100)
 	}
 	l1, l5, l15 := readLoadAvg()
 	sample.CPU.Load1, sample.CPU.Load5, sample.CPU.Load15 = l1, l5, l15
@@ -944,7 +953,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 // for them to finish. Returns true when they are all gone. (false, nil)
 // means the quit was sent but an app was still running after the wait
 // (typically an unsaved-work dialog); the errors carry not-running and
-// cannot-quit, the latter when terminate was refused outright.
+// cannot-quit, the latter at once when every terminate was refused and the
+// apps are still there.
 func (Cleaner) QuitApp(path string) (bool, error) {
 	return quitAppWith(path, workspaceList, workspaceTerminate)
 }
@@ -960,16 +970,20 @@ func quitAppWith(path string, list func() []workspaceApp, terminate func(int32) 
 			sent = true
 		}
 	}
+	if !sent {
+		// Nothing was asked to quit, so there is nothing to wait for. An app
+		// that quit just before refuses too; it is gone, which is a quit.
+		if len(quitMatches(path, list())) == 0 {
+			return true, nil
+		}
+		return false, codeError{Code: "cannot-quit"}
+	}
 	deadline := time.Now().Add(statusQuitTimeout)
 	for time.Now().Before(deadline) {
 		if len(quitMatches(path, list())) == 0 {
 			return true, nil
 		}
 		time.Sleep(statusQuitPoll)
-	}
-	if !sent {
-		// terminate was refused outright, not merely slow: an error.
-		return false, codeError{Code: "cannot-quit"}
 	}
 	// Sent, but still running after the wait; the frontend reports it as
 	// "hasn't quit yet" — likely waiting on unsaved work.

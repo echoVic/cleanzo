@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +56,23 @@ func TestBuildSampleOverallCPU(t *testing.T) {
 	s := buildSample(nil, nil, prev, cur, src, 2*time.Second)
 	if s.CPU.Usage != 30 { // (30-0)/(200-100) = 30% of all cores
 		t.Errorf("usage = %v, want 30", s.CPU.Usage)
+	}
+}
+
+// TestBuildSampleCPUCounterWrap: counters that went backwards, as a wrapped
+// uint32 tick sum does, read as no usage rather than a full CPU.
+func TestBuildSampleCPUCounterWrap(t *testing.T) {
+	src := statusSource{
+		memory: func() MemoryStatus { return MemoryStatus{} },
+		disk:   func() DiskStat { return DiskStat{} },
+	}
+	for _, c := range []struct{ prev, cur cpuTicks }{
+		{cpuTicks{Busy: 100, Total: 1000}, cpuTicks{Busy: 50, Total: 900}},   // both wrapped
+		{cpuTicks{Busy: 500, Total: 1000}, cpuTicks{Busy: 400, Total: 1100}}, // busy wrapped
+	} {
+		if s := buildSample(nil, nil, c.prev, c.cur, src, 2*time.Second); s.CPU.Usage != 0 {
+			t.Errorf("%+v -> %+v: usage = %v, want 0", c.prev, c.cur, s.CPU.Usage)
+		}
 	}
 }
 
@@ -576,6 +594,68 @@ func TestWatchStatusBatteryRefreshAddsNoSample(t *testing.T) {
 	}
 }
 
+// A battery refresh that hangs is given up after statusBatteryTimeout, and
+// the samples keep the reading from before rather than losing it.
+func TestWatchStatusBatteryRefreshTimesOut(t *testing.T) {
+	oldDelay, oldBudget, oldInterval, oldEvery, oldTimeout := statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery, statusBatteryTimeout
+	statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery, statusBatteryTimeout = 5*time.Millisecond, time.Second, 30*time.Millisecond, 20*time.Millisecond, 10*time.Millisecond
+	defer func() {
+		statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery, statusBatteryTimeout = oldDelay, oldBudget, oldInterval, oldEvery, oldTimeout
+	}()
+
+	var calls, timedOut atomic.Int32
+	var unbounded atomic.Bool
+	src := fakeSource()
+	src.battery = func(ctx context.Context) *BatteryStatus {
+		if calls.Add(1) == 1 {
+			return &BatteryStatus{Percent: 88}
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			unbounded.Store(true)
+		}
+		<-ctx.Done() // a system_profiler that never answers
+		timedOut.Add(1)
+		return nil
+	}
+	var mu sync.Mutex
+	var batteries []*BatteryStatus
+	count := func() int { mu.Lock(); defer mu.Unlock(); return len(batteries) }
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = watchStatusWith(ctx, func(s StatusSample) error {
+			mu.Lock()
+			batteries = append(batteries, s.Battery)
+			mu.Unlock()
+			return nil
+		}, src)
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for timedOut.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	for n := count(); count() < n+2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	gaveUp := timedOut.Load()
+	cancel()
+	<-stopped
+	if unbounded.Load() {
+		t.Error("a battery refresh ran without a timeout")
+	}
+	if gaveUp < 2 {
+		t.Fatalf("%d hung refreshes were given up, want them to time out", gaveUp)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i, b := range batteries {
+		if b == nil || b.Percent != 88 {
+			t.Fatalf("sample %d battery = %+v, want the earlier 88%% reading", i, b)
+		}
+	}
+}
+
 // fakeMachine counts reads and remembers being closed.
 type fakeMachine struct {
 	reads  int
@@ -683,5 +763,37 @@ func TestQuitAppRefused(t *testing.T) {
 	ce, isCode := err.(codeError)
 	if ok || !isCode || ce.Code != "cannot-quit" {
 		t.Errorf("terminate refused must be cannot-quit, got (%v, %v)", ok, err)
+	}
+}
+
+// TestQuitAppRefusedAnswersAtOnce: when every terminate is refused there is
+// nothing to wait for, so the answer comes without the quit timeout.
+func TestQuitAppRefusedAnswersAtOnce(t *testing.T) {
+	oldTimeout, oldPoll := statusQuitTimeout, statusQuitPoll
+	statusQuitTimeout, statusQuitPoll = 2*time.Second, 2*time.Millisecond
+	defer func() { statusQuitTimeout, statusQuitPoll = oldTimeout, oldPoll }()
+	running := []workspaceApp{{Pid: 7, Path: "/Applications/Arc.app", BundleID: "company.arc", Regular: true}}
+	refuse := func(int32) bool { return false }
+
+	start := time.Now()
+	ok, err := quitAppWith("/Applications/Arc.app", func() []workspaceApp { return running }, refuse)
+	if took := time.Since(start); took > 500*time.Millisecond {
+		t.Errorf("a refused quit took %v", took)
+	}
+	if ce, isCode := err.(codeError); ok || !isCode || ce.Code != "cannot-quit" {
+		t.Errorf("want cannot-quit, got (%v, %v)", ok, err)
+	}
+
+	// Refused because the app had already quit: it is gone, which is a quit.
+	lists := 0
+	gone := func() []workspaceApp {
+		lists++
+		if lists == 1 {
+			return running
+		}
+		return nil
+	}
+	if ok, err := quitAppWith("/Applications/Arc.app", gone, refuse); !ok || err != nil {
+		t.Errorf("an app gone by the check: want (true, nil), got (%v, %v)", ok, err)
 	}
 }
