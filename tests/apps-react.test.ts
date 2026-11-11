@@ -114,6 +114,11 @@ test("classifyUninstall: pure in-use failures (moved 0) -> inUse", () => {
   expect(classifyUninstall(uninstall({ moved: 0, failed: ["/Applications/X.app: in-use"] }))).toBe("inUse");
 });
 
+test("classifyUninstall: a usage check that could not finish (nothing moved) -> usageUnknown", () => {
+  expect(classifyUninstall(uninstall({ moved: 0, failed: ["/Applications/X.app: usage-unknown"] }))).toBe("usageUnknown");
+  expect(classifyUninstall(uninstall({ moved: 0, failed: ["/Applications/X.app: usage-unknown", "/x: denied"] }))).toBe("partial");
+});
+
 test("classifyUninstall: any other failures -> partial", () => {
   expect(classifyUninstall(uninstall({ moved: 1, failed: ["/private/x"] }))).toBe("partial");
   expect(classifyUninstall(uninstall({ moved: 0, failed: ["/x: denied"] }))).toBe("partial");
@@ -1063,6 +1068,27 @@ test("缓存清理失败不会清掉占用；全是 in-use、其他失败和异�
       response = uninstall({ failed: [mode === "in-use" ? "/cache: in-use" : "/cache: denied"] }); rejects = mode === "exception";
       h.expanded(a.id).onCleanCache(a.id); await h.flush(); expect(h.messages.at(-1)).toContain(mode === "in-use" ? "正在运行" : "有 1 项缓存未能清理"); expect(h.expanded(a.id).usage.cache).toBe(1024); expect(h.expanded(a.id).usage.cachePaths).toEqual(["/cache"]); expect(h.busy).toBe(false);
     }
+  } finally { h.dispose(); }
+});
+
+test("占用检查没能完成：卸载和清缓存都说没有移动任何东西，不报「有 1 项未能删除」", async () => {
+  const a = app({ name: "A", path: "/Applications/A.app" });
+  const stream = updateStream();
+  const { t } = await import("../src/i18n");
+  const h = await appsHarness({
+    listApps: async () => [a], startUpdateCheck: () => stream as any,
+    uninstallDetail: async () => ({ app: a, items: [{ kind: "app", path: a.id, size: 800 }, { kind: "cache", path: "/cache", size: 200 }], totalSize: 1000 }),
+    uninstallApp: async (id) => uninstall({ path: id, failed: [`${id}: usage-unknown`] }),
+    cleanAppCache: async (id) => uninstall({ path: id, failed: [`${id}: usage-unknown`] }),
+  });
+  try {
+    await h.flush({ active: true }); stream.finish(); await h.flush(); h.rows()[0].props.onToggle(a.id); await h.flush();
+    h.expanded(a.id).onUninstall(a.id); await h.flush(); h.dialog().onConfirm(); await h.flush();
+    expect(h.messages.at(-1)).toBe(t("apps.fail", { msg: t("fs.usageUnknown") }));
+    expect(h.rows()).toHaveLength(1);
+    h.expanded(a.id).onCleanCache(a.id); await h.flush();
+    expect(h.messages.at(-1)).toBe(t("fs.usageUnknown"));
+    expect(h.expanded(a.id).usage.cache).toBe(200);
   } finally { h.dispose(); }
 });
 

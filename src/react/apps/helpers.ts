@@ -49,19 +49,24 @@ export function sortApps(apps: readonly AppInfo[], by: AppSortBy, lang: string, 
   });
 }
 
+/** 失败列表非空，且每一项都以「: code」结尾。 */
+export function onlyFailure(failed: readonly string[], code: string): boolean {
+  return failed.length > 0 && failed.every((f) => f.endsWith(`: ${code}`));
+}
+
 /**
  * 卸载结果分类（决定 toast 文案）：
  * - inUse：moved===0 且所有失败都是 ": in-use" 后缀
- * - partial：有失败项（但不是上面那种纯 in-use）
+ * - usageUnknown：moved===0 且所有失败都是 ": usage-unknown"：占用检查没做完，什么都没移
+ * - partial：有失败项（但不是上面两种）
  * - ok：全部成功移动
  */
-export type UninstallOutcome = "inUse" | "partial" | "ok" | "launched";
+export type UninstallOutcome = "inUse" | "usageUnknown" | "partial" | "ok" | "launched";
 
 export function classifyUninstall(res: UninstallResult): UninstallOutcome {
   if (res.launched) return "launched";
-  if (res.moved === 0 && res.failed.length > 0 && res.failed.every((f) => f.endsWith(": in-use"))) {
-    return "inUse";
-  }
+  if (res.moved === 0 && onlyFailure(res.failed, "in-use")) return "inUse";
+  if (res.moved === 0 && onlyFailure(res.failed, "usage-unknown")) return "usageUnknown";
   if (res.failed.length > 0) return "partial";
   return "ok";
 }

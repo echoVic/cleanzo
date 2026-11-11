@@ -12,7 +12,7 @@ import { useFlip } from "../../ui/motion/flip";
 import { usePresence } from "../../ui/motion/presence";
 import { quitErrCode } from "../status/format";
 import { appsApi } from "./api";
-import { bundleFailed, classifyUninstall, filterApps, readAppSort, saveAppSort, sortApps, type AppSortBy } from "./helpers";
+import { bundleFailed, classifyUninstall, filterApps, onlyFailure, readAppSort, saveAppSort, sortApps, type AppSortBy } from "./helpers";
 import { AnimatedAppRow, type AppRowProps } from "./AppRow";
 import { AppRowExpanded } from "./AppRowExpanded";
 import { filterByKind, growthFor, growthTagFor, splitUsage, updateCount, type AppsFilter, type CheckProgress, type UsageSplit } from "./updates";
@@ -327,7 +327,8 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
       if (res.failed.length === 0) { // 没有可移的也算清理完：缓存已经在别处清掉了
         toast(t("apps.cacheCleaned", { name: a.name, size: human(res.freed) }));
         setUsage((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], cache: 0, cachePaths: [] } } : prev);
-      } else if (res.failed.length > 0 && res.failed.every((f) => f.endsWith(": in-use"))) toast(t("apps.inUse", { name: a.name }), "err");
+      } else if (onlyFailure(res.failed, "in-use")) toast(t("apps.inUse", { name: a.name }), "err");
+      else if (onlyFailure(res.failed, "usage-unknown")) toast(errText("usage-unknown"), "err"); // 占用检查没做完：一项都没移
       else toast(t("apps.cacheFail", { name: a.name, n: res.failed.length }), "err");
     } catch { toast(t("apps.cacheFail", { name: a.name, n: usage[id]?.cachePaths.length ?? 0 }), "err"); }
     finally { endAction(id); }
@@ -405,6 +406,8 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
         }
       } else if (outcome === "inUse") {
         toast(t("apps.inUse", { name }), "err");
+      } else if (outcome === "usageUnknown") {
+        toast(t("apps.fail", { msg: errText("usage-unknown") }), "err");
       } else if (outcome === "partial") {
         if (isWindows()) {
           toast(t("apps.fail", { msg: errText(res.failed[0]?.slice(res.path.length + 2) ?? "blocked") }), "err");
