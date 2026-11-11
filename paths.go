@@ -102,18 +102,31 @@ func platformProtected(path, home string) bool {
 	return false
 }
 
+// systemTemp reports whether p, resolved and lower-cased, is in one of the
+// folders macOS keeps temporary files in: a user's own folder inside
+// /var/folders, /tmp or /var/tmp. /var/folders itself holds every user's
+// folders, so only a folder inside it counts.
+func systemTemp(p string) bool {
+	if p != "/private/var/folders" && within(p, "/private/var/folders") {
+		return true
+	}
+	return within(p, "/private/tmp") || within(p, "/private/var/tmp")
+}
+
 // allowedTemp judges the temporary folder, whose old entries are removed
 // for good. On Windows it must be inside the resolved profile. On macOS,
-// where it is normally in /var/folders, it must not be the disk, the home
-// folder, or inside a folder of the user's data: started from a shell with
-// TMPDIR=~/Downloads, the temporary rule would offer week-old downloads.
+// where it is normally in /var/folders, it must be in one of the system's
+// temporary folders, and not the home folder or inside a folder of the
+// user's data: started from a shell with TMPDIR=~/Downloads or
+// TMPDIR=~/Projects, the temporary rule would offer the files that were
+// not opened this week.
 func allowedTemp(home, tmp string) bool {
 	if runtime.GOOS != "windows" {
 		if !filepath.IsAbs(home) || !filepath.IsAbs(tmp) {
 			return false
 		}
 		h, p := strings.ToLower(resolvePath(home)), strings.ToLower(resolvePath(tmp))
-		if p == string(filepath.Separator) || p == h {
+		if p == string(filepath.Separator) || p == h || !systemTemp(p) {
 			return false
 		}
 		if !within(p, h) {

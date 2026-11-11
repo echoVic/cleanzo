@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -79,6 +80,52 @@ func TestTempRootMustBeATempFolder(t *testing.T) {
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.temp"}}, time.Time{}, cleanHooks{})
 	if !exists(old) || len(res) != 1 || res[0].Freed != 0 {
 		t.Fatalf("a download was removed as temporary: %+v", res)
+	}
+}
+
+// TestTempRootIsOneOfTheSystems: the temporary rule permanently removes
+// week-old entries, so its root must be one of the system's temporary
+// folders. Started from a shell with TMPDIR=~/Projects, it would otherwise
+// offer the projects that were not opened this week.
+func TestTempRootIsOneOfTheSystems(t *testing.T) {
+	env := testEnv(t)
+	// A home that is not under the system's temporary folders, as a real
+	// one is; it is only resolved, never read.
+	home := "/Users/cleanzo-test-nobody"
+	links := t.TempDir()
+	for name, target := range map[string]string{"apps": "/Applications", "users": "/Users"} {
+		if err := os.Symlink(target, filepath.Join(links, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := []string{
+		"/Users", "/Applications", "/Library", "/usr/local", "/private", "/private/var", "/private/var/folders",
+		filepath.Join(home, "Projects"), filepath.Join(home, "tmp"), filepath.Join(home, "Library", "Developer"),
+		filepath.Join(links, "apps"), filepath.Join(links, "users", "Shared"), // a link is judged by where it points
+	}
+	for _, tmp := range refused {
+		if allowedTemp(home, tmp) || allowedTemp(env.home, tmp) {
+			t.Errorf("temp root %s accepted", tmp)
+		}
+	}
+	for _, tmp := range []string{"/tmp", "/private/tmp", "/tmp/build", "/var/tmp", "/private/var/tmp/x", env.tmp, os.TempDir()} {
+		if !allowedTemp(home, tmp) {
+			t.Errorf("temp root %s refused", tmp)
+		}
+	}
+
+	// A refused root hides the temporary rule and nothing else. The test's
+	// temporary folders are all made before TMPDIR points at /Applications.
+	writeFile(t, filepath.Join(env.home, "Library", "Logs", "app.log"), 100)
+	t.Setenv("TMPDIR", "/Applications")
+	if safeToClean("/Applications/Safari.app") || safeToClean("/Applications/Cleanzo-test-missing.app") {
+		t.Error("TMPDIR=/Applications made apps cleanable")
+	}
+	env.tmp = "/Applications"
+	specs, _ := expandItems(&env)
+	ids := itemIDs(specs)
+	if slices.Contains(ids, "sys.temp") || !slices.Contains(ids, "sys.logs") {
+		t.Fatalf("items from a refused temp root: %v", ids)
 	}
 }
 
