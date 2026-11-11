@@ -68,7 +68,7 @@ func recycleWithContext(ctx context.Context, path string) error {
 	}
 	nuke, capacity, known := recycleSettings(root)
 	if known {
-		if !recycleFits(0, nuke, capacity, true) {
+		if !recycleFits(0, nuke, capacity) {
 			return errNotRecycled
 		}
 		measureCtx, cancel := context.WithTimeout(ctx, dirSizeTimeout)
@@ -79,7 +79,7 @@ func recycleWithContext(ctx context.Context, path string) error {
 		cancel()
 		if ctx.Err() != nil || failures != 0 ||
 			(measureErr != nil && !errors.Is(measureErr, context.DeadlineExceeded)) ||
-			(measureErr == nil && !recycleFits(size, nuke, capacity, true)) {
+			(measureErr == nil && !recycleFits(size, nuke, capacity)) {
 			return errNotRecycled
 		}
 		// A measurement deadline leaves capacity unknown; WANTNUKEWARNING protects the shell move.

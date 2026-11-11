@@ -22,6 +22,22 @@ func testEnv(t *testing.T) junkEnv {
 	return junkEnv{home: home, tmp: tmp, rules: darwinJunkRules, apps: buildAppIndex(nil), guard: &usageGuard{running: map[string]bool{}}, fda: true, findTool: func(string) string { return "" }}
 }
 
+// scanJunk expands and measures items with serialized callbacks, as
+// ScanJunk does without its channel.
+func scanJunk(ctx context.Context, env junkEnv, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
+	env.ctx = ctx
+	env.observe = true
+	specs, summary := expandItems(&env)
+	return measureJunk(ctx, specs, env, summary, measuring, sized)
+}
+
+// expandMemoActive reports whether an expansion's memo is on.
+func expandMemoActive() bool {
+	expandMemo.Lock()
+	defer expandMemo.Unlock()
+	return expandMemo.users > 0
+}
+
 // itemIDs returns sorted item IDs for assertions.
 func itemIDs(specs []itemSpec) []string {
 	var ids []string

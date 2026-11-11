@@ -24,12 +24,10 @@ func snapshotApps(procs []procInfo) (map[string]bool, []string) {
 		if name != "" {
 			ids[strings.TrimSuffix(name, ".exe")] = true
 		}
-		product := p.Product
-		if product == "" && p.Exe != "" {
-			product = processProduct(p.Exe)
-		}
-		if product != "" {
-			ids[strings.ToLower(product)] = true
+		if p.Exe != "" {
+			if product := processProduct(p.Exe); product != "" {
+				ids[strings.ToLower(product)] = true
+			}
 		}
 	}
 	return ids, apps

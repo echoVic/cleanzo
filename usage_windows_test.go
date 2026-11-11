@@ -208,12 +208,18 @@ func TestWindowsUsageNamesAndRoots(t *testing.T) {
 	data := filepath.Join(env.home, "data", "User Data")
 	writeFile(t, exe, 1)
 	mustMkdir(t, data)
-	saved := snapshotProcesses
-	t.Cleanup(func() { snapshotProcesses = saved })
+	saved, savedRead := snapshotProcesses, readProcessProduct
+	t.Cleanup(func() { snapshotProcesses, readProcessProduct = saved, savedRead })
+	readProcessProduct = func(p string) string {
+		if p == exe {
+			return "Fake Product"
+		}
+		return ""
+	}
 	calls := 0
 	snapshotProcesses = func() ([]procInfo, error) {
 		calls++
-		return []procInfo{{Exe: exe, Name: "fake.exe", Product: "Fake Product", CmdLine: `fake.exe --user-data-dir="` + data + `"`}, {Name: "unreadable.exe"}}, nil
+		return []procInfo{{Exe: exe, Name: "fake.exe", CmdLine: `fake.exe --user-data-dir="` + data + `"`}, {Name: "unreadable.exe"}}, nil
 	}
 	guard := probeUsage()
 	if calls != 1 || guard.failed || !guard.inUse(filepath.Join(env.home, "Fake Product")) || !guard.inUse(filepath.Join(env.home, "unreadable")) || !guard.inUse(filepath.Join(data, "Cache")) || !guard.inUse(filepath.Dir(exe)) {

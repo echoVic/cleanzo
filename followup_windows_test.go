@@ -413,7 +413,7 @@ func TestWindowsUsageAncestorRoots(t *testing.T) {
 		process procInfo
 		busy    bool
 	}{
-		{"exe-in-ancestor", procInfo{Exe: filepath.Join(ancestor, "ancestor-tool.exe"), Name: "ancestor-tool.exe", Product: "Ancestor Tool"}, false},
+		{"exe-in-ancestor", procInfo{Exe: filepath.Join(ancestor, "ancestor-tool.exe"), Name: "ancestor-tool.exe"}, false},
 		{"argument-is-ancestor", procInfo{Name: "ancestor-tool.exe", CmdLine: `ancestor-tool.exe --user-data-dir="` + ancestor + `"`}, false},
 		{"argument-inside-home", procInfo{Name: "ancestor-tool.exe", CmdLine: `ancestor-tool.exe --user-data-dir="` + narrow + `"`}, true},
 	}

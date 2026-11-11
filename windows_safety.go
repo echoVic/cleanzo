@@ -8,9 +8,9 @@ import (
 
 // procInfo is one process identity and its readable usage metadata.
 type procInfo struct {
-	Pid, PPid                   uint32
-	Exe, Name, Product, CmdLine string
-	Created                     time.Time
+	Pid, PPid          uint32
+	Exe, Name, CmdLine string
+	Created            time.Time
 }
 
 // windowsSystemPath identifies protected system executables after resolving both paths.

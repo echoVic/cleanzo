@@ -963,14 +963,6 @@ type JunkSelection struct {
 	Paths []string `json:"paths,omitempty"`
 }
 
-// scanJunk expands and measures items with serialized callbacks.
-func scanJunk(ctx context.Context, env junkEnv, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
-	env.ctx = ctx
-	env.observe = true
-	specs, summary := expandItems(&env)
-	return measureJunk(ctx, specs, env, summary, measuring, sized)
-}
-
 // measureJunk collects leftovers alongside item measurements for the final summary.
 func measureJunk(ctx context.Context, specs []itemSpec, env junkEnv, summary ScanSummary, measuring func(string), sized func(JunkItem)) ([]JunkItem, ScanSummary) {
 	var wg sync.WaitGroup
@@ -1430,13 +1422,6 @@ func startExpandMemo() (stop func()) {
 		}
 		expandMemo.Unlock()
 	}
-}
-
-// expandMemoActive reports whether an expansion's memo is on.
-func expandMemoActive() bool {
-	expandMemo.Lock()
-	defer expandMemo.Unlock()
-	return expandMemo.users > 0
 }
 
 // memoLstat is os.Lstat, remembered while the memo is on.
