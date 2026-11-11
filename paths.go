@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -101,10 +102,25 @@ func platformProtected(path, home string) bool {
 	return false
 }
 
-// allowedTemp keeps Windows temp patterns inside the resolved profile; Darwin retains all existing roots.
+// allowedTemp judges the temporary folder, whose old entries are removed
+// for good. On Windows it must be inside the resolved profile. On macOS,
+// where it is normally in /var/folders, it must not be the disk, the home
+// folder, or inside a folder of the user's data: started from a shell with
+// TMPDIR=~/Downloads, the temporary rule would offer week-old downloads.
 func allowedTemp(home, tmp string) bool {
 	if runtime.GOOS != "windows" {
-		return true
+		if !filepath.IsAbs(home) || !filepath.IsAbs(tmp) {
+			return false
+		}
+		h, p := strings.ToLower(resolvePath(home)), strings.ToLower(resolvePath(tmp))
+		if p == string(filepath.Separator) || p == h {
+			return false
+		}
+		if !within(p, h) {
+			return true
+		}
+		inside := func(dir string) bool { return within(strings.TrimPrefix(p, h), dir) }
+		return !slices.ContainsFunc(protectedHomeDirs, inside) && !slices.ContainsFunc(protectedHomeTrees, inside)
 	}
 	if !windowsLocalPath(home) || !windowsLocalPath(tmp) {
 		return false
