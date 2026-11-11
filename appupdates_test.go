@@ -12,6 +12,23 @@ import (
 	"time"
 )
 
+// rememberAppAction commits a as the delivered action for id, as a check
+// whose send succeeded does.
+func rememberAppAction(id string, a appUpdateAction) {
+	appUpdateCache.Lock()
+	defer appUpdateCache.Unlock()
+	appUpdateCache.m[id] = nextAppActionLocked(a)
+}
+
+// resetAppActions forgets every action and ends the running check.
+func resetAppActions() {
+	appUpdateCache.Lock()
+	defer appUpdateCache.Unlock()
+	appUpdateCache.generation++
+	appUpdateCache.m = map[string]appUpdateAction{}
+	appUpdateCache.pending = map[uint64]*pendingAppAction{}
+}
+
 func TestCleanVersion(t *testing.T) {
 	for in, want := range map[string]string{
 		"v1.2.3":                          "1.2.3",

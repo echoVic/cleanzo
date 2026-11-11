@@ -52,7 +52,7 @@ type appUpdateAction struct {
 }
 
 // Platform implementations register hooks without putting bound methods in
-// files with build constraints.
+// files with build constraints. Every platform sets all three in init.
 var (
 	appUpdateCheck   func(context.Context, []string, *mygo.Channel[AppUpdate]) error
 	appUpdateUpgrade func(context.Context, string) AppUpgradeResult
@@ -61,25 +61,16 @@ var (
 
 // CheckAppUpdates streams the update state of the apps listed by the page.
 func (Cleaner) CheckAppUpdates(ctx context.Context, ids []string, ch *mygo.Channel[AppUpdate]) error {
-	if appUpdateCheck == nil {
-		return errUnsupported
-	}
 	return appUpdateCheck(ctx, ids, ch)
 }
 
 // UpgradeApp uses only the action remembered by the Go update check.
 func (Cleaner) UpgradeApp(ctx context.Context, id string) (AppUpgradeResult, error) {
-	if appUpdateUpgrade == nil {
-		return AppUpgradeResult{ID: id, Code: "unsupported"}, nil
-	}
 	return appUpdateUpgrade(ctx, id), nil
 }
 
 // CleanAppCache delegates to the platform's cache cleanup implementation.
 func (Cleaner) CleanAppCache(path string) UninstallResult {
-	if appUpdateClean == nil {
-		return UninstallResult{Path: path, Failed: []string{path + ": unsupported"}}
-	}
 	return appUpdateClean(path)
 }
 
@@ -332,12 +323,6 @@ func nextAppActionLocked(a appUpdateAction) appUpdateAction {
 	return a
 }
 
-func rememberAppAction(id string, a appUpdateAction) {
-	appUpdateCache.Lock()
-	defer appUpdateCache.Unlock()
-	appUpdateCache.m[id] = nextAppActionLocked(a)
-}
-
 // publishAppUpdate makes the action available before Send, so a received update
 // can immediately invoke UpgradeApp. Failed delivery discards only its pending
 // result. Never hold the cache lock across Send: it may wait on the page.
@@ -380,14 +365,6 @@ func appActionFor(id string) (appUpdateAction, bool) {
 		}
 	}
 	return a, a.kind != ""
-}
-
-func resetAppActions() {
-	appUpdateCache.Lock()
-	defer appUpdateCache.Unlock()
-	appUpdateCache.generation++
-	appUpdateCache.m = map[string]appUpdateAction{}
-	appUpdateCache.pending = map[uint64]*pendingAppAction{}
 }
 
 // probeUsageFn is probeUsage's implementation; tests replace it.

@@ -621,7 +621,6 @@ func (m appBrewLock) tryLock() bool {
 	}
 }
 
-func (m appBrewLock) lock()   { m <- struct{}{} }
 func (m appBrewLock) unlock() { <-m }
 func (m appBrewLock) lockContext(ctx context.Context) bool {
 	if ctx.Err() != nil {

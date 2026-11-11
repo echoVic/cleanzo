@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// lock takes m without giving up, as a test holding brew busy does.
+func (m appBrewLock) lock() { m <- struct{}{} }
+
 // iTerm2-style: two items, the newer one needs a newer system.
 const testAppcastITerm = `<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
