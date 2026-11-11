@@ -167,7 +167,7 @@ func TestScanAIModels(t *testing.T) {
 	}
 	big := aiModelNamed(t, ollama, "qwen3-coder:30b")
 	small := aiModelNamed(t, ollama, "qwen3-coder:30b-small")
-	if big.Kind != aiModelKindManifest || len(big.Blobs) != 3 || !filepath.IsAbs(big.Path) {
+	if !filepath.IsAbs(big.Path) {
 		t.Fatalf("big = %+v", big)
 	}
 	if big.Size != aaa+bbb+ccc {
@@ -179,10 +179,7 @@ func TestScanAIModels(t *testing.T) {
 	}
 	// The shared blob is assigned to the first manifest only, so the model
 	// sizes add up to the blobs' total instead of counting it twice.
-	if !slices.Contains(big.Blobs, blob("sha256-aaaa1111")) || slices.Contains(small.Blobs, blob("sha256-aaaa1111")) || len(small.Blobs) != 1 {
-		t.Fatalf("shared blob assignment: big = %+v, small = %+v", big, small)
-	}
-	if small.Size != eee || small.Blobs[0] != blob("sha256-eeee4444") {
+	if small.Size != eee {
 		t.Fatalf("small = %+v", small)
 	}
 	if small.Last != aiModelRecent.Unix() {
@@ -203,7 +200,7 @@ func TestScanAIModels(t *testing.T) {
 	hfModel := aiModelNamed(t, hf, "org/name")
 	bone := aiModelOnDisk(t, filepath.Join(hfModel.Path, "blobs", "bone"))
 	btwo := aiModelOnDisk(t, filepath.Join(hfModel.Path, "blobs", "btwo"))
-	if hfModel.Size != bone+btwo || hfModel.Kind != "" || len(hfModel.Blobs) != 0 {
+	if hfModel.Size != bone+btwo {
 		t.Fatalf("huggingface model = %+v", hfModel)
 	}
 	if hfModel.Last != aiModelRecent.Unix() || hfModel.Path != filepath.Join(home, ".cache", "huggingface", "hub", "models--org--name") {
@@ -221,7 +218,7 @@ func TestScanAIModels(t *testing.T) {
 	lmModel := aiModelNamed(t, lm, "lmstudio-community/Qwen3-8B-GGUF")
 	gguf := aiModelOnDisk(t, filepath.Join(lm.Path, "lmstudio-community", "Qwen3-8B-GGUF", "model.gguf"))
 	mmproj := aiModelOnDisk(t, filepath.Join(lm.Path, "lmstudio-community", "Qwen3-8B-GGUF", "mmproj.gguf"))
-	if lmModel.Size != gguf+mmproj || lmModel.Last != aiModelMid.Unix() || lmModel.Kind != "" {
+	if lmModel.Size != gguf+mmproj || lmModel.Last != aiModelMid.Unix() {
 		t.Fatalf("lmstudio model = %+v", lmModel)
 	}
 	// A source's total is its models' total, so nothing is counted twice.

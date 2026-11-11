@@ -504,7 +504,7 @@ function createRuntime(): Runtime {
 
   // ── 本地模型：Ollama 共享 blob、HuggingFace 目录、LM Studio 目录各来一份 ──
   const mkModel = (name: string, path: string, size: number, ageDays: number): AIModelEntry => ({
-    name, path, size, last: now - ageDays * DAY, kind: "", blobs: [],
+    name, path, size, last: now - ageDays * DAY,
   });
   const modelSources: AIModelSource[] = [
     {

@@ -36,7 +36,6 @@ type JunkItem struct {
 	Paths          []string     `json:"paths"`
 	Top            []TopItem    `json:"top"`
 	Subs           []SubItem    `json:"subs"`
-	Skipped        string       `json:"skipped,omitempty"`
 	FoundSize      int64        `json:"foundSize,omitempty"` // measured candidates, including in-use entries
 	ReadErrors     int          `json:"readErrors,omitempty"`
 	Details        []JunkDetail `json:"details,omitempty"`

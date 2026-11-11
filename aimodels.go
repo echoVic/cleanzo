@@ -33,17 +33,12 @@ import (
 // Last is when a model last changed on disk, never when a runtime last used
 // it: no runtime records that reliably, and the page must not guess.
 
-// aiModelKindManifest marks a model whose cleaning must reclaim blobs.
-const aiModelKindManifest = "manifest"
-
 // AIModelEntry is one model as the page lists it.
 type AIModelEntry struct {
-	Name  string   `json:"name"`  // model name, such as qwen3-coder:30b or org/name
-	Path  string   `json:"path"`  // absolute path: the unit cleaning moves
-	Size  int64    `json:"size"`  // bytes the model alone accounts for, shared blobs once
-	Last  int64    `json:"last"`  // newest modification, unix seconds; 0 when unknown
-	Kind  string   `json:"kind"`  // aiModelKindManifest when blobs must go with the model
-	Blobs []string `json:"blobs"` // for a manifest: the blobs this model accounts for
+	Name string `json:"name"` // model name, such as qwen3-coder:30b or org/name
+	Path string `json:"path"` // absolute path: the unit cleaning moves
+	Size int64  `json:"size"` // bytes the model alone accounts for, shared blobs once
+	Last int64  `json:"last"` // newest modification, unix seconds; 0 when unknown
 }
 
 // AIModelSource is one runtime's model folder as the page lists it.
@@ -362,13 +357,12 @@ func scanOllamaModels(ctx context.Context, root string, out *AIModelSource) erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry := AIModelEntry{Name: m.name, Path: m.path, Kind: aiModelKindManifest, Blobs: []string{}}
+		entry := AIModelEntry{Name: m.name, Path: m.path}
 		for _, blob := range owned[m.path] {
 			info, err := os.Lstat(blob)
 			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
-			entry.Blobs = append(entry.Blobs, blob)
 			entry.Size += onDisk(info)
 			entry.Last = max(entry.Last, info.ModTime().Unix())
 			out.Files++
@@ -399,7 +393,7 @@ func scanHuggingFaceModels(ctx context.Context, root string, out *AIModelSource)
 		dir := filepath.Join(root, name)
 		size, files, last := measureAIModelDir(ctx, dir, filepath.Join(dir, "blobs"))
 		display := strings.ReplaceAll(strings.TrimPrefix(name, "models--"), "--", "/")
-		out.Models = append(out.Models, AIModelEntry{Name: display, Path: dir, Size: size, Last: last, Blobs: []string{}})
+		out.Models = append(out.Models, AIModelEntry{Name: display, Path: dir, Size: size, Last: last})
 		out.Files += files
 	}
 	return nil
@@ -433,7 +427,7 @@ func scanLMStudioModels(ctx context.Context, root string, out *AIModelSource) er
 			dir := filepath.Join(pubDir, m.Name())
 			size, files, last := measureAIModelDir(ctx, dir, dir)
 			out.Models = append(out.Models, AIModelEntry{
-				Name: strings.Join([]string{pub.Name(), m.Name()}, "/"), Path: dir, Size: size, Last: last, Blobs: []string{},
+				Name: strings.Join([]string{pub.Name(), m.Name()}, "/"), Path: dir, Size: size, Last: last,
 			})
 			out.Files += files
 		}
