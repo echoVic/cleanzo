@@ -213,16 +213,29 @@ type ollamaManifestJSON struct {
 	} `json:"layers"`
 }
 
+// errOllamaManifestUnreadable reports a file or folder under manifests that
+// could not be read or parsed: the blobs it names are unknown.
+var errOllamaManifestUnreadable = errors.New("ollama manifest unreadable")
+
 // ollamaManifests reads every model manifest under root/manifests, sorted by
-// path so the blob ownership below is the same on every scan.
-func ollamaManifests(ctx context.Context, root string) ([]aiOllamaManifest, error) {
+// path so the blob ownership below is the same on every scan. A scan lists
+// what it can read; with strict set, any manifest file or folder that cannot
+// be read or parsed returns errOllamaManifestUnreadable instead.
+func ollamaManifests(ctx context.Context, root string, strict bool) ([]aiOllamaManifest, error) {
 	dir := filepath.Join(root, "manifests")
 	out := []aiOllamaManifest{}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// Without a manifests folder there are no manifests to read.
+			if strict && !(p == dir && errors.Is(err, fs.ErrNotExist)) {
+				return errOllamaManifestUnreadable
+			}
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !d.Type().IsRegular() || strings.HasPrefix(d.Name(), ".") {
@@ -232,7 +245,10 @@ func ollamaManifests(ctx context.Context, root string) ([]aiOllamaManifest, erro
 		if rel, err := filepath.Rel(dir, p); err != nil || !strings.Contains(rel, string(filepath.Separator)) {
 			return nil
 		}
-		m, ok := readOllamaManifest(root, p)
+		m, ok, err := readOllamaManifest(root, p)
+		if err != nil && strict {
+			return errOllamaManifestUnreadable
+		}
 		if ok {
 			out = append(out, m)
 		}
@@ -246,15 +262,16 @@ func ollamaManifests(ctx context.Context, root string) ([]aiOllamaManifest, erro
 }
 
 // readOllamaManifest reads one manifest: its name and the blobs it names,
-// config first as Ollama stores it. Files that are not manifests are skipped.
-func readOllamaManifest(root, path string) (aiOllamaManifest, bool) {
+// config first as Ollama stores it. JSON that names no blob is not a manifest
+// (ok is false); a file that cannot be read or parsed returns its error.
+func readOllamaManifest(root, path string) (aiOllamaManifest, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return aiOllamaManifest{}, false
+		return aiOllamaManifest{}, false, err
 	}
 	var raw ollamaManifestJSON
-	if json.Unmarshal(data, &raw) != nil {
-		return aiOllamaManifest{}, false
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return aiOllamaManifest{}, false, err
 	}
 	m := aiOllamaManifest{path: path, name: ollamaModelName(root, path), blobs: []string{}}
 	seen := map[string]bool{}
@@ -276,7 +293,7 @@ func readOllamaManifest(root, path string) (aiOllamaManifest, bool) {
 	}
 	// Without a config or layer digest the file is JSON in the manifests
 	// folder, not a model: listing it would offer its file for cleaning.
-	return m, len(m.blobs) > 0
+	return m, len(m.blobs) > 0, nil
 }
 
 // ollamaBlobName turns a digest (sha256:...) into a blob file name
@@ -334,7 +351,7 @@ func ollamaOwnedBlobs(manifests []aiOllamaManifest) map[string][]string {
 
 // scanOllamaModels lists one entry per manifest, sized by the blobs it owns.
 func scanOllamaModels(ctx context.Context, root string, out *AIModelSource) error {
-	manifests, err := ollamaManifests(ctx, root)
+	manifests, err := ollamaManifests(ctx, root, false)
 	if err != nil {
 		return err
 	}
@@ -577,9 +594,14 @@ func cleanAIModelDir(ctx context.Context, src aiModelSource, root string, entry 
 // cleanOllamaModel moves a manifest and the blobs no remaining manifest
 // names. The manifest goes first, so the runtime stops offering the model
 // even when a blob cannot be moved; blobs still named by another manifest
-// stay put.
+// stay put. When any manifest cannot be read, the blobs it names are unknown,
+// so nothing moves and the part is blocked.
 func cleanOllamaModel(ctx context.Context, root, modelPath string, r AIPartResult) AIPartResult {
-	manifests, err := ollamaManifests(ctx, root)
+	manifests, err := ollamaManifests(ctx, root, true)
+	if errors.Is(err, errOllamaManifestUnreadable) {
+		r.Skipped = "blocked"
+		return r
+	}
 	if err != nil {
 		r.Skipped = "cancelled"
 		return r

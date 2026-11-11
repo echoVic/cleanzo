@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -358,6 +359,47 @@ func TestCleanAIModelsOllamaOrphans(t *testing.T) {
 	}
 	if ollama = aiModelSourceOf(t, scan, "ollama"); !ollama.Installed || len(ollama.Models) != 0 || ollama.Size != 0 {
 		t.Fatalf("after cleaning = %+v", ollama)
+	}
+}
+
+// TestCleanAIModelsOllamaUnreadableManifest: when another model's manifest
+// cannot be parsed or read, the blobs it names are unknown, so the clean
+// stops for the model rather than treating a shared blob as an orphan.
+func TestCleanAIModelsOllamaUnreadableManifest(t *testing.T) {
+	for _, broken := range []string{"truncated", "unreadable"} {
+		t.Run(broken, func(t *testing.T) {
+			if broken == "unreadable" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("file modes do not deny reading here")
+			}
+			home := aiModelsFixture(t)
+			trashed := aiModelsRecordTrash(t)
+			scan, err := (Cleaner{}).ScanAIModels(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ollama := aiModelSourceOf(t, scan, "ollama")
+			big, small := aiModelNamed(t, ollama, "qwen3-coder:30b"), aiModelNamed(t, ollama, "qwen3-coder:30b-small")
+			if broken == "truncated" {
+				if err := os.WriteFile(small.Path, []byte(`{"config":{"digest":"sha256:eeee4444"},"layers":[{"dig`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Chmod(small.Path, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Chmod(small.Path, 0o644) })
+			}
+			res, err := (Cleaner{}).CleanAIModels(context.Background(), []AIModelSelection{{Source: "ollama", Models: []string{big.Path}}})
+			if err != nil || len(res.Parts) != 1 {
+				t.Fatalf("result = %+v, %v", res, err)
+			}
+			if r := res.Parts[0]; r.Skipped != "blocked" || r.Moved != 0 || r.Freed != 0 || len(*trashed) != 0 {
+				t.Fatalf("part = %+v, trashed %v", r, *trashed)
+			}
+			if !exists(filepath.Join(home, ".ollama/models/blobs/sha256-aaaa1111")) || !exists(big.Path) {
+				t.Fatal("the shared blob or the model left")
+			}
+		})
 	}
 }
 
