@@ -54,8 +54,10 @@ func TestSkillDownloadsAreNotCutShort(t *testing.T) {
 
 // TestUntarSafeStopsAtLimits: an archive stops unpacking with an error once
 // it has written more bytes, or held more entries, than an upgrade allows.
+// The limits count the whole repository, so they leave room for a skill in
+// a large monorepo.
 func TestUntarSafeStopsAtLimits(t *testing.T) {
-	if skillUnpackLimit != 512<<20 || skillEntryLimit != 20000 {
+	if skillUnpackLimit != 2<<30 || skillEntryLimit != 200000 {
 		t.Fatalf("limits = %d bytes, %d entries", skillUnpackLimit, skillEntryLimit)
 	}
 	savedBytes, savedEntries := skillUnpackLimit, skillEntryLimit

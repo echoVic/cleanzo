@@ -132,10 +132,12 @@ var skillGitCommand = func(ctx context.Context, dir string, args ...string) ([]b
 const skillArchiveLimit = 256 << 20
 
 // skillUnpackLimit and skillEntryLimit bound what an archive unpacks to: the
-// bytes written and the entries it holds. Tests lower them.
+// bytes written and the entries it holds. The archive is the whole
+// repository, not just the skill's folder, so a skill in a large monorepo
+// fits. Tests lower them.
 var (
-	skillUnpackLimit int64 = 512 << 20
-	skillEntryLimit        = 20000
+	skillUnpackLimit int64 = 2 << 30
+	skillEntryLimit        = 200000
 )
 
 var (
