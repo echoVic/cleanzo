@@ -1,11 +1,11 @@
 import * as React from "react";
 
 /**
- * 插画版闲置引导（旧版 large / fullscan / orphans 共用）：虚线圆环 + 主题线稿，
- * 与 home-axis 数字版 IdleHero 互斥。DOM 逐字复刻旧版 renderIdleScanPages。
+ * 插画版闲置引导：大文件、空间分析和增长监控页没有结果时共用，虚线圆环 + 主题线稿；
+ * 清理、AI 工具和技能页的空态用数字版 IdleHero。
  */
 export interface EmptyGuideProps {
-  /** linearGradient id（eg-large-grad / eg-fs-grad / eg-orphans-grad）。 */
+  /** linearGradient id，每页一个（eg-large-grad / eg-fs-grad / growth-empty）。 */
   gradId: string;
   title: string;
   desc: string;
