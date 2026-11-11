@@ -79,8 +79,8 @@ func TestUpdateState(t *testing.T) {
 
 func TestCaskState(t *testing.T) {
 	cases := []struct{ short, build, cask, state, reason string }{
-		// The cask only adds components to the short version, and has a build
-		// or the bundle's build extends the short version: CFBundleVersion decides.
+		// The cask only adds components to the short version, and the bundle's
+		// build compares with the cask's: CFBundleVersion decides.
 		{"4.1.15", "270135", "4.1.15.55,270135", "current", ""},        // WeChat, its build after the comma
 		{"4.1.15", "270135", "4.1.15.60,270200", "update", ""},         // a newer build of the same short version
 		{"16.69", "16.69.23010700", "16.69.23010700", "current", ""},   // Office: a build that is the full dotted version
@@ -89,12 +89,16 @@ func TestCaskState(t *testing.T) {
 		{"6.4.6 (56145)", "6.4.6.56145", "6.4.6.56145", "current", ""}, // Zoom: the short version names the build too
 		{"6.4.6 (56145)", "6.4.6.56145", "6.4.6.56200", "update", ""},  // and a newer one
 		{"133.0", "133.0.1", "133.0.3", "update", ""},                  // a build that extends the short version, older
-		{"4.1.15", "", "4.1.15.55,270135", "current", ""},              // no build to compare
-		{"4.1.15", "4.1.15", "4.1.15.55,270135", "current", ""},        // a build that says no more than the short version
-		{"4.1.15", "270135", "4.1.15.55,abc", "current", ""},           // a cask build that is not a number
-		{"4.1.15", "270135", "4.1.15.55,", "update", ""},               // an empty cask build is none
 		// Otherwise the short versions compare, as for every other source:
-		// X.Y to X.Y.Z is an update whatever the bundle's build says.
+		// X.Y to X.Y.Z is an update whatever the bundle's build says, also
+		// when the cask has a build that the bundle's cannot be compared with.
+		{"4.1.15", "", "4.1.15.55,270135", "update", ""},                       // no build in the bundle
+		{"4.1.15", "4.1.15", "4.1.15.55,270135", "update", ""},                 // a build that says no more than the short version
+		{"4.1.15", "270135", "4.1.15.55,abc", "update", ""},                    // a cask build that is not a number
+		{"4.1.15", "270135", "4.1.15.55,", "update", ""},                       // an empty cask build is none
+		{"2024.3", "IU-243.21565.193", "2024.3.1,243.22562.145", "update", ""}, // JetBrains: a build that is not a number
+		{"2.0", "2.0", "2.0.1,a1b2c3", "update", ""},
+		{"2.0", "100", "2.0.1,a1b2c3", "update", ""},
 		{"2.0", "100", "2.0.1", "update", ""},
 		{"2.0", "2.0", "2.0.1", "update", ""},
 		{"2.0", "", "2.0.1", "update", ""},

@@ -131,11 +131,12 @@ func updateState(current, latest string) (state, reason string) {
 // CFBundleVersion decides, as for Sparkle feeds:
 //   - a build that extends the short version, against the cask's dotted
 //     version;
-//   - any other build, against the cask's part after the comma; with no such
-//     build in the bundle, or one that is not a number in the cask, there is
-//     nothing to compare and the bundle is current.
+//   - any other build, against the cask's part after the comma.
 //
-// Any other X.Y to X.Y.Z is an update, whatever the bundle's build says.
+// When the bundle has no build that compares with the cask's (none, one that
+// says no more than the short version, or either is not a number, as
+// JetBrains' IU-243.21565.193), the short versions decide after all: any X.Y
+// to X.Y.Z is an update, whatever the bundle's build says.
 func caskState(short, build, cask string) (state, reason string) {
 	s, l, b := versionParts(cleanVersion(short)), versionParts(cleanVersion(cask)), versionParts(cleanVersion(build))
 	_, caskBuild, _ := strings.Cut(strings.TrimSpace(cask), ",")
@@ -151,7 +152,10 @@ func caskState(short, build, cask string) (state, reason string) {
 	case b != nil && compareVersions(b, s) != 0: // a build that says more than the short version
 		against = versionParts(cleanVersion(caskBuild))
 	}
-	if against != nil && compareVersions(against, b) > 0 {
+	if against == nil {
+		return updateState(short, cask)
+	}
+	if compareVersions(against, b) > 0 {
 		return "update", ""
 	}
 	return "current", ""
