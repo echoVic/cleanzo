@@ -837,7 +837,7 @@ test("返回后新结果到达前，保留的更新按钮仍发送原应用 ID",
   } finally { h.dispose(); }
 });
 
-test("展开只开一行，详情缓存复用；外部请求先展开和定位，不打开卸载确认", async () => {
+test("展开只开一行，重新展开复用详情、卸载确认重读；外部请求先展开和定位，不打开卸载确认", async () => {
   const a = app({ name: "A", path: "/Applications/A.app" }), b = app({ name: "B", path: "/Applications/B.app" });
   const calls: string[] = [];
   const stream = updateStream();
@@ -850,7 +850,7 @@ test("展开只开一行，详情缓存复用；外部请求先展开和定位�
     h.rows()[0].props.onToggle(a.id); await h.flush();
     expect(h.rows().filter((n) => n.props.open).map((n) => n.props.app.id)).toEqual([a.id]);
     h.rows()[1].props.onToggle(b.id); await h.flush(); expect(calls).toEqual([b.id, a.id]);
-    h.expanded(b.id).onUninstall(b.id); await h.flush(); expect(h.dialog().open).toBe(true); expect(h.dialog().stage).toBe("detail"); expect(calls).toEqual([b.id, a.id]);
+    h.expanded(b.id).onUninstall(b.id); await h.flush(); expect(h.dialog().open).toBe(true); expect(h.dialog().stage).toBe("detail"); expect(calls).toEqual([b.id, a.id, b.id]);
     h.dialog().onOpenChange(false); h.rows()[1].props.onToggle(b.id); await h.flush(); expect(h.rows().every((n) => !n.props.open)).toBe(true);
   } finally { h.dispose(); }
 });
@@ -881,8 +881,11 @@ test("更新动作：brew 互斥、成功同步版本和计数，失败展开并
 test("清缓存后确认框移除缓存路径；卸载部分失败移除本体成功的行", async () => {
   const a = app({ name: "A", path: "/Applications/A.app" });
   const stream = updateStream();
-  let removals = 0;
-  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => ({ app: a, items: [{ kind: "app", path: a.id, size: 800 }, { kind: "cache", path: "/cache", size: 200 }], totalSize: 1000 }), cleanAppCache: async (id) => uninstall({ path: id, moved: 1, freed: 200 }), uninstallApp: async (id) => { removals++; return uninstall({ path: id, moved: 1, failed: ["/data: denied"] }); } });
+  let removals = 0, cleaned = false;
+  // 详情按磁盘上的现状返回：缓存清掉后就不再列出。
+  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => cleaned
+    ? { app: a, items: [{ kind: "app", path: a.id, size: 800 }], totalSize: 800 }
+    : { app: a, items: [{ kind: "app", path: a.id, size: 800 }, { kind: "cache", path: "/cache", size: 200 }], totalSize: 1000 }, cleanAppCache: async (id) => { cleaned = true; return uninstall({ path: id, moved: 1, freed: 200 }); }, uninstallApp: async (id) => { removals++; return uninstall({ path: id, moved: 1, failed: ["/data: denied"] }); } });
   try {
     await h.flush({ active: true }); stream.emit(upd({ id: a.id, state: "update" })); stream.finish(); await h.flush();
     h.rows()[0].props.onToggle(a.id); await h.flush();
@@ -897,11 +900,18 @@ test("退出和强退只在确认后调用；待退出、不能退出和已退�
   for (const mode of ["pending", "cannot-quit", "not-running", "done"] as const) {
     const calls: string[] = [];
     const stream = updateStream();
+    let stopped = false;
     const h = await appsHarness({
       listApps: async () => [a], startUpdateCheck: () => stream as any,
-      uninstallDetail: async () => ({ app: a, items: [], totalSize: 0 }),
-      quitApp: async (path) => { calls.push(`quit:${path}`); if (mode === "cannot-quit" || mode === "not-running") throw new Error(JSON.stringify({ code: mode })); return mode === "done"; },
-      forceQuitApp: async (path) => { calls.push(`force:${path}`); return true; },
+      uninstallDetail: async () => ({ app: { ...a, running: !stopped }, items: [], totalSize: 0 }),
+      quitApp: async (path) => {
+        calls.push(`quit:${path}`);
+        if (mode === "not-running") stopped = true;
+        if (mode === "cannot-quit" || mode === "not-running") throw new Error(JSON.stringify({ code: mode }));
+        stopped = mode === "done";
+        return stopped;
+      },
+      forceQuitApp: async (path) => { calls.push(`force:${path}`); stopped = true; return true; },
     });
     try {
       await h.flush({ active: true }); h.rows()[0].props.onToggle(a.id); await h.flush();
@@ -934,8 +944,8 @@ test("Windows 接线：不检查更新和增长，外部展开后打开卸载器
   try {
     setPlatformForTest("win32");
     await h.flush({ active: true, uninstallPath: a.id, uninstallNonce: 1 }); expect(forbidden).toBe(0); expect(h.busy).toBe(false); expect(h.rows()[0].props.open).toBe(true); expect(h.dialog().open).toBe(false);
-    h.expanded(a.id).onUninstall(a.id); await h.flush(); expect(calls).toEqual([`detail:${a.id}`]); expect(h.dialog().stage).toBe("detail");
-    h.dialog().onConfirm(); await h.flush(); expect(calls[1]).toBe(`uninstall:${a.id}`); expect(h.dialog().stage).toBe("launched"); expect(h.rows()).toHaveLength(1);
+    h.expanded(a.id).onUninstall(a.id); await h.flush(); expect(calls).toEqual([`detail:${a.id}`, `detail:${a.id}`]); expect(h.dialog().stage).toBe("detail");
+    h.dialog().onConfirm(); await h.flush(); expect(calls[2]).toBe(`uninstall:${a.id}`); expect(h.dialog().stage).toBe("launched"); expect(h.rows()).toHaveLength(1);
     h.dialog().onRefresh(); await h.flush(); expect(loads).toBe(2); expect(h.dialog().open).toBe(false); expect(forbidden).toBe(0);
   } finally { h.dispose(); }
 });
@@ -973,17 +983,39 @@ test("占用读取失败保留错误；卸载可重试分析，关闭后丢弃�
   } finally { h.dispose(); }
 });
 
+test("卸载确认每次重读详情：读到前显示分析中，读到后展示当下的文件并更新占用", async () => {
+  const a = app({ name: "A", path: "/Applications/A.app" });
+  const stream = updateStream();
+  let reads = 0, resolve!: (d: UninstallDetail) => void;
+  const later: UninstallDetail = { app: a, items: [{ kind: "app", path: a.id, size: 800 }, { kind: "data", path: "/data", size: 300 }], totalSize: 1100 };
+  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => {
+    if (++reads === 1) return { app: a, items: [{ kind: "app", path: a.id, size: 800 }, { kind: "cache", path: "/cache", size: 200 }], totalSize: 1000 };
+    return await new Promise((yes) => { resolve = yes; });
+  } });
+  try {
+    await h.flush({ active: true }); stream.finish(); await h.flush();
+    h.rows()[0].props.onToggle(a.id); await h.flush(); expect(reads).toBe(1); expect(h.expanded(a.id).usage.cache).toBe(200);
+    h.expanded(a.id).onUninstall(a.id); await h.flush();
+    expect(reads).toBe(2); expect(h.dialog().open).toBe(true); expect(h.dialog().stage).toBe("analyzing"); expect(h.dialog().detail).toBeNull();
+    resolve(later); await h.flush();
+    expect(h.dialog().stage).toBe("detail"); expect(h.dialog().detail.items).toEqual(later.items); expect(h.dialog().detail.totalSize).toBe(1100);
+    expect(h.expanded(a.id).usage).toEqual({ app: 800, data: 300, cache: 0, cachePaths: [] });
+  } finally { h.dispose(); }
+});
+
 test("详情晚于退出返回时，卸载确认仍使用退出后的运行状态", async () => {
   const a = app({ name: "A", path: "/Applications/A.app", running: true });
   const stream = updateStream();
-  let resolve!: (d: UninstallDetail) => void;
-  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => await new Promise((yes) => { resolve = yes; }), quitApp: async () => true });
+  let reads = 0, resolve!: (d: UninstallDetail) => void;
+  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => { reads++; return await new Promise((yes) => { resolve = yes; }); }, quitApp: async () => true });
   try {
     await h.flush({ active: true }); h.rows()[0].props.onToggle(a.id); await h.flush();
     h.expanded(a.id).onQuit(a.id); await h.flush(); h.nodes().find((n) => n.props.onClick && n.props.children === "退出").props.onClick(); await h.flush();
     expect(h.rows()[0].props.app.running).toBe(false);
-    resolve({ app: a, items: [], totalSize: 0 }); await h.flush(); h.expanded(a.id).onUninstall(a.id); await h.flush();
-    expect(h.dialog().detail.app.running).toBe(false);
+    // 确认框打开时第一次读取还没回来：复用它，停在「分析中」，不另发一次。
+    h.expanded(a.id).onUninstall(a.id); await h.flush(); expect(h.dialog().stage).toBe("analyzing"); expect(reads).toBe(1);
+    resolve({ app: a, items: [], totalSize: 0 }); await h.flush();
+    expect(h.dialog().detail.app.running).toBe(false); expect(h.rows()[0].props.app.running).toBe(false);
   } finally { h.dispose(); }
 });
 
@@ -995,8 +1027,9 @@ test("详情晚于升级返回时，卸载确认仍使用升级后的版本", as
   try {
     await h.flush({ active: true }); stream.emit(upd({ id: a.id, state: "update", action: "brew" })); stream.finish(); await h.flush(); h.rows()[0].props.onToggle(a.id); await h.flush();
     h.rows()[0].props.onUpgrade(a.id); await h.flush(); expect(h.rows()[0].props.app.version).toBe("1.171.0");
-    resolve({ app: a, items: [], totalSize: 0 }); await h.flush(); h.expanded(a.id).onUninstall(a.id); await h.flush();
-    expect(h.dialog().detail.app.version).toBe("1.171.0");
+    h.expanded(a.id).onUninstall(a.id); await h.flush(); expect(h.dialog().stage).toBe("analyzing");
+    resolve({ app: a, items: [], totalSize: 0 }); await h.flush();
+    expect(h.dialog().detail.app.version).toBe("1.171.0"); expect(h.rows()[0].props.app.version).toBe("1.171.0");
   } finally { h.dispose(); }
 });
 

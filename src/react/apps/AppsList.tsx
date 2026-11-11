@@ -204,9 +204,10 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   const count = progress.finished ? updateCount(updates) : null;
   React.useEffect(() => { onCounts({ updates: count, total: apps.length }); }, [count, apps.length, onCounts]);
 
-  const ensureDetail = React.useCallback((id: string): Promise<UninstallDetail> => {
+  /** fresh 为真时不用已读过的详情，重新读一次；正在读的那次照样复用。 */
+  const ensureDetail = React.useCallback((id: string, fresh = false): Promise<UninstallDetail> => {
     const cached = detailsRef.current[id];
-    if (cached) return Promise.resolve(cached);
+    if (cached && !fresh) return Promise.resolve(cached);
     const pending = detailJobs.current.get(id);
     if (pending) return pending;
     const requestedApp = appsRef.current.find((a) => a.id === id);
@@ -298,7 +299,6 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
           appsRef.current = appsRef.current.map((a) => a.id === id ? { ...a, version: res.version } : a);
           setApps((prev) => prev.map((a) => a.id === id ? { ...a, version: res.version } : a));
           setUpdates((prev) => new Map(prev).set(id, { ...u, state: "current", current: res.version, action: "" }));
-          setDetails((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], app: { ...prev[id].app, version: res.version } } } : prev);
           toast(t("apps.upgraded", { name: a.name, v: res.version }));
         } else if (u.action === "open-store") toast(t("apps.opened.store"));
         else toast(t("apps.opened.app", { name: a.name }));
@@ -327,11 +327,6 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
       if (res.failed.length === 0) { // 没有可移的也算清理完：缓存已经在别处清掉了
         toast(t("apps.cacheCleaned", { name: a.name, size: human(res.freed) }));
         setUsage((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], cache: 0, cachePaths: [] } } : prev);
-        // 确认框复用这份详情，清掉缓存路径，避免展示已经移走的文件。
-        setDetails((prev) => {
-          const d = prev[id];
-          return d ? { ...prev, [id]: { ...d, items: d.items.filter((it) => it.kind !== "cache"), totalSize: Math.max(0, d.totalSize - splitUsage(d).cache) } } : prev;
-        });
       } else if (res.failed.length > 0 && res.failed.every((f) => f.endsWith(": in-use"))) toast(t("apps.inUse", { name: a.name }), "err");
       else toast(t("apps.cacheFail", { name: a.name, n: res.failed.length }), "err");
     } catch { toast(t("apps.cacheFail", { name: a.name, n: usage[id]?.cachePaths.length ?? 0 }), "err"); }
@@ -341,7 +336,6 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   const markStopped = (id: string) => {
     appsRef.current = appsRef.current.map((a) => a.id === id ? { ...a, running: false } : a);
     setApps((prev) => prev.map((a) => a.id === id ? { ...a, running: false } : a));
-    setDetails((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], app: { ...prev[id].app, running: false } } } : prev);
     setStuck((prev) => { const next = new Set(prev); next.delete(id); return next; });
   };
   const doQuit = async (a: AppInfo) => {
@@ -382,12 +376,11 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   }, []);
   const openDetail = async (id: string) => {
     const seq = ++seqRef.current;
-    const cached = detailsRef.current[id];
-    setDialog(cached ? { stage: "detail", detail: cached, failMsg: null } : DIALOG_IDLE);
+    // 确认框列的是要移走的文件：每次打开都重读，读到前停在「分析中」。
+    setDialog(DIALOG_IDLE);
     setDialogOpen(true);
-    if (cached) return;
     try {
-      const d = await ensureDetail(id);
+      const d = await ensureDetail(id, true);
       if (seq !== seqRef.current) return;
       setDialog({ stage: "detail", detail: d, failMsg: null });
     } catch (e) {
