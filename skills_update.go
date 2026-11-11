@@ -847,7 +847,7 @@ type SkillUpgradeRequest struct {
 // SkillUpgradeResult reports one upgrade.
 type SkillUpgradeResult struct {
 	Path  string `json:"path"`
-	Tree  string `json:"tree"`  // the folder's tree hash after the upgrade
+	Tree  string `json:"tree"`  // the folder's tree hash after the upgrade, a git clone's HEAD commit once it fast-forwards; "" on error
 	Error string `json:"error"` // "" on success; no-origin, modified, mismatch, not-found, rate-limited, ...
 }
 

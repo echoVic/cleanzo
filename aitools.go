@@ -1002,7 +1002,7 @@ type AIPartResult struct {
 	Moved   int64    `json:"moved"`   // paths moved to the Trash
 	Freed   int64    `json:"freed"`   // bytes
 	Kept    int64    `json:"kept"`    // sessions or file items left alone
-	Skipped string   `json:"skipped"` // running, blocked, unknown, in-use; "" when cleaned
+	Skipped string   `json:"skipped"` // unknown, running, blocked, in-use; models also cancelled, missing, changed; "" when cleaned
 	Failed  []string `json:"failed"`
 }
 

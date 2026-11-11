@@ -136,7 +136,7 @@ export interface AIPartResult {
   freed: number;
   /** sessions or file items left alone */
   kept: number;
-  /** running, blocked, unknown, in-use; "" when cleaned */
+  /** unknown, running, blocked, in-use; models also cancelled, missing, changed; "" when cleaned */
   skipped: string;
   failed: string[];
 }
@@ -998,7 +998,7 @@ export interface SkillUpgradeRequest {
 /** SkillUpgradeResult reports one upgrade. */
 export interface SkillUpgradeResult {
   path: string;
-  /** the folder's tree hash after the upgrade */
+  /** the folder's tree hash after the upgrade, a git clone's HEAD commit once it fast-forwards; "" on error */
   tree: string;
   /** "" on success; no-origin, modified, mismatch, not-found, rate-limited, ... */
   error: string;
@@ -1430,8 +1430,8 @@ export const Cleaner = {
   },
   /**
    * TrashSkills moves skill entries to the Trash. A link moves as a link; its
-   * target stays. A folder that a skills folder links to is moved only when
-   * all those links are moved with it, so no tool is left with a broken link.
+   * target stays. A folder that a skills folder links to is moved only once
+   * all those links have moved with it, so no tool is left with a broken link.
    * Folders with files a process has open are left alone.
    */
   trashSkills(paths: string[]): Promise<SkillTrashResult> {
