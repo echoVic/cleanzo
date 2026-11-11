@@ -79,17 +79,29 @@ func TestUpdateState(t *testing.T) {
 
 func TestCaskState(t *testing.T) {
 	cases := []struct{ short, build, cask, state, reason string }{
-		// The cask only adds components to the short version: CFBundleVersion decides.
-		{"4.1.15", "270135", "4.1.15.55,270135", "current", ""},      // WeChat, its build after the comma
-		{"4.1.15", "270135", "4.1.15.60,270200", "update", ""},       // a newer build of the same short version
-		{"16.69", "16.69.23010700", "16.69.23010700", "current", ""}, // a build that is the full dotted version
-		{"16.69", "16.69.23010700", "16.69.23011000", "update", ""},  // and a newer one
-		{"16.69", "16.69.23011000", "16.69.23010700", "current", ""}, // the bundle is newer
-		{"4.1.15", "", "4.1.15.55,270135", "current", ""},            // no build to compare
-		{"2.0", "100", "2.0.1", "current", ""},                       // a counter build, but no cask build
-		{"0.10.3", "0.10.3", "0.10.3.1", "current", ""},              // a build that says no more than the short version
-		{"4.1.15", "270135", "4.1.15.55,abc", "current", ""},         // a cask build that is not a number
-		// Otherwise the short versions compare, as for every other source.
+		// The cask only adds components to the short version, and has a build
+		// or the bundle's build extends the short version: CFBundleVersion decides.
+		{"4.1.15", "270135", "4.1.15.55,270135", "current", ""},        // WeChat, its build after the comma
+		{"4.1.15", "270135", "4.1.15.60,270200", "update", ""},         // a newer build of the same short version
+		{"16.69", "16.69.23010700", "16.69.23010700", "current", ""},   // Office: a build that is the full dotted version
+		{"16.69", "16.69.23010700", "16.69.23011000", "update", ""},    // and a newer one
+		{"16.69", "16.69.23011000", "16.69.23010700", "current", ""},   // the bundle is newer
+		{"6.4.6 (56145)", "6.4.6.56145", "6.4.6.56145", "current", ""}, // Zoom: the short version names the build too
+		{"6.4.6 (56145)", "6.4.6.56145", "6.4.6.56200", "update", ""},  // and a newer one
+		{"133.0", "133.0.1", "133.0.3", "update", ""},                  // a build that extends the short version, older
+		{"4.1.15", "", "4.1.15.55,270135", "current", ""},              // no build to compare
+		{"4.1.15", "4.1.15", "4.1.15.55,270135", "current", ""},        // a build that says no more than the short version
+		{"4.1.15", "270135", "4.1.15.55,abc", "current", ""},           // a cask build that is not a number
+		{"4.1.15", "270135", "4.1.15.55,", "update", ""},               // an empty cask build is none
+		// Otherwise the short versions compare, as for every other source:
+		// X.Y to X.Y.Z is an update whatever the bundle's build says.
+		{"2.0", "100", "2.0.1", "update", ""},
+		{"2.0", "2.0", "2.0.1", "update", ""},
+		{"2.0", "", "2.0.1", "update", ""},
+		{"0.10.3", "0.10.3", "0.10.3.1", "update", ""},
+		{"133.0", "13324.11.25", "133.0.3", "update", ""},
+		{"133.0", "", "133.0.3", "update", ""},
+		{"133.0", "133.0", "133.0.3", "update", ""},
 		{"156.0.8078.76", "8078.76", "156.0.8078.80", "update", ""},
 		{"4.1.15", "270135", "4.1.16.10,271000", "update", ""},
 		{"4.1.16", "271000", "4.1.15.55,270135", "current", ""},

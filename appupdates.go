@@ -125,27 +125,31 @@ func updateState(current, latest string) (state, reason string) {
 // caskState compares a bundle with its Homebrew cask, whose version can be
 // "version,build" (4.1.15.55,270135). It is updateState of the short
 // versions, unless the cask's version only adds components to the bundle's
-// short version (4.1.15). The short version cannot tell those releases apart,
-// so CFBundleVersion decides, as for Sparkle feeds:
-//   - a build that extends the short version (16.69.23010700), against the
-//     cask's dotted version;
-//   - any other build (270135), against the cask's part after the comma.
+// short version (4.1.15) and a build tells the releases apart: the cask has
+// one after the comma (WeChat), or the bundle's CFBundleVersion extends its
+// short version (Office's 16.69.23010700, Zoom's 6.4.6.56145). Then
+// CFBundleVersion decides, as for Sparkle feeds:
+//   - a build that extends the short version, against the cask's dotted
+//     version;
+//   - any other build, against the cask's part after the comma; with no such
+//     build in the bundle, or one that is not a number in the cask, there is
+//     nothing to compare and the bundle is current.
 //
-// With no build to compare on either side, the bundle is current.
+// Any other X.Y to X.Y.Z is an update, whatever the bundle's build says.
 func caskState(short, build, cask string) (state, reason string) {
-	s, l := versionParts(cleanVersion(short)), versionParts(cleanVersion(cask))
-	if s == nil || !extendsVersion(l, s) {
+	s, l, b := versionParts(cleanVersion(short)), versionParts(cleanVersion(cask)), versionParts(cleanVersion(build))
+	_, caskBuild, _ := strings.Cut(strings.TrimSpace(cask), ",")
+	caskBuild = strings.TrimSpace(caskBuild)
+	extends := b != nil && extendsVersion(b, s)
+	if s == nil || !extendsVersion(l, s) || (caskBuild == "" && !extends) {
 		return updateState(short, cask)
 	}
-	b := versionParts(cleanVersion(build))
 	var against []int
 	switch {
-	case b == nil, compareVersions(b, s) == 0: // no build, or one that says no more than the short version
-	case extendsVersion(b, s):
+	case extends:
 		against = l
-	default:
-		_, after, _ := strings.Cut(strings.TrimSpace(cask), ",")
-		against = versionParts(cleanVersion(after))
+	case b != nil && compareVersions(b, s) != 0: // a build that says more than the short version
+		against = versionParts(cleanVersion(caskBuild))
 	}
 	if against != nil && compareVersions(against, b) > 0 {
 		return "update", ""
