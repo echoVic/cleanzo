@@ -227,7 +227,7 @@ export interface AppUpgradeResult {
   done: boolean;
   /** the bundle's version afterwards (brew) */
   version: string;
-  /** "in-use" | "brew-failed" | "not-checked" | "unsupported" | "busy" | "" */
+  /** "in-use" | "brew-failed" | "open-failed" | "not-checked" | "unsupported" | "busy" | "" */
   code: string;
   /** brew's last output line */
   detail: string;
@@ -433,7 +433,7 @@ export interface GrowthApp {
 export interface GrowthConfig {
   /** measure in the background, show the menu bar icon, stay open without windows */
   enabled: boolean;
-  /** only while monitoring is on or the menu bar shows a reading */
+  /** only while monitoring is on, the menu bar shows a reading, or Trash reminders are on */
   openAtLogin: boolean;
   /** a day's growth that alerts */
   dailyGB: number;

@@ -35,7 +35,7 @@ type AppUpgradeResult struct {
 	ID      string `json:"id"`
 	Done    bool   `json:"done"`    // brew: the bundle now has Latest; open-*: opened
 	Version string `json:"version"` // the bundle's version afterwards (brew)
-	Code    string `json:"code"`    // "in-use" | "brew-failed" | "not-checked" | "unsupported" | "busy" | ""
+	Code    string `json:"code"`    // "in-use" | "brew-failed" | "open-failed" | "not-checked" | "unsupported" | "busy" | ""
 	Detail  string `json:"detail"`  // brew's last output line
 	Command string `json:"command"` // the command to run in Terminal when brew failed
 }

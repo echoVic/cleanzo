@@ -15,9 +15,10 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// growthTray is the Cleanzo icon in the menu bar, shown while monitoring is on
-// and no reading shows: with readings, their items carry Cleanzo's menu instead
-// (menubar spec §三.4). The main thread makes and removes it.
+// growthTray is the Cleanzo icon in the menu bar, shown while monitoring or
+// Trash reminders are on and no reading shows: with readings, their items carry
+// Cleanzo's menu instead (menubar spec §三.4). The main thread makes and
+// removes it.
 var growthTray atomic.Pointer[mygo.Tray]
 
 // growthMenuShown is the model of Cleanzo's menu as last built: the icon's
@@ -89,14 +90,14 @@ func growthKeepRunning(supported bool, resident func() bool) bool {
 }
 
 // startResident runs in WhenReady, on the main thread, so it reads no records:
-// they would hold up the first window. It starts the monitor's loop and shows
-// the menu bar: the readings chosen, an item each, or else the Cleanzo icon
-// while monitoring is on, with the lines that act and no more, which
-// refreshGrowthTray completes on another goroutine. It reports true when the
-// app was opened at login and Cleanzo shows in the menu bar: then no window
-// opens, and the Dock icon is dropped before anything else is made. Without
-// either, nothing would show that Cleanzo runs, so the window opens after all,
-// with its Dock icon.
+// they would hold up the first window. It starts the monitor's loop and the
+// Trash reminders, and shows the menu bar: the readings chosen, an item each,
+// or else the Cleanzo icon while monitoring or Trash reminders are on, with
+// the lines that act and no more, which refreshGrowthTray completes on another
+// goroutine. It reports true when the app was opened at login and Cleanzo
+// shows in the menu bar: then no window opens, and the Dock icon is dropped
+// before anything else is made. Without either, nothing would show that
+// Cleanzo runs, so the window opens after all, with its Dock icon.
 //
 // It leaves the login item alone: only SaveGrowthConfig, SaveMenuBar and the
 // menu's "turn off" change it, so what the user set in System Settings stays.
@@ -179,12 +180,14 @@ func applyGrowthLifecycle(cfg GrowthConfig) error {
 	return applyResident(cfg, menuBarConfigNow())
 }
 
-// applyResident puts the app in the state the two settings ask for (growth
-// spec §六, menubar spec §三, §七):
+// applyResident puts the app in the state the two settings ask for, with
+// Trash reminders as they are (growth spec §六, menubar spec §三, §七):
 //   - the readings in mb, an item each, which carry Cleanzo's menu;
-//   - the Cleanzo icon while monitoring is on and no reading shows;
-//   - opening at login as chosen, only while one of them is on;
-//   - quitting when neither is on and no window is open, a minimized or
+//   - the Cleanzo icon while monitoring or Trash reminders are on and no
+//     reading shows;
+//   - opening at login as chosen, only while monitoring, a reading or Trash
+//     reminders are on;
+//   - quitting when none of them is on and no window is open, a minimized or
 //     hidden one included.
 //
 // It does nothing before the app runs, as in a test: there is no main thread
@@ -369,7 +372,7 @@ func growthMenuCommands(running bool, text func(string, map[string]string) strin
 }
 
 // menuBarOnlyMenu is Cleanzo's menu while monitoring is off and a reading
-// shows: open, then menuBarMenuTail.
+// shows or Trash reminders are on: open, then menuBarMenuTail.
 func menuBarOnlyMenu(text func(string, map[string]string) string) []growthMenuItem {
 	return append([]growthMenuItem{{label: text("growth.tray.open", nil), action: "open"}}, menuBarMenuTail(text)...)
 }

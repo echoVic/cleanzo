@@ -140,7 +140,7 @@ func lastGrowthAt(dir string, now time.Time) time.Time {
 // GrowthConfig is what the user chose for the growth monitor (spec §五, §六).
 type GrowthConfig struct {
 	Enabled     bool     `json:"enabled"`     // measure in the background, show the menu bar icon, stay open without windows
-	OpenAtLogin bool     `json:"openAtLogin"` // only while monitoring is on or the menu bar shows a reading
+	OpenAtLogin bool     `json:"openAtLogin"` // only while monitoring is on, the menu bar shows a reading, or Trash reminders are on
 	DailyGB     float64  `json:"dailyGB"`     // a day's growth that alerts
 	WeeklyGB    float64  `json:"weeklyGB"`    // seven days' growth that alerts
 	Ignored     []string `json:"ignored"`     // owner keys that never alert
@@ -181,8 +181,9 @@ func loadGrowthConfig(dir string) GrowthConfig {
 }
 
 // validateGrowthConfig returns a normalized copy, or a translatable error for
-// thresholds outside the choices. Opening at login needs monitoring on or a
-// reading in the menu bar (menuBar; menubar spec §七.3).
+// thresholds outside the choices. Opening at login needs monitoring on, or
+// something else that keeps Cleanzo open (menuBar: a reading in the menu bar
+// or Trash reminders; menubar spec §七.3).
 func validateGrowthConfig(c GrowthConfig, menuBar bool) (GrowthConfig, error) {
 	if !slices.Contains(growthDailyChoices, c.DailyGB) || !slices.Contains(growthWeeklyChoices, c.WeeklyGB) {
 		return GrowthConfig{}, codeError{Code: "growth-threshold"}

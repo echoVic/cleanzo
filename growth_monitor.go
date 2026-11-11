@@ -366,7 +366,7 @@ var errGrowthNoNotifications = errors.New("notifications unsupported")
 // an alert of no owner, which says that monitoring is on. macOS asks for
 // permission at an app's first notification, and this way it asks while the
 // user is at the page, not during a run nobody watches. Clicking it opens the
-// growth page.
+// process page's disk usage tab (focusGrowth).
 var growthOnNotice = GrowthAlert{}
 
 // growthNoticeText is the title and body of the notification for a, an alert
@@ -379,8 +379,8 @@ func growthNoticeText(locale string, a GrowthAlert) (title, body string) {
 }
 
 // postGrowthNotification shows one alert, or growthOnNotice. Clicking it opens
-// the growth page at the app, even after a relaunch (App.OnNotificationClick
-// in growth_app.go).
+// the process page's disk usage tab at the alert's owner (focusGrowth), even
+// after a relaunch (App.OnNotificationClick in growth_app.go).
 func postGrowthNotification(a GrowthAlert) error {
 	if !mygo.NotificationsSupported() {
 		return errGrowthNoNotifications
