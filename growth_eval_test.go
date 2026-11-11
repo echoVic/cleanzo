@@ -205,7 +205,7 @@ func TestWindowsHoldDailyRunsThatDrift(t *testing.T) {
 		t.Fatalf("1.5 GB a day reaches the 10 GB weekly alert over seven runs: %+v", week)
 	}
 	apps := buildGrowthApps(h, cfg2(), byBase, "/h", time.UTC)
-	if len(apps) != 1 || apps[0].Week == nil || apps[0].Week.Days != 7 || apps[0].Month == nil || apps[0].Month.Days != 30 || apps[0].Month.Bytes != 45*gb {
+	if len(apps) != 1 || apps[0].Week == nil || apps[0].Week.Bytes != 21*gb/2 || apps[0].Month == nil || apps[0].Month.Bytes != 45*gb {
 		t.Fatalf("week %+v, month %+v", apps[0].Week, apps[0].Month)
 	}
 }
@@ -435,7 +435,7 @@ func TestBuildGrowthApps(t *testing.T) {
 		t.Fatalf("apps = %+v", apps)
 	}
 	td := apps[0]
-	if td.Day == nil || td.Day.Bytes != 5*gb || td.Week == nil || td.Week.Bytes != 9*gb || td.Week.Days != 5 || td.Month == nil || td.Month.Bytes != 12*gb || td.Month.Days != 10 {
+	if td.Day == nil || td.Day.Bytes != 5*gb || td.Week == nil || td.Week.Bytes != 9*gb || td.Month == nil || td.Month.Bytes != 12*gb {
 		t.Fatalf("deltas day=%+v week=%+v month=%+v", td.Day, td.Week, td.Month)
 	}
 	if len(td.Spark) != 30 || td.Spark[29] != 14*gb || td.Spark[28] != 9*gb || td.Spark[27] != -1 || td.Spark[24] != 5*gb {

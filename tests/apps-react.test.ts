@@ -407,7 +407,7 @@ test("占用拆成本体、数据、缓存", () => {
 
 test("增长按 appPath 对上；小标签按 bundle ID", () => {
   const a = app({ name: "Arc", path: "/Applications/Arc.app", bundleId: "company.thebrowser.Browser" });
-  const g = { key: "app:company.thebrowser.Browser", appPath: "/Applications/Arc.app", week: { bytes: 3 * 2 ** 30, atLeast: false, days: 7 } } as GrowthApp;
+  const g = { key: "app:company.thebrowser.Browser", appPath: "/Applications/Arc.app", week: { bytes: 3 * 2 ** 30, atLeast: false } } as GrowthApp;
   expect(growthFor(a, [g])).toBe(g);
   expect(growthFor(app({ name: "B", path: "/Applications/B.app" }), [g])).toBeNull();
   const summary = {
@@ -514,7 +514,7 @@ test("展开的三栏：版本原因、缓存可清、运行中禁用清理、�
   const noop = () => {};
   const props = {
     app: a, update: upd({ id: a.id, source: "sparkle", state: "unknown", reason: "bad-url" }), checking: false,
-    usage: { app: 800, data: 2000, cache: 400, cachePaths: ["/c"] }, usageError: null, week: { bytes: 3 * 2 ** 30, atLeast: false, days: 7 }, month: null,
+    usage: { app: 800, data: 2000, cache: 400, cachePaths: ["/c"] }, usageError: null, week: { bytes: 3 * 2 ** 30, atLeast: false }, month: null,
     busy: null, brewBusy: false, stuck: false, upgradeFail: null,
     onUpgrade: noop, onCleanCache: noop, onQuit: noop, onForceQuit: noop, onUninstall: noop, onCopy: noop,
   };
@@ -958,7 +958,7 @@ test("Windows 接线：不检查更新和增长，外部展开后打开卸载器
 test("增长开启才读明细、展示排序和增长；搜索排在筛选后，关闭时不读明细", async () => {
   const a = app({ name: "A", path: "/Applications/A.app", lastOpened: NOW });
   const b = app({ name: "B", path: "/Applications/B.app", lastOpened: 0 });
-  const g = (appPath: string, bytes: number): GrowthApp => ({ key: appPath, name: appPath, kind: "app", orphan: false, appPath, size: 1, partial: false, ignored: false, day: null, week: { bytes, days: 7, atLeast: false }, month: null, spark: [], folders: [] });
+  const g = (appPath: string, bytes: number): GrowthApp => ({ key: appPath, name: appPath, kind: "app", orphan: false, appPath, size: 1, partial: false, ignored: false, day: null, week: { bytes, atLeast: false }, month: null, spark: [], folders: [] });
   for (const enabled of [false, true]) {
     let reads = 0;
     const stream = updateStream();

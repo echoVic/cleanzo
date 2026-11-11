@@ -13,7 +13,6 @@ import (
 type GrowthDelta struct {
 	Bytes   int64 `json:"bytes"`
 	AtLeast bool  `json:"atLeast"`
-	Days    int   `json:"days"` // the window's actual length, rounded
 }
 
 // GrowthAlert is an owner whose growth passed a threshold (spec §五).
@@ -330,13 +329,12 @@ func buildGrowthApps(history []growthSnapshot, cfg GrowthConfig, owner func(grow
 		if !ok {
 			continue
 		}
-		days := growthDays(w.base, cur)
 		for key, c := range growthChanges(w, cur, owner) {
 			r := rows[key]
 			if r == nil || !c.compared {
 				continue
 			}
-			d := &GrowthDelta{Bytes: c.bytes, AtLeast: c.atLeast, Days: days}
+			d := &GrowthDelta{Bytes: c.bytes, AtLeast: c.atLeast}
 			switch window {
 			case "day":
 				r.Day = d
@@ -353,7 +351,7 @@ func buildGrowthApps(history []growthSnapshot, cfg GrowthConfig, owner func(grow
 					a, inBase := growthEarlier(w, before, f.Path)
 					b := growthEntry{Path: f.Path, Size: f.Size, Complete: f.Complete, Denied: f.Denied}
 					if delta, atLeast, ok := growthEntryChange(a, inBase, w.base, b); ok {
-						r.Folders[i].Week = &GrowthDelta{Bytes: delta, AtLeast: atLeast, Days: days}
+						r.Folders[i].Week = &GrowthDelta{Bytes: delta, AtLeast: atLeast}
 					}
 				}
 			}

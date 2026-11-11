@@ -77,17 +77,17 @@ function createRuntime(): Runtime {
   const growthApps = (): GrowthApp[] => [
     { key: "app:com.youqu.todesk.mac", name: "ToDesk", kind: "app", orphan: false, appPath: "/Applications/ToDesk.app",
       size: 152 * GB, partial: false, ignored: growthConfig.ignored.includes("app:com.youqu.todesk.mac"),
-      day: { bytes: 5.6 * GB, atLeast: false, days: 1 }, week: { bytes: 38 * GB, atLeast: false, days: 7 }, month: { bytes: 140 * GB, atLeast: false, days: 30 },
+      day: { bytes: 5.6 * GB, atLeast: false }, week: { bytes: 38 * GB, atLeast: false }, month: { bytes: 140 * GB, atLeast: false },
       spark: Array.from({ length: 30 }, (_, i) => (i < 6 ? -1 : (i - 5) * 5.6 * GB)),
       folders: [
-        { path: "/Library/Application Support/ToDesk/dumps", size: 150 * GB, complete: true, denied: false, outside: true, week: { bytes: 38 * GB, atLeast: false, days: 7 } },
+        { path: "/Library/Application Support/ToDesk/dumps", size: 150 * GB, complete: true, denied: false, outside: true, week: { bytes: 38 * GB, atLeast: false } },
         { path: "/Users/mock/Library/Caches/ToDesk", size: 2 * GB, complete: true, denied: false, outside: false, week: null },
       ] },
     { key: "app:com.electron.lark", name: "飞书", kind: "app", orphan: false, appPath: "/Applications/Lark.app",
       size: 27.8 * GB, partial: false, ignored: growthConfig.ignored.includes("app:com.electron.lark"),
-      day: { bytes: 0.2 * GB, atLeast: false, days: 1 }, week: { bytes: 1.1 * GB, atLeast: false, days: 7 }, month: null,
+      day: { bytes: 0.2 * GB, atLeast: false }, week: { bytes: 1.1 * GB, atLeast: false }, month: null,
       spark: Array.from({ length: 30 }, (_, i) => 26 * GB + i * 0.06 * GB),
-      folders: [{ path: "/Users/mock/Library/Application Support/LarkShell", size: 25.1 * GB, complete: true, denied: false, outside: false, week: { bytes: GB, atLeast: false, days: 7 } }] },
+      folders: [{ path: "/Users/mock/Library/Application Support/LarkShell", size: 25.1 * GB, complete: true, denied: false, outside: false, week: { bytes: GB, atLeast: false } }] },
   ];
   const growthSummary = (): GrowthSummary => ({
     supported: true, config: growthConfig,
@@ -96,8 +96,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.5.0", os: "darwin", arch: "arm64", goVersion: "go1.27.3",
-    chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
+    version: "0.5.0", chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
     model: "MacBook Pro (16-inch, 2023)", modelId: "Mac14,10", perfCores: 8, effCores: 4, gpuCores: 19,
@@ -702,7 +701,7 @@ function createRuntime(): Runtime {
     "Cleaner.Disk": async () => disk,
     "Cleaner.FullScan": async (ch) => stream(ch, async (emit) => {
       const items = bigItems.filter((it) => !isGone(it.path)).map((it) => ({ ...it, size: sizeOf(it.path) }));
-      for (const [i, it] of items.entries()) await emit({ kind: "item", ...it, scanned: (i + 1) * 1200 }, 220 + (i % 3) * 90);
+      for (const [i, it] of items.entries()) await emit({ kind: "item", ...it }, 220 + (i % 3) * 90);
       await emit({ kind: "done", result: { disk: { ...disk }, items, scanned: 12480, skipped: 18, elapsedMs: 2900 } });
     }),
     "Cleaner.DirChildren": async (path) => {

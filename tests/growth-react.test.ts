@@ -43,15 +43,15 @@ test("横幅：没开过就询问，问过没开就提示，开着不显示", ()
 
 test("增长文案：正负、下限、没有可比记录", () => {
   const atLeast = (s: string) => t("growth.atLeast", { size: s });
-  expect(fmtDelta({ bytes: 5.6 * GB, atLeast: false, days: 1 }, atLeast)).toBe("+5.6 GB");
-  expect(fmtDelta({ bytes: -GB, atLeast: false, days: 1 }, atLeast)).toBe("−1.0 GB");
-  expect(fmtDelta({ bytes: 3 * GB, atLeast: true, days: 1 }, atLeast)).toBe("至少 +3.0 GB");
+  expect(fmtDelta({ bytes: 5.6 * GB, atLeast: false }, atLeast)).toBe("+5.6 GB");
+  expect(fmtDelta({ bytes: -GB, atLeast: false }, atLeast)).toBe("−1.0 GB");
+  expect(fmtDelta({ bytes: 3 * GB, atLeast: true }, atLeast)).toBe("至少 +3.0 GB");
   expect(fmtDelta(null, atLeast)).toBe("—");
 });
 
 test("排序：按 7 天增长时没有数据的排后面，再按占用", () => {
-  const apps = [app({ key: "a", size: 1, week: { bytes: GB, atLeast: false, days: 7 } }), app({ key: "b", size: 9 }),
-    app({ key: "c", size: 2, week: { bytes: 5 * GB, atLeast: false, days: 7 } }), app({ key: "d", size: 5 })];
+  const apps = [app({ key: "a", size: 1, week: { bytes: GB, atLeast: false } }), app({ key: "b", size: 9 }),
+    app({ key: "c", size: 2, week: { bytes: 5 * GB, atLeast: false } }), app({ key: "d", size: 5 })];
   expect(sortApps(apps, "week").map((a) => a.key)).toEqual(["c", "a", "b", "d"]);
   expect(sortApps(apps, "size").map((a) => a.key)).toEqual(["b", "d", "c", "a"]);
   expect(apps[0]?.key).toBe("a"); // 不改原数组
