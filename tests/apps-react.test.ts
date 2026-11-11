@@ -877,7 +877,7 @@ test("更新动作：brew 互斥、成功同步版本和计数，失败展开并
     expect(h.rows()[0].props.app.version).toBe("2"); expect(h.rows()[0].props.update.state).toBe("current"); expect(h.rows()[0].props.update.action).toBe(""); expect(h.counts.updates).toBe(1); expect(h.busy).toBe(false);
     response = { id: b.id, done: false, version: "", code: "brew-failed", detail: "needs terminal", command: "brew upgrade --cask b" };
     h.rows()[1].props.onUpgrade(b.id); await h.flush(); expect(h.rows()[1].props.open).toBe(true); expect(h.expanded(b.id).upgradeFail).toEqual({ detail: "needs terminal", command: "brew upgrade --cask b" });
-    for (const [code, message] of [["in-use", "正在运行"], ["busy", "Homebrew 正在更新"], ["not-checked", "请重新检查"]]) {
+    for (const [code, message] of [["in-use", "「B」正在运行，请先退出再更新"], ["busy", "Homebrew 正在更新"], ["not-checked", "请重新检查"]]) {
       response = { ...response, code }; h.rows()[1].props.onUpgrade(b.id); await h.flush(); expect(h.messages.at(-1)).toContain(message);
     }
   } finally { h.dispose(); }
@@ -1066,7 +1066,7 @@ test("缓存清理失败不会清掉占用；全是 in-use、其他失败和异�
     await h.flush({ active: true }); stream.finish(); await h.flush(); h.rows()[0].props.onToggle(a.id); await h.flush();
     for (const mode of ["in-use", "failed", "exception"]) {
       response = uninstall({ failed: [mode === "in-use" ? "/cache: in-use" : "/cache: denied"] }); rejects = mode === "exception";
-      h.expanded(a.id).onCleanCache(a.id); await h.flush(); expect(h.messages.at(-1)).toContain(mode === "in-use" ? "正在运行" : "有 1 项缓存未能清理"); expect(h.expanded(a.id).usage.cache).toBe(1024); expect(h.expanded(a.id).usage.cachePaths).toEqual(["/cache"]); expect(h.busy).toBe(false);
+      h.expanded(a.id).onCleanCache(a.id); await h.flush(); expect(h.messages.at(-1)).toContain(mode === "in-use" ? "「A」正在运行，请先退出再清理缓存" : "有 1 项缓存未能清理"); expect(h.expanded(a.id).usage.cache).toBe(1024); expect(h.expanded(a.id).usage.cachePaths).toEqual(["/cache"]); expect(h.busy).toBe(false);
     }
   } finally { h.dispose(); }
 });

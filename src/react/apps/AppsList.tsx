@@ -302,7 +302,7 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
           toast(t("apps.upgraded", { name: a.name, v: res.version }));
         } else if (u.action === "open-store") toast(t("apps.opened.store"));
         else toast(t("apps.opened.app", { name: a.name }));
-      } else if (res.code === "in-use") toast(t("apps.inUse", { name: a.name }), "err");
+      } else if (res.code === "in-use") toast(t("apps.inUseUpgrade", { name: a.name }), "err");
       else if (res.code === "busy") toast(t("apps.upgradeBusy"), "err");
       else if (res.code === "not-checked") toast(t("apps.notChecked"), "err");
       else {
@@ -327,7 +327,7 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
       if (res.failed.length === 0) { // 没有可移的也算清理完：缓存已经在别处清掉了
         toast(t("apps.cacheCleaned", { name: a.name, size: human(res.freed) }));
         setUsage((prev) => prev[id] ? { ...prev, [id]: { ...prev[id], cache: 0, cachePaths: [] } } : prev);
-      } else if (onlyFailure(res.failed, "in-use")) toast(t("apps.inUse", { name: a.name }), "err");
+      } else if (onlyFailure(res.failed, "in-use")) toast(t("apps.inUseCache", { name: a.name }), "err");
       else if (onlyFailure(res.failed, "usage-unknown")) toast(errText("usage-unknown"), "err"); // 占用检查没做完：一项都没移
       else toast(t("apps.cacheFail", { name: a.name, n: res.failed.length }), "err");
     } catch { toast(t("apps.cacheFail", { name: a.name, n: usage[id]?.cachePaths.length ?? 0 }), "err"); }
