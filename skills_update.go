@@ -954,14 +954,11 @@ func extractedRepo(ctx context.Context, repo, ref string, cache map[string]skill
 	return archive, nil
 }
 
-// untarSafe unpacks a GitHub archive into dest and returns its top folder.
-// Entries that would land outside dest, links that point outside the
-// archive, devices and other special files are refused.
-func untarSafe(r io.Reader, dest string) (string, error) {
-	return untarSafeModes(r, dest, nil)
-}
-
-// untarSafeModes retains executable modes from tar before Windows loses that information.
+// untarSafeModes unpacks a GitHub archive into dest and returns its top
+// folder, recording each file's Git mode in modes when it is not nil (Windows
+// has no executable bit to read it back from). Entries that would land
+// outside dest, links that point outside the archive, devices and other
+// special files are refused.
 func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {

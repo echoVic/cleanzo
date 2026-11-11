@@ -6,7 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +16,12 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+// untarSafe unpacks an archive the way an upgrade does, without recording
+// modes.
+func untarSafe(r io.Reader, dest string) (string, error) {
+	return untarSafeModes(r, dest, nil)
+}
 
 // fakeGitHub serves a repository's tree listing and archive.
 type fakeGitHub struct {
@@ -285,5 +291,4 @@ func TestGitCloneOriginAndUpgrade(t *testing.T) {
 	if out, _ := cmd.Output(); !strings.Contains(string(out), "cleanzo: before upgrade") {
 		t.Fatalf("local change not stashed: %s", out)
 	}
-	_ = fmt.Sprint
 }
