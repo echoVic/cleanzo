@@ -574,15 +574,15 @@ function createRuntime(): Runtime {
       ignored = ignored.filter((k) => k !== key(p.unignore));
       const enabled = p.enabled ?? growthConfig.enabled;
       growthConfig = {
-        enabled, openAtLogin: (enabled || menuBarItems.length > 0) && (p.openAtLogin ?? growthConfig.openAtLogin), asked: p.asked ?? growthConfig.asked,
+        enabled, openAtLogin: (enabled || menuBarItems.length > 0 || trashReminder.enabled) && (p.openAtLogin ?? growthConfig.openAtLogin), asked: p.asked ?? growthConfig.asked,
         dailyGB: p.dailyGB ?? growthConfig.dailyGB, weeklyGB: p.weeklyGB ?? growthConfig.weeklyGB, ignored,
       };
     },
     "Cleaner.MenuBar": async () => ({ supported: true, items: menuBarItems, available: ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"] }),
-    // 和 Go 一样按固定顺序存；读数全关、后台监控也关着时取消开机启动。
+    // 和 Go 一样按固定顺序存；读数全关、后台监控和废纸篓提醒也关着时取消开机启动。
     "Cleaner.SaveMenuBar": async (items) => {
       menuBarItems = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"].filter((it) => items.includes(it));
-      if (menuBarItems.length === 0 && !growthConfig.enabled) growthConfig = { ...growthConfig, openAtLogin: false };
+      if (menuBarItems.length === 0 && !growthConfig.enabled && !trashReminder.enabled) growthConfig = { ...growthConfig, openAtLogin: false };
     },
     "Cleaner.TrashReminder": async () => ({ supported: true, config: trashReminder, fda: true }),
     // 和 Go 一样只收 1 / 2 / 5 / 10 GB；提醒、后台监控、菜单栏读数都关着时取消开机启动。
