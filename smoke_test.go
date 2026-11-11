@@ -60,7 +60,7 @@ func TestSmokeTour(t *testing.T) {
 			if failure != "" {
 				return
 			}
-			if len(visits) != 20 || len(themes) != 2 || themes[0] != mygo.ThemeLight || themes[1] != mygo.ThemeDark {
+			if len(visits) != 22 || len(themes) != 2 || themes[0] != mygo.ThemeLight || themes[1] != mygo.ThemeDark {
 				t.Fatalf("visits = %v, themes = %v", visits, themes)
 			}
 			for _, theme := range []string{"light", "dark"} {

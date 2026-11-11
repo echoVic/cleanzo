@@ -10,7 +10,7 @@ try {
   if (!(Test-Path $report)) { throw 'Smoke error report missing' }
   $raw = Get-Content $report -Raw
   if ($raw.Trim() -ne '[]') { throw "Smoke errors: $raw" }
-  $views = 'status', 'process', 'clean', 'aitools', 'skills', 'fullscan', 'large', 'photos', 'apps', 'settings'
+  $views = 'status', 'process', 'clean', 'aispace', 'aitools', 'skills', 'fullscan', 'large', 'photos', 'apps', 'settings'
   foreach ($theme in 'light', 'dark') {
     foreach ($view in $views) {
       $image = Join-Path $env:CLEANZO_SMOKE_DIR "$theme-$view.png"

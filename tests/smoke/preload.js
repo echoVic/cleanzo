@@ -50,6 +50,17 @@
         const failure = root.querySelector(".empty.err");
         if (failure) throw Error(`smoke: clean scan failed: ${failure.textContent}`);
       }
+      if (view === "aispace") {
+        // 未扫描时页面上只有「开始扫描」一个按钮，扫过之后用标题栏的「重新扫描」。
+        const scan = root.querySelector(".head-actions button") || root.querySelector("button");
+        if (!scan || scan.disabled) throw Error("smoke: scan button unavailable");
+        scan.click(); // 只扫描模型和工具，绝不调用清理操作。
+        // 扫描中的画面换下了点过的按钮；结果页带回「重新扫描」，失败回到空态并显示错误。
+        await waitFor(() => !scan.isConnected);
+        await waitFor(() => root.querySelector(".head-actions button") || root.querySelector(".empty.err"));
+        const failure = root.querySelector(".empty.err");
+        if (failure) throw Error(`smoke: aispace scan failed: ${failure.textContent}`);
+      }
       await delay(1000);
       for (const select of root.querySelectorAll("select")) {
         const scheme = getComputedStyle(select).colorScheme;
