@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { Skill, SkillCopy, SkillUpdate } from "../src/mygo";
 import { daysAgo, linkCandidates, matchFilter, matchQuery, mergeOrigins, sortSkills, trashPlan, windowDays } from "../src/react/skills/helpers";
 
@@ -160,4 +160,77 @@ test("a rescan keeps what the last update check found for folders that did not c
   expect(next["/s/b"]?.status).toBe("unknown"); // 内容变了：上次的结论作废
   expect(next["/s/new"]?.status).toBe("unknown");
   expect(next["/s/gone"]).toBeUndefined(); // 文件夹没了：不再留着它的状态
+});
+
+// ---- 页面：升级的确认（无浏览器，见 page-harness.ts） ----
+
+async function skillsPage(skills: Skill[], checked: SkillUpdate[]) {
+  await import("./setup-dom");
+  const { pageHarness, textOf } = await import("./page-harness");
+  const { t } = await import("../src/i18n");
+  const { SkillsPage } = await import("../src/react/skills/SkillsPage");
+  const { skillsApi } = await import("../src/react/skills/api");
+  const upgrades: { path: string; force: boolean }[][] = [];
+  const spies = [
+    spyOn(skillsApi, "scan").mockImplementation(async () => ({ roots: [], skills, sources: [], scannedAt: NOW })),
+    spyOn(skillsApi, "origins").mockImplementation(async () => checked.map((u) => ({ ...u, status: "unknown", checkedAt: 0 }))),
+    spyOn(skillsApi, "checkUpdates").mockImplementation(async () => checked),
+    spyOn(skillsApi, "upgrade").mockImplementation(async (reqs) => {
+      upgrades.push(reqs);
+      return reqs.map((r) => ({ path: r.path, tree: "tree-2", error: "" }));
+    }),
+  ];
+  const page = pageHarness(SkillsPage, {});
+  await page.settle();
+  page.find((el) => typeof el.props.onCta === "function")!.props.onCta();
+  await page.settle();
+  page.click(t("skills.updates.check"));
+  await page.settle();
+  return {
+    page, upgrades, t,
+    row(name: string) { return page.find((el) => el.props.skill?.name === name && "onUpgrade" in el.props)!; },
+    summary() { return page.find((el) => "onUpgradeAll" in el.props)!; },
+    /** 升级确认框：开着时它的文字，关着时 null。 */
+    dialog() {
+      const el = page.find((n) => typeof n.props.onOpenChange === "function" && textOf(n).includes(t("skills.upgradeConfirm.title")));
+      return el?.props.open ? textOf(el) : null;
+    },
+    close() { page.close(); for (const s of spies) s.mockRestore(); },
+  };
+}
+
+test("a row's overwrite asks first, with the same dialog as Upgrade All", async () => {
+  const s = skill("a", { copies: [copy({ path: "/s/a", real: "/s/a" })] });
+  const sk = await skillsPage([s], [update("/s/a", { name: "a", status: "update", modified: true, remote: "tree-2", checkedAt: NOW })]);
+  try {
+    sk.row("a").props.onUpgrade("/s/a", true);
+    await sk.page.settle();
+    expect(sk.upgrades).toEqual([]);
+    expect(sk.dialog()).toContain(sk.t("skills.upgradeConfirm.body", { n: 1 }));
+    expect(sk.dialog()).toContain(sk.t("skills.upgradeConfirm.modified", { n: 1 }));
+    sk.page.click(sk.t("skills.upgradeConfirm.force", { n: 1 }));
+    await sk.page.settle();
+    expect(sk.upgrades).toEqual([[{ path: "/s/a", force: true }]]);
+    expect(sk.dialog()).toBeNull();
+  } finally { sk.close(); }
+});
+
+test("Upgrade All counts the folders its dialog lists", async () => {
+  // 同一个技能在两个工具里各有一份文件夹，都有更新；另有一条已经不在这次扫描里的结果。
+  const s = skill("b", { copies: [
+    copy({ tool: "claude", path: "/c/b", real: "/c/b" }),
+    copy({ tool: "codex", path: "/x/b", real: "/x/b" }),
+  ] });
+  const ups = ["/c/b", "/x/b", "/gone/z"].map((p) => update(p, { name: "b", status: "update", remote: "tree-2", checkedAt: NOW }));
+  const sk = await skillsPage([s], ups);
+  try {
+    const n = sk.summary().props.updatable;
+    expect(n).toBe(2);
+    sk.summary().props.onUpgradeAll();
+    await sk.page.settle();
+    expect(sk.dialog()).toContain(sk.t("skills.upgradeConfirm.body", { n }));
+    sk.page.click(sk.t("skills.upgradeConfirm.ok"));
+    await sk.page.settle();
+    expect(sk.upgrades).toEqual([[{ path: "/c/b", force: false }, { path: "/x/b", force: false }]]);
+  } finally { sk.close(); }
 });

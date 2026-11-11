@@ -13,7 +13,7 @@ import { useT, type DictKey } from "../../ui/i18n-react";
 import { currentLang } from "../../i18n";
 import { errText, setNavBusy, toast } from "../../shared";
 import { human, displayPath } from "../ai/format";
-import { daysAgo, isFolder, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, windowDays, type SkillFilter, type SkillSort, mergeOrigins } from "./helpers";
+import { daysAgo, isFolder, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, upgradeTargets, windowDays, type SkillFilter, type SkillSort, mergeOrigins } from "./helpers";
 import { skillsApi } from "./api";
 
 type Phase = "idle" | "scanning" | "scanned";
@@ -40,7 +40,8 @@ export function SkillsPage() {
   const [updates, setUpdates] = React.useState<Record<string, SkillUpdate>>({});
   const [checking, setChecking] = React.useState(false);
   const [checkedAt, setCheckedAt] = React.useState(0);
-  const [upgradeOpen, setUpgradeOpen] = React.useState(false);
+  /** 升级确认框要升级的文件夹：「全部升级」是全部，行内的「覆盖并升级」是那一个；null 为关着。 */
+  const [upgradeAsk, setUpgradeAsk] = React.useState<SkillUpdate[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   /** 首次扫描失败：持久化内联错误面板（含重试）；已有数据时重扫失败仍走 toast 保留旧数据。 */
   const [scanErr, setScanErr] = React.useState<string | null>(null);
@@ -183,15 +184,23 @@ export function SkillsPage() {
     await scan();
   };
 
-  const upgradeTargets = Object.values(updates).filter((u) => u.status === "update");
-  const upgradeModified = upgradeTargets.filter((u) => u.modified);
-  const upgradeCCSwitch = upgradeTargets.some((u) => u.origin.kind === "cc-switch");
+  const allTargets = upgradeTargets(skills, updates);
+  const asked = upgradeAsk ?? [];
+  const askedModified = asked.filter((u) => u.modified);
+  const askedCCSwitch = asked.some((u) => u.origin.kind === "cc-switch");
 
-  const doUpgrade = async (force: boolean) => {
-    setUpgradeOpen(false);
+  /** 行内升级：要覆盖本地改动的先确认，和「全部升级」同一个确认框；没改过的直接升级。 */
+  const upgradeRow = (path: string, force: boolean) => {
+    const u = updates[path];
+    if (force && u) setUpgradeAsk([u]);
+    else void upgradeOne(path, force, { setBusy, scan, checkUpdates, t });
+  };
+
+  const doUpgrade = async (targets: SkillUpdate[], force: boolean) => {
+    setUpgradeAsk(null);
     setBusy(true);
     try {
-      const reqs = upgradeTargets.map((u) => ({ path: u.path, force: force && u.modified }));
+      const reqs = targets.map((u) => ({ path: u.path, force: force && u.modified }));
       const res: SkillUpgradeResult[] = await skillsApi.upgrade(reqs);
       const failed = res.filter((r) => r.error);
       const firstFail = failed[0];
@@ -261,9 +270,9 @@ export function SkillsPage() {
       {data && (
         <>
           <SummaryCard data={data} counts={counts} linkable={linkable.length} busy={busy}
-            updatable={counts.updates} checking={checking} hasCheck={hasCheck}
+            updatable={allTargets.length} checking={checking} hasCheck={hasCheck}
             onLinkAll={() => setLinkPairs(linkable)}
-            onUpgradeAll={() => setUpgradeOpen(true)} />
+            onUpgradeAll={() => setUpgradeAsk(allTargets)} />
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {(["all", "idle", "issues", "updates", "unobserved"] as SkillFilter[]).map((f) => (
@@ -306,7 +315,7 @@ export function SkillsPage() {
                 expanded={expanded.has(s.name)} busy={busy} ups={updateFor(s)} hasCheck={hasCheck}
                 onToggle={(on) => toggle(s.name, on)} onExpand={() => toggleExpand(s.name)}
                 onLink={(pairs) => setLinkPairs(pairs)}
-                onUpgrade={(path, force) => upgradeOne(path, force, { setBusy, scan, checkUpdates, t })} />
+                onUpgrade={upgradeRow} />
             ))}
           </Card>
 
@@ -370,14 +379,14 @@ export function SkillsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={upgradeOpen} onOpenChange={(v) => !v && setUpgradeOpen(false)}>
+      <Dialog open={upgradeAsk !== null} onOpenChange={(v) => !v && setUpgradeAsk(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("skills.upgradeConfirm.title")}</DialogTitle>
-            <DialogDescription>{t("skills.upgradeConfirm.body", { n: upgradeTargets.length })}</DialogDescription>
+            <DialogDescription>{t("skills.upgradeConfirm.body", { n: asked.length })}</DialogDescription>
           </DialogHeader>
           <ul className="max-h-[30vh] space-y-1 overflow-auto text-xs">
-            {upgradeTargets.map((u) => (
+            {asked.map((u) => (
               <li key={u.path} className="flex items-center gap-2">
                 <b>{u.name}</b>
                 <span className="min-w-0 truncate text-muted" title={`${u.origin.repo}${u.origin.path ? `/${u.origin.path}` : ""}`}>{u.origin.repo}{u.origin.path ? `/${u.origin.path}` : ""}</span>
@@ -385,18 +394,18 @@ export function SkillsPage() {
               </li>
             ))}
           </ul>
-          {upgradeModified.length > 0 && (
-            <p className="mt-3 text-xs text-warning-text">{t("skills.upgradeConfirm.modified", { n: upgradeModified.length })}</p>
+          {askedModified.length > 0 && (
+            <p className="mt-3 text-xs text-warning-text">{t("skills.upgradeConfirm.modified", { n: askedModified.length })}</p>
           )}
-          {upgradeCCSwitch && (
+          {askedCCSwitch && (
             <p className="mt-2 text-xs text-muted">{t("skills.upgradeConfirm.ccswitch")}</p>
           )}
           <p className="mt-3 text-xs text-muted">{t("skills.upgradeConfirm.safety")}</p>
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
-            {upgradeModified.length > 0
-              ? <Button onClick={() => void doUpgrade(true)}>{t("skills.upgradeConfirm.force", { n: upgradeModified.length })}</Button>
-              : <Button onClick={() => void doUpgrade(false)}>{t("skills.upgradeConfirm.ok")}</Button>}
+            {askedModified.length > 0
+              ? <Button onClick={() => void doUpgrade(asked, true)}>{t("skills.upgradeConfirm.force", { n: askedModified.length })}</Button>
+              : <Button onClick={() => void doUpgrade(asked, false)}>{t("skills.upgradeConfirm.ok")}</Button>}
           </div>
         </DialogContent>
       </Dialog>

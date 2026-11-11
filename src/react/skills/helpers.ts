@@ -121,6 +121,16 @@ export function linkCandidates(s: Skill): { path: string; target: string }[] {
 export const okSources = (sources: SkillSource[]) => sources.filter((s) => s.status === "ok");
 
 /**
+ * 「全部升级」要升级的文件夹：检查结果是「有更新」、而且是这次扫描里某个技能的副本指向的文件夹。
+ * 按钮上的数和确认框里的数都是它的个数；同一个技能在两个工具里各有一份文件夹时算两个。
+ */
+export function upgradeTargets(skills: Skill[], updates: Record<string, SkillUpdate>): SkillUpdate[] {
+  const reals = new Set<string>();
+  for (const s of skills) for (const c of s.copies) if (c.real) reals.add(c.real);
+  return Object.values(updates).filter((u) => u.status === "update" && reals.has(u.path));
+}
+
+/**
  * 扫描后读到的离线来源并入上一次检查的结果：文件夹内容没变的保留检查结论
  *（有没有更新），变了的、新出现的按「未检查」算，已经不在的不再留。
  */
