@@ -426,14 +426,14 @@ func ccSwitchStore() (string, bool) {
 // ccSwitchStoreHolds reports whether folder (resolved) is in CC Switch's store.
 func ccSwitchStoreHolds(folder string) bool {
 	store, ok := ccSwitchStore()
-	return ok && ccSwitchIn(store, folder)
+	return ok && directlyIn(store, folder)
 }
 
-// ccSwitchIn reports whether folder sits directly in store. Paths compare
-// as within does: without case on Windows.
-func ccSwitchIn(store, folder string) bool {
-	dir := filepath.Dir(folder)
-	return within(dir, store) && within(store, dir)
+// directlyIn reports whether folder sits directly in dir. Paths compare as
+// within does: without case on Windows.
+func directlyIn(dir, folder string) bool {
+	parent := filepath.Dir(folder)
+	return within(parent, dir) && within(dir, parent)
 }
 
 // skillFolderOf turns "skills/x/SKILL.md" into "skills/x".
@@ -510,13 +510,13 @@ func skillOrigins(ctx context.Context, skills []Skill) map[string]SkillOrigin {
 				continue
 			}
 			agents := filepath.Join(homeDir(), ".agents/skills")
-			if o, ok := lock[s.Name]; ok && filepath.Dir(c.Real) == resolvePath(agents) {
+			if o, ok := lock[s.Name]; ok && directlyIn(resolvePath(agents), c.Real) {
 				out[c.Real] = o
 				continue
 			}
 			// With a store, a CC Switch row names a folder in it; a folder
 			// elsewhere that shares the name is not CC Switch's.
-			if o, ok := cc[filepath.Base(c.Real)]; ok && (!ccStore || ccSwitchIn(store, c.Real)) {
+			if o, ok := cc[filepath.Base(c.Real)]; ok && (!ccStore || directlyIn(store, c.Real)) {
 				out[c.Real] = o
 			}
 		}
