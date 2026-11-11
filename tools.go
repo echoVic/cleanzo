@@ -36,7 +36,7 @@ var brewCleanup = toolCommand{
 
 // pnpmPrune lets pnpm remove unused packages from its store.
 var pnpmPrune = toolCommand{
-	Tool: "pnpm", Args: []string{"store", "prune"}, Busy: []string{"/pnpm", "pnpm.cjs", "pnpm.mjs"}, Timeout: 5 * time.Minute,
+	Tool: "pnpm", Args: []string{"store", "prune"}, Busy: []string{"/pnpm ", "/pnpm\n", "pnpm.cjs", "pnpm.mjs", "/pnpm.js"}, Timeout: 5 * time.Minute,
 	Estimate: func(env junkEnv, tool string) (int64, bool, []string, error) {
 		size, roots, err := estimateToolFolder(env, tool, []string{"store", "path"}, 5*time.Minute)
 		return size, true, roots, err
@@ -45,7 +45,7 @@ var pnpmPrune = toolCommand{
 
 // goModCleanup lets Go remove the module cache, including read-only modules.
 var goModCleanup = toolCommand{
-	Tool: "go", Args: []string{"clean", "-modcache"}, Busy: []string{"bin/go ", "gopls"}, Timeout: 5 * time.Minute,
+	Tool: "go", Args: []string{"clean", "-modcache"}, Busy: []string{"/go ", "/go\n", "gopls"}, Timeout: 5 * time.Minute,
 	Estimate: func(env junkEnv, tool string) (int64, bool, []string, error) {
 		size, roots, err := estimateToolFolder(env, tool, []string{"env", "GOMODCACHE"}, 5*time.Minute)
 		return size, false, roots, err
@@ -114,12 +114,28 @@ func toolBusy(patterns []string) bool {
 	return commandBusy(string(out), patterns, runtime.GOOS == "windows")
 }
 
-// commandBusy normalizes Windows separators and case while preserving Darwin matches.
+// commandBusy reports whether any process line runs a pattern's command. On
+// Windows separators and case are normalized first.
 func commandBusy(out string, patterns []string, windows bool) bool {
 	if windows {
 		out = strings.ToLower(strings.ReplaceAll(out, `\`, "/"))
 	}
-	return slices.ContainsFunc(patterns, func(pattern string) bool { return strings.Contains(out, pattern) })
+	for _, line := range strings.Split(out, "\n") {
+		if commandLineMatches(line+"\n", patterns) {
+			return true
+		}
+	}
+	return false
+}
+
+// commandLineMatches reports whether one process line, ending in "\n",
+// holds a pattern. "/name " and "/name\n" match a path's last part followed
+// by arguments or the line's end, and the pattern without its leading slash
+// also matches the line's first word, as ps shows a command typed in a shell.
+func commandLineMatches(line string, patterns []string) bool {
+	return slices.ContainsFunc(patterns, func(p string) bool {
+		return strings.Contains(line, p) || strings.HasPrefix(line, strings.TrimLeft(p, "/"))
+	})
 }
 
 // runTool bounds an official command and kills its process group on cancellation.

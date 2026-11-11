@@ -402,10 +402,7 @@ func aiCommandRunning(out string, tool aiTool, windows bool) bool {
 		if windows && tool.ID == "claude" && windowsClaudeDesktop(line, os.Getenv("LOCALAPPDATA")) && !strings.Contains(line, "@anthropic-ai/claude-code/") {
 			continue
 		}
-		line += "\n"
-		if slices.ContainsFunc(patterns, func(p string) bool {
-			return strings.Contains(line, p) || strings.HasPrefix(line, strings.TrimLeft(p, "/"))
-		}) {
+		if commandLineMatches(line+"\n", patterns) {
 			return true
 		}
 	}
