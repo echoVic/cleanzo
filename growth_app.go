@@ -50,12 +50,7 @@ func init() { growthApply = applyGrowthLifecycle }
 // Windows, growthSupported is false, so the app quits too.
 func registerGrowthLifecycle() {
 	mygo.App.OnWindowAllClosed(func() {
-		switch afterLastWindow(growthSupported(), residentOn, holdingOpen()) {
-		case "stay":
-			mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
-		case "quit":
-			mygo.App.Quit()
-		}
+		settleWithoutWindows(mygo.App, afterLastWindow(growthSupported(), residentOn, holdingOpen()))
 	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if !hasVisibleWindows && mygo.App.IsReady() { // no window can be made before that
@@ -131,6 +126,27 @@ func holdOpen() (release func()) {
 
 // holdingOpen tells whether work holds Cleanzo open (holdOpen).
 func holdingOpen() bool { return heldWork.Load() > 0 }
+
+// windowlessApp is what settleWithoutWindows asks of the app; mygo.App has it.
+type windowlessApp interface {
+	SetActivationPolicy(mygo.ActivationPolicy)
+	Quit()
+}
+
+// settleWithoutWindows does what afterLastWindow answered, with no window
+// open. While held, Cleanzo has no menu bar item, so it shows its Dock icon:
+// it never runs unseen, and a click on the icon opens the window again
+// (OnActivate). It runs on the main thread.
+func settleWithoutWindows(app windowlessApp, answer string) {
+	switch answer {
+	case "stay":
+		app.SetActivationPolicy(mygo.ActivationPolicyAccessory)
+	case "wait":
+		app.SetActivationPolicy(mygo.ActivationPolicyRegular)
+	case "quit":
+		app.Quit()
+	}
+}
 
 // quitIfNoWindow quits when held work has ended with no window open and
 // nothing keeps Cleanzo in the menu bar: the last window closed while the work
@@ -244,8 +260,9 @@ func applyGrowthLifecycle(cfg GrowthConfig) error {
 //     reading shows;
 //   - opening at login as chosen, only while monitoring, a reading or Trash
 //     reminders are on;
-//   - quitting when none of them is on, no work holds the app open
-//     (holdOpen) and no window is open, a minimized or hidden one included.
+//   - with none of them on and no window open, a minimized or hidden one
+//     included, quitting, or showing the Dock icon while work holds the app
+//     open (holdOpen, settleWithoutWindows).
 //
 // It does nothing before the app runs, as in a test: there is no main thread
 // to wait for then.
@@ -272,8 +289,8 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 		if want := resident && g.OpenAtLogin; mygo.App.OpenAtLogin() != want {
 			loginErr = mygo.App.SetOpenAtLogin(want)
 		}
-		if !resident && !holdingOpen() && len(mygo.Windows()) == 0 {
-			mygo.App.Quit()
+		if !resident && len(mygo.Windows()) == 0 {
+			settleWithoutWindows(mygo.App, afterLastWindow(true, func() bool { return resident }, holdingOpen()))
 		}
 	})
 	if loginErr != nil {

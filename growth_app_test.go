@@ -263,6 +263,36 @@ func TestAfterLastWindow(t *testing.T) {
 	}
 }
 
+// appRecorder stands in for mygo.App and records what settleWithoutWindows
+// asks of it.
+type appRecorder struct{ calls []string }
+
+func (a *appRecorder) SetActivationPolicy(p mygo.ActivationPolicy) {
+	a.calls = append(a.calls, string(p))
+}
+func (a *appRecorder) Quit() { a.calls = append(a.calls, "quit") }
+
+// With no window open, Cleanzo drops its Dock icon in the menu bar, quits, or,
+// held open by work such as a brew upgrade, keeps its Dock icon: it has no
+// menu bar item then, as when residency was turned off from the menu during an
+// upgrade, and must not run unseen.
+func TestSettleWithoutWindows(t *testing.T) {
+	for _, tc := range []struct {
+		resident, held bool
+		want           []string
+	}{
+		{true, false, []string{"accessory"}},
+		{false, true, []string{"regular"}},
+		{false, false, []string{"quit"}},
+	} {
+		app := &appRecorder{}
+		settleWithoutWindows(app, afterLastWindow(true, func() bool { return tc.resident }, tc.held))
+		if !slices.Equal(app.calls, tc.want) {
+			t.Errorf("resident %v, held %v: %v, want %v", tc.resident, tc.held, app.calls, tc.want)
+		}
+	}
+}
+
 // Only the end of the last held work may quit Cleanzo, and releasing a hold
 // twice counts once.
 func TestHoldOpenEndsWithTheLastHold(t *testing.T) {
