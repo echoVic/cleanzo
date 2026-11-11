@@ -44,6 +44,12 @@ func buildAppIndex(dirs []string) *appIndex {
 		}()
 	}
 	wg.Wait()
+	return appIndexFrom(paths, metadata)
+}
+
+// appIndexFrom indexes the bundles at paths, sorted, by the string values of
+// their Info.plist files (metadata[i] for paths[i]; nil when unreadable).
+func appIndexFrom(paths []string, metadata []map[string]string) *appIndex {
 	x := &appIndex{keys: map[string]appRef{}}
 	// Merge in path order so completion timing cannot decide an alias's owner.
 	for i, m := range metadata {

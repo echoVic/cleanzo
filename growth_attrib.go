@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -50,18 +52,54 @@ func currentGrowthAttributor() (growthAttributor, time.Time) {
 	growthAttributors.Lock()
 	defer growthAttributors.Unlock()
 	if growthAttributors.a.idx == nil || time.Since(growthAttributors.at) > time.Minute {
-		dirs := appDirs()
-		bundles := readGrowthBundles(dirs)
-		growthAttributors.a = growthAttributor{idx: buildAppIndex(dirs), keys: growthKeys(bundles), paths: growthAppPaths(bundles)}
+		growthAttributors.a = buildGrowthAttributor(appDirs())
 		growthAttributors.at = time.Now()
 	}
 	return growthAttributors.a, growthAttributors.at
 }
 
+// buildGrowthAttributor reads the app bundles in dirs, each Info.plist once.
+func buildGrowthAttributor(dirs []string) growthAttributor {
+	bundles := readGrowthBundles(dirs)
+	return growthAttributor{idx: growthAppIndex(bundles), keys: growthKeys(bundles), paths: growthAppPaths(bundles)}
+}
+
+// growthAppIndex is buildAppIndex of the same folders, from what
+// readGrowthBundles read: the folder bundles, in path order.
+func growthAppIndex(bundles []growthBundle) *appIndex {
+	var folders []growthBundle
+	for _, b := range bundles {
+		if b.dir {
+			folders = append(folders, b)
+		}
+	}
+	slices.SortFunc(folders, func(a, b growthBundle) int { return strings.Compare(a.path, b.path) })
+	paths, metadata := make([]string, len(folders)), make([]map[string]string, len(folders))
+	for i, b := range folders {
+		paths[i], metadata[i] = b.path, b.info
+	}
+	return appIndexFrom(paths, metadata)
+}
+
 // growthBundle is an app bundle in one of the app folders, and what names it.
 type growthBundle struct {
 	path string
+	dir  bool              // a folder, not a link or file named .app
+	info map[string]string // the string values of its Info.plist; nil when unreadable
 	id   appIdentity
+}
+
+// growthReadInfo reads the string values of a bundle's Info.plist, nil when it
+// cannot. Tests replace it.
+var growthReadInfo = func(bundle string) map[string]string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// XML, as readBundleInfo: plutil cannot put <date> or <data> values in JSON.
+	out, err := quietCommand(exec.CommandContext(ctx, "/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(bundle, "Contents", "Info.plist"))).Output()
+	if err != nil {
+		return nil
+	}
+	return plistValues(out)
 }
 
 // readGrowthBundles lists the app bundles in dirs, folder by folder, and reads
@@ -76,7 +114,7 @@ func readGrowthBundles(dirs []string) []growthBundle {
 			p := filepath.Join(dir, e.Name())
 			if strings.HasSuffix(e.Name(), ".app") && !seen[p] {
 				seen[p] = true
-				out = append(out, growthBundle{path: p})
+				out = append(out, growthBundle{path: p, dir: e.IsDir()})
 			}
 		}
 	}
@@ -88,7 +126,13 @@ func readGrowthBundles(dirs []string) []growthBundle {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out[i].id = readAppIdentity(out[i].path) // each goroutine fills its own bundle
+			b := &out[i] // each goroutine fills its own bundle
+			b.info = growthReadInfo(b.path)
+			name := b.info["CFBundleDisplayName"]
+			if name == "" {
+				name = b.info["CFBundleName"]
+			}
+			b.id = appIdentity{strings.TrimSuffix(filepath.Base(b.path), ".app"), name, b.info["CFBundleIdentifier"]}
 		}()
 	}
 	wg.Wait()

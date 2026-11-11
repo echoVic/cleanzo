@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -131,16 +132,59 @@ func TestGrowthKeys(t *testing.T) {
 	}
 }
 
-// readGrowthBundles reads each bundle once, also from a folder listed twice
-// (appDirs lists Utilities as a suite too), and keeps the folders' order.
+// Rebuilding the attributor reads each bundle's Info.plist once, also from a
+// folder listed twice (appDirs lists Utilities as a suite too), and keeps the
+// folders' order. The bundles have no Info.plist on disk: all the attributor
+// knows comes through the reads counted here.
 func TestReadGrowthBundlesReadsEachBundleOnce(t *testing.T) {
-	a, b := t.TempDir(), t.TempDir()
-	makeApp(t, a, "Foo.app", "com.example.foo", "Foo")
-	makeApp(t, b, "Bar.app", "com.example.bar", "Bar")
-	got := readGrowthBundles([]string{a, b, a})
-	if len(got) != 2 || got[0].path != filepath.Join(a, "Foo.app") || got[0].id.bid != "com.example.foo" ||
-		got[1].path != filepath.Join(b, "Bar.app") || got[1].id.name != "Bar" {
+	home := t.TempDir()
+	setHome(t, home)
+	a, b := filepath.Join(home, "Applications"), t.TempDir()
+	foo, bar := filepath.Join(a, "Foo.app"), filepath.Join(b, "Bar.app")
+	mustMkdir(t, filepath.Join(foo, "Contents"))
+	mustMkdir(t, filepath.Join(bar, "Contents"))
+	info := map[string]map[string]string{
+		foo: {"CFBundleIdentifier": "com.example.Foo", "CFBundleDisplayName": "Foo Display", "CFBundleName": "FooName", "CFBundleExecutable": "FooExe"},
+		bar: {"CFBundleIdentifier": "com.example.bar", "CFBundleName": "Bar"},
+	}
+	var mu sync.Mutex
+	reads := map[string]int{}
+	saved := growthReadInfo
+	growthReadInfo = func(p string) map[string]string {
+		mu.Lock()
+		reads[p]++
+		mu.Unlock()
+		return info[p]
+	}
+	t.Cleanup(func() { growthReadInfo = saved })
+	dirs := []string{a, b, a}
+
+	got := readGrowthBundles(dirs)
+	if len(got) != 2 || got[0].path != foo || got[0].id.bid != "com.example.Foo" || got[0].id.name != "Foo Display" ||
+		got[1].path != bar || got[1].id.name != "Bar" {
 		t.Fatalf("bundles = %+v", got)
+	}
+
+	clear(reads)
+	at := buildGrowthAttributor(dirs)
+	if want := map[string]int{foo: 1, bar: 1}; !maps.Equal(reads, want) {
+		t.Errorf("Info.plist reads = %v, want %v", reads, want)
+	}
+	for name, want := range map[string]string{
+		"com.example.foo": "com.example.Foo", "Foo Display": "com.example.Foo", "FooName": "com.example.Foo",
+		"FooExe": "com.example.Foo", "Foo": "com.example.Foo", "Bar": "com.example.bar", "com.example.bar.helper": "com.example.bar",
+	} {
+		if app, ok := at.idx.lookup(name); !ok || app.BundleID != want {
+			t.Errorf("index lookup %q = %+v, %v; want %s", name, app, ok, want)
+		}
+	}
+	for _, name := range []string{"Foo Display", "com.example.bar"} {
+		if !at.keys.owns(name) {
+			t.Errorf("keys do not know %q", name)
+		}
+	}
+	if want := map[string]string{"com.example.foo": foo}; !maps.Equal(at.paths, want) {
+		t.Errorf("paths = %v, want %v", at.paths, want)
 	}
 }
 
