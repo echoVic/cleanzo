@@ -212,9 +212,10 @@ func (c claimSet) clone() claimSet {
 // protected reports hard protected paths and their descendants.
 func (env junkEnv) protected(p string) bool { return env.protectedKey(canonical(p)) }
 
-// protectedKey is protected for a path already in comparison form. The home
-// folder is resolved once a call: resolving it for each folder and pattern
-// made a clean of thousands of entries spend seconds in the guard.
+// protectedKey is protected for a path already in comparison form. It
+// resolves the home folder and builds the protected patterns once a call,
+// then compares the path and each of its parents up to home with them; a
+// clean checks thousands of entries this way.
 func (env junkEnv) protectedKey(key string) bool {
 	home := canonical(env.home)
 	if !within(key, home) {
@@ -413,12 +414,12 @@ func (env junkEnv) collectRecursiveFiles(dir string, names []string, age time.Du
 
 // walkRecursiveFiles lists a folder that collectRecursiveFiles checked, as
 // resolved. Entries are judged from the listing: on macOS a folder that is
-// not a link is entered without another look, since an lstat per folder
-// made walking a large Documents folder take tens of seconds; one that
-// cannot be read is reported when its listing fails. On Windows each
-// folder is checked in full before it is entered, as its reparse and cloud
-// placeholder attributes are not in the listing's type. node_modules
-// folders hold packages' own files, not downloads, and are not entered.
+// not a link is entered without another look, which keeps a walk of a large
+// Documents folder to one listing per folder; one that cannot be read is
+// reported when its listing fails. On Windows each folder is checked in
+// full before it is entered, as its reparse and cloud placeholder
+// attributes are not in the listing's type. node_modules folders hold
+// packages' own files, not downloads, and are not entered.
 func (env junkEnv) walkRecursiveFiles(dir, resolved string, names []string, age time.Duration, claims claimSet, spec *itemSpec) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
