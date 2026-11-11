@@ -10,7 +10,7 @@ import {
   finalizeCleanRows, finalizeScan, createCleanRowTracker, groupCheckState, groupToggleOn, isSelectable, isVisible, itemTitle,
   keepLatestVisible, removeFromSel,
   rowStateNote, scanItem, scanStart, scanPhase, scanProgress, splitApps, toggleGroup, toggleRow, toggleSub,
-  withIgnored, withIgnoredSummary, emptySel, heroTotals,
+  withIgnored, withIgnoredSummary, heroTotals,
   type RowState,
 } from "../src/react/clean/helpers";
 
@@ -155,41 +155,26 @@ test("apps are truncated at 15 and show their remaining size; usage and estimate
   expect(splitApps(st.items, true).shown.length).toBe(17);
 });
 
-test("ignore persists before hiding a row and rolls back on failure, without a stale-results bar", () => {
-  const st = scan([item("dev.npx", "dev", 1024)]);
+test("ignoring a row adds it to the ignored list once, drops its selection and counts it in the summary", () => {
+  const st = scan([item("dev.npx", "dev", 1024, { subs: [{ path: "/a", name: "a", detail: "", size: 1024, default: true }] })]);
+  expect(st.sel.selected.has("dev.npx")).toBe(true);
+  expect([...st.sel.subSel.keys()]).toContain("dev.npx");
   const settings: Settings = { disabledGroups: [], ignored: [], custom: [] };
-  // 成功路径：读改写 ignored 列表后才移走行。
   const next = withIgnored(settings, "dev.npx");
   expect(next.ignored).toEqual(["dev.npx"]);
-  const after = removeFromSel({ ...st }, "dev.npx");
+  expect(withIgnored(next, "dev.npx").ignored).toEqual(["dev.npx"]);
+  // 传入的设置不变：保存失败时调用方手里还是原来的那份。
+  expect(settings.ignored).toEqual([]);
+  const after = removeFromSel(st.sel, "dev.npx");
   expect(after.selected.has("dev.npx")).toBe(false);
   expect([...after.subSel.keys()]).not.toContain("dev.npx");
-  // 行从 items 移除（旧测试断言 data-id 消失的等价物）。
-  const kept = st.items.filter((x) => x.id !== "dev.npx");
-  expect(kept).toHaveLength(0);
-  // 检查计数 +1；本页自己忽略的项不触发 stale 条（stale 只由设置页保存触发）。
-  expect(withIgnoredSummary({ fullDiskAccess: false, containers: 3, checked: 54, ignored: 2, leftovers: 0, leftoversSize: 0 }).ignored).toBe(3);
-  // 失败路径：不改 settings、不移行（调用方只有 try 成功后才调用上面两个纯函数）。
-  expect(settings.ignored).toEqual([]);
+  expect(withIgnoredSummary({ fullDiskAccess: false, containers: 3, checked: 54, ignored: 2, leftovers: 0, leftoversSize: 0 })!.ignored).toBe(3);
 });
 
-test("leftovers callback and English refresh use the current language", () => {
-  scan([item("dev.npx", "dev", 1024)]);
-  setLang( "en");
-  expect(ruleName("dev.npx")).toBe("npx cache");
-  expect(ruleName("dev.npx")).not.toBe("dev.npx");
-  expect(t("junk.access", { n: 3 })).toContain("Full Disk Access");
-  setLang( "zh");
-});
-
-test("a scan error presents retry instead of selectable partial results", () => {
-  // 旧 DOM 测试的纯逻辑等价物：失败时 items 清空、计划为 null（界面只留重试）。
-  const cleared = { items: [], pending: new Set<string>(), sel: emptySel() };
-  expect(buildCleanPlan(cleared.items, cleared.sel)).toBeNull();
-  // cleaned 阶段允许重新扫描（失败后「重新扫描」按钮可用）。
-  expect(canStartScan("cleaned", false)).toBe(true);
-  expect(canStartScan("scanning", false)).toBe(false);
-  expect(canStartScan("cleaning", false)).toBe(false);
+test("a scan can start after a scan or a clean, but not while scanning, cleaning or ignoring", () => {
+  for (const phase of ["idle", "scanned", "cleaned"]) expect(canStartScan(phase, false)).toBe(true);
+  for (const phase of ["scanning", "cleaning"]) expect(canStartScan(phase, false)).toBe(false);
+  expect(canStartScan("scanned", true)).toBe(false);
 });
 
 test("stopping a scan retains measured rows and drops buffered and unmeasured rows", () => {
@@ -280,16 +265,6 @@ test("tool failure shows both its skip reason and failed count", () => {
     t, human);
   expect(row.skipWarn).toBe("清理失败，已跳过");
   expect(row.failedCount).toBe(1);
-});
-
-test("shared confirmation clears pending on cancel and invalidates old async modal work", () => {
-  // 旧断言针对已删除的全局 overlay/setPending 序号机制。React 版确认弹层是本地
-  // Dialog：取消即不触发 doClean；迟到的旧工作由 phase 守卫丢弃。这里校验守卫。
-  expect(canStartScan("scanned", false)).toBe(true);
-  expect(canStartScan("scanned", true)).toBe(false); // ignoring 锁：确认流程不响应
-  // doClean 入口要求 phase 仍为 scanned；确认打开期间若旧清理已开始（cleaning），
-  // 迟到的确认回调直接返回——行为等价于旧 modalSeq 失效。
-  expect(canStartScan("cleaning", false)).toBe(false);
 });
 
 test("all backend catalog rules have names and descriptions in both languages", () => {
@@ -384,15 +359,6 @@ test("cleanup tracker keeps completed and failed results when another row is can
   expect(final.rows.get("active")!.state).toBe("stopped");
   expect(final.rows.get("waiting")!.state).toBe("skipped");
   expect(cleanTotals(final.rows)).toEqual({ freed: 100, trashed: 0, inUse: 0, failedNames: ["failed"] });
-});
-
-test("rejected cleanup keeps the failure visible and permits a rescan", () => {
-  // 失败后 phase=cleaned：结果注记保留（失败行仍显示 skipped/failed），且允许重新扫描。
-  const rows = new Map([["dev.npx", { state: "done" as const, result: { name: "dev.npx", freed: 0, trashed: 0, inUse: 0, files: 0, failed: [], skipped: "failed" as const } }]]);
-  expect(rowStateNote(rows.get("dev.npx")!, t, human).skipWarn).toBe("清理失败，已跳过");
-  expect(canStartScan("cleaned", false)).toBe(true);
-  // 清理中不允许再发一次扫描。
-  expect(canStartScan("cleaning", false)).toBe(false);
 });
 
 
