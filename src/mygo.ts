@@ -373,7 +373,6 @@ export interface FullScanEvent {
   path?: string;
   size?: number;
   trashable?: boolean;
-  scanned?: number;
   result?: FullScanResult;
 }
 
@@ -467,8 +466,6 @@ export interface GrowthConfigPatch {
 export interface GrowthDelta {
   bytes: number;
   atLeast: boolean;
-  /** the window's actual length, rounded */
-  days: number;
 }
 
 /** GrowthFolder is one measured entry of a row. */
@@ -1044,9 +1041,6 @@ export interface SubItem {
 export interface SystemInfo {
   /** the app's, from mygo.config.ts; empty under go test */
   version: string;
-  os: string;
-  arch: string;
-  goVersion: string;
   /** e.g. "Apple M2 Pro"; empty under go test */
   chip: string;
   /** bytes */
