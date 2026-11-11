@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ---------------------------------------------------------------------------
@@ -776,13 +778,10 @@ func knownSkillRef(s string, roots map[string]bool) []string {
 	return skillRefsIn(s, roots, homeDir(), runtime.GOOS == "windows")
 }
 
-// windowsSkillPathRef matches a Windows path to a SKILL.md, from a drive or
-// ~, with either separator; JSON doubles each backslash once, or twice for
-// arguments that are JSON in a JSON string. A folder name may hold spaces,
-// as a profile folder named after the user's full name does, but no colon:
-// a Windows path has one only after its drive, so a match that runs into
-// the next path's drive gives way to a match from that drive.
-var windowsSkillPathRef = regexp.MustCompile(`((?:~|[A-Za-z]:)(?:[\\/]+[^"'\t\n\v\f\r\\/:]+)*)[\\/]+([A-Za-z0-9._-]+)[\\/]+SKILL\.md`)
+// windowsSkillRef matches the end of a Windows path to a SKILL.md, the
+// skill's folder and the file, with either separator; JSON doubles each
+// backslash once, or twice for arguments that are JSON in a JSON string.
+var windowsSkillRef = regexp.MustCompile(`[\\/]+([A-Za-z0-9._-]+)[\\/]+SKILL\.md`)
 
 var windowsSeparators = regexp.MustCompile(`[\\/]+`)
 
@@ -792,21 +791,55 @@ func windowsRefKey(p string) string {
 	return strings.TrimSuffix(strings.ToLower(windowsSeparators.ReplaceAllString(p, "/")), "/")
 }
 
+// windowsRefTail spells at most the last n characters of s as windowsRefKey
+// spells a path.
+func windowsRefTail(s string, n int) string {
+	var rev []rune
+	for s != "" && len(rev) < n {
+		r, size := utf8.DecodeLastRuneInString(s)
+		s = s[:len(s)-size]
+		if r == '\\' || r == '/' {
+			s, r = strings.TrimRight(s, `\/`), '/'
+		}
+		rev = append(rev, unicode.ToLower(r))
+	}
+	slices.Reverse(rev)
+	return string(rev)
+}
+
 // skillRefsIn is knownSkillRef for a given home folder and platform.
 func skillRefsIn(s string, roots map[string]bool, home string, windows bool) []string {
 	var out []string
 	if windows {
-		known := map[string]bool{}
+		// A path counts when the text right before the skill's folder is a
+		// known skills folder, written out or from ~. Looking for the known
+		// folders, not for whatever looks like a path, keeps other paths on
+		// the line and a home folder with a space in its name from hiding it.
+		var keys []string
+		homeKey := windowsRefKey(home)
 		for root := range roots {
-			known[windowsRefKey(root)] = true
-		}
-		for _, m := range windowsSkillPathRef.FindAllStringSubmatch(s, -1) {
-			dir := m[1]
-			if strings.HasPrefix(dir, "~") {
-				dir = home + strings.TrimPrefix(dir, "~")
+			// A root that failed to resolve is empty and names nothing.
+			key := windowsRefKey(root)
+			if key == "" {
+				continue
 			}
-			if known[windowsRefKey(dir)] && !slices.Contains(out, m[2]) {
-				out = append(out, m[2])
+			keys = append(keys, key)
+			if rest, ok := strings.CutPrefix(key, homeKey+"/"); ok && homeKey != "" { // slash-ok: windowsRefKey spells every separator as a slash
+				keys = append(keys, "~/"+rest) // slash-ok: windowsRefKey spells every separator as a slash
+			}
+		}
+		width := 0
+		for _, key := range keys {
+			width = max(width, utf8.RuneCountInString(key)+1)
+		}
+		for _, m := range windowsSkillRef.FindAllStringSubmatchIndex(s, -1) {
+			tail, name := windowsRefTail(s[:m[0]], width), s[m[2]:m[3]]
+			known := slices.ContainsFunc(keys, func(key string) bool {
+				// ~ starts a path; one inside another path is a folder named ~.
+				return strings.HasSuffix(tail, key) && !(key[0] == '~' && strings.HasSuffix(tail, "/"+key)) // slash-ok: windowsRefTail spells every separator as a slash
+			})
+			if known && !slices.Contains(out, name) {
+				out = append(out, name)
 			}
 		}
 		return out

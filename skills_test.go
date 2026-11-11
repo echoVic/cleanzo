@@ -55,7 +55,8 @@ func findSkill(t *testing.T, res SkillScanResult, name string) Skill {
 // forward slashes after the drive. Only the known skills folders count.
 func TestSkillRefsWindowsPaths(t *testing.T) {
 	home := `C:\Users\me`
-	roots := map[string]bool{`C:\Users\me\.agents\skills`: true, `C:\Users\me\.claude\skills`: true}
+	// A root that failed to resolve is empty; it names no folder.
+	roots := map[string]bool{`C:\Users\me\.agents\skills`: true, `C:\Users\me\.claude\skills`: true, `C:\Users\me\.codex\skills`: true, "": true}
 	for in, want := range map[string][]string{
 		`{"command":"Get-Content C:\\Users\\me\\.agents\\skills\\pdf\\SKILL.md"}`:               {"pdf"},
 		`"{\"command\":\"type C:\\\\Users\\\\me\\\\.claude\\\\skills\\\\doc\\\\SKILL.md\"}"`:    {"doc"},
@@ -64,6 +65,13 @@ func TestSkillRefsWindowsPaths(t *testing.T) {
 		`{"path":"D:\\other\\skills\\pdf\\SKILL.md"}`:                                           nil,
 		`{"path":"C:\\Users\\me\\.claude\\plugins\\p\\skills\\pdf\\SKILL.md"}`:                  nil,
 		`{"a":"C:\\Users\\me\\.agents\\skills\\a\\SKILL.md","b":"~/.claude/skills/b/SKILL.md"}`: {"a", "b"},
+		// Several paths, or other paths, on one line.
+		`cat ~/.claude/skills/a/SKILL.md ~/.claude/skills/b/SKILL.md`:                    {"a", "b"},
+		`Get-Content ~\.codex\skills\a\SKILL.md; Get-Content ~\.codex\skills\b\SKILL.md`: {"a", "b"},
+		`type C:\Users\me\.claude\skills\a\SKILL.md ~\.claude\skills\b\SKILL.md`:         {"a", "b"},
+		`cd C:\work && type ~\.claude\skills\xlsx\SKILL.md`:                              {"xlsx"},
+		`curl https://x/y && type ~\.claude\skills\xlsx\SKILL.md`:                        {"xlsx"},
+		`type D:\x\~\.claude\skills\pdf\SKILL.md`:                                        nil,
 	} {
 		if got := skillRefsIn(in, roots, home, true); !slices.Equal(got, want) {
 			t.Errorf("%s: got %v, want %v", in, got, want)
@@ -82,6 +90,9 @@ func TestSkillRefsWindowsPaths(t *testing.T) {
 		`{"command":"cat ~\\.claude\\skills\\xlsx\\SKILL.md"}`:                                                         {"xlsx"},
 		`{"path":"C:\\Users\\Ada Lovelace\\.claude\\plugins\\p\\skills\\pdf\\SKILL.md"}`:                               nil,
 		`{"path":"C:\\Users\\Ada\\.agents\\skills\\pdf\\SKILL.md"}`:                                                    nil,
+		`type "C:\Users\Ada Lovelace\.claude\skills\a\SKILL.md" ~\.claude\skills\b\SKILL.md`:                           {"a", "b"},
+		`cd "C:\work dir" && type "C:\Users\Ada Lovelace\.agents\skills\pdf\SKILL.md"`:                                 {"pdf"},
+		`{"command":"cd x\nC:\\Users\\Ada Lovelace\\.agents\\skills\\pdf\\SKILL.md"}`:                                  {"pdf"},
 	} {
 		if got := skillRefsIn(in, spaced, `C:\Users\Ada Lovelace`, true); !slices.Equal(got, want) {
 			t.Errorf("%s: got %v, want %v", in, got, want)
