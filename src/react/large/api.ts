@@ -10,7 +10,6 @@ export const largeApi = {
     const done = Cleaner.largeScan(threshold, ch);
     return { ch, done };
   },
-  dirChildren: (path: string) => Cleaner.dirChildren(path),
   trashPath: (path: string) => Cleaner.trashPath(path),
   cleanPaths: (paths: string[]) => Cleaner.cleanPaths(paths),
   reveal: (path: string) => Cleaner.revealInFinder(path),

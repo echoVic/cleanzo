@@ -17,7 +17,7 @@ import { dur, play } from "../../ui/motion/motion";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { baseName, displayPath, errText, human, setNavBusy, toast } from "../../shared";
 import { requestAppsFilter } from "../apps/entry";
-import { setCleanStaleHandler, takeStalePending } from "./entry";
+import { setCleanStaleHandler } from "./entry";
 import { cleanApi } from "./api";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import { playCleanFocal, shouldPlayFocal } from "./focal";
@@ -133,12 +133,11 @@ export function CleanPage() {
     };
   }, []);
 
-  // 设置页保存配置后通知本页显过期条；clean 页未挂载过则由 takeStalePending 兜底。
+  // 设置页保存配置后通知本页显过期条；还没扫过（idle）就没有可过期的结果。
   React.useEffect(() => {
     setCleanStaleHandler(() => {
       if (phaseRef.current !== "idle") setStale(true);
     });
-    if (takeStalePending() && phaseRef.current !== "idle") setStale(true);
     return () => setCleanStaleHandler(() => {});
   }, []);
 
