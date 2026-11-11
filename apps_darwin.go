@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -25,7 +27,8 @@ func listInstalledApps() []AppInfo {
 }
 
 // appUninstallDetail preserves the macOS AppUninstallDetail behavior. The
-// app's size is that of its "app" item, so the bundle is walked once.
+// app's size is that of its "app" item, so the bundle is walked once. What it
+// lists is kept for the uninstall its confirm leads to (uninstallApp).
 func appUninstallDetail(path string) UninstallDetail {
 	apps := []AppInfo{appMetadata(path)}
 	if ids, paths, err := runningApps(); err == nil {
@@ -42,18 +45,76 @@ func appUninstallDetail(path string) UninstallDetail {
 	for _, it := range items {
 		total += it.Size
 	}
+	rememberUninstallListed(path, items)
 	return UninstallDetail{App: app, Items: items, TotalSize: total}
 }
 
-// uninstallApp preserves the macOS UninstallApp behavior.
+// uninstallListedMax bounds how many apps' last uninstall details are kept.
+const uninstallListedMax = 32
+
+// uninstallListed holds the paths the last uninstall detail of each app
+// listed, for the apps whose details were read last, oldest first. The
+// confirm shows a detail, so the uninstall after it moves no more than that.
+var uninstallListed struct {
+	sync.Mutex
+	apps []listedUninstall
+}
+
+// listedUninstall is what one uninstall detail listed for app.
+type listedUninstall struct {
+	app   string
+	paths map[string]bool
+}
+
+// rememberUninstallListed records what a detail of app listed, in place of
+// what an earlier one did. A detail without the app's bundle offers nothing
+// to uninstall and leaves no record.
+func rememberUninstallListed(app string, items []UninstallItem) {
+	uninstallListed.Lock()
+	defer uninstallListed.Unlock()
+	uninstallListed.apps = slices.DeleteFunc(uninstallListed.apps, func(l listedUninstall) bool { return l.app == app })
+	if len(items) == 0 || items[0].Kind != "app" {
+		return
+	}
+	paths := make(map[string]bool, len(items))
+	for _, it := range items {
+		paths[it.Path] = true
+	}
+	uninstallListed.apps = append(uninstallListed.apps, listedUninstall{app: app, paths: paths})
+	if over := len(uninstallListed.apps) - uninstallListedMax; over > 0 {
+		uninstallListed.apps = slices.Delete(uninstallListed.apps, 0, over)
+	}
+}
+
+// takeUninstallListed returns what the last detail of app listed and drops
+// it; false when none is on record.
+func takeUninstallListed(app string) (map[string]bool, bool) {
+	uninstallListed.Lock()
+	defer uninstallListed.Unlock()
+	i := slices.IndexFunc(uninstallListed.apps, func(l listedUninstall) bool { return l.app == app })
+	if i < 0 {
+		return nil, false
+	}
+	paths := uninstallListed.apps[i].paths
+	uninstallListed.apps = slices.Delete(uninstallListed.apps, i, i+1)
+	return paths, true
+}
+
+// uninstallApp moves the app's bundle and its related files to the Trash.
+// They are found again, and when a detail of the app is on record, only those
+// it listed are moved: one that appeared since its confirm stays.
 func uninstallApp(path string) UninstallResult {
 	name, bid, _ := readBundleInfo(filepath.Join(path, "Contents", "Info.plist"))
 	app := AppInfo{ID: path, Publisher: "", Name: name, Path: path, BundleID: bid}
 	res := UninstallResult{Path: path}
+	listed, confirmed := takeUninstallListed(path)
 	items := uninstallPaths(app)
 	if len(items) == 0 || items[0].Kind != "app" {
 		res.Failed = append(res.Failed, path+": not-app")
 		return res
+	}
+	if confirmed {
+		items = slices.DeleteFunc(items, func(it UninstallItem) bool { return !listed[it.Path] })
 	}
 	// A running app would recreate what is removed under it, or keep its
 	// moved bundle running. A failed probe says nothing about whether it runs.
