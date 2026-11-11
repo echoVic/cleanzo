@@ -337,6 +337,10 @@ func TestFetchFeedInMemory(t *testing.T) {
 			http.Redirect(w, r, "http://example.com/plain", http.StatusFound)
 		case "/redirect-local":
 			http.Redirect(w, r, "https://127.0.0.1/feed", http.StatusFound)
+		case "/redirect-github":
+			http.Redirect(w, r, "https://objects.githubusercontent.com/403", http.StatusFound)
+		case "/redirect-elsewhere":
+			http.Redirect(w, r, "https://example.com/403", http.StatusFound)
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -345,31 +349,48 @@ func TestFetchFeedInMemory(t *testing.T) {
 	appUpdateHTTP = newAppUpdateClient(appFeedTestTransport(func(r *http.Request) (*http.Response, error) {
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
-		return w.Result(), nil
+		res := w.Result()
+		res.Request = r // as http.Transport does
+		return res, nil
 	}), feedURLOK)
 	t.Cleanup(func() { appUpdateHTTP = saved })
 	for _, c := range []struct {
-		path    string
+		url     string
 		wantLen int
 		wantErr error
 	}{
-		{"/ok", 15, nil}, {"/limit", 2 << 20, nil}, {"/big", 0, errFeedBad},
-		{"/404", 0, errFeedNotFound}, {"/403", 0, errFeedRate}, {"/429", 0, errFeedRate},
-		{"/500", 0, errFeedBad}, {"/redirect-http", 0, errFeedURL}, {"/redirect-local", 0, errFeedURL},
+		{"https://example.com/ok", 15, nil}, {"https://example.com/limit", 2 << 20, nil}, {"https://example.com/big", 0, errFeedBad},
+		{"https://example.com/404", 0, errFeedNotFound}, {"https://example.com/429", 0, errFeedRate},
+		{"https://example.com/500", 0, errFeedBad}, {"https://example.com/redirect-http", 0, errFeedURL},
+		{"https://example.com/redirect-local", 0, errFeedURL},
+		// Only GitHub answers a rate limit with 403; elsewhere it means the
+		// feed is not there for us, as S3 answers a missing object.
+		{"https://example.com/403", 0, errFeedNotFound}, {"https://notgithub.com/403", 0, errFeedNotFound},
+		{"https://github.com.example.com/403", 0, errFeedNotFound},
+		{"https://github.com/403", 0, errFeedRate}, {"https://api.github.com/403", 0, errFeedRate},
+		{"https://objects.githubusercontent.com/403", 0, errFeedRate},
+		{"https://notgithub.com/429", 0, errFeedRate},
 	} {
-		t.Run(c.path, func(t *testing.T) {
+		t.Run(c.url, func(t *testing.T) {
 			before := hits
-			b, err := fetchFeed(context.Background(), "https://example.com"+c.path)
+			b, err := fetchFeed(context.Background(), c.url)
 			if !errors.Is(err, c.wantErr) || len(b) != c.wantLen {
 				t.Fatalf("got %d bytes, %v; want %d bytes, %v", len(b), err, c.wantLen, c.wantErr)
 			}
-			if c.path == "/ok" && string(b) != "version: 1.0.2\n" {
+			if strings.HasSuffix(c.url, "/ok") && string(b) != "version: 1.0.2\n" {
 				t.Fatalf("unexpected feed: %q", b)
 			}
 			if hits != before+1 {
 				t.Fatalf("sent %d requests, want 1", hits-before)
 			}
 		})
+	}
+	// The host that answered 403 decides, not the one first asked.
+	if _, err := fetchFeed(context.Background(), "https://example.com/redirect-github"); !errors.Is(err, errFeedRate) {
+		t.Errorf("403 from GitHub after a redirect: %v, want rate-limited", err)
+	}
+	if _, err := fetchFeed(context.Background(), "https://github.com/redirect-elsewhere"); !errors.Is(err, errFeedNotFound) {
+		t.Errorf("403 from another host after a GitHub redirect: %v, want not-found", err)
 	}
 	before := hits
 	for _, raw := range []string{"", "http://example.com/feed", "https://localhost/feed", "https://127.0.0.1/feed"} {

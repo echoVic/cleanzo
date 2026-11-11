@@ -242,11 +242,19 @@ func fetchFeed(ctx context.Context, raw string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	answered := req
+	if resp.Request != nil {
+		answered = resp.Request // the last hop after redirects
+	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, errFeedNotFound
-	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests:
+	case resp.StatusCode == http.StatusTooManyRequests:
 		return nil, errFeedRate
+	case resp.StatusCode == http.StatusForbidden && gitHubHost(answered.URL):
+		return nil, errFeedRate
+	case resp.StatusCode == http.StatusForbidden:
+		return nil, errFeedNotFound
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("%w: status %d", errFeedBad, resp.StatusCode)
 	}
@@ -258,6 +266,22 @@ func fetchFeed(ctx context.Context, raw string) ([]byte, error) {
 		return nil, errFeedBad
 	}
 	return data, nil
+}
+
+// gitHubHost reports whether u is on GitHub, whose 403 is a rate limit. Other
+// hosts answer 403 for a feed that is not there for us, as S3 does for a
+// missing object.
+func gitHubHost(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	for _, d := range []string{"github.com", "githubusercontent.com"} {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // feedReason turns a fetch error into the reason code the page translates.
