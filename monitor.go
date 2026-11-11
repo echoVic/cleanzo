@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -108,15 +107,14 @@ type procSample struct {
 
 // statusSource is everything the loop reads, injectable for tests.
 type statusSource struct {
-	procs     func() []procReading // nil: no app list (macOS)
-	apps      func() []workspaceApp
-	memory    func() MemoryStatus
-	cpu       func() (busy, total uint64) // cumulative ticks
-	battery   func(ctx context.Context) *BatteryStatus
-	disk      func() DiskStat
-	terminate func(pid int32) bool
-	group     func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
-	machine   func() machineSampler                                                        // optional: opens the live machine readings (macOS)
+	procs   func() []procReading // nil: no app list (macOS)
+	apps    func() []workspaceApp
+	memory  func() MemoryStatus
+	cpu     func() (busy, total uint64) // cumulative ticks
+	battery func(ctx context.Context) *BatteryStatus
+	disk    func() DiskStat
+	group   func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
+	machine func() machineSampler                                                        // optional: opens the live machine readings (macOS)
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -554,8 +552,9 @@ func parseBatteryJSON(data []byte) *BatteryStatus {
 	if scan.charge == nil && scan.health == nil {
 		readFlatBattery(b, map[string]bool{}, root)
 	}
-	// No battery installed, or a UPS report only: nothing to show.
-	if b.Percent == 0 && b.Cycles == 0 && b.MaxCapacity == 0 && !b.Plugged && !b.Charging {
+	// No battery installed, or a UPS report only: nothing to show. Being on
+	// AC power says nothing here, a desktop Mac reports that too.
+	if b.Percent == 0 && b.Cycles == 0 && b.MaxCapacity == 0 {
 		return nil
 	}
 	if b.Percent > 100 { // "percent" picked up something else, e.g. watts
@@ -696,9 +695,6 @@ func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceA
 		cpu := 0.0
 		if elapsed > 0 {
 			cpu = float64(g.cpuNs) / float64(elapsed) * 100
-			if cpu < 0 {
-				cpu = 0 // counters can jitter backwards on sample edges
-			}
 		}
 		rows = append(rows, AppUsage{
 			Key:    key,
@@ -821,7 +817,6 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 		// A battery result that arrived while sampling is used next round;
 		// drain what is here now so the first sample has it if it won the
 		// budget race.
-		waited := false
 		if first {
 			// The first sample may still wait the rest of the budget.
 			deadline := time.NewTimer(time.Until(deadlineOf(batCtx)))
@@ -833,7 +828,6 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 				return ctx.Err()
 			case <-deadline.C:
 			}
-			waited = true
 		} else {
 			select {
 			case b := <-batDone:
@@ -842,28 +836,33 @@ func watchStatusWith(ctx context.Context, send func(StatusSample) error, src sta
 			default:
 			}
 		}
-		_ = waited
 
 		if err := send(sample); err != nil {
 			return err
 		}
 		prevProcs, prevCPU = curProcs, curCPU
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case b := <-batDone: // a late result waits for the next round
-			latest = b
-		case <-batTimer.C: // refresh in the background, never blocking sampling
-			go func() {
-				b := src.battery(ctx)
-				select {
-				case batDone <- b:
-				case <-ctx.Done():
-				}
-			}()
-			batTimer.Reset(statusBatteryEvery)
-		case <-tick.C:
+		// Only the tick starts the next sample: the battery's refresh and its
+		// result are handled here without cutting the interval short.
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case b := <-batDone: // a late result waits for the next round
+				latest = b
+			case <-batTimer.C: // refresh in the background, never blocking sampling
+				go func() {
+					b := src.battery(ctx)
+					select {
+					case batDone <- b:
+					case <-ctx.Done():
+					}
+				}()
+				batTimer.Reset(statusBatteryEvery)
+			case <-tick.C:
+				break wait
+			}
 		}
 	}
 }
@@ -1000,5 +999,3 @@ func quitMatches(path string, apps []workspaceApp) []workspaceApp {
 	}
 	return out
 }
-
-var _ = fmt.Sprintf

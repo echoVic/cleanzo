@@ -87,7 +87,7 @@ func TestWindowsStubsCleanNothing(t *testing.T) {
 	}
 	source := realStatusSource()
 	busy, total := source.cpu()
-	if total == 0 || busy > total || source.memory().Total == 0 || source.disk().Total <= 0 || len(source.procs()) == 0 || source.terminate(int32(os.Getpid())) {
+	if total == 0 || busy > total || source.memory().Total == 0 || source.disk().Total <= 0 || len(source.procs()) == 0 || workspaceTerminate(int32(os.Getpid())) {
 		t.Fatal("live status readings unavailable or self termination accepted")
 	}
 

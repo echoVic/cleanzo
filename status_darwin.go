@@ -14,11 +14,10 @@ func realStatusSource() statusSource {
 		memory: func() MemoryStatus {
 			return readMemoryStatus()
 		},
-		cpu:       cpuBusyTotal,
-		battery:   statusBattery,
-		disk:      diskStat,
-		terminate: workspaceTerminate,
-		machine:   newMachineReader,
+		cpu:     cpuBusyTotal,
+		battery: statusBattery,
+		disk:    diskStat,
+		machine: newMachineReader,
 	}
 }
 

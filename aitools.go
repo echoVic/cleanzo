@@ -1124,8 +1124,10 @@ func aiTargets(root string, tool aiTool, part aiPart, groups []string) (targets 
 			}
 		}
 		for _, key := range groups {
-			// A key names a folder inside dir: no escaping it.
-			clean := filepath.Clean(key)
+			// A key names a folder inside dir: no escaping it. Keys use "/" on
+			// every platform (a month is yyyy/mm), so the checks below read the
+			// slash form; Clean alone turns it into "\" on Windows.
+			clean := filepath.ToSlash(filepath.Clean(key))
 			if clean == "." || clean == keep || filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") || strings.Contains(clean, "/../") {
 				return nil, 0, errAIRefused
 			}

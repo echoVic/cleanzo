@@ -11,7 +11,6 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo"
 )
 
@@ -71,12 +70,6 @@ var menuBarHasBattery = sync.OnceValue(func() bool {
 // menuBarSupported: the readings are macOS only (spec §二).
 func menuBarSupported() bool { return true }
 
-// menuBarController is the readings' items: one menu bar item per reading
-// shown (spec §三.1), named after its reading, so that each stays where the
-// user dragged it with ⌘. While a reading shows they are Cleanzo's place in
-// the menu bar: a right-click on any shows Cleanzo's menu, and no Cleanzo icon
-// shows (spec §三.4). Only the main thread uses it; the sampler's goroutine
-// hands it each reading through mygo.RunOnMain.
 // menuBarPaintKey is what uniquely determines how an item's icon looks:
 // the text, the width it is drawn at, and the ink.
 type menuBarPaintKey struct {
@@ -85,6 +78,12 @@ type menuBarPaintKey struct {
 	ink   readoutInk
 }
 
+// menuBarController is the readings' items: one menu bar item per reading
+// shown (spec §三.1), named after its reading, so that each stays where the
+// user dragged it with ⌘. While a reading shows they are Cleanzo's place in
+// the menu bar: a right-click on any shows Cleanzo's menu, and no Cleanzo icon
+// shows (spec §三.4). Only the main thread uses it; the sampler's goroutine
+// hands it each reading through mygo.RunOnMain.
 type menuBarController struct {
 	shown     bool                       // show has run
 	items     []string                   // the readings shown, in menuBarItems' order
@@ -135,6 +134,7 @@ func (m *menuBarController) show(items []string) {
 			t.Destroy()
 			delete(m.trays, item)
 			delete(m.drawn, item)
+			delete(m.paintKeys, item) // a new item for this reading has no image yet
 		}
 	}
 	m.items = slices.Clone(items)
@@ -159,7 +159,7 @@ func (m *menuBarController) show(items []string) {
 			continue
 		}
 		t.OnAppearanceChange(func() { m.repaint(item) })
-		t.OnClick(func() { m.click(item) })
+		t.OnClick(func() { m.toggle(item) }) // its panel (spec §四)
 		t.OnRightClick(m.menu)
 		m.trays[item] = t
 		m.paint(item, t, menuBarTextFor(item, m.last, nativeText))
@@ -255,16 +255,6 @@ func (m *menuBarController) relabel() {
 	}
 }
 
-// click opens item's panel (spec §四), or Cleanzo's menu when Control is held,
-// as for a right-click (spec §三.4).
-func (m *menuBarController) click(item string) {
-	if menuBarControlHeld() {
-		m.menu()
-		return
-	}
-	m.toggle(item)
-}
-
 // menu shows Cleanzo's menu at the pointer (spec §三.4): the lines of the
 // Cleanzo icon, which does not show while a reading does. A right-click or a
 // Control-click on a reading asks for it. At the pointer, it shows on the
@@ -281,20 +271,6 @@ func (m *menuBarController) menu() {
 	}
 	m.closePanels()
 	growthTrayMenu(residentModelNow(), growthMenuAction).Popup(nil)
-}
-
-// menuBarControlHeld tells whether Control is held now. A click with it is a
-// right-click on macOS, which mygo 0.7.1 still reports as a click.
-func menuBarControlHeld() bool {
-	if !appKitInit() {
-		return false
-	}
-	held := false
-	withPool(func() {
-		flags := objc.Send[uint64](objc.ID(objc.GetClass("NSEvent")), nsSel("modifierFlags"))
-		held = flags&(1<<18) != 0 // NSEventModifierFlagControl
-	})
-	return held
 }
 
 // menuBarPanelWidth is the mockup's width in points (spec §九).

@@ -973,6 +973,7 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 	}
 	tr := tar.NewReader(gz)
 	top := ""
+	links := map[string]bool{} // the links this archive made, by entry name
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -996,6 +997,14 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 			top = first
 		} else if first != top {
 			return "", fmt.Errorf("unexpected entry %q", h.Name)
+		}
+		// Nothing is written through a link the archive made: each link stays
+		// inside the archive by its own text, but an entry under one lands
+		// wherever the links lead together, which can be outside dest.
+		for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
+			if links[dir] {
+				return "", fmt.Errorf("entry %q is under a link", h.Name)
+			}
 		}
 		target := filepath.Join(dest, filepath.FromSlash(name))
 		switch h.Typeflag {
@@ -1038,6 +1047,7 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 			if err := makeSkillSymlink(h.Linkname, target); err != nil {
 				return "", err
 			}
+			links[name] = true
 		default:
 			// Hard links, devices and FIFOs never belong in a skill.
 			return "", fmt.Errorf("unsupported entry %q", h.Name)

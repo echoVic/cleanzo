@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -279,6 +280,17 @@ func TestParseBatteryNoBattery(t *testing.T) {
 	}
 }
 
+// A desktop Mac still reports its power settings: the "AC Power" block says
+// it is the current source, and nothing else describes a battery.
+func TestParseBatteryDesktopMac(t *testing.T) {
+	b := parseBatteryJSON([]byte(`{"SPPowerDataType":[
+		{"_name":"sppower_information","AC Power":{"Current Power Source":"TRUE","System Sleep Timer":0,"Wake On LAN":"Yes"}},
+		{"_name":"sppower_hwconfig_information","sppower_ups_installed":"FALSE"}]}`))
+	if b != nil {
+		t.Errorf("a Mac on AC power with no battery fields has no battery card, got %+v", b)
+	}
+}
+
 func TestParseBatteryMissingFields(t *testing.T) {
 	// Old macOS shapes: bools instead of strings, missing capacity.
 	b := parseBatteryJSON([]byte(`{"SPPowerDataType":[{"_items":[
@@ -448,8 +460,7 @@ func fakeSource() statusSource {
 		battery: func(ctx context.Context) *BatteryStatus {
 			return &BatteryStatus{Percent: 88, Charging: true, Cycles: 12, MaxCapacity: 95, Condition: "Normal"}
 		},
-		disk:      func() DiskStat { return DiskStat{Total: 1, Used: 2, Free: 3} },
-		terminate: func(int32) bool { return true },
+		disk: func() DiskStat { return DiskStat{Total: 1, Used: 2, Free: 3} },
 	}
 }
 
@@ -527,6 +538,41 @@ func TestWatchStatusCancelStops(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel must stop the loop")
+	}
+}
+
+// The battery refresh runs between samples: neither starting one nor its
+// result arriving may send an extra sample ahead of the two-second tick.
+func TestWatchStatusBatteryRefreshAddsNoSample(t *testing.T) {
+	oldDelay, oldBudget, oldInterval, oldBattery := statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery
+	statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery = 5*time.Millisecond, time.Second, time.Hour, 20*time.Millisecond
+	defer func() {
+		statusFirstDelay, statusFirstBudget, statusInterval, statusBatteryEvery = oldDelay, oldBudget, oldInterval, oldBattery
+	}()
+
+	var samples, reads atomic.Int32
+	src := fakeSource()
+	src.battery = func(context.Context) *BatteryStatus {
+		reads.Add(1)
+		return &BatteryStatus{Percent: 88}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = watchStatusWith(ctx, func(StatusSample) error { samples.Add(1); return nil }, src)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for reads.Load() < 4 && time.Now().Before(deadline) { // the first read and three refreshes
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-stopped
+	if reads.Load() < 4 {
+		t.Fatalf("battery read %d times, want the refresh to keep running", reads.Load())
+	}
+	if got := samples.Load(); got != 1 {
+		t.Errorf("%d samples within one tick, want only the first", got)
 	}
 }
 

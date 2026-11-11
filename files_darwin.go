@@ -117,7 +117,9 @@ func platformCollectPhotoFiles(ctx context.Context, roots []string, cap int) []s
 				}
 				return nil
 			}
-			if photoExts[strings.ToLower(filepath.Ext(p))] {
+			// Regular files only: a symlink to a photo is that photo again, and
+			// as a duplicate pair the original could be the one to go.
+			if d.Type().IsRegular() && photoExts[strings.ToLower(filepath.Ext(p))] {
 				out = append(out, p)
 				if len(out) >= cap {
 					return stop

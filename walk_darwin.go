@@ -14,9 +14,10 @@ import (
 
 // fullScanTargets returns the directories the full scan enumerates:
 // the user's home with ~/Library expanded one level, plus system-level roots.
-func fullScanTargets() []string {
+func fullScanTargets() (out []string) {
 	h := homeDir()
-	var out []string
+	// The result is named so that this filter shapes what the caller gets:
+	// volumes mounted among the targets are other disks, and leave no gap.
 	defer func() { out = slices.DeleteFunc(out, mountPoint) }()
 	entries, err := os.ReadDir(h)
 	if err == nil {

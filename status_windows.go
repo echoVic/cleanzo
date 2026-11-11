@@ -55,7 +55,7 @@ func realStatusSource() statusSource {
 		group: func(r procReading, byPid map[int32]procReading, _ func(int32) int32) (string, string) {
 			return windowsAppGroup(r, byPid, ancestors)
 		},
-		memory: readMemoryStatus, cpu: windowsCPUTicks, battery: statusBattery, disk: diskStat, terminate: workspaceTerminate,
+		memory: readMemoryStatus, cpu: windowsCPUTicks, battery: statusBattery, disk: diskStat,
 	}
 }
 

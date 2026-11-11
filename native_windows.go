@@ -30,9 +30,6 @@ type vmStats64 struct {
 	Swapped                          uint64
 }
 
-// hostCPULoad keeps the shared CPU conversion input available on Windows.
-type hostCPULoad struct{ Ticks [4]uint32 }
-
 // procReading is the platform-neutral input to process attribution.
 type procReading struct {
 	Pid       int32
@@ -43,12 +40,6 @@ type procReading struct {
 	SysNs     uint64
 	Start     uint64
 }
-
-// nativeVMStats reports an unavailable memory probe.
-func nativeVMStats() (vmStats64, bool) { return vmStats64{}, false }
-
-// nativeCPUTicks reports an unavailable CPU probe.
-func nativeCPUTicks() (hostCPULoad, bool) { return hostCPULoad{}, false }
 
 // windowsProcessMemory is PROCESS_MEMORY_COUNTERS_EX2 from psapi.h (96 bytes on amd64/arm64).
 type windowsProcessMemory struct {
@@ -76,15 +67,6 @@ func init() {
 
 // statusSnapshotProcesses permits status failures to be tested independently of cleanup's probe.
 var statusSnapshotProcesses = processSnapshot
-
-// nativeProcs reads one current-session snapshot and the readable process counters.
-func nativeProcs() []procReading {
-	procs, err := statusSnapshotProcesses()
-	if err != nil {
-		return nil
-	}
-	return windowsProcReadings(procs)
-}
 
 // windowsProcReadings gathers private working set and process CPU time in nanoseconds.
 func windowsProcReadings(procs []procInfo) []procReading {
@@ -306,9 +288,6 @@ func workspaceForceTerminate(pid int32) bool { return false }
 
 // nativeSysctlString reports an unavailable Darwin sysctl.
 func nativeSysctlString(name string) string { return "" }
-
-// nativeSysctlUint64 reports an unavailable Darwin sysctl.
-func nativeSysctlUint64(name string) uint64 { return 0 }
 
 // nativeSysctlRaw reports an unavailable Darwin sysctl.
 func nativeSysctlRaw(name string) []byte { return nil }

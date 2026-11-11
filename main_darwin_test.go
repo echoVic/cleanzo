@@ -1254,6 +1254,10 @@ func TestFullScanSkipsMountedVolumes(t *testing.T) {
 	if slices.Contains(targets, mnt) || !slices.Contains(targets, filepath.Join(home, "Projects")) {
 		t.Fatalf("targets = %v", targets)
 	}
+	// Leaving the volume out must not leave an empty target in its place.
+	if slices.Contains(targets, "") {
+		t.Fatalf("an empty target took the volume's place (%d targets)", len(targets))
+	}
 }
 
 // TestFindLargeFilesNothingFound: find exits with status 1 and prints
@@ -1271,6 +1275,20 @@ func TestFindLargeFilesNothingFound(t *testing.T) {
 	files, err := findLargeFiles(context.Background(), dir, 1<<20)
 	if err != nil || len(files) != 0 {
 		t.Fatalf("findLargeFiles = %v, %v", files, err)
+	}
+}
+
+// TestPhotoLinksAreNotPhotos: a symlink to a photo is the same file under a
+// second name. Collected, the pair looks like an exact duplicate and the
+// original can be the one recommended for the Trash.
+func TestPhotoLinksAreNotPhotos(t *testing.T) {
+	pics := filepath.Join(t.TempDir(), "Pictures")
+	writeFile(t, filepath.Join(pics, "real.jpg"), 10)
+	if err := os.Symlink(filepath.Join(pics, "real.jpg"), filepath.Join(pics, "alias.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	if got := collectPhotoFiles([]string{pics}, 100); len(got) != 1 || filepath.Base(got[0]) != "real.jpg" {
+		t.Errorf("collected %v, want only the real file", got)
 	}
 }
 

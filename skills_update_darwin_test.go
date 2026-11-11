@@ -151,11 +151,21 @@ func TestUntarSafeRejectsEscapes(t *testing.T) {
 		"link-abs": {{Name: "r/", Typeflag: tar.TypeDir}, {Name: "r/l", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"}},
 		"hardlink": {{Name: "r/", Typeflag: tar.TypeDir}, {Name: "r/h", Typeflag: tar.TypeLink, Linkname: "r/x"}},
 		"two-tops": {{Name: "a/x", Typeflag: tar.TypeReg, Size: 1}, {Name: "b/y", Typeflag: tar.TypeReg, Size: 1}},
+		// Each link stays inside the archive on paper; followed one after the
+		// other they climb out, and the file lands above dest.
+		"through-links": {{Name: "r/", Typeflag: tar.TypeDir}, {Name: "r/up", Typeflag: tar.TypeSymlink, Linkname: ".."},
+			{Name: "r/up/up2", Typeflag: tar.TypeSymlink, Linkname: ".."}, {Name: "r/up/up2/escaped", Typeflag: tar.TypeReg, Size: 1}},
+		"file-under-link": {{Name: "r/", Typeflag: tar.TypeDir}, {Name: "r/d/", Typeflag: tar.TypeDir},
+			{Name: "r/l", Typeflag: tar.TypeSymlink, Linkname: "d"}, {Name: "r/l/f", Typeflag: tar.TypeReg, Size: 1}},
 	}
 	for name, hdrs := range cases {
-		dest := filepath.Join(t.TempDir(), "x")
+		base := t.TempDir()
+		dest := filepath.Join(base, "in", "x")
 		if _, err := untarSafe(bytes.NewReader(build(hdrs...)), dest); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+		if fileExists(filepath.Join(base, "escaped")) || fileExists(filepath.Join(base, "in", "escaped")) {
+			t.Errorf("%s: wrote outside the destination", name)
 		}
 	}
 	dest := filepath.Join(t.TempDir(), "x")

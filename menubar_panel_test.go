@@ -521,7 +521,7 @@ func TestPanelMemShares(t *testing.T) {
 	}
 	_, _, _, ok = panelMemShares(MemoryStatus{})
 	panelEqual(t, ok, false)
-	a, w, c, ok = panelMemShares(MemoryStatus{Total: 100, App: 200, Wired: 0, Compressed: 50})
+	a, w, c, _ = panelMemShares(MemoryStatus{Total: 100, App: 200, Wired: 0, Compressed: 50})
 	panelEqual(t, []float64{a, w, c}, []float64{100, 0, 50})
 }
 

@@ -125,3 +125,39 @@ func trashed(home, name string) bool {
 	_, err := os.Lstat(filepath.Join(home, ".Trash", name))
 	return err == nil
 }
+
+// TestAIGroupKeysUseSlashes: the page sends a month as yyyy/mm on every
+// platform, and a key never reaches deeper than its part's own groups,
+// whichever separator spells it.
+func TestAIGroupKeysUseSlashes(t *testing.T) {
+	root := t.TempDir()
+	old := time.Now().Add(-40 * 24 * time.Hour)
+	session := filepath.Join(root, "sessions", "2026", "10", "01", "rollout.jsonl")
+	mustMkdir(t, filepath.Dir(session))
+	if err := os.WriteFile(session, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(session, old, old); err != nil {
+		t.Fatal(err)
+	}
+	tool, part, ok := findAIPart("codex", "codex.sessions")
+	if !ok {
+		t.Fatal("codex.sessions is not a known part")
+	}
+	targets, _, err := aiTargets(root, tool, part, []string{"2026/10"})
+	if err != nil || len(targets) != 1 || targets[0] != session {
+		t.Fatalf("month 2026/10: targets %v, err %v", targets, err)
+	}
+
+	mustMkdir(t, filepath.Join(root, "projects", "a", "b"))
+	tool, part, ok = findAIPart("claude", "claude.sessions")
+	if !ok {
+		t.Fatal("claude.sessions is not a known part")
+	}
+	nested := []string{"a/b", filepath.Join("a", "b")}
+	for _, key := range nested {
+		if _, _, err := aiTargets(root, tool, part, []string{key}); err == nil {
+			t.Errorf("key %q reaches below a project folder and was accepted", key)
+		}
+	}
+}

@@ -647,9 +647,8 @@ func aiModelInsideRoot(root, target string) bool {
 	return real != realRoot && within(real, realRoot)
 }
 
-// aiModelTrash moves target to the Trash when it is a real path inside the
-// runtime's root, and returns the bytes the entry took.
-// aiModelTrash moves one known model file or folder to the Trash.
+// aiModelTrash moves one known model file or folder to the Trash, and
+// returns the bytes the entry took.
 //
 // It checks the path itself (inside this runtime's folder, a clean path, no
 // symlink at the target) but deliberately skips platformRemovalSafe: that
