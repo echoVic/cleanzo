@@ -938,6 +938,59 @@ echo "==> Upgrading ghostty"`)
 	}
 }
 
+// Closing the window cancels the page's context while brew runs. brew must
+// still finish, and the bundle must still be read afterwards: killing it can
+// leave the old app removed and the new one not yet moved in.
+func TestUpgradeAppBrewOutlivesTheCaller(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Ghostty", map[string]string{"CFBundleIdentifier": "com.mitchellh.ghostty", "CFBundleShortVersionString": "1.3.1"}, false, "")
+	bin := t.TempDir()
+	started, release, finished := filepath.Join(bin, "started"), filepath.Join(bin, "release"), filepath.Join(bin, "finished")
+	plist := filepath.Join(app, "Contents", "Info.plist")
+	// The fake brew waits for the test, then upgrades the bundle to 1.4.0.
+	fakeTool(t, bin, "brew", `touch `+shellPath(started)+`
+i=0
+while [ ! -f `+shellPath(release)+` ] && [ $i -lt 1000 ]; do sleep 0.01; i=$((i+1)); done
+sed -i '' 's/1.3.1/1.4.0/' `+shellPath(plist)+`
+touch `+shellPath(finished)+`
+echo "==> Upgrading ghostty"`)
+	savedDirs := toolDirs
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs = savedDirs })
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "ghostty", path: app, latest: "1.4.0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan AppUpgradeResult, 1)
+	go func() {
+		res, _ := (Cleaner{}).UpgradeApp(ctx, app)
+		done <- res
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for !exists(started) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !exists(started) {
+		t.Fatal("fixture brew did not start")
+	}
+	cancel()
+	time.Sleep(200 * time.Millisecond) // time for a kill to land, were there one
+	writeText(t, release, "release")
+	var res AppUpgradeResult
+	select {
+	case res = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("UpgradeApp did not return")
+	}
+	if !res.Done || res.Version != "1.4.0" || res.Code != "" || !exists(finished) {
+		t.Fatalf("upgrade after the caller went away: %+v; brew finished=%v", res, exists(finished))
+	}
+}
+
 func TestCleanAppCacheOnlyMovesCaches(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)

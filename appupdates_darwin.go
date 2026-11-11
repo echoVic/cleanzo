@@ -684,8 +684,12 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 		res.Code, res.Detail = "brew-failed", "no-tool"
 		return res
 	}
-	out, err := runTool(ctx, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
-	if after, ok := readAppBundle(ctx, a.path); ok {
+	// Once brew starts, the page closing does not stop it: a kill can land
+	// between removing the old app and moving the new one in. Only the timeout
+	// bounds it, and the bundle is read afterwards either way.
+	run := context.WithoutCancel(ctx)
+	out, err := runTool(run, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
+	if after, ok := readAppBundle(run, a.path); ok {
 		res.Version = after.short
 	}
 	if v, l := versionParts(cleanVersion(res.Version)), versionParts(cleanVersion(a.latest)); v != nil && l != nil && compareVersions(v, l) >= 0 {
