@@ -62,10 +62,12 @@
   installers, backups, archives, custom folders) are moved to the Trash or
   Recycle Bin and can be recovered.
 - Refused outright: the home folder itself, ~/Library, Desktop/Documents/etc.,
-  Keychain, iCloud Drive, Mail, Messages, the Photos library and ~/.ssh.
+  Keychain, iCloud Drive and other cloud storage folders
+  (~/Library/CloudStorage), Mail, Messages, the Photos library and ~/.ssh.
   Symlinks are resolved and case is ignored before the check.
 - Files open by a process (lsof) and caches named after a running app are
-  skipped; apps that are running cannot be uninstalled.
+  skipped; apps that are running cannot be uninstalled. When the in-use check
+  itself fails, nothing is moved.
 - Every cleanup lists what will be permanently deleted and what will be moved to
   the Trash, and can be stopped while running.
 - Spotlight, CloudKit, JetBrains and virtualenv caches are on a hard-protected

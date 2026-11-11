@@ -1,6 +1,6 @@
 # Audit fixes for the next release (2026-11-11)
 
-**Spec:** `/Users/bytedance/Documents/GitHub/cleanzo/outputs/audit-2026-11-11/review-list.md` (absolute path: the file is untracked and exists only in the main checkout). Every item below points at a line of that list; read the matching entry for the scenario and the evidence. Line numbers in the list are for commit `b8bff34`; the branch has moved a few lines since, so find code by name.
+**Spec:** `outputs/audit-2026-11-11/review-list.md` (untracked: it exists only in the maintainer's main checkout). Every item below points at a line of that list; read the matching entry for the scenario and the evidence. Line numbers in the list are for commit `b8bff34`; the branch has moved a few lines since, so find code by name.
 
 **Goal:** fix what the audit left open so the branch can ship: safety items first, then wrong results, then the measured slowdowns, then verified dead code.
 
