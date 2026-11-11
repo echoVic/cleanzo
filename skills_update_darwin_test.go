@@ -196,6 +196,7 @@ func TestDSStoreCountsWhereTheSourceHasOne(t *testing.T) {
 // from a skills folder; a folder of the user's that shares a name gets none.
 func TestCCSwitchOriginNeedsItsStore(t *testing.T) {
 	home := skillFixture(t)
+	writeSkillFile(t, filepath.Join(home, ".cc-switch/settings.json"), `{"skillStorageLocation":"cc_switch"}`)
 	store := filepath.Join(home, ".cc-switch/skills/lark-doc")
 	writeSkill(t, store, "from cc switch\n")
 	mustMkdir(t, filepath.Join(home, ".claude/skills"))

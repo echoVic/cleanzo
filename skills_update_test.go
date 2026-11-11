@@ -444,6 +444,55 @@ func TestCCSwitchNameMatchNeedsForce(t *testing.T) {
 	}
 }
 
+// TestCCSwitchUnifiedStore: CC Switch's settings choose its store. With
+// "unified" it keeps its skills as real folders in ~/.agents/skills, and an
+// old ~/.cc-switch/skills left behind is not the store.
+func TestCCSwitchUnifiedStore(t *testing.T) {
+	home := skillFixture(t)
+	noOpenFiles(t)
+	newFakeGitHub(t, map[string]string{"skills/lark-doc/SKILL.md": "upstream\n", "skills/mine/SKILL.md": "upstream\n"})
+	writeSkillFile(t, filepath.Join(home, ".cc-switch/settings.json"), `{"language":"zh","skillStorageLocation":"unified"}`)
+	writeSkill(t, filepath.Join(home, ".cc-switch/skills/lark-doc"), "stale\n")
+	dir := filepath.Join(home, ".agents/skills/lark-doc")
+	writeSkill(t, dir, "older\n")
+	writeSkill(t, filepath.Join(home, ".claude/skills/mine"), "my own\n")
+	fakeCCSwitch(t, home, `[
+		{"directory":"lark-doc","repo_owner":"acme","repo_name":"skills","readme_url":"https://github.com/acme/skills/blob/main/skills/lark-doc/SKILL.md"},
+		{"directory":"mine","repo_owner":"acme","repo_name":"skills","readme_url":"https://github.com/acme/skills/blob/main/skills/mine/SKILL.md"}]`)
+	ups, err := Cleaner{}.CheckSkillUpdates(context.Background())
+	if err != nil || len(ups) != 1 || ups[0].Path != resolvePath(dir) || ups[0].Origin.Kind != originCCSwitch {
+		t.Fatalf("unified store = %+v, %v", ups, err)
+	}
+	// A folder in the store is CC Switch's own: an update, not a local change.
+	if ups[0].Status != "update" || ups[0].Modified {
+		t.Fatalf("store folder = %+v", ups[0])
+	}
+}
+
+// TestCCSwitchUnreadableSettings: when CC Switch's settings cannot be read,
+// its store is unknown, so a row names a folder by name alone and a
+// difference from the source counts as a local change.
+func TestCCSwitchUnreadableSettings(t *testing.T) {
+	for name, settings := range map[string]string{"truncated": `{"skillStorageLocation":`, "missing": ""} {
+		t.Run(name, func(t *testing.T) {
+			home := skillFixture(t)
+			noOpenFiles(t)
+			newFakeGitHub(t, map[string]string{"skills/mine/SKILL.md": "upstream\n"})
+			if settings != "" {
+				writeSkillFile(t, filepath.Join(home, ".cc-switch/settings.json"), settings)
+			}
+			writeSkill(t, filepath.Join(home, ".cc-switch/skills/other"), "x\n")
+			dir := filepath.Join(home, ".claude/skills/mine")
+			writeSkill(t, dir, "my own\n")
+			fakeCCSwitch(t, home, `[{"directory":"mine","repo_owner":"acme","repo_name":"skills","readme_url":"https://github.com/acme/skills/blob/main/skills/mine/SKILL.md"}]`)
+			ups, err := Cleaner{}.CheckSkillUpdates(context.Background())
+			if err != nil || len(ups) != 1 || ups[0].Path != resolvePath(dir) || ups[0].Origin.Kind != originCCSwitch || !ups[0].Modified {
+				t.Fatalf("unknown store = %+v, %v", ups, err)
+			}
+		})
+	}
+}
+
 func TestGitCloneOriginAndUpgrade(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
