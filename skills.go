@@ -183,7 +183,7 @@ func (Cleaner) ListSkillRoots() []SkillRoot {
 // ScanSkills lists the skills, their copies and problems, and their usage.
 func (c Cleaner) ScanSkills(ctx context.Context) (SkillScanResult, error) {
 	res := SkillScanResult{Roots: c.ListSkillRoots(), Skills: []Skill{}, Sources: []SkillSource{}, ScannedAt: skillNow().Unix()}
-	copies, err := skillCopies(ctx, res.Roots)
+	copies, err := skillCopies(ctx, res.Roots, true)
 	if err != nil {
 		return SkillScanResult{}, err
 	}
@@ -199,21 +199,8 @@ func (c Cleaner) ScanSkills(ctx context.Context) (SkillScanResult, error) {
 		since[s.Tool] = s.Since
 	}
 
-	byName := map[string]*Skill{}
-	var names []string
-	for _, cp := range copies {
-		name := filepath.Base(cp.Path)
-		s := byName[name]
-		if s == nil {
-			s = &Skill{Name: name, Copies: []SkillCopy{}, Uses: []SkillUse{}, Issues: []string{}}
-			byName[name] = s
-			names = append(names, name)
-		}
-		s.Copies = append(s.Copies, cp)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		s := byName[name]
+	for _, s := range groupSkills(copies) {
+		name := s.Name
 		reals := map[string]string{} // folder -> hash
 		for _, cp := range s.Copies {
 			if s.Installed == 0 || cp.Modified < s.Installed {
@@ -270,14 +257,47 @@ func (c Cleaner) ScanSkills(ctx context.Context) (SkillScanResult, error) {
 	return res, nil
 }
 
+// skillEntries lists the skills and their copies without hashing folders or
+// reading usage records: all that finding where skills came from needs.
+func skillEntries(ctx context.Context) ([]Skill, error) {
+	copies, err := skillCopies(ctx, Cleaner{}.ListSkillRoots(), false)
+	if err != nil {
+		return nil, err
+	}
+	skills := []Skill{}
+	for _, s := range groupSkills(copies) {
+		skills = append(skills, *s)
+	}
+	return skills, nil
+}
+
+// groupSkills gathers copies by skill name, in name order.
+func groupSkills(copies []SkillCopy) []*Skill {
+	byName := map[string]*Skill{}
+	var out []*Skill
+	for _, cp := range copies {
+		name := filepath.Base(cp.Path)
+		s := byName[name]
+		if s == nil {
+			s = &Skill{Name: name, Copies: []SkillCopy{}, Uses: []SkillUse{}, Issues: []string{}}
+			byName[name] = s
+			out = append(out, s)
+		}
+		s.Copies = append(s.Copies, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 func addIssue(s *Skill, issue string) {
 	if !slices.Contains(s.Issues, issue) {
 		s.Issues = append(s.Issues, issue)
 	}
 }
 
-// skillCopies reads the entries of every skills folder.
-func skillCopies(ctx context.Context, roots []SkillRoot) ([]SkillCopy, error) {
+// skillCopies reads the entries of every skills folder. Without measure,
+// folders are neither hashed nor sized.
+func skillCopies(ctx context.Context, roots []SkillRoot, measure bool) ([]SkillCopy, error) {
 	var copies []SkillCopy
 	hashes := map[string]string{}
 	sizes := map[string]int64{}
@@ -317,7 +337,7 @@ func skillCopies(ctx context.Context, roots []SkillRoot) ([]SkillCopy, error) {
 				if _, err := os.Stat(filepath.Join(cp.Real, "SKILL.md")); err != nil {
 					cp.Kind = map[string]string{"dir": "invalid", "link": "broken"}[cp.Kind]
 				}
-				if _, done := hashes[cp.Real]; !done {
+				if _, done := hashes[cp.Real]; !done && measure {
 					hashes[cp.Real], sizes[cp.Real] = skillHash(ctx, cp.Real)
 				}
 				cp.Hash = hashes[cp.Real]

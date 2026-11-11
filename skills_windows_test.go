@@ -59,7 +59,7 @@ func TestWindowsSkillsUnsupportedLinks(t *testing.T) {
 	t.Cleanup(func() { skillUpdateHTTP = savedHTTP })
 	origins := map[string]SkillOrigin{resolvePath(old): {Kind: originSkillsCLI, Repo: "acme/skills", Path: "skills/fixture", Tree: original}}
 	var result SkillUpgradeResult
-	err = upgradeOne(context.Background(), SkillUpgradeRequest{Path: old}, origins, &treeCache{trees: map[string]*githubTree{}}, map[string]skillArchive{}, &result)
+	err = upgradeOne(context.Background(), SkillUpgradeRequest{Path: old}, origins, &treeCache{trees: map[string]*githubTree{}}, map[string]skillArchive{}, skillGuard().inUse, &result)
 	if !errors.Is(err, errUnsupported) {
 		t.Fatalf("real upgrade privilege failure: %v", err)
 	}

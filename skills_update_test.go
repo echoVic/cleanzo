@@ -212,20 +212,67 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// installLocked installs a skill folder and records it in the skills lock.
+// installLocked installs a skill folder and records it in the skills lock,
+// next to the skills already there.
 func installLocked(t *testing.T, home, name string, files map[string]string, tree string) string {
 	t.Helper()
 	dir := filepath.Join(home, ".agents/skills", name)
 	for p, body := range files {
 		writeSkillFile(t, filepath.Join(dir, p), body)
 	}
-	lock := map[string]any{"version": 3, "skills": map[string]any{name: map[string]any{
+	lockPath := filepath.Join(home, ".agents/.skill-lock.json")
+	lock := struct {
+		Version int            `json:"version"`
+		Skills  map[string]any `json:"skills"`
+	}{3, map[string]any{}}
+	if data, err := os.ReadFile(lockPath); err == nil {
+		json.Unmarshal(data, &lock)
+	}
+	lock.Skills[name] = map[string]any{
 		"source": "acme/skills", "sourceType": "github", "sourceUrl": "https://github.com/acme/skills.git",
 		"skillPath": "skills/" + name + "/SKILL.md", "skillFolderHash": tree,
-	}}}
+	}
 	data, _ := json.Marshal(lock)
-	writeSkillFile(t, filepath.Join(home, ".agents/.skill-lock.json"), string(data))
+	writeSkillFile(t, lockPath, string(data))
 	return dir
+}
+
+// TestSkillUpdatesReadNoTranscripts: listing origins, checking and
+// upgrading need only the skill folders' entries, not the usage records a
+// full scan reads; an upgrade checks what is in use once for all folders.
+func TestSkillUpdatesReadNoTranscripts(t *testing.T) {
+	home := skillFixture(t)
+	writeSkillFile(t, opencodeDB(), "")
+	queries := 0
+	opencodeQuery = func(context.Context, string, string) ([]byte, error) { queries++; return []byte("[]"), nil }
+	probes := 0
+	saved := openFilesHook
+	openFilesHook = func() ([]string, error) { probes++; return nil, nil }
+	t.Cleanup(func() { openFilesHook = saved })
+	gh := newFakeGitHub(t, map[string]string{"skills/a/SKILL.md": "a1\n", "skills/b/SKILL.md": "b1\n"})
+	repo := gh.materialize(t)
+	treeA, _ := gitTreeHash(filepath.Join(repo, "skills/a"))
+	treeB, _ := gitTreeHash(filepath.Join(repo, "skills/b"))
+	a := installLocked(t, home, "a", map[string]string{"SKILL.md": "a1\n"}, treeA)
+	b := installLocked(t, home, "b", map[string]string{"SKILL.md": "b1\n"}, treeB)
+	gh.files["skills/a/SKILL.md"], gh.files["skills/b/SKILL.md"] = "a2\n", "b2\n"
+
+	if ups, err := (Cleaner{}).ListSkillOrigins(context.Background()); err != nil || len(ups) != 2 {
+		t.Fatalf("origins = %+v, %v", ups, err)
+	}
+	if ups, err := (Cleaner{}).CheckSkillUpdates(context.Background()); err != nil || len(ups) != 2 || ups[0].Status != "update" {
+		t.Fatalf("check = %+v, %v", ups, err)
+	}
+	res, err := Cleaner{}.UpgradeSkills(context.Background(), []SkillUpgradeRequest{{Path: a}, {Path: b}})
+	if err != nil || len(res) != 2 || res[0].Error != "" || res[1].Error != "" {
+		t.Fatalf("upgrade = %+v, %v", res, err)
+	}
+	if queries != 0 {
+		t.Fatalf("usage records read %d times", queries)
+	}
+	if probes != 1 {
+		t.Fatalf("usage probed %d times for one upgrade", probes)
+	}
 }
 
 func noOpenFiles(t *testing.T) {

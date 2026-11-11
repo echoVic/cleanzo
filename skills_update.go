@@ -612,21 +612,21 @@ func fetchGitHubTree(ctx context.Context, repo, ref string) (map[string]string, 
 // CheckSkillUpdates compares the skills that have an origin with their
 // source. Repositories are listed once each; nothing is downloaded.
 func (c Cleaner) CheckSkillUpdates(ctx context.Context) ([]SkillUpdate, error) {
-	scan, err := c.ScanSkills(ctx)
+	skills, err := skillEntries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return checkSkillUpdates(ctx, scan.Skills, true), nil
+	return checkSkillUpdates(ctx, skills, true), nil
 }
 
 // ListSkillOrigins reports the skills that have an origin, without going
 // to the network.
 func (c Cleaner) ListSkillOrigins(ctx context.Context) ([]SkillUpdate, error) {
-	scan, err := c.ScanSkills(ctx)
+	skills, err := skillEntries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return checkSkillUpdates(ctx, scan.Skills, false), nil
+	return checkSkillUpdates(ctx, skills, false), nil
 }
 
 func checkSkillUpdates(ctx context.Context, skills []Skill, online bool) []SkillUpdate {
@@ -855,11 +855,11 @@ type SkillUpgradeResult struct {
 // checked again first; a folder with local changes is upgraded only with
 // Force. Archives are downloaded once per repository.
 func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) ([]SkillUpgradeResult, error) {
-	scan, err := c.ScanSkills(ctx)
+	skills, err := skillEntries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	origins := skillOrigins(ctx, scan.Skills)
+	origins := skillOrigins(ctx, skills)
 	cache := &treeCache{trees: map[string]*githubTree{}}
 	archives := map[string]skillArchive{} // repo@ref -> extracted root and Git modes
 	defer func() {
@@ -867,6 +867,14 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 			os.RemoveAll(filepath.Dir(dir.root))
 		}
 	}()
+	// What is in use is read once, when the first folder gets that far.
+	var guard *usageGuard
+	inUse := func(folder string) bool {
+		if guard == nil {
+			guard = skillGuard()
+		}
+		return guard.inUse(folder)
+	}
 	results := []SkillUpgradeResult{}
 	for _, r := range reqs {
 		if ctx.Err() != nil {
@@ -878,7 +886,7 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 			results = append(results, res)
 			continue
 		}
-		if err := upgradeOne(ctx, r, origins, cache, archives, &res); err != nil {
+		if err := upgradeOne(ctx, r, origins, cache, archives, inUse, &res); err != nil {
 			res.Error = err.Error()
 		}
 		results = append(results, res)
@@ -886,7 +894,7 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 	return results, nil
 }
 
-func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]SkillOrigin, cache *treeCache, archives map[string]skillArchive, res *SkillUpgradeResult) error {
+func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]SkillOrigin, cache *treeCache, archives map[string]skillArchive, inUse func(string) bool, res *SkillUpgradeResult) error {
 	// Origins are keyed by the resolved folder, as the scan reports it.
 	folder := resolvePath(filepath.Clean(r.Path))
 	o, ok := origins[folder]
@@ -897,7 +905,7 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	if err := skillFolderOK(folder, ctx); err != nil {
 		return err
 	}
-	if skillGuard().inUse(folder) {
+	if inUse(folder) {
 		return errSkillInUse
 	}
 	u := checkOne(ctx, folder, filepath.Base(folder), o, cache, true, skillNow().Unix())
