@@ -418,9 +418,18 @@ func pickGrowthNotifications(alerts []GrowthAlert, n *growthNotified, now time.T
 		}
 		n.Count[today]++
 	}
+	stale := func(d string) bool {
+		t, err := time.Parse(time.DateOnly, d)
+		return err != nil || now.Sub(t) > 8*24*time.Hour
+	}
 	for d := range n.Count {
-		if t, err := time.Parse(time.DateOnly, d); err != nil || now.Sub(t) > 8*24*time.Hour {
+		if stale(d) {
 			delete(n.Count, d)
+		}
+	}
+	for k, d := range n.Day {
+		if stale(d) {
+			delete(n.Day, k)
 		}
 	}
 	for k, t := range n.Week {

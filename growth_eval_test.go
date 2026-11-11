@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"math"
 	"path/filepath"
 	"strings"
@@ -371,6 +372,24 @@ func TestPickGrowthNotifications(t *testing.T) {
 	}
 	if got := pickGrowthNotifications(week, &n, tomorrow.Add(48*time.Hour)); len(got) != 0 {
 		t.Fatalf("a seven-day alert waits a week: %+v", got)
+	}
+}
+
+// The date of each owner's last notification is kept as long as the daily
+// counts are, so owners that stopped growing do not pile up in notified.json.
+func TestPickGrowthNotificationsForgetsOldDays(t *testing.T) {
+	now := t0
+	n := loadGrowthNotified(t.TempDir())
+	n.Day["app:old"] = now.Add(-9 * 24 * time.Hour).Format(time.DateOnly)
+	n.Day["app:junk"] = "not a date"
+	n.Day["app:recent"] = now.Add(-2 * 24 * time.Hour).Format(time.DateOnly)
+	pickGrowthNotifications([]GrowthAlert{{Key: "app:new", Window: "day", Bytes: gb}}, &n, now)
+	want := map[string]string{
+		"app:recent": now.Add(-2 * 24 * time.Hour).Format(time.DateOnly),
+		"app:new":    now.Format(time.DateOnly),
+	}
+	if !maps.Equal(n.Day, want) {
+		t.Fatalf("day = %v, want %v", n.Day, want)
 	}
 }
 
