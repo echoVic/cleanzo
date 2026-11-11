@@ -30,6 +30,10 @@ export function textOf(node: React.ReactNode): string {
 /** 最后一条 toast 的文字和类型。 */
 export interface Toasted { text: string; kind: string }
 
+/** 页面连着重新渲染超过这么多遍（一次渲染里，或 settle 里连着的几轮）就算停不下来。 */
+const MAX_RERENDERS = 20;
+const notConverging = () => new Error("页面渲染未收敛");
+
 export function pageHarness<P extends object>(Component: (p: P) => React.ReactNode, initial: P) {
   const slots: Slot[] = [];
   let pending: { slot: Slot; effect: () => unknown; deps?: readonly unknown[] }[] = [];
@@ -121,14 +125,14 @@ export function pageHarness<P extends object>(Component: (p: P) => React.ReactNo
   });
 
   function render() {
-    for (let pass = 0; pass < 20; pass++) {
+    // 渲染期间改了状态：像 React 一样丢掉这一遍，马上重新渲染；一直改就是停不下来。
+    for (let pass = 0; ; pass++) {
+      if (pass >= MAX_RERENDERS) throw notConverging();
       dirty = false;
       cursor = 0;
       pending = [];
       rendering = true;
-      tree = Component(props);
-      rendering = false;
-      // 渲染期间改了状态：像 React 一样丢掉这一遍，马上重新渲染。
+      try { tree = Component(props); } finally { rendering = false; }
       if (!dirty) break;
     }
     const effects = pending;
@@ -148,11 +152,23 @@ export function pageHarness<P extends object>(Component: (p: P) => React.ReactNo
     toasts,
     /** 换 props 并重新渲染（下一次 settle）。 */
     setProps(next: Partial<P>) { props = { ...props, ...next }; dirty = true; },
-    /** 渲染、执行 effect、等异步回调，直到状态不再变化。 */
+    /**
+     * 跑 40 轮：状态变了就渲染、执行 effect，再等一个宏任务让异步回调跑完。
+     * 连着超过 MAX_RERENDERS 轮都要重新渲染（effect 每次都改状态，或异步回调每轮都改）时抛出「页面渲染未收敛」。
+     * 最后以渲染收尾，读到的树就是最新的状态。
+     */
     async settle() {
+      let busyRounds = 0;
       for (let i = 0; i < 40; i++) {
-        if (dirty && !rendering) render();
+        if (dirty && !rendering) {
+          if (++busyRounds > MAX_RERENDERS) throw notConverging();
+          render();
+        } else busyRounds = 0;
         await new Promise((r) => setImmediate(r));
+      }
+      for (let pass = 0; dirty && !rendering; pass++) {
+        if (pass >= MAX_RERENDERS) throw notConverging();
+        render();
       }
     },
     all,
@@ -168,13 +184,19 @@ export function pageHarness<P extends object>(Component: (p: P) => React.ReactNo
       if (!el) throw new Error(`no clickable element "${label}"`);
       el.props.onClick();
     },
+    /** 执行 effect 的清理，再放回 hook 和全局对象；某个清理抛错也照样放回，最后抛出第一个错误。 */
     close() {
-      for (const s of slots) s.cleanup?.();
+      const errors: unknown[] = [];
+      for (const s of slots) {
+        try { s.cleanup?.(); } catch (e) { errors.push(e); }
+        s.cleanup = undefined;
+      }
       for (const spy of spies) spy.mockRestore();
       Object.assign(globalThis, {
         document: previous.document, window: previous.window,
         requestAnimationFrame: previous.raf, cancelAnimationFrame: previous.cancelRaf, CSS: previous.css,
       });
+      if (errors.length > 0) throw errors[0];
     },
   };
 }
@@ -211,7 +233,7 @@ export function fakeStream<T>() {
 
 /**
  * 一个测试对全局状态的改动：spy、页面的 api 对象、globalThis 上的成员、界面语言、挂上的页面。
- * 每改一处先记下怎么还原；restore 按相反顺序全部还原，某一步出错时其余照样还原，最后抛出第一个错误。
+ * 每改一处先记下怎么还原；restore 按相反顺序全部还原，某一步出错时其余照样还原。
  * 用法：const env = changes(); try { 搭建…断言… } finally { env.restore(); }
  */
 export function changes() {
@@ -225,11 +247,19 @@ export function changes() {
       undo.push(() => spy.mockRestore());
       return spy;
     },
-    /** 换掉对象上的几个成员，还原时放回原来的值。只查成员名：替身（如 fakeStream）不必和原来的类型一致。 */
+    /**
+     * 换掉对象上的几个成员，还原时放回原来的值；原来没有的成员还原时删掉。
+     * 只查成员名：替身（如 fakeStream）不必和原来的类型一致。
+     */
     assign<T extends object>(obj: T, over: { [K in keyof T]?: unknown }) {
       const target = obj as Record<string, unknown>;
-      const saved = Object.fromEntries(Object.keys(over).map((k) => [k, target[k]]));
-      undo.push(() => { Object.assign(target, saved); });
+      const saved = Object.keys(over).map((k) => ({ k, own: Object.hasOwn(target, k), value: target[k] }));
+      undo.push(() => {
+        for (const { k, own, value } of saved) {
+          if (own) target[k] = value;
+          else delete target[k];
+        }
+      });
       Object.assign(obj, over);
     },
     /** 切换界面语言，还原时回到原来的偏好。 */
@@ -244,12 +274,16 @@ export function changes() {
       undo.push(page.close);
       return page;
     },
+    /**
+     * 按相反顺序还原全部改动。restore 在 finally 里调用，这里同步抛错会盖住测试本身的失败：
+     * 还原出的错误改在微任务里抛出，测试的错误照常报告，还原的错误也算作这个（async）测试的错误。
+     */
     restore() {
       const errors: unknown[] = [];
       for (let restore = undo.pop(); restore; restore = undo.pop()) {
         try { restore(); } catch (e) { errors.push(e); }
       }
-      if (errors.length > 0) throw errors[0];
+      for (const error of errors) queueMicrotask(() => { throw error; });
     },
   };
 }
