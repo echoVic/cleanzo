@@ -703,7 +703,11 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 	out, err := runToolWith(run, tool, []string{"upgrade", "--cask", a.token}, brewUpgradeTimeout, runToolDetached)
 	after, read := readAppBundle(run, a.path)
 	res.Version = after.short
-	if state, _ := caskState(after.short, after.build, a.latest); read && state == "current" {
+	// A bundle whose build says nothing caskState can compare can read as an
+	// update once installed, so a bundle brew changed and exited zero on is
+	// done too.
+	changed := after.short != b.short || after.build != b.build
+	if state, _ := caskState(after.short, after.build, a.latest); read && (state == "current" || err == nil && changed) {
 		forgetAppAction(id, a.revision)
 		res.Done, res.Command = true, ""
 		return res

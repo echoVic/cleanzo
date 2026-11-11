@@ -985,6 +985,61 @@ echo "==> Upgrading wechat"`)
 	}
 }
 
+// When the bundle's build says nothing caskState can compare, the cask's
+// version can read as an update even once installed. brew exiting zero with
+// the bundle's short version or build changed is then a done upgrade; an
+// unchanged bundle, or brew failing, is not.
+func TestUpgradeAppAcceptsAChangedBundle(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		short, build, cask     string
+		afterShort, afterBuild string
+		exit                   int
+		done                   bool
+	}{
+		{"build changed", "4.1.15", "260000", "4.1.15.55", "4.1.15", "270135", 0, true},
+		{"short version changed", "1.2.2", "4567", "1.2.3.4567", "1.2.3", "4567", 0, true},
+		{"unchanged", "4.1.15", "260000", "4.1.15.55", "4.1.15", "260000", 0, false},
+		{"brew failed", "4.1.15", "260000", "4.1.15.55", "4.1.15", "270135", 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if state, _ := caskState(tc.afterShort, tc.afterBuild, tc.cask); state != "update" {
+				t.Fatalf("caskState after the upgrade = %s, want the shape that still reads as an update", state)
+			}
+			home := t.TempDir()
+			setHome(t, home)
+			app := fakeBundle(t, filepath.Join(home, "Applications"), "WeChat", map[string]string{
+				"CFBundleIdentifier": "com.tencent.xinWeChat", "CFBundleShortVersionString": tc.short, "CFBundleVersion": tc.build,
+			}, false, "")
+			bin := t.TempDir()
+			plist := filepath.Join(app, "Contents", "Info.plist")
+			fakeTool(t, bin, "brew", fmt.Sprintf(`sed -i '' 's/>%s</>%s</; s/>%s</>%s</' %s
+echo "==> Upgrading wechat"
+exit %d`, tc.short, tc.afterShort, tc.build, tc.afterBuild, shellPath(plist), tc.exit))
+			savedDirs := toolDirs
+			toolDirs = func() []string { return []string{bin} }
+			t.Cleanup(func() { toolDirs = savedDirs })
+			resetAppActions()
+			t.Cleanup(resetAppActions)
+			stubUsage(t, &usageGuard{running: map[string]bool{}})
+			rememberAppAction(app, appUpdateAction{kind: "brew", token: "wechat", path: app, latest: tc.cask})
+			res, err := Cleaner{}.UpgradeApp(context.Background(), app)
+			if err != nil || res.Version != tc.afterShort {
+				t.Fatalf("%+v %v", res, err)
+			}
+			if tc.done && (!res.Done || res.Code != "" || res.Command != "") {
+				t.Fatalf("a changed bundle after brew succeeded: %+v", res)
+			}
+			if !tc.done && (res.Done || res.Code != "brew-failed" || res.Detail != "==> Upgrading wechat" || res.Command != "brew upgrade --cask wechat") {
+				t.Fatalf("want brew-failed: %+v", res)
+			}
+			if _, cached := appActionFor(app); cached == tc.done {
+				t.Fatalf("action cached = %v after done = %v", cached, res.Done)
+			}
+		})
+	}
+}
+
 // Closing the window cancels the page's context while brew runs. brew must
 // still finish, and the bundle must still be read afterwards: killing it can
 // leave the old app removed and the new one not yet moved in.
