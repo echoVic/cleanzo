@@ -52,10 +52,6 @@ export interface AIModelEntry {
   size: number;
   /** newest modification, unix seconds; 0 when unknown */
   last: number;
-  /** aiModelKindManifest when blobs must go with the model */
-  kind: string;
-  /** for a manifest: the blobs this model accounts for */
-  blobs: string[];
 }
 
 /** AIModelSelection picks the models of one runtime to clean. */
@@ -550,7 +546,6 @@ export interface JunkItem {
   paths: string[];
   top: TopItem[];
   subs: SubItem[];
-  skipped?: string;
   /** measured candidates, including in-use entries */
   foundSize?: number;
   readErrors?: number;
