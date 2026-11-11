@@ -146,7 +146,9 @@ func scanTrashReminder(ctx context.Context, env junkEnv) (trashReminderSnapshot,
 	return s, nil
 }
 
-// A changed descendant keeps the entire original top-level item recoverable.
+// trashUnchanged reports whether nothing inside a Trash entry changed after
+// at. A changed descendant keeps the entire top-level entry recoverable; an
+// entry that cannot be read through counts as changed.
 func trashUnchanged(ctx context.Context, path string, at time.Time) bool {
 	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -166,7 +168,8 @@ func trashUnchanged(ctx context.Context, path string, at time.Time) bool {
 	}) == nil
 }
 
-// cleanTrashReminder uses the captured candidates, plus the existing removal guards.
+// cleanTrashReminder uses the captured candidates, plus the existing removal
+// guards; cleanItem keeps what changed in the Trash after the snapshot.
 func cleanTrashReminder(ctx context.Context, env junkEnv, s trashReminderSnapshot, progress func(int64)) CleanResult {
 	res := CleanResult{Name: "sys.trash"}
 	if ctx.Err() != nil || !env.fda {
@@ -175,9 +178,7 @@ func cleanTrashReminder(ctx context.Context, env junkEnv, s trashReminderSnapsho
 	env.ctx = ctx
 	spec := s.spec
 	var cleaned int64
-	return cleanItem(ctx, spec, env, nil, s.At, cleanHooks{beforeRemove: func(path string) bool {
-		return trashUnchanged(ctx, path, s.At)
-	}, removed: func(_, _ string, b int64) {
+	return cleanItem(ctx, spec, env, nil, s.At, cleanHooks{removed: func(_, _ string, b int64) {
 		if progress != nil {
 			progress(b)
 		}

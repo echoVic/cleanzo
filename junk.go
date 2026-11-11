@@ -1159,8 +1159,10 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			res.InUse++
 			continue
 		}
+		// What reached the Trash after the scan stays recoverable: an entry
+		// stays whole when anything inside it changed since.
 		inTrash := runtime.GOOS != "windows" && trash != "" && within(key, trash)
-		if inTrash && !scannedAt.IsZero() && changedAt(info).After(scannedAt) {
+		if inTrash && !scannedAt.IsZero() && !trashUnchanged(ctx, e.path, scannedAt) {
 			continue
 		}
 		permanent := !spec.item.Trash || inTrash

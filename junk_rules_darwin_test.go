@@ -99,3 +99,23 @@ func TestCleanKeepsWhatReachedTheTrashAfterTheScan(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 }
+
+// TestCleanKeepsAFolderThatChangedInTheTrash: a file that reaches a folder
+// already in the Trash after the scan keeps that whole folder recoverable,
+// even when only a folder deep inside it changed.
+func TestCleanKeepsAFolderThatChangedInTheTrash(t *testing.T) {
+	env := testEnv(t)
+	trash := filepath.Join(env.home, ".Trash")
+	writeFile(t, filepath.Join(trash, "old.bin"), 100)
+	kept := filepath.Join(trash, "folder", "nested", "old.bin")
+	writeFile(t, kept, 200)
+	time.Sleep(20 * time.Millisecond)
+	scannedAt := time.Now()
+	time.Sleep(20 * time.Millisecond)
+	fresh := filepath.Join(trash, "folder", "nested", "new.bin")
+	writeFile(t, fresh, 300)
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.UnixMilli(scannedAt.UnixMilli()), cleanHooks{})[0]
+	if exists(filepath.Join(trash, "old.bin")) || !exists(kept) || !exists(fresh) || res.Freed != 100 {
+		t.Fatalf("result = %+v", res)
+	}
+}
