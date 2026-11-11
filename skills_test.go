@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,33 @@ func findSkill(t *testing.T, res SkillScanResult, name string) Skill {
 	}
 	t.Fatalf("skill %q not listed; have %d", name, len(res.Skills))
 	return Skill{}
+}
+
+// TestSkillRefsWindowsPaths: on Windows, Codex and OpenCode record the
+// SKILL.md they read with backslashes (escaped once by JSON, or twice when
+// the arguments are JSON in a JSON string), in any letter case, or with
+// forward slashes after the drive. Only the known skills folders count.
+func TestSkillRefsWindowsPaths(t *testing.T) {
+	home := `C:\Users\me`
+	roots := map[string]bool{`C:\Users\me\.agents\skills`: true, `C:\Users\me\.claude\skills`: true}
+	for in, want := range map[string][]string{
+		`{"command":"Get-Content C:\\Users\\me\\.agents\\skills\\pdf\\SKILL.md"}`:               {"pdf"},
+		`"{\"command\":\"type C:\\\\Users\\\\me\\\\.claude\\\\skills\\\\doc\\\\SKILL.md\"}"`:    {"doc"},
+		`{"path":"c:/users/ME/.agents/skills/pdf/SKILL.md"}`:                                    {"pdf"},
+		`{"command":"cat ~\\.agents\\skills\\xlsx\\SKILL.md\nls"}`:                              {"xlsx"},
+		`{"path":"D:\\other\\skills\\pdf\\SKILL.md"}`:                                           nil,
+		`{"path":"C:\\Users\\me\\.claude\\plugins\\p\\skills\\pdf\\SKILL.md"}`:                  nil,
+		`{"a":"C:\\Users\\me\\.agents\\skills\\a\\SKILL.md","b":"~/.claude/skills/b/SKILL.md"}`: {"a", "b"},
+	} {
+		if got := skillRefsIn(in, roots, home, true); !slices.Equal(got, want) {
+			t.Errorf("%s: got %v, want %v", in, got, want)
+		}
+	}
+	// Elsewhere paths use slashes, and an escape before one is no separator.
+	unix := map[string]bool{"/Users/me/.agents/skills": true}
+	if got := skillRefsIn(`{"cmd":"ls\n/Users/me/.agents/skills/pdf/SKILL.md"}`, unix, "/Users/me", false); !slices.Equal(got, []string{"pdf"}) {
+		t.Errorf("unix path: got %v", got)
+	}
 }
 
 func TestSkillDescriptionForms(t *testing.T) {

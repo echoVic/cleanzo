@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -772,14 +773,47 @@ var skillPathRef = regexp.MustCompile(`((?:~|/)[^"'\s\\]*)/([A-Za-z0-9._-]+)/SKI
 // one of the known skills folders; plugin and memory skills that happen to
 // share a name are not the user's.
 func knownSkillRef(s string, roots map[string]bool) []string {
+	return skillRefsIn(s, roots, homeDir(), runtime.GOOS == "windows")
+}
+
+// windowsSkillPathRef matches a Windows path to a SKILL.md, from a drive or
+// ~, with either separator; JSON doubles each backslash once, or twice for
+// arguments that are JSON in a JSON string.
+var windowsSkillPathRef = regexp.MustCompile(`((?:~|[A-Za-z]:)(?:[\\/]+[^"'\s\\/]+)*)[\\/]+([A-Za-z0-9._-]+)[\\/]+SKILL\.md`)
+
+var windowsSeparators = regexp.MustCompile(`[\\/]+`)
+
+// windowsRefKey spells a Windows path one way for comparing: one slash for
+// any run of separators, lower case.
+func windowsRefKey(p string) string {
+	return strings.TrimSuffix(strings.ToLower(windowsSeparators.ReplaceAllString(p, "/")), "/")
+}
+
+// skillRefsIn is knownSkillRef for a given home folder and platform.
+func skillRefsIn(s string, roots map[string]bool, home string, windows bool) []string {
 	var out []string
-	home := homeDir()
+	if windows {
+		known := map[string]bool{}
+		for root := range roots {
+			known[windowsRefKey(root)] = true
+		}
+		for _, m := range windowsSkillPathRef.FindAllStringSubmatch(s, -1) {
+			dir := m[1]
+			if strings.HasPrefix(dir, "~") {
+				dir = home + strings.TrimPrefix(dir, "~")
+			}
+			if known[windowsRefKey(dir)] && !slices.Contains(out, m[2]) {
+				out = append(out, m[2])
+			}
+		}
+		return out
+	}
 	for _, m := range skillPathRef.FindAllStringSubmatch(strings.ReplaceAll(s, `\/`, `/`), -1) {
 		dir := m[1]
 		if strings.HasPrefix(dir, "~") {
 			dir = home + strings.TrimPrefix(dir, "~")
 		}
-		if roots[filepath.Clean(dir)] && !slices.Contains(out, m[2]) {
+		if roots[path.Clean(dir)] && !slices.Contains(out, m[2]) {
 			out = append(out, m[2])
 		}
 	}
