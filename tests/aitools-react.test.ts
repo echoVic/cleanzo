@@ -117,7 +117,7 @@ async function aiPage(env: Changes, scans: (() => Promise<AIScanResult>)[], cras
   env.spy(aiApi, "scanTool").mockImplementation(() => (scans.shift() ?? (() => Promise.reject(new Error("no scan"))))());
   env.spy(aiApi, "clean").mockImplementation(async (sel) => { cleaned.push(sel); return { freed: 100, parts: [] }; });
   env.spy(Cleaner, "crashDumps").mockImplementation(async () => crash[Math.min(crashReads++, crash.length - 1)]!);
-  const page = env.page(AIToolPage, { toolId: "codex", toolName: "Codex" });
+  const page = env.page(AIToolPage, { toolId: "codex", toolName: "Codex", visit: 1 });
   return {
     page, cleaned, forgetCrashDumps,
     /** 空闲页的「扫描」或页头的「重新扫描」。 */
@@ -145,6 +145,42 @@ test("the Codex crash-dump banner is measured again with each scan", async () =>
     ai.scan();
     await ai.page.settle();
     expect(ai.page.text()).not.toContain(banner);
+  } finally { env.restore(); }
+});
+
+test("the Codex crash-dump banner is read again each time the view is shown", async () => {
+  const banner = t("ai.crash.big", { size: human(6 * GB) });
+  const env = (await import("./page-harness")).changes();
+  try {
+    const ai = await aiPage(env, [], [dumps(6 * GB), dumps(0)]);
+    await ai.page.settle();
+    expect(ai.page.text()).toContain(banner);
+    // 垃圾清理清掉崩溃转储后缓存失效；离开再回到这一页，不扫描，提示也跟着变。
+    ai.forgetCrashDumps();
+    ai.page.setProps({ visit: 2 });
+    await ai.page.settle();
+    expect(ai.page.text()).not.toContain(banner);
+  } finally { env.restore(); }
+});
+
+test("each time an AI tool view is shown, its page is rendered with a new visit", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const mounted: [string, number][] = [];
+    // 截获 mountAITool 收到的参数，不挂真的 React 根；entry 建容器用的 document 换成最小替身。
+    const mount = await import("../src/react/ai/mount");
+    env.spy(mount, "mountAITool").mockImplementation((_el, toolId, _toolName, visit) => { mounted.push([toolId, visit]); });
+    env.assign(globalThis, { document: {
+      createElement: () => ({ className: "", classList: { toggle() {} } }),
+      querySelector: () => ({ appendChild() {} }),
+    } });
+    const { showReactAITool } = await import("../src/react/ai/entry");
+    showReactAITool("codex", "Codex");
+    showReactAITool("claude", "Claude Code");
+    showReactAITool("codex", "Codex");
+    const codexVisits = mounted.filter(([id]) => id === "codex").map(([, visit]) => visit);
+    expect(codexVisits).toHaveLength(2);
+    expect(codexVisits[1]).not.toBe(codexVisits[0]);
   } finally { env.restore(); }
 });
 

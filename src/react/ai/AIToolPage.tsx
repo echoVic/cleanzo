@@ -24,6 +24,8 @@ const CRASH_NOTE_BYTES = 100 * 1024 * 1024;
 interface AIToolPageProps {
   toolId: string;
   toolName: string;
+  /** 每次显示这一视图加一：根不重挂，靠它重新读崩溃转储。 */
+  visit: number;
 }
 
 interface ConfirmedSelection {
@@ -33,7 +35,7 @@ interface ConfirmedSelection {
   size: number;
 }
 
-export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
+export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
   const t = useT();
   const reveal = (path: string) => {
     void aiApi.reveal(path).catch((e: unknown) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
@@ -51,7 +53,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   const [busy, setBusy] = React.useState(false); // 清理进行中：按钮不能再点出第二次清理
   const [scannedAt, setScannedAt] = React.useState(0);
   // Codex 桌面版的崩溃转储不在 ~/.codex 里，由垃圾清理的「应用崩溃转储」负责；这里只提示。
-  // 进入页面和每次扫描都读一次：垃圾清理清掉转储后缓存失效，提示跟着重新量。
+  // 每次显示这一页和每次扫描都读一次：垃圾清理清掉转储后缓存失效，提示跟着重新量。
   const [crash, setCrash] = React.useState({ bytes: 0, threshold: Infinity });
   const crashSeq = React.useRef(0);
   const readCrash = React.useCallback(() => {
@@ -65,7 +67,7 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
   React.useEffect(() => {
     readCrash();
     return () => { crashSeq.current++; };
-  }, [readCrash]);
+  }, [readCrash, visit]);
 
   const parts = tool?.parts ?? [];
   const visible = parts.filter(offered);

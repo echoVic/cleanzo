@@ -3,6 +3,8 @@ import { mountAITool } from "./mount";
 import { aiApi } from "./api";
 
 const containers = new Map<string, HTMLElement>();
+/** 显示过几次 AI 工具视图：每次显示都给页面一个新的 visit。 */
+let visits = 0;
 
 /** 启动时按安装情况显示侧栏「AI 工具」分组和各工具入口。 */
 export async function initReactAITools() {
@@ -27,5 +29,5 @@ export function showReactAITool(toolId: string, toolName: string) {
     containers.set(toolId, host);
   }
   for (const [id, el] of containers) el.classList.toggle("hidden", id !== toolId);
-  mountAITool(host, toolId, toolName);
+  mountAITool(host, toolId, toolName, ++visits);
 }
