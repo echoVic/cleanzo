@@ -61,6 +61,41 @@ func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
 	return out, err
 }
 
+// detachedOutputTail is how much of a detached command's output is read
+// back: its end, where the result is.
+const detachedOutputTail = 64 << 10
+
+// runToolDetached runs a command that must finish even when Cleanzo quits
+// under it, as a brew upgrade must. Its output goes to a file, unlinked once
+// open, instead of a pipe: a write to a pipe whose reader has gone kills the
+// writer. It runs in its own process group, which cancellation kills while
+// Cleanzo runs, and which is killed once the command ends, as runToolCmd
+// does. The end of the output is read back from the file then.
+func runToolDetached(cmd *exec.Cmd) ([]byte, error) {
+	f, err := os.CreateTemp("", "cleanzo-tool-*.log")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	_ = os.Remove(f.Name()) // the command and f keep it open; nothing is left if Cleanzo quits
+	cmd.Stdout, cmd.Stderr = f, f
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 100 * time.Millisecond
+	err = cmd.Run()
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	info, statErr := f.Stat()
+	if statErr != nil {
+		return nil, err
+	}
+	off := max(0, info.Size()-detachedOutputTail)
+	out := make([]byte, info.Size()-off)
+	n, _ := f.ReadAt(out, off)
+	return out[:n], err
+}
+
 // toolPath builds the fixed PATH used for official cleanup tools.
 func toolPath(tool string) string {
 	return "PATH=" + filepath.Dir(tool) + ":/usr/bin:/bin:/usr/sbin:/sbin"

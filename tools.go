@@ -140,6 +140,11 @@ func commandLineMatches(line string, patterns []string) bool {
 
 // runTool bounds an official command and kills its process group on cancellation.
 func runTool(ctx context.Context, tool string, args []string, timeout time.Duration) (string, error) {
+	return runToolWith(ctx, tool, args, timeout, runToolCmd)
+}
+
+// runToolWith is runTool with run starting the command and waiting for it.
+func runToolWith(ctx context.Context, tool string, args []string, timeout time.Duration, run func(*exec.Cmd) ([]byte, error)) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := quietCommand(exec.CommandContext(ctx, tool, args...))
@@ -147,7 +152,7 @@ func runTool(ctx context.Context, tool string, args []string, timeout time.Durat
 	if filepath.Base(tool) == "brew" {
 		cmd.Env = append(cmd.Env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1")
 	}
-	out, err := runToolCmd(cmd)
+	out, err := run(cmd)
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}

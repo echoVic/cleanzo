@@ -640,6 +640,9 @@ func (m appBrewLock) lockContext(ctx context.Context) bool {
 
 var appUpgradeMu = make(appBrewLock, 1)
 
+// brewUpgradeTimeout bounds one brew upgrade; tests shorten it.
+var brewUpgradeTimeout = 10 * time.Minute
+
 // upgradeApp does what the last check found for id (spec section 5).
 func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 	res := AppUpgradeResult{ID: id}
@@ -692,10 +695,12 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 	// A kill can land between removing the old app and moving the new one in,
 	// so once brew starts, the call's context ending does not stop it, and
 	// closing the last window does not quit Cleanzo under it (holdOpen). The
-	// timeout still stops it. Quitting Cleanzo outright can still cut it short,
-	// as brew writes to Cleanzo's pipe. The bundle is read afterwards either way.
+	// timeout still stops it. Quitting Cleanzo outright does not: brew runs in
+	// its own process group and writes to a file, not to Cleanzo's pipe
+	// (runToolDetached), so it finishes without Cleanzo. The bundle is read
+	// afterwards either way.
 	run := context.WithoutCancel(ctx)
-	out, err := runTool(run, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
+	out, err := runToolWith(run, tool, []string{"upgrade", "--cask", a.token}, brewUpgradeTimeout, runToolDetached)
 	after, read := readAppBundle(run, a.path)
 	res.Version = after.short
 	if state, _ := caskState(after.short, after.build, a.latest); read && state == "current" {

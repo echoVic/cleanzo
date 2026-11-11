@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1058,6 +1059,123 @@ echo "==> Upgrading ghostty"`)
 	// Its end lets Cleanzo quit, if the last window closed meanwhile.
 	if holdingOpen() || ended.Load() != 1 {
 		t.Fatalf("after the upgrade: holding %v, ended %d times", holdingOpen(), ended.Load())
+	}
+}
+
+// Cleanzo quits (Cmd+Q, Quit in the menu) while brew runs. brew writes on
+// after that and must still finish: an upgrade cut short can leave the old
+// app removed and the new one not yet moved in. A helper process plays
+// Cleanzo and exits while the fake brew waits; brew then writes to its
+// stdout and stderr and upgrades the bundle.
+func TestUpgradeAppBrewOutlivesCleanzo(t *testing.T) {
+	dir := t.TempDir()
+	home, bin, tmp := filepath.Join(dir, "home"), filepath.Join(dir, "bin"), filepath.Join(dir, "tmp")
+	mustMkdir(t, bin)
+	mustMkdir(t, tmp)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Ghostty", map[string]string{"CFBundleIdentifier": "com.mitchellh.ghostty", "CFBundleShortVersionString": "1.3.1"}, false, "")
+	started, release, finished := filepath.Join(bin, "started"), filepath.Join(bin, "release"), filepath.Join(bin, "finished")
+	plist := filepath.Join(app, "Contents", "Info.plist")
+	fakeTool(t, bin, "brew", `touch `+shellPath(started)+`
+i=0
+while [ ! -f `+shellPath(release)+` ] && [ $i -lt 1000 ]; do sleep 0.01; i=$((i+1)); done
+echo "==> Upgrading ghostty"
+echo "==> Removing App '/Applications/Ghostty.app'" >&2
+sed -i '' 's/1.3.1/1.4.0/' `+shellPath(plist)+`
+echo "==> Moving App 'Ghostty.app' to '/Applications/Ghostty.app'"
+touch `+shellPath(finished))
+	t.Cleanup(func() { _ = os.WriteFile(release, []byte("release"), 0o644) })
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestUpgradeAppBrewQuitHelper$")
+	helper.Env = append(os.Environ(), "CLEANZO_UPGRADE_HELPER="+dir, "TMPDIR="+tmp)
+	out, err := helper.CombinedOutput()
+	if err != nil || !exists(started) {
+		t.Fatalf("helper: %v, brew started=%v\n%s", err, exists(started), out)
+	}
+	if exists(finished) {
+		t.Fatal("brew finished before Cleanzo quit")
+	}
+	writeText(t, release, "release")
+	deadline := time.Now().Add(10 * time.Second)
+	for !exists(finished) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !exists(finished) {
+		t.Fatal("brew died after Cleanzo quit")
+	}
+	if data, _ := os.ReadFile(plist); !strings.Contains(string(data), "1.4.0") {
+		t.Fatalf("bundle after brew: %s", data)
+	}
+	// brew's output file is not left behind.
+	if left, _ := os.ReadDir(tmp); len(left) != 0 {
+		t.Fatalf("left in the temporary folder: %v", left)
+	}
+}
+
+// TestUpgradeAppBrewQuitHelper is Cleanzo for TestUpgradeAppBrewOutlivesCleanzo:
+// it starts the upgrade and exits once brew runs.
+func TestUpgradeAppBrewQuitHelper(t *testing.T) {
+	dir := os.Getenv("CLEANZO_UPGRADE_HELPER")
+	if dir == "" {
+		return
+	}
+	home, bin := filepath.Join(dir, "home"), filepath.Join(dir, "bin")
+	setHome(t, home)
+	toolDirs = func() []string { return []string{bin} }
+	probeUsageFn = func() *usageGuard { return &usageGuard{running: map[string]bool{}} }
+	app := filepath.Join(home, "Applications", "Ghostty.app")
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "ghostty", path: app, latest: "1.4.0"})
+	go upgradeApp(context.Background(), app)
+	started := filepath.Join(bin, "started")
+	deadline := time.Now().Add(5 * time.Second)
+	for !exists(started) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !exists(started) {
+		t.Fatal("fixture brew did not start")
+	}
+	os.Exit(0) // Cleanzo quits while brew runs
+}
+
+// While Cleanzo runs, the timeout stops brew and every process it started.
+func TestUpgradeAppBrewTimeoutStopsItsGroup(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "Ghostty", map[string]string{"CFBundleIdentifier": "com.mitchellh.ghostty", "CFBundleShortVersionString": "1.3.1"}, false, "")
+	bin := t.TempDir()
+	pidFile := filepath.Join(bin, "child")
+	fakeTool(t, bin, "brew", `sleep 30 &
+echo $! > `+shellPath(pidFile)+`
+echo "==> Downloading"
+sleep 30`)
+	savedDirs, savedTimeout := toolDirs, brewUpgradeTimeout
+	toolDirs = func() []string { return []string{bin} }
+	brewUpgradeTimeout = 2 * time.Second
+	t.Cleanup(func() { toolDirs, brewUpgradeTimeout = savedDirs, savedTimeout })
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	rememberAppAction(app, appUpdateAction{kind: "brew", token: "ghostty", path: app, latest: "1.4.0"})
+
+	start := time.Now()
+	res, _ := Cleaner{}.UpgradeApp(context.Background(), app)
+	if res.Done || res.Code != "brew-failed" || res.Detail != "timeout" || res.Command != "brew upgrade --cask ghostty" || time.Since(start) > 10*time.Second {
+		t.Fatalf("timed out: %+v after %v", res, time.Since(start))
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if _, err := fmt.Sscan(string(data), &pid); err != nil || pid <= 0 {
+		t.Fatalf("child pid %q: %v", data, err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if syscall.Kill(pid, 0) == nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatal("brew's child outlived the timeout")
 	}
 }
 
