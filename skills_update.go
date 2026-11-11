@@ -699,6 +699,12 @@ func checkOneForPlatform(ctx context.Context, folder, name string, o SkillOrigin
 		return u
 	}
 	u.Remote = remote
+	if remote == local {
+		// The folder is the source's tree: nothing to upgrade and nothing
+		// to lose, whatever tree was recorded at install.
+		u.Status, u.Modified = "current", false
+		return u
+	}
 	base := o.Tree
 	if base == "" {
 		base = local

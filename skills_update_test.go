@@ -244,6 +244,24 @@ func TestUpgradeRefusesLocalChangesUnlessForced(t *testing.T) {
 	}
 }
 
+// TestIdenticalToUpstreamIsCurrent: a folder with the source's tree is
+// current and unmodified, even when the tree recorded at install is older
+// (the skill was brought up to date some other way).
+func TestIdenticalToUpstreamIsCurrent(t *testing.T) {
+	home := skillFixture(t)
+	gh := newFakeGitHub(t, map[string]string{"skills/doc/SKILL.md": "v1\n"})
+	tree1, _ := gitTreeHash(filepath.Join(gh.materialize(t), "skills/doc"))
+	gh.files["skills/doc/SKILL.md"] = "v2\n"
+	installLocked(t, home, "doc", map[string]string{"SKILL.md": "v2\n"}, tree1)
+	ups, err := Cleaner{}.CheckSkillUpdates(context.Background())
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("ups = %+v, %v", ups, err)
+	}
+	if u := ups[0]; u.Status != "current" || u.Modified || u.Remote != u.Local || u.Remote == tree1 {
+		t.Fatalf("identical to upstream = %+v", u)
+	}
+}
+
 func TestUpgradeRejectsArchiveThatDoesNotMatch(t *testing.T) {
 	home := skillFixture(t)
 	noOpenFiles(t)
