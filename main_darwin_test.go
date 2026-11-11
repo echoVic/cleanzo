@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 func TestSafeToClean(t *testing.T) {
@@ -563,6 +565,31 @@ func TestUsageGuardInUse(t *testing.T) {
 	}
 	if !(&usageGuard{failed: true}).inUse("/Users/me/anything") {
 		t.Error("a guard whose probe failed must report everything in use")
+	}
+}
+
+// TestUninstallProbeFailureIsNotInUse: when lsof or lsappinfo fails, the
+// uninstall refuses with usage-unknown, not with "quit the app first".
+func TestUninstallProbeFailureIsNotInUse(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	appPath := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	stubUsage(t, &usageGuard{failed: true})
+	res := Cleaner{}.UninstallApp(appPath)
+	if res.Moved != 0 || !slices.Equal(res.Failed, []string{appPath + ": usage-unknown"}) || !exists(appPath) {
+		t.Fatalf("failed probe must refuse with usage-unknown: %+v", res)
+	}
+}
+
+// TestScanOrphansProbeFailure: a Leftovers scan whose usage probe failed
+// reports usage-unknown instead of finishing with nothing found.
+func TestScanOrphansProbeFailure(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	writeFile(t, filepath.Join(home, "Library", "Application Support", "GoneApp", "data"), 2<<20)
+	stubUsage(t, &usageGuard{failed: true})
+	if err := (Cleaner{}).ScanOrphans(context.Background(), &mygo.Channel[OrphanItem]{}); !errors.Is(err, errUsageUnknown) {
+		t.Fatalf("ScanOrphans error = %v, want usage-unknown", err)
 	}
 }
 

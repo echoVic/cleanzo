@@ -1207,13 +1207,18 @@ var appleDataNames = map[string]bool{
 // completed measurement is streamed through onItem, one call at a time. It
 // stops when ctx is canceled. With no roots specified, it checks libraryRoots.
 func collectOrphans(ctx context.Context, onItem func(o OrphanItem), roots ...string) ([]OrphanItem, int64) {
+	return collectOrphansWith(ctx, probeUsage(), onItem, roots...)
+}
+
+// collectOrphansWith is collectOrphans with the usage snapshot g, which
+// leaves out what is in use.
+func collectOrphansWith(ctx context.Context, g *usageGuard, onItem func(o OrphanItem), roots ...string) ([]OrphanItem, int64) {
 	if len(roots) == 0 {
 		roots = libraryRoots
 	}
 	h := homeDir()
 	traversal := junkEnv{home: h, tmp: filepath.Clean(os.TempDir()), fda: true}
 	keys := installedKeys()
-	g := probeUsage()
 	type candidate struct {
 		path  string
 		kind  string

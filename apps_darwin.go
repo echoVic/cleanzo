@@ -50,8 +50,12 @@ func uninstallApp(path string) UninstallResult {
 		return res
 	}
 	// A running app would recreate what is removed under it, or keep its
-	// moved bundle running.
+	// moved bundle running. A failed probe says nothing about whether it runs.
 	g := probeUsage()
+	if g.failed {
+		res.Failed = append(res.Failed, path+": "+errUsageUnknown.Error())
+		return res
+	}
 	if g.inUse(resolvePath(path)) || g.running[strings.ToLower(bid)] {
 		res.Failed = append(res.Failed, path+": "+errInUse.Error())
 		return res
@@ -74,10 +78,16 @@ func uninstallApp(path string) UninstallResult {
 	return res
 }
 
-// scanOrphans preserves the macOS ScanOrphans behavior.
+// scanOrphans streams the macOS leftovers. A failed usage probe would hide
+// every candidate as in use, so the scan reports usage-unknown instead of
+// finishing with nothing found.
 func scanOrphans(ctx context.Context, ch *mygo.Channel[OrphanItem]) error {
 	start := time.Now()
-	_, total := collectOrphans(ctx, func(o OrphanItem) {
+	g := probeUsage()
+	if g.failed {
+		return errUsageUnknown
+	}
+	_, total := collectOrphansWith(ctx, g, func(o OrphanItem) {
 		_ = ch.Send(o)
 	})
 	// send a terminal sentinel so the frontend knows the scan finished
