@@ -778,8 +778,11 @@ func knownSkillRef(s string, roots map[string]bool) []string {
 
 // windowsSkillPathRef matches a Windows path to a SKILL.md, from a drive or
 // ~, with either separator; JSON doubles each backslash once, or twice for
-// arguments that are JSON in a JSON string.
-var windowsSkillPathRef = regexp.MustCompile(`((?:~|[A-Za-z]:)(?:[\\/]+[^"'\s\\/]+)*)[\\/]+([A-Za-z0-9._-]+)[\\/]+SKILL\.md`)
+// arguments that are JSON in a JSON string. A folder name may hold spaces,
+// as a profile folder named after the user's full name does, but no colon:
+// a Windows path has one only after its drive, so a match that runs into
+// the next path's drive gives way to a match from that drive.
+var windowsSkillPathRef = regexp.MustCompile(`((?:~|[A-Za-z]:)(?:[\\/]+[^"'\t\n\v\f\r\\/:]+)*)[\\/]+([A-Za-z0-9._-]+)[\\/]+SKILL\.md`)
 
 var windowsSeparators = regexp.MustCompile(`[\\/]+`)
 

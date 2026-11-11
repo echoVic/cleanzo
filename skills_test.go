@@ -69,6 +69,24 @@ func TestSkillRefsWindowsPaths(t *testing.T) {
 			t.Errorf("%s: got %v, want %v", in, got, want)
 		}
 	}
+	// A profile folder named after the user's full name holds a space. A path
+	// earlier on the line, or a URL before the drive, does not swallow it.
+	spaced := map[string]bool{`C:\Users\Ada Lovelace\.agents\skills`: true, `C:\Users\Ada Lovelace\.claude\skills`: true}
+	for in, want := range map[string][]string{
+		`{"command":"Get-Content 'C:\\Users\\Ada Lovelace\\.agents\\skills\\pdf\\SKILL.md'"}`:                          {"pdf"},
+		`{"command":"type \"C:\\Users\\Ada Lovelace\\.claude\\skills\\doc\\SKILL.md\""}`:                               {"doc"},
+		`"{\"command\":\"type \\\"C:\\\\Users\\\\Ada Lovelace\\\\.claude\\\\skills\\\\doc\\\\SKILL.md\\\"\"}"`:         {"doc"},
+		`{"path":"c:/users/ada lovelace/.agents/skills/pdf/SKILL.md"}`:                                                 {"pdf"},
+		`{"command":"copy C:\\tmp\\a b.txt D:\\x & type C:\\Users\\Ada Lovelace\\.agents\\skills\\pdf\\SKILL.md"}`:     {"pdf"},
+		`{"url":"file:///C:/Users/Ada%20Lovelace/x","path":"C:\\Users\\Ada Lovelace\\.agents\\skills\\pdf\\SKILL.md"}`: {"pdf"},
+		`{"command":"cat ~\\.claude\\skills\\xlsx\\SKILL.md"}`:                                                         {"xlsx"},
+		`{"path":"C:\\Users\\Ada Lovelace\\.claude\\plugins\\p\\skills\\pdf\\SKILL.md"}`:                               nil,
+		`{"path":"C:\\Users\\Ada\\.agents\\skills\\pdf\\SKILL.md"}`:                                                    nil,
+	} {
+		if got := skillRefsIn(in, spaced, `C:\Users\Ada Lovelace`, true); !slices.Equal(got, want) {
+			t.Errorf("%s: got %v, want %v", in, got, want)
+		}
+	}
 	// Elsewhere paths use slashes, and an escape before one is no separator.
 	unix := map[string]bool{"/Users/me/.agents/skills": true}
 	if got := skillRefsIn(`{"cmd":"ls\n/Users/me/.agents/skills/pdf/SKILL.md"}`, unix, "/Users/me", false); !slices.Equal(got, []string{"pdf"}) {
