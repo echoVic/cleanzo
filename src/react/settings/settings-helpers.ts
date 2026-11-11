@@ -33,6 +33,11 @@ export function resolveFolderName(typed: string, path: string): string {
   return typed.trim() || baseNameOf(path);
 }
 
+/** 配置里这个自定义目录已保存的名称；目录已不在配置里时为 null。 */
+export function savedFolderName(s: Settings | null, path: string): string | null {
+  return s?.custom.find((c) => c.path === path)?.name ?? null;
+}
+
 /**
  * ignored 项的展示名：app:<bundleId> 用已安装应用名（查不到保留 ID），
  * 其余规则走 ruleName（未知规则同样保留稳定 ID）。

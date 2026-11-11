@@ -13,7 +13,7 @@ import { growthApi } from "../growth/api";
 import { settingsApi, type ThemePref } from "./api";
 import { TrashReminderControls } from "./TrashReminderSection";
 import {
-  GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, SaveQueue, toggleMenuBarItem,
+  GROUPS, baseNameOf, ignoredLabel, nextDisabledGroups, normalized, resolveFolderName, savedFolderName, SaveQueue, toggleMenuBarItem,
   type GroupId,
 } from "./settings-helpers";
 
@@ -295,19 +295,21 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
     return () => window.removeEventListener("focus", onFocus);
   }, [checkPermission]);
 
-  /** 串行保存最新配置；非名称保存期间锁住编辑。 */
-  const save = React.useCallback((update: (s: Settings) => Settings, key: string, lock: boolean) => {
-    if (!settingsRef.current || loading) return;
+  /** 串行保存最新配置；非名称保存期间锁住编辑。保存成功时得到 true。 */
+  const save = React.useCallback((update: (s: Settings) => Settings, key: string, lock: boolean): Promise<boolean> => {
+    if (!settingsRef.current || loading) return Promise.resolve(false);
     saveDepthRef.current++;
     if (lock) setLocked(true);
     setErrors((prev) => withoutError(prev, key));
-    void queueRef.current!.run(async () => {
+    let ok = false;
+    return queueRef.current!.run(async () => {
       const next = update(settingsRef.current!);
       try {
         await settingsApi.saveSettings(next);
         settingsRef.current = next;
         setSettings(next);
         markCleanStale();
+        ok = true;
       } catch (e) {
         setErrors((prev) => withError(prev, key, e));
       } finally {
@@ -318,7 +320,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
           void load();
         }
       }
-    });
+    }).then(() => ok);
   }, [loading, load]);
 
   const onGroupToggle = (g: GroupId, checked: boolean) => {
@@ -335,7 +337,12 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
     const name = resolveFolderName(input.value, folder.path);
     // 名称没变且没有在保存：把用户输入的空白规整回去即可。
     if (name === folder.name && saveDepthRef.current === 0) { input.value = name; return; }
-    save((s) => ({ ...s, custom: s.custom.map((c) => c.path === folder.path ? { ...c, name } : c) }), `custom:${folder.path}`, false);
+    void save((s) => ({ ...s, custom: s.custom.map((c) => c.path === folder.path ? { ...c, name } : c) }), `custom:${folder.path}`, false)
+      .then((ok) => {
+        // 没存上：输入框回到已保存的名称（用户已经回到框里接着改时不打断）。
+        const kept = savedFolderName(settingsRef.current, folder.path);
+        if (!ok && kept !== null && document.activeElement !== input) input.value = kept;
+      });
   };
   const onRemoveFolder = (folder: CustomFolder) => {
     save((s) => ({ ...s, custom: s.custom.filter((c) => c.path !== folder.path) }), `custom:${folder.path}`, true);
