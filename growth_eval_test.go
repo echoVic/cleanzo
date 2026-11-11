@@ -209,6 +209,41 @@ func TestWindowsHoldDailyRunsThatDrift(t *testing.T) {
 	}
 }
 
+// A big folder can run out of time in the record a window picks. It is then
+// compared with its latest complete measurement in that window instead; an
+// entry never measured to the end there still compares with nothing.
+func TestBigFoldersCompareWithTheirLatestCompleteRecord(t *testing.T) {
+	wechat := filepath.Join("/h", "Library", "Containers", "com.tencent.xinWeChat")
+	cut := func(path string, size int64) growthEntry {
+		return growthEntry{Path: path, Kind: growthHome, Size: size}
+	}
+	h := []growthSnapshot{
+		at(-6*24*time.Hour, true, cut(wechat, 20*gb), cut(todesk, gb)), // the week's base
+		at(-5*24*time.Hour, true, done(wechat, 22*gb), cut(todesk, gb)),
+		at(-4*24*time.Hour, true, done(wechat, 24*gb), cut(todesk, gb)), // WeChat's latest complete one in the week
+		at(-26*time.Hour, true, done(wechat, 31*gb), cut(todesk, gb)),   // a manual run: WeChat's in the day
+		at(-24*time.Hour, true, cut(wechat, 30*gb), cut(todesk, gb)),    // the day's base
+	}
+	cur := at(0, true, done(wechat, 36*gb), done(todesk, 9*gb))
+	a := evaluateGrowth(h, cur, cfg2(), byBase)
+	if len(a) != 2 || a[0].Key != "app:com.tencent.xinwechat" || a[0].Window != "week" || a[0].Bytes != 12*gb || a[0].AtLeast ||
+		a[1].Key != a[0].Key || a[1].Window != "day" || a[1].Bytes != 5*gb || a[1].AtLeast {
+		t.Fatalf("alerts = %+v", a)
+	}
+	apps := buildGrowthApps(append(h, cur), cfg2(), byBase, "/h", time.UTC)
+	byKey := map[string]GrowthApp{}
+	for _, r := range apps {
+		byKey[r.Key] = r
+	}
+	w := byKey["app:com.tencent.xinwechat"]
+	if w.Day == nil || w.Day.Bytes != 5*gb || w.Week == nil || w.Week.Bytes != 12*gb || len(w.Folders) != 1 || w.Folders[0].Week == nil || w.Folders[0].Week.Bytes != 12*gb {
+		t.Fatalf("WeChat: day %+v, week %+v, folders %+v", w.Day, w.Week, w.Folders)
+	}
+	if td := byKey["app:todesk"]; td.Day != nil || td.Week != nil || td.Folders[0].Week != nil {
+		t.Fatalf("ToDesk never finished in a window: day %+v, week %+v", td.Day, td.Week)
+	}
+}
+
 func TestLowerBoundsAndUncomparableEntries(t *testing.T) {
 	h := []growthSnapshot{at(-24*time.Hour, true, done(todesk, 10*gb), growthEntry{Path: codex, Kind: growthHome, Size: 9 * gb})}
 	partial := growthEntry{Path: todesk, Kind: growthHome, Size: 12*gb + gb/2}
@@ -257,7 +292,7 @@ func TestVanishedEntriesCountOnlyAfterWholeRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cur := at(0, true, done(todesk, 13*gb))
 			cur.Cut = tc.cut
-			changes := growthChanges(base, cur, byBase)
+			changes := growthChanges(growthWindow{base: base, records: []growthSnapshot{base}}, cur, byBase)
 			if c, ok := changes["app:todesk"]; !ok || c.bytes != tc.bytes {
 				t.Fatalf("owner changes = %+v, want net growth %d", changes, tc.bytes)
 			}

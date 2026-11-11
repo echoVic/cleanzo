@@ -57,7 +57,15 @@ type GrowthFolder struct {
 	Week     *GrowthDelta `json:"week"`
 }
 
-// growthBase finds the record cur is compared with (spec §五), or nil:
+// growthWindow is what one window compares cur with: its base, and every
+// record in the window's range, the base among them, oldest first.
+type growthWindow struct {
+	base    growthSnapshot
+	records []growthSnapshot
+}
+
+// growthBase finds the window cur is compared with (spec §五), false when no
+// record is in its range. Its base is:
 //   - "day": the latest record 20 to 28 hours older;
 //   - "week": the earliest record at most 7 days and 12 hours older and at
 //     least 3 days;
@@ -68,7 +76,7 @@ type GrowthFolder struct {
 // back is a little more than that old: the upper bounds allow for it, as the
 // day's 28 hours do. Records taken with a different Full Disk Access never
 // count.
-func growthBase(history []growthSnapshot, cur growthSnapshot, window string) *growthSnapshot {
+func growthBase(history []growthSnapshot, cur growthSnapshot, window string) (growthWindow, bool) {
 	var lo, hi time.Duration
 	latest := false
 	switch window {
@@ -79,20 +87,44 @@ func growthBase(history []growthSnapshot, cur growthSnapshot, window string) *gr
 	case "month":
 		lo, hi = 8*24*time.Hour, 30*24*time.Hour+12*time.Hour
 	default:
-		return nil
+		return growthWindow{}, false
 	}
-	var found *growthSnapshot
-	for i := range history {
-		h := &history[i]
+	var w growthWindow
+	for _, h := range history {
 		age := time.Duration(cur.At-h.At) * time.Second
-		if h.At >= cur.At || age < lo || age > hi || h.FDA != cur.FDA {
-			continue
-		}
-		if found == nil || latest && h.At > found.At || !latest && h.At < found.At {
-			found = h
+		if h.At < cur.At && age >= lo && age <= hi && h.FDA == cur.FDA {
+			w.records = append(w.records, h)
 		}
 	}
-	return found
+	if len(w.records) == 0 {
+		return growthWindow{}, false
+	}
+	slices.SortStableFunc(w.records, func(a, b growthSnapshot) int { return cmp.Compare(a.At, b.At) })
+	w.base = w.records[0]
+	if latest {
+		w.base = w.records[len(w.records)-1]
+	}
+	return w, true
+}
+
+// growthEarlier is the measurement of path that cur's is compared with, from
+// before, the base's entries by path. It is the base's, unless the base did not
+// measure it to the end: a big folder can run out of time, and a cut run may
+// never reach it. Then it is the latest complete measurement in the window, if
+// there is one.
+func growthEarlier(w growthWindow, before map[string]growthEntry, path string) (growthEntry, bool) {
+	a, ok := before[path]
+	if ok && a.Complete || !ok && !w.base.Cut {
+		return a, ok
+	}
+	for i := len(w.records) - 1; i >= 0; i-- {
+		for _, e := range w.records[i].Entries {
+			if e.Path == path && e.Complete {
+				return e, true
+			}
+		}
+	}
+	return a, ok
 }
 
 // growthDays is a window's length in whole days.
@@ -109,11 +141,11 @@ type growthChange struct {
 	grew     int64  // and by how much
 }
 
-// growthEntryChange compares one entry, reporting false when it cannot be
-// compared:
-//   - exact when both records measured it to the end;
-//   - a lower bound when only the base did;
-//   - nothing when the base did not finish it, or its readability changed.
+// growthEntryChange compares one entry b with its earlier measurement a
+// (growthEarlier), reporting false when it cannot be compared:
+//   - exact when both measured it to the end;
+//   - a lower bound when only a did;
+//   - nothing when a did not finish it, or its readability changed.
 //
 // An entry missing on one side counts as 0 there, but only when that side's
 // run measured everything (not Cut).
@@ -145,12 +177,20 @@ func growthTopFolder(a, b growthEntry) string {
 	return filepath.Join(b.Path, best)
 }
 
-// growthChanges sums each owner's entry changes between base and cur.
-func growthChanges(base, cur growthSnapshot, owner func(growthEntry) growthOwner) map[string]growthChange {
-	before := make(map[string]growthEntry, len(base.Entries))
-	for _, e := range base.Entries {
-		before[e.Path] = e
+// growthEntries indexes a record's entries by path.
+func growthEntries(s growthSnapshot) map[string]growthEntry {
+	m := make(map[string]growthEntry, len(s.Entries))
+	for _, e := range s.Entries {
+		m[e.Path] = e
 	}
+	return m
+}
+
+// growthChanges sums each owner's entry changes between w and cur: each entry
+// against growthEarlier, and the base's entries gone since.
+func growthChanges(w growthWindow, cur growthSnapshot, owner func(growthEntry) growthOwner) map[string]growthChange {
+	base := w.base
+	before := growthEntries(base)
 	out := map[string]growthChange{}
 	add := func(key string, delta int64, atLeast bool, folder string) {
 		c := out[key]
@@ -165,7 +205,7 @@ func growthChanges(base, cur growthSnapshot, owner func(growthEntry) growthOwner
 	seen := make(map[string]bool, len(cur.Entries))
 	for _, b := range cur.Entries {
 		seen[b.Path] = true
-		a, inBase := before[b.Path]
+		a, inBase := growthEarlier(w, before, b.Path)
 		if delta, atLeast, ok := growthEntryChange(a, inBase, base, b); ok {
 			add(owner(b).key, delta, atLeast, growthTopFolder(a, b))
 		}
@@ -226,16 +266,16 @@ func evaluateGrowth(history []growthSnapshot, cur growthSnapshot, cfg GrowthConf
 	totals := growthTotals(cur, owner)
 	out := []GrowthAlert{}
 	check := func(window string, thresholdGB float64) {
-		base := growthBase(history, cur, window)
-		if base == nil {
+		w, ok := growthBase(history, cur, window)
+		if !ok {
 			return
 		}
-		for key, c := range growthChanges(*base, cur, owner) {
+		for key, c := range growthChanges(w, cur, owner) {
 			if slices.Contains(cfg.Ignored, key) || float64(c.bytes) < thresholdGB*float64(1<<30) {
 				continue
 			}
 			out = append(out, GrowthAlert{
-				Key: key, Name: totals[key].owner.name, Window: window, Days: growthDays(*base, cur),
+				Key: key, Name: totals[key].owner.name, Window: window, Days: growthDays(w.base, cur),
 				Bytes: c.bytes, AtLeast: c.atLeast, Folder: c.folder, Total: totals[key].size, At: cur.At,
 			})
 		}
@@ -275,19 +315,19 @@ func buildGrowthApps(history []growthSnapshot, cfg GrowthConfig, owner func(grow
 		r.Partial = r.Partial || !e.Complete
 		r.Folders = append(r.Folders, GrowthFolder{Path: e.Path, Size: e.Size, Complete: e.Complete, Denied: e.Denied, Outside: !within(e.Path, home)})
 	}
-	for _, w := range []string{"day", "week", "month"} {
-		base := growthBase(earlier, cur, w)
-		if base == nil {
+	for _, window := range []string{"day", "week", "month"} {
+		w, ok := growthBase(earlier, cur, window)
+		if !ok {
 			continue
 		}
-		days := growthDays(*base, cur)
-		for key, c := range growthChanges(*base, cur, owner) {
+		days := growthDays(w.base, cur)
+		for key, c := range growthChanges(w, cur, owner) {
 			r := rows[key]
 			if r == nil || !c.compared {
 				continue
 			}
 			d := &GrowthDelta{Bytes: c.bytes, AtLeast: c.atLeast, Days: days}
-			switch w {
+			switch window {
 			case "day":
 				r.Day = d
 			case "week":
@@ -296,16 +336,13 @@ func buildGrowthApps(history []growthSnapshot, cfg GrowthConfig, owner func(grow
 				r.Month = d
 			}
 		}
-		if w == "week" {
-			before := map[string]growthEntry{}
-			for _, e := range base.Entries {
-				before[e.Path] = e
-			}
+		if window == "week" {
+			before := growthEntries(w.base)
 			for _, r := range rows {
 				for i, f := range r.Folders {
-					a, inBase := before[f.Path]
+					a, inBase := growthEarlier(w, before, f.Path)
 					b := growthEntry{Path: f.Path, Size: f.Size, Complete: f.Complete, Denied: f.Denied}
-					if delta, atLeast, ok := growthEntryChange(a, inBase, *base, b); ok {
+					if delta, atLeast, ok := growthEntryChange(a, inBase, w.base, b); ok {
 						r.Folders[i].Week = &GrowthDelta{Bytes: delta, AtLeast: atLeast, Days: days}
 					}
 				}
