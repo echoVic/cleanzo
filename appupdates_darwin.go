@@ -670,6 +670,8 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 		return res
 	}
 	defer appUpgradeMu.unlock()
+	release := holdOpen() // closing the last window leaves Cleanzo running until this returns
+	defer release()
 	b, ok := readAppBundle(ctx, a.path)
 	if !ok {
 		res.Code = "not-checked"
@@ -687,9 +689,11 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 		res.Code, res.Detail = "brew-failed", "no-tool"
 		return res
 	}
-	// Once brew starts, the page closing does not stop it: a kill can land
-	// between removing the old app and moving the new one in. Only the timeout
-	// bounds it, and the bundle is read afterwards either way.
+	// A kill can land between removing the old app and moving the new one in,
+	// so once brew starts, the call's context ending does not stop it, and
+	// closing the last window does not quit Cleanzo under it (holdOpen). The
+	// timeout still stops it. Quitting Cleanzo outright can still cut it short,
+	// as brew writes to Cleanzo's pipe. The bundle is read afterwards either way.
 	run := context.WithoutCancel(ctx)
 	out, err := runTool(run, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
 	after, read := readAppBundle(run, a.path)

@@ -1008,6 +1008,10 @@ echo "==> Upgrading ghostty"`)
 	t.Cleanup(resetAppActions)
 	stubUsage(t, &usageGuard{running: map[string]bool{}})
 	rememberAppAction(app, appUpdateAction{kind: "brew", token: "ghostty", path: app, latest: "1.4.0"})
+	var ended atomic.Int32
+	savedEnded := heldWorkEnded
+	heldWorkEnded = func() { ended.Add(1) }
+	t.Cleanup(func() { heldWorkEnded = savedEnded })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1023,6 +1027,13 @@ echo "==> Upgrading ghostty"`)
 	if !exists(started) {
 		t.Fatal("fixture brew did not start")
 	}
+	// Closing the last window now must leave Cleanzo running, or brew would
+	// lose its parent mid-upgrade.
+	if !holdingOpen() {
+		writeText(t, release, "release")
+		<-done
+		t.Fatal("brew runs, and nothing holds Cleanzo open")
+	}
 	cancel()
 	time.Sleep(200 * time.Millisecond) // time for a kill to land, were there one
 	writeText(t, release, "release")
@@ -1034,6 +1045,10 @@ echo "==> Upgrading ghostty"`)
 	}
 	if !res.Done || res.Version != "1.4.0" || res.Code != "" || !exists(finished) {
 		t.Fatalf("upgrade after the caller went away: %+v; brew finished=%v", res, exists(finished))
+	}
+	// Its end lets Cleanzo quit, if the last window closed meanwhile.
+	if holdingOpen() || ended.Load() != 1 {
+		t.Fatalf("after the upgrade: holding %v, ended %d times", holdingOpen(), ended.Load())
 	}
 }
 

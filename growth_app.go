@@ -9,6 +9,7 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,15 +46,16 @@ func init() { growthApply = applyGrowthLifecycle }
 // (growth spec §六, menubar spec §七). It runs before Run, as App.OnNotificationClick must
 // for the click that launched the app.
 //
-// With all three off, closing the last window quits. On Windows,
-// growthSupported is false, so the app quits too.
+// With all three off, closing the last window quits (afterLastWindow). On
+// Windows, growthSupported is false, so the app quits too.
 func registerGrowthLifecycle() {
 	mygo.App.OnWindowAllClosed(func() {
-		if growthKeepRunning(growthSupported(), residentOn) {
+		switch afterLastWindow(growthSupported(), residentOn, holdingOpen()) {
+		case "stay":
 			mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
-			return
+		case "quit":
+			mygo.App.Quit()
 		}
-		mygo.App.Quit()
 	})
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
 		if !hasVisibleWindows && mygo.App.IsReady() { // no window can be made before that
@@ -87,6 +89,61 @@ func residentOn() bool {
 // asked only then, so a platform without the monitor never reads its settings.
 func growthKeepRunning(supported bool, resident func() bool) bool {
 	return supported && resident()
+}
+
+// afterLastWindow tells what Cleanzo does once no window is open:
+//   - "stay" in the menu bar without its Dock icon, where the monitor runs and
+//     resident says so (growthKeepRunning);
+//   - "wait", Dock icon and all, while held, as work holds it open
+//     (holdOpen): it quits when that work ends (quitIfNoWindow);
+//   - "quit" otherwise.
+func afterLastWindow(supported bool, resident func() bool, held bool) string {
+	switch {
+	case growthKeepRunning(supported, resident):
+		return "stay"
+	case held:
+		return "wait"
+	}
+	return "quit"
+}
+
+// heldWork counts work under way that quitting would cut short, such as a
+// brew upgrade (upgradeApp). While there is any, closing the last window
+// leaves Cleanzo running (afterLastWindow).
+var heldWork atomic.Int32
+
+// heldWorkEnded runs when the last held work ends; tests replace it.
+var heldWorkEnded = quitIfNoWindow
+
+// holdOpen keeps Cleanzo running without windows until release is called.
+// Calling release again does nothing.
+func holdOpen() (release func()) {
+	heldWork.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if heldWork.Add(-1) == 0 {
+				heldWorkEnded()
+			}
+		})
+	}
+}
+
+// holdingOpen tells whether work holds Cleanzo open (holdOpen).
+func holdingOpen() bool { return heldWork.Load() > 0 }
+
+// quitIfNoWindow quits when held work has ended with no window open and
+// nothing keeps Cleanzo in the menu bar: the last window closed while the work
+// ran. It does nothing before the app runs, as in a test.
+func quitIfNoWindow() {
+	if !mygo.App.IsReady() {
+		return
+	}
+	mygo.RunOnMain(func() {
+		if len(mygo.Windows()) == 0 && afterLastWindow(growthSupported(), residentOn, holdingOpen()) == "quit" {
+			mygo.App.Quit()
+		}
+	})
 }
 
 // startResident runs in WhenReady, on the main thread, so it reads no records:
@@ -187,8 +244,8 @@ func applyGrowthLifecycle(cfg GrowthConfig) error {
 //     reading shows;
 //   - opening at login as chosen, only while monitoring, a reading or Trash
 //     reminders are on;
-//   - quitting when none of them is on and no window is open, a minimized or
-//     hidden one included.
+//   - quitting when none of them is on, no work holds the app open
+//     (holdOpen) and no window is open, a minimized or hidden one included.
 //
 // It does nothing before the app runs, as in a test: there is no main thread
 // to wait for then.
@@ -215,7 +272,7 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 		if want := resident && g.OpenAtLogin; mygo.App.OpenAtLogin() != want {
 			loginErr = mygo.App.SetOpenAtLogin(want)
 		}
-		if !resident && len(mygo.Windows()) == 0 {
+		if !resident && !holdingOpen() && len(mygo.Windows()) == 0 {
 			mygo.App.Quit()
 		}
 	})

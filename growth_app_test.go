@@ -243,6 +243,45 @@ func TestGrowthKeepRunning(t *testing.T) {
 	}
 }
 
+// Closing the last window keeps Cleanzo in the menu bar where it is resident,
+// waits while work holds it open, such as a brew upgrade, and quits otherwise.
+func TestAfterLastWindow(t *testing.T) {
+	for _, tc := range []struct {
+		supported, resident, held bool
+		want                      string
+	}{
+		{true, true, false, "stay"},
+		{true, true, true, "stay"},
+		{true, false, true, "wait"},
+		{true, false, false, "quit"},
+		{false, false, true, "wait"},
+		{false, true, false, "quit"},
+	} {
+		if got := afterLastWindow(tc.supported, func() bool { return tc.resident }, tc.held); got != tc.want {
+			t.Errorf("supported %v, resident %v, held %v: %q, want %q", tc.supported, tc.resident, tc.held, got, tc.want)
+		}
+	}
+}
+
+// Only the end of the last held work may quit Cleanzo, and releasing a hold
+// twice counts once.
+func TestHoldOpenEndsWithTheLastHold(t *testing.T) {
+	ended := 0
+	saved := heldWorkEnded
+	heldWorkEnded = func() { ended++ }
+	t.Cleanup(func() { heldWorkEnded = saved })
+	first, second := holdOpen(), holdOpen()
+	first()
+	first()
+	if ended != 0 || !holdingOpen() {
+		t.Fatalf("after the first of two holds: ended %d times, holding %v", ended, holdingOpen())
+	}
+	second()
+	if ended != 1 || holdingOpen() {
+		t.Fatalf("after the last hold: ended %d times, holding %v", ended, holdingOpen())
+	}
+}
+
 // Closing the window keeps Cleanzo in the menu bar while a reading shows or
 // monitoring is on, and quits otherwise (menubar spec §七.1).
 func TestResidentOnFollowsTheReadingsAndMonitoring(t *testing.T) {
