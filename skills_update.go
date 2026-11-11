@@ -33,7 +33,8 @@ import (
 // A skill installed from GitHub can be compared with its source and
 // upgraded. Where a skill came from is read, never guessed, from:
 //
-//   cleanzo     Cleanzo's own record of the skills it upgraded
+//   cleanzo     Cleanzo's own record of the skills it upgraded or found
+//               identical to their source
 //   skills-cli  ~/.agents/.skill-lock.json, written by `npx skills`: the
 //               repository, the SKILL.md path and the folder's git tree hash
 //   git         a skill folder that is itself a git clone
@@ -50,7 +51,8 @@ import (
 // recorded installed tree (CC Switch keeps a hash of its own) the local
 // folder is compared with the source directly; a CC Switch folder known by
 // its name alone counts as modified when it differs, as it may be the
-// user's own. A folder identical to its source is current and unmodified.
+// user's own. A folder identical to its source is current and unmodified,
+// and Cleanzo records that tree as the one it is at.
 //
 // Upgrading downloads the repository archive from codeload.github.com,
 // checks that the extracted folder has exactly the tree GitHub reported,
@@ -274,7 +276,8 @@ func skillUpdatesPath() string {
 	return filepath.Join(filepath.Dir(configPath()), "skill-updates.json")
 }
 
-// skillRecord is Cleanzo's record of one upgraded folder.
+// skillRecord is Cleanzo's record of one folder it upgraded or found
+// identical to its source.
 type skillRecord struct {
 	Origin    SkillOrigin       `json:"origin"`
 	UpdatedAt int64             `json:"updatedAt"`
@@ -790,8 +793,18 @@ func checkOneForPlatform(ctx context.Context, folder, name string, o SkillOrigin
 	u.Remote = remote
 	if remote == local {
 		// The folder is the source's tree: nothing to upgrade and nothing
-		// to lose, whatever tree was recorded at install.
+		// to lose, whatever tree was recorded at install. Cleanzo's record
+		// keeps that tree, as after an upgrade, so a later change at the
+		// source is an update and not a local change. The record is
+		// best-effort: this check's answer holds without it.
 		u.Status, u.Modified = "current", false
+		if o.Tree != local {
+			o.Tree, o.Kind = local, originCleanzo
+			if !windows {
+				modes = nil
+			}
+			_ = saveSkillRecord(folder, skillRecord{Origin: o, UpdatedAt: now, Modes: modes})
+		}
 		return u
 	}
 	if o.Kind == originCCSwitch && o.Tree == "" && !ccSwitchStoreHolds(folder) {

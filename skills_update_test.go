@@ -356,6 +356,54 @@ func TestIdenticalToUpstreamIsCurrent(t *testing.T) {
 	}
 }
 
+// TestIdenticalTreeIsRecorded: once a folder is found identical to its
+// source, that tree is the one it is known to be at, so a later change at the
+// source is an update, not a local change, and upgrading needs no Force.
+func TestIdenticalTreeIsRecorded(t *testing.T) {
+	for _, kind := range []string{originSkillsCLI, originCCSwitch} {
+		t.Run(kind, func(t *testing.T) {
+			home := skillFixture(t)
+			noOpenFiles(t)
+			gh := newFakeGitHub(t, map[string]string{"skills/doc/SKILL.md": "v1\n"})
+			tree1, _ := gitTreeHash(filepath.Join(gh.materialize(t), "skills/doc"))
+			gh.files["skills/doc/SKILL.md"] = "v2\n"
+			dir := filepath.Join(home, ".claude/skills/doc")
+			if kind == originSkillsCLI {
+				dir = installLocked(t, home, "doc", map[string]string{"SKILL.md": "v2\n"}, tree1)
+			} else {
+				// Known to CC Switch by its name alone, with no tree of its own.
+				writeSkill(t, dir, "v2\n")
+				fakeCCSwitch(t, home, `[{"directory":"doc","repo_owner":"acme","repo_name":"skills","readme_url":"https://github.com/acme/skills/blob/main/skills/doc/SKILL.md"}]`)
+			}
+			ups, err := Cleaner{}.CheckSkillUpdates(context.Background())
+			if err != nil || len(ups) != 1 || ups[0].Status != "current" || ups[0].Modified {
+				t.Fatalf("identical = %+v, %v", ups, err)
+			}
+			tree2 := ups[0].Local
+
+			gh.files["skills/doc/SKILL.md"] = "v3\n"
+			ups, err = Cleaner{}.CheckSkillUpdates(context.Background())
+			if err != nil || len(ups) != 1 || ups[0].Status != "update" || ups[0].Modified || ups[0].Origin.Tree != tree2 {
+				t.Fatalf("after a source change = %+v, %v", ups, err)
+			}
+			res, _ := Cleaner{}.UpgradeSkills(context.Background(), []SkillUpgradeRequest{{Path: dir}})
+			if len(res) != 1 || res[0].Error != "" {
+				t.Fatalf("unforced upgrade = %+v", res)
+			}
+			if b, _ := os.ReadFile(filepath.Join(dir, "SKILL.md")); string(b) != "v3\n" {
+				t.Fatalf("upgrade left %q", b)
+			}
+
+			// A local change after that is still one.
+			writeSkillFile(t, filepath.Join(dir, "SKILL.md"), "v3 with my notes\n")
+			gh.files["skills/doc/SKILL.md"] = "v4\n"
+			if ups, _ = (Cleaner{}).CheckSkillUpdates(context.Background()); len(ups) != 1 || !ups[0].Modified {
+				t.Fatalf("local change = %+v", ups)
+			}
+		})
+	}
+}
+
 func TestUpgradeRejectsArchiveThatDoesNotMatch(t *testing.T) {
 	home := skillFixture(t)
 	noOpenFiles(t)
