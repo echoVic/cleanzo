@@ -53,9 +53,10 @@ func TestSkillDownloadsAreNotCutShort(t *testing.T) {
 }
 
 // TestUntarSafeStopsAtLimits: an archive stops unpacking with an error once
-// it has written more bytes, or held more entries, than an upgrade allows.
-// The limits count the whole repository, so they leave room for a skill in
-// a large monorepo.
+// it has written more bytes, or held more entries, than an upgrade allows;
+// the error is the code the Skills page translates (too-large,
+// too-many-entries). The limits count the whole repository, so they leave
+// room for a skill in a large monorepo.
 func TestUntarSafeStopsAtLimits(t *testing.T) {
 	if skillUnpackLimit != 2<<30 || skillEntryLimit != 200000 {
 		t.Fatalf("limits = %d bytes, %d entries", skillUnpackLimit, skillEntryLimit)
@@ -89,12 +90,16 @@ func TestUntarSafeStopsAtLimits(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "x")
 	if _, err := untarSafe(bytes.NewReader(archive(600, 600)), dest); err == nil {
 		t.Fatal("1200 bytes unpacked past a 1000-byte limit")
+	} else if err.Error() != "too-large" {
+		t.Fatalf("too many bytes: error %q, want too-large", err)
 	}
 	if n := written(dest); n > 1000 {
 		t.Fatalf("%d bytes written past the limit", n)
 	}
 	if _, err := untarSafe(bytes.NewReader(archive(1, 1, 1, 1, 1, 1, 1, 1, 1, 1)), filepath.Join(t.TempDir(), "x")); err == nil {
 		t.Fatal("11 entries unpacked past a 10-entry limit")
+	} else if err.Error() != "too-many-entries" {
+		t.Fatalf("too many entries: error %q, want too-many-entries", err)
 	}
 	root, err := untarSafe(bytes.NewReader(archive(500, 400, 1, 1, 1, 1, 1, 1, 1)), filepath.Join(t.TempDir(), "x"))
 	if err != nil || written(root) != 907 {

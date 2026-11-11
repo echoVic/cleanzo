@@ -637,7 +637,8 @@ function lastText(t: T, s: Skill, now: number): string {
     : t("skills.last.short", { n: windowDays(s.since, now) });
 }
 
-function failReason(t: T, err: string): string {
+/** 后端的错误码翻成当前语言；认不出的原样显示。 */
+export function failReason(t: T, err: string): string {
   const k = `skills.err.${err}` as DictKey;
   const s = t(k);
   return s === k ? err : s;

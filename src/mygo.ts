@@ -1000,7 +1000,7 @@ export interface SkillUpgradeResult {
   path: string;
   /** the folder's tree hash after the upgrade, a git clone's HEAD commit once it fast-forwards; "" on error */
   tree: string;
-  /** "" on success; no-origin, modified, mismatch, not-found, rate-limited, ... */
+  /** "" on success; no-origin, modified, mismatch, not-found, rate-limited, too-large, too-many-entries, ... */
   error: string;
 }
 

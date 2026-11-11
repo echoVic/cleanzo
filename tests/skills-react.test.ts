@@ -234,3 +234,20 @@ test("Upgrade All counts the folders its dialog lists", async () => {
     expect(sk.upgrades).toEqual([[{ path: "/c/b", force: false }, { path: "/x/b", force: false }]]);
   } finally { sk.close(); }
 });
+
+test("upgrade error codes read as text in both languages; an unknown error shows as sent", async () => {
+  await import("./setup-dom");
+  const { t, setPref } = await import("../src/i18n");
+  const { failReason } = await import("../src/react/skills/SkillsPage");
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      setPref(lang);
+      for (const code of ["rate-limited", "not-found", "modified", "mismatch", "no-origin", "too-large", "too-many-entries"]) {
+        const text = failReason(t, code);
+        expect(text).not.toBe(code);
+        expect(text).not.toContain("skills.err.");
+      }
+      expect(failReason(t, "github 502")).toBe("github 502");
+    }
+  } finally { setPref("system"); }
+});

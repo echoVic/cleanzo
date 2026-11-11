@@ -147,8 +147,8 @@ var (
 	errSkillNotFound = errors.New("not-found")
 	errSkillRate     = errors.New("rate-limited")
 
-	errSkillTooLarge       = errors.New("archive too large")
-	errSkillTooManyEntries = errors.New("archive has too many entries")
+	errSkillTooLarge       = errors.New("too-large")        // the archive unpacks past skillUnpackLimit
+	errSkillTooManyEntries = errors.New("too-many-entries") // the archive holds more than skillEntryLimit entries
 )
 
 // ---------------------------------------------------------------------------
@@ -874,7 +874,7 @@ type SkillUpgradeRequest struct {
 type SkillUpgradeResult struct {
 	Path  string `json:"path"`
 	Tree  string `json:"tree"`  // the folder's tree hash after the upgrade, a git clone's HEAD commit once it fast-forwards; "" on error
-	Error string `json:"error"` // "" on success; no-origin, modified, mismatch, not-found, rate-limited, ...
+	Error string `json:"error"` // "" on success; no-origin, modified, mismatch, not-found, rate-limited, too-large, too-many-entries, ...
 }
 
 // UpgradeSkills upgrades the requested folders to their source. Each one is
