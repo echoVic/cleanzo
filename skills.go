@@ -1072,15 +1072,11 @@ type SkillTrashResult struct {
 }
 
 // TrashSkills moves skill entries to the Trash. A link moves as a link; its
-// target stays. A folder that a skills folder links to is moved only when
-// all those links are moved with it, so no tool is left with a broken link.
+// target stays. A folder that a skills folder links to is moved only once
+// all those links have moved with it, so no tool is left with a broken link.
 // Folders with files a process has open are left alone.
 func (Cleaner) TrashSkills(paths []string) SkillTrashResult {
 	res := SkillTrashResult{Items: []SkillTrashItem{}}
-	moving := map[string]bool{}
-	for _, p := range paths {
-		moving[filepath.Clean(p)] = true
-	}
 	// Links first, so a folder's links are gone before it moves.
 	ordered := slices.Clone(paths)
 	sort.SliceStable(ordered, func(i, j int) bool { return isLink(ordered[i]) && !isLink(ordered[j]) })
@@ -1098,10 +1094,10 @@ func (Cleaner) TrashSkills(paths []string) SkillTrashResult {
 		}
 		if !isLink(p) {
 			real := resolvePath(p)
-			for _, l := range skillLinksTo(real) {
-				if !moving[l] {
-					item.Error = errSkillLinked.Error()
-				}
+			// Any link still there, chosen or not (its move may have
+			// failed), keeps the folder.
+			if len(skillLinksTo(real)) > 0 {
+				item.Error = errSkillLinked.Error()
 			}
 			if item.Error == "" {
 				if guard == nil {

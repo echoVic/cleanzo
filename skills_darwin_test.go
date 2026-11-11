@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -213,6 +214,38 @@ func TestTrashSkills(t *testing.T) {
 	// The link went first and took the name; the folder is "lonely 2".
 	if !isLink(filepath.Join(home, ".Trash/lonely")) || !fileExists(filepath.Join(home, ".Trash/lonely 2/SKILL.md")) {
 		t.Fatal("folder not in the Trash")
+	}
+}
+
+// TestTrashSkillsKeepsFolderWhileLinked: when a link chosen with its folder
+// cannot be moved, the folder stays too, so the link still leads somewhere.
+func TestTrashSkillsKeepsFolderWhileLinked(t *testing.T) {
+	home := skillFixture(t)
+	noOpenFiles(t)
+	agents := filepath.Join(home, ".agents/skills")
+	claude := filepath.Join(home, ".claude/skills")
+	writeSkill(t, filepath.Join(agents, "pair"), "p")
+	mustMkdir(t, claude)
+	link := filepath.Join(claude, "pair")
+	if err := os.Symlink(filepath.Join(agents, "pair"), link); err != nil {
+		t.Fatal(err)
+	}
+	saved := trashItem
+	trashItem = func(p string) error {
+		if p == link {
+			return errors.New("refused")
+		}
+		return saved(p)
+	}
+	t.Cleanup(func() { trashItem = saved })
+	res := Cleaner{}.TrashSkills([]string{filepath.Join(agents, "pair"), link})
+	if res.Moved != 0 || !fileExists(filepath.Join(agents, "pair/SKILL.md")) || !fileExists(filepath.Join(link, "SKILL.md")) {
+		t.Fatalf("folder moved while its link stayed: %+v", res)
+	}
+	for _, item := range res.Items {
+		if item.Path == filepath.Join(agents, "pair") && item.Error != "linked" {
+			t.Fatalf("folder = %+v", item)
+		}
 	}
 }
 
