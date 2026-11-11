@@ -39,7 +39,7 @@ func buildAppIndex(dirs []string) *appIndex {
 			defer func() { <-sem }()
 			out, err := quietCommand(exec.Command("/usr/bin/plutil", "-convert", "xml1", "-o", "-", filepath.Join(p, "Contents", "Info.plist"))).Output()
 			if err == nil {
-				metadata[i] = plistStrings(out)
+				metadata[i] = plistValues(out)
 			}
 		}()
 	}

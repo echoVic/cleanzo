@@ -28,18 +28,14 @@ func mustAppUsage(rows []AppUsage, key string) AppUsage {
 	return AppUsage{}
 }
 
-// ---- attribution ----------------------------------------------------------
-
-func TestMergeAppsResponsibleUnavailable(t *testing.T) {
-	// The private API missing: no responsibility info, plain exec merge.
-	procs := []procReading{
-		{Pid: 1, Path: "/usr/local/bin/node", Footprint: 10},
-		{Pid: 2, Path: "/usr/local/bin/node", Footprint: 20},
+// testGroup is the tests' grouper for mergeApps: a process's row is its
+// outermost .app, else its executable.
+func testGroup(r procReading, _ map[int32]procReading) (string, string) {
+	b := outermostBundle(r.Path)
+	if b == "" {
+		b = r.Path
 	}
-	rows := mergeApps(nil, procs, nil, func(int32) int32 { return -1 }, 0)
-	if got := mustAppUsage(rows, "exec:node"); got.Memory != 30 || got.Procs != 2 {
-		t.Errorf("exec merge = %+v, want memory 30 procs 2", got)
-	}
+	return "app:" + strings.ToLower(b), b
 }
 
 // ---- CPU math -------------------------------------------------------------
@@ -110,16 +106,6 @@ func TestMemoryFromVMZeroTotal(t *testing.T) {
 
 // ---- parsing --------------------------------------------------------------
 
-func TestParseSwapUsage(t *testing.T) {
-	used, total := parseSwapUsage("total = 2048.00M  used = 512.50M  free = 1535.50M  (encrypted)")
-	if used != 512.5*1024*1024 || total != 2048*1024*1024 {
-		t.Errorf("swap = %d/%d", used, total)
-	}
-	if u, _ := parseSwapUsage(""); u != 0 {
-		t.Error("empty swap line must read zero")
-	}
-}
-
 func TestParseSwapUsageBytes(t *testing.T) {
 	// The schema itself, per XNU's struct xsw_usage (sys/sysctl.h) — the
 	// bytes the vm.swapusage sysctl actually returns (CTLTYPE_STRUCT), not
@@ -150,7 +136,7 @@ func TestParseSwapUsageBytes(t *testing.T) {
 	// The memory card consumes used/total only, and used may exceed a
 	// momentarily stale total on real machines (swap is dynamically
 	// sized), so the parser passes them through unvalidated.
-	// Short or empty buffers read as not-ok → the caller falls back.
+	// Short or empty buffers read as not-ok and the zero struct.
 	for _, bad := range [][]byte{nil, {}, make([]byte, 23), b[:16]} {
 		if su, ok := parseSwapUsageBytes(bad); ok {
 			t.Errorf("buffer of %d bytes must not parse", len(bad))
@@ -168,22 +154,6 @@ func TestParseSwapUsageBytes(t *testing.T) {
 	binary.LittleEndian.PutUint32(b[28:32], 0)
 	if su, _ = parseSwapUsageBytes(b); su.Encrypted {
 		t.Error("xsu_encrypted=0 must read false")
-	}
-}
-
-func TestParseLoadAvg(t *testing.T) {
-	l1, l5, l15 := parseLoadAvg(" 1.92 2.03 1.85 ")
-	if l1 != 1.92 || l5 != 2.03 || l15 != 1.85 {
-		t.Errorf("loads = %v %v %v", l1, l5, l15)
-	}
-}
-
-func TestParseBootTime(t *testing.T) {
-	if v := parseBootTime("{ sec = 1728975540, usec = 190631 } Thu Oct 17 09:39:00 2026"); v != 1728975540 {
-		t.Errorf("bootTime = %d", v)
-	}
-	if v := parseBootTime(""); v != 0 {
-		t.Errorf("unreadable boottime = %d", v)
 	}
 }
 
@@ -478,7 +448,8 @@ func fakeSource() statusSource {
 		battery: func(ctx context.Context) *BatteryStatus {
 			return &BatteryStatus{Percent: 88, Charging: true, Cycles: 12, MaxCapacity: 95, Condition: "Normal"}
 		},
-		disk: func() DiskStat { return DiskStat{Total: 1, Used: 2, Free: 3} },
+		disk:  func() DiskStat { return DiskStat{Total: 1, Used: 2, Free: 3} },
+		group: testGroup,
 	}
 }
 

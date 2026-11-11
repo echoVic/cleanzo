@@ -142,8 +142,8 @@ func processFixture() (cur map[int32]procReading, others []otherProc, apps []wor
 		{Pid: 600, Path: "/Applications/Cleanzo.app/Contents/MacOS/Cleanzo", Footprint: 80 << 20},
 	})
 	others = []otherProc{
-		{Pid: 414, UID: 88, CPU: 40.2, Memory: 135 << 20, Path: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"},
-		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 50 << 20, Path: "/Applications/Microsoft Defender.app/Contents/MacOS/wdavdaemon"},
+		{Pid: 414, CPU: 40.2, Memory: 135 << 20, Path: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"},
+		{Pid: 7045, CPU: 10.8, Memory: 50 << 20, Path: "/Applications/Microsoft Defender.app/Contents/MacOS/wdavdaemon"},
 	}
 	apps = []workspaceApp{
 		{Pid: 100, Path: "/Applications/Google Chrome.app", BundleID: "com.google.Chrome", Name: "Google Chrome", Regular: true},
@@ -411,7 +411,7 @@ func TestOtherProcsReaderFallsBackWhenUIDHasNoAccount(t *testing.T) {
 		return []byte(fmt.Sprintf("12345 %d 2.5 1024 tool\n", uid)), 1, nil
 	}
 	read := otherProcsReader()
-	want := []otherProc{{Pid: 12345, UID: uid, CPU: 2.5, Memory: 1024 * 1024, Path: "/opt/foreign/tool", Name: "tool"}}
+	want := []otherProc{{Pid: 12345, CPU: 2.5, Memory: 1024 * 1024, Path: "/opt/foreign/tool", Name: "tool"}}
 	if got := read(context.Background()); !slices.Equal(got, want) {
 		t.Fatalf("first reading = %+v, want %+v from the immediate fallback", got, want)
 	}

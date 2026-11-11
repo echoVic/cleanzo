@@ -26,11 +26,11 @@ func TestParsePsOutputKeepsOtherAccountsWithShortNames(t *testing.T) {
 	}, "\n"))
 	got := parsePsOutput(out, 501)
 	want := []otherProc{
-		{Pid: 1, UID: 0, CPU: 0.3, Memory: 12288 * 1024, Path: "launchd", Name: "launchd"},
-		{Pid: 414, UID: 88, CPU: 40.2, Memory: 138240 * 1024, Path: "WindowServer", Name: "WindowServer"},
-		{Pid: 7045, UID: 0, CPU: 10.8, Memory: 53872 * 1024, Path: "wdavdaemon", Name: "wdavdaemon"},
-		{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "Google Chrome He", Name: "Google Chrome He"},
-		{Pid: 0, UID: 0, CPU: 5.0, Memory: 0, Path: "kernel_task", Name: "kernel_task"},
+		{Pid: 1, CPU: 0.3, Memory: 12288 * 1024, Path: "launchd", Name: "launchd"},
+		{Pid: 414, CPU: 40.2, Memory: 138240 * 1024, Path: "WindowServer", Name: "WindowServer"},
+		{Pid: 7045, CPU: 10.8, Memory: 53872 * 1024, Path: "wdavdaemon", Name: "wdavdaemon"},
+		{Pid: 7046, CPU: 2.5, Memory: 1024 * 1024, Path: "Google Chrome He", Name: "Google Chrome He"},
+		{Pid: 0, CPU: 5.0, Memory: 0, Path: "kernel_task", Name: "kernel_task"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d processes, want %d: %+v", len(got), len(want), got)
@@ -202,7 +202,7 @@ func TestWatchProcessesStopsDuringTheFirstWait(t *testing.T) {
 
 func TestParsePsOutputPreservesChineseName(t *testing.T) {
 	got := parsePsOutput([]byte("7046 0 2.5 1024 语雀\n"), 501)
-	want := otherProc{Pid: 7046, UID: 0, CPU: 2.5, Memory: 1024 * 1024, Path: "语雀", Name: "语雀"}
+	want := otherProc{Pid: 7046, CPU: 2.5, Memory: 1024 * 1024, Path: "语雀", Name: "语雀"}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

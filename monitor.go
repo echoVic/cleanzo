@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,8 +112,8 @@ type statusSource struct {
 	cpu     func() (busy, total uint64) // cumulative ticks
 	battery func(ctx context.Context) *BatteryStatus
 	disk    func() DiskStat
-	group   func(procReading, map[int32]procReading, func(int32) int32) (string, string) // optional platform attribution
-	machine func() machineSampler                                                        // optional: opens the live machine readings (macOS)
+	group   func(procReading, map[int32]procReading) (string, string) // the app rows; required with procs (see mergeApps)
+	machine func() machineSampler                                     // optional: opens the live machine readings (macOS)
 }
 
 // Timing knobs, variables so tests can shrink them.
@@ -155,21 +154,6 @@ func memoryFromVM(totalBytes, page uint64, vm vmStats64, pressure, swapUsed, swa
 
 // ---- parsing helpers (pure, table-tested) ---------------------------------
 
-var bootTimeRe = regexp.MustCompile(`sec = (\d+)`)
-
-// parseBootTime reads kern.boottime's "{ sec = 1728975540, usec = 0 } ...".
-func parseBootTime(s string) int64 {
-	m := bootTimeRe.FindStringSubmatch(s)
-	if m == nil {
-		return 0
-	}
-	v, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
 // bootTimeMax is unix seconds of 2100-01-01: kern.boottime is a struct
 // timeval, so anything past that means the bytes were not a timeval.
 const bootTimeMax = int64(4102444800)
@@ -178,7 +162,6 @@ const bootTimeMax = int64(4102444800)
 // sit little-endian at offset 0, 8 bytes wide on 64-bit darwin (LP64);
 // the sysctl command renders them as text, but the raw sysctl hands over
 // the struct. Values outside the plausible unix range read as zero.
-// (真机 verification P1-1: the text regex never matched the binary.)
 func parseBootTimeBytes(b []byte) int64 {
 	if len(b) < 8 {
 		return 0
@@ -190,59 +173,9 @@ func parseBootTimeBytes(b []byte) int64 {
 	return v
 }
 
-// swapUnit converts "2048.00M" / "3.62G" to bytes, binary units.
-func swapUnit(v string) uint64 {
-	if len(v) == 0 {
-		return 0
-	}
-	mult := uint64(1)
-	switch v[len(v)-1] {
-	case 'K':
-		mult, v = 1024, v[:len(v)-1]
-	case 'M':
-		mult, v = 1024*1024, v[:len(v)-1]
-	case 'G':
-		mult, v = 1024*1024*1024, v[:len(v)-1]
-	case 'T':
-		mult, v = 1024*1024*1024*1024, v[:len(v)-1]
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f < 0 {
-		return 0
-	}
-	return uint64(f * float64(mult))
-}
-
-// parseSwapUsage reads "total = 2048.00M  used = 512.00M  free = ...",
-// skipping the "=" separators the sysctl prints between name and value.
-func parseSwapUsage(s string) (used, total uint64) {
-	fields := strings.Fields(s)
-	for i := 0; i+1 < len(fields); i++ {
-		switch fields[i] {
-		case "total", "used":
-			j := i + 1
-			if fields[j] == "=" {
-				j++
-			}
-			if j >= len(fields) {
-				continue
-			}
-			v := swapUnit(strings.TrimSuffix(fields[j], ","))
-			if fields[i] == "total" {
-				total = v
-			} else {
-				used = v
-			}
-		}
-	}
-	return used, total
-}
-
 // swapUsage mirrors XNU's struct xsw_usage (sys/sysctl.h), what the
 // vm.swapusage sysctl hands over. It is CTLTYPE_STRUCT: the raw sysctl
-// returns the struct, not the "total = 2048.00M" text the CLI renders —
-// the text parser above reads zeros from those bytes (fix3, same class
-// of bug as kern.boottime / vm.loadavg in fix2).
+// returns the struct, not the "total = 2048.00M" text the CLI renders.
 type swapUsage struct {
 	Total     uint64 // xsu_total: total swap space in bytes
 	Avail     uint64 // xsu_avail: swap space currently available
@@ -253,9 +186,8 @@ type swapUsage struct {
 
 // parseSwapUsageBytes decodes the 32-byte xsw_usage: three little-endian
 // uint64 (offsets 0/8/16), a uint32 pagesize at 24 and a boolean_t (int)
-// at 28. The whole struct is required for the byte counts; a short or
-// empty buffer reads as not-ok so the caller falls back to the text
-// shape.
+// at 28. The three counts are required; a short or empty buffer reads as
+// not-ok and the zero struct.
 func parseSwapUsageBytes(b []byte) (swapUsage, bool) {
 	var su swapUsage
 	if len(b) < 24 { // the three uint64 are the whole byte story
@@ -273,27 +205,6 @@ func parseSwapUsageBytes(b []byte) (swapUsage, bool) {
 	return su, true
 }
 
-// parseLoadAvg reads " 1.92 2.03 1.85 " into the 1/5/15-minute loads.
-func parseLoadAvg(s string) (l1, l5, l15 float64) {
-	fields := strings.Fields(s)
-	vals := make([]float64, 0, 3)
-	for _, f := range fields {
-		if v, err := strconv.ParseFloat(f, 64); err == nil && len(vals) < 3 {
-			vals = append(vals, v)
-		}
-	}
-	if len(vals) > 0 {
-		l1 = vals[0]
-	}
-	if len(vals) > 1 {
-		l5 = vals[1]
-	}
-	if len(vals) > 2 {
-		l15 = vals[2]
-	}
-	return
-}
-
 // loadAvgMax caps a sane load: anything past a million means the bytes
 // were misread, not measured.
 const loadAvgMax = 1e6
@@ -305,7 +216,6 @@ const loadAvgMax = 1e6
 // struct puts it at 12. All three candidates are accepted, first valid
 // one wins, so a layout change fails soft to zero instead of rendering
 // garbage.
-// (真机 verification P1-4: the text parser never matched the binary.)
 func loadScaleAt(b []byte, off, n int) uint64 {
 	if off+n > len(b) {
 		return 0
@@ -343,15 +253,10 @@ func parseLoadAvgBytes(b []byte) (l1, l5, l15 float64) {
 	return 0, 0, 0
 }
 
-// readLoadAvg is the wiring: vm.loadavg is a fixed-point struct, not
-// text, so the binary parse runs first; the text parse only remains as a
-// fallback for the sysctl CLI's rendered shape, used when the raw read
-// itself failed.
+// readLoadAvg reads vm.loadavg, a fixed-point struct; a failed read is
+// zero loads.
 func readLoadAvg() (l1, l5, l15 float64) {
-	if raw := nativeSysctlRaw("vm.loadavg"); len(raw) > 0 {
-		return parseLoadAvgBytes(raw)
-	}
-	return parseLoadAvg(nativeSysctlString("vm.loadavg"))
+	return parseLoadAvgBytes(nativeSysctlRaw("vm.loadavg"))
 }
 
 // parseBool reads system_profiler's mixed bool spellings.
@@ -582,46 +487,16 @@ func outermostBundle(path string) string {
 	return path[:idx+4]
 }
 
-// procGroupKey decides which app a process belongs to:
-//  1. its own outermost .app;
-//  2. its responsible process's outermost .app (or executable name);
-//  3. its executable file name.
-func procGroupKey(r procReading, byPid map[int32]procReading, responsible func(int32) int32) (key, bundle string) {
-	if b := outermostBundle(r.Path); b != "" {
-		return "app:" + strings.ToLower(b), b
-	}
-	if rpid := responsible(r.Pid); rpid > 0 && rpid != r.Pid {
-		if rp, ok := byPid[rpid]; ok {
-			if b := outermostBundle(rp.Path); b != "" {
-				return "app:" + strings.ToLower(b), b
-			}
-			return "exec:" + filepath.Base(rp.Path), ""
+// displayName picks the row's name: the localized name of the running app
+// at bundle, else the .app folder or executable name.
+func displayName(bundle string, apps []workspaceApp) string {
+	lower := strings.ToLower(bundle)
+	for _, a := range apps {
+		if a.Path != "" && strings.ToLower(a.Path) == lower && a.Name != "" {
+			return a.Name
 		}
 	}
-	return "exec:" + filepath.Base(r.Path), ""
-}
-
-// displayName picks the row's name: the localized name of the running Dock
-// app at that bundle, else the .app folder name, else the executable name.
-func displayName(key, bundle string, apps []workspaceApp, procs []procReading) string {
-	if bundle != "" {
-		lower := strings.ToLower(bundle)
-		for _, a := range apps {
-			if a.Path != "" && strings.ToLower(a.Path) == lower && a.Name != "" {
-				return a.Name
-			}
-		}
-		return strings.TrimSuffix(filepath.Base(bundle), ".app")
-	}
-	for _, p := range procs {
-		if "exec:"+filepath.Base(p.Path) == key {
-			return filepath.Base(p.Path)
-		}
-	}
-	if i := strings.Index(key, "exec:"); i == 0 {
-		return key[len("exec:"):]
-	}
-	return key
+	return strings.TrimSuffix(filepath.Base(bundle), ".app")
 }
 
 // canQuit reports whether the group has a Dock app that may be terminated:
@@ -656,14 +531,12 @@ type appGroup struct {
 	procs  int
 }
 
-// mergeApps attributes every sampled process to an app row and computes
-// per-app CPU from the previous sample. New or reused pids get no CPU that
-// round. The result holds the memory top 8 union the CPU top 8, deduped.
-func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceApp, responsible func(int32) int32, elapsed time.Duration, groupers ...func(procReading, map[int32]procReading, func(int32) int32) (string, string)) []AppUsage {
-	group := procGroupKey
-	if len(groupers) > 0 && groupers[0] != nil {
-		group = groupers[0]
-	}
+// mergeApps attributes every sampled process to an app row with group and
+// computes per-app CPU from the previous sample. group returns the row's
+// key and its bundle or executable path; an empty key leaves the process
+// out. New or reused pids get no CPU that round. The result holds the
+// memory top 8 union the CPU top 8, deduped.
+func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceApp, elapsed time.Duration, group func(procReading, map[int32]procReading) (string, string)) []AppUsage {
 	byPid := make(map[int32]procReading, len(procs))
 	for _, r := range procs {
 		byPid[r.Pid] = r
@@ -674,7 +547,7 @@ func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceA
 		if statusProcessExcluded(r.Pid, r.Path) {
 			continue
 		}
-		key, bundle := group(r, byPid, responsible)
+		key, bundle := group(r, byPid)
 		if key == "" {
 			continue
 		}
@@ -700,7 +573,7 @@ func mergeApps(prev map[int32]procSample, procs []procReading, apps []workspaceA
 		}
 		rows = append(rows, AppUsage{
 			Key:    key,
-			Name:   displayName(key, g.bundle, apps, procs),
+			Name:   displayName(g.bundle, apps),
 			Path:   g.bundle,
 			Memory: g.memory,
 			CPU:    cpu,
@@ -905,7 +778,7 @@ func buildSample(prevProcs, curProcs map[int32]procSample, prevCPU, curCPU cpuTi
 		Procs:  len(curProcs),
 	}
 	if src.procs != nil {
-		sample.Apps = mergeApps(prevProcs, curReadings, src.apps(), nativeResponsiblePid, elapsed, src.group)
+		sample.Apps = mergeApps(prevProcs, curReadings, src.apps(), elapsed, src.group)
 	}
 	// Counters that went backwards wrapped or were reset: no usage this round.
 	if curCPU.Total > prevCPU.Total && prevCPU.Total > 0 && curCPU.Busy >= prevCPU.Busy {

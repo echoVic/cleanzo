@@ -108,9 +108,6 @@ func windowsProcReadings(procs []procInfo) []procReading {
 	return out
 }
 
-// nativeResponsiblePid is unused when the source supplies snapshot-local GUI ancestry.
-func nativeResponsiblePid(pid int32) int32 { return -1 }
-
 // nativeMachineInfo reads registry identity and computes the boot time from monotonic uptime.
 func nativeMachineInfo() (string, uint64, uint64, string, int64) {
 	cpu := windowsRegistryString(`HARDWARE\DESCRIPTION\System\CentralProcessor\0`, "ProcessorNameString")
@@ -285,9 +282,6 @@ func workspaceTerminate(pid int32) bool {
 // workspaceForceTerminate is never used on Windows: the process page is
 // macOS only in this version.
 func workspaceForceTerminate(pid int32) bool { return false }
-
-// nativeSysctlString reports an unavailable Darwin sysctl.
-func nativeSysctlString(name string) string { return "" }
 
 // nativeSysctlRaw reports an unavailable Darwin sysctl.
 func nativeSysctlRaw(name string) []byte { return nil }

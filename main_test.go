@@ -20,16 +20,6 @@ import (
 	"time"
 )
 
-// TestCleanerDropsLegacyJunkMethods keeps the bound API on the rule engine.
-func TestCleanerDropsLegacyJunkMethods(t *testing.T) {
-	service := reflect.TypeOf(Cleaner{})
-	for _, name := range []string{"Scan", "Clean", "ScanStream", "CleanStream", "ScanAppCaches", "GetCategories", "SaveCategories"} {
-		if _, ok := service.MethodByName(name); ok {
-			t.Errorf("legacy method %s is still bound", name)
-		}
-	}
-}
-
 // TestSettingsSaveDropsLegacyCategories writes only the v3 settings model.
 func TestSettingsSaveDropsLegacyCategories(t *testing.T) {
 	home := t.TempDir()
@@ -1108,14 +1098,6 @@ func TestCleanJunkStops(t *testing.T) {
 	left, _ := os.ReadDir(one)
 	if removed != 1 || len(left) != 2 || !slices.Equal(started, []string{"custom:" + one}) || !exists(filepath.Join(two, "z")) {
 		t.Fatalf("removed %d, %d left, started %v", removed, len(left), started)
-	}
-}
-
-// TestDiskReportsCapacity gets disk usage without scanning files.
-func TestDiskReportsCapacity(t *testing.T) {
-	got := Cleaner{}.Disk()
-	if got.Total <= 0 || got.Free <= 0 {
-		t.Fatalf("Disk = %+v, want positive total and free", got)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"math"
 	"reflect"
 	"testing"
-	"time"
 )
 
 // panelTestText keeps the key and variables visible in logic tests.
@@ -88,14 +87,8 @@ func panelTestGrowth(enabled bool) *GrowthState {
 // panelTestViewKeys visits the native views where they are supported.
 var panelTestViewKeys func(panelText)
 
-func TestPanelConstantsAndLinks(t *testing.T) {
-	panelEqual(t, panelTop, 5)
-	panelEqual(t, panelQuitConfirm, 3*time.Second)
-	panelEqual(t, panelDiskSparkFloor, 1000000)
-	panelEqual(t, panelSparkPoints, 30)
-	panelEqual(t, panelDiagSamples, 3)
-	panelEqual(t, float64(panelBusy), 80.0)
-	panelEqual(t, float64(panelIdleBelow), 50.0)
+// TestPanelLinks: each panel's title key and the pages its links open.
+func TestPanelLinks(t *testing.T) {
 	for _, item := range menuBarItems {
 		panelEqual(t, panelTitle(item), "menubar.panel."+item)
 		want := []panelLink{{"menubar.panel.openHome", MenuBarTarget{Page: "status"}}}

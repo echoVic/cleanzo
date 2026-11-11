@@ -226,36 +226,6 @@ func TestOutermostBundle(t *testing.T) {
 	}
 }
 
-func TestMergeAppsAttribution(t *testing.T) {
-	procs := []procReading{
-		{Pid: 1, Path: "/Applications/Chrome.app/Contents/MacOS/Chrome", Footprint: 100},
-		{Pid: 2, Path: "/Applications/Chrome.app/Contents/Frameworks/Chrome Helper.app/Contents/MacOS/Chrome Helper", Footprint: 50}, // helper of a nested .app still lands on the outermost
-		{Pid: 3, Path: "/opt/homebrew/bin/node", Footprint: 10},
-		{Pid: 4, Path: "/Applications/Terminal.app/Contents/MacOS/Terminal", Footprint: 20},
-	}
-	byPid := map[int32]procReading{}
-	for _, p := range procs {
-		byPid[p.Pid] = p
-	}
-	// node (pid 3) is responsible to Terminal (pid 4).
-	responsible := func(pid int32) int32 {
-		if pid == 3 {
-			return 4
-		}
-		return -1
-	}
-	rows := mergeApps(nil, procs, nil, responsible, 0)
-	if got := mustAppUsage(rows, "app:/applications/chrome.app"); got.Memory != 150 || got.Procs != 2 {
-		t.Errorf("Chrome group = %+v, want memory 150 procs 2", got)
-	}
-	if got := mustAppUsage(rows, "app:/applications/terminal.app"); got.Memory != 30 {
-		t.Errorf("node should be attributed to Terminal via its responsible process: %+v", got)
-	}
-	if got := mustAppUsage(rows, "exec:node"); got.Procs != 0 {
-		t.Errorf("node must not stand alone: %+v", got)
-	}
-}
-
 func TestMergeAppsTop8Union(t *testing.T) {
 	var procs []procReading
 	for i := 0; i < 20; i++ {
@@ -266,7 +236,7 @@ func TestMergeAppsTop8Union(t *testing.T) {
 			UserNs:    uint64(i) * 1_000_000_000,
 		})
 	}
-	rows := mergeApps(nil, procs, nil, func(int32) int32 { return -1 }, 2*time.Second)
+	rows := mergeApps(nil, procs, nil, 2*time.Second, testGroup)
 	if len(rows) > 16 {
 		t.Errorf("union cap is 16, got %d", len(rows))
 	}
@@ -289,7 +259,7 @@ func TestMergeAppsQuitButton(t *testing.T) {
 		{Pid: 2, Path: "/Applications/Bar.app", BundleID: "com.bar.helper", Name: "Bar", Regular: false},  // menu bar app
 		{Pid: 3, Path: "/Applications/Foo.app", BundleID: "com.apple.finder", Name: "Foo", Regular: true}, // excluded
 	}
-	rows := mergeApps(nil, procs, apps, func(int32) int32 { return -1 }, 0)
+	rows := mergeApps(nil, procs, apps, 0, testGroup)
 	if !mustAppUsage(rows, "app:/applications/chrome.app").Quit {
 		t.Error("regular Dock app should offer quit")
 	}
@@ -304,11 +274,11 @@ func TestMergeAppsQuitButton(t *testing.T) {
 func TestDisplayNameLocalized(t *testing.T) {
 	procs := []procReading{{Pid: 1, Path: "/Applications/Lark.app/Contents/MacOS/Lark"}}
 	apps := []workspaceApp{{Pid: 1, Path: "/Applications/Lark.app", Name: "飞书", Regular: true}}
-	if got := mustAppUsage(mergeApps(nil, procs, apps, func(int32) int32 { return -1 }, 0), "app:/applications/lark.app"); got.Name != "飞书" {
+	if got := mustAppUsage(mergeApps(nil, procs, apps, 0, testGroup), "app:/applications/lark.app"); got.Name != "飞书" {
 		t.Errorf("want localized name 飞书, got %q", got.Name)
 	}
 	// No workspace entry: fall back to the bundle folder name.
-	if got := mustAppUsage(mergeApps(nil, procs, nil, func(int32) int32 { return -1 }, 0), "app:/applications/lark.app"); got.Name != "Lark" {
+	if got := mustAppUsage(mergeApps(nil, procs, nil, 0, testGroup), "app:/applications/lark.app"); got.Name != "Lark" {
 		t.Errorf("want bundle name Lark, got %q", got.Name)
 	}
 }
@@ -323,7 +293,7 @@ func TestMergeAppsCPUDeltaAndReuse(t *testing.T) {
 		2: {Pid: 2, UserNs: 0, SysNs: 0, Start: 9}, // reused pid: different Start
 	}
 	// 1.5s of CPU over 2s of wall = 75% of one core.
-	rows := mergeApps(prev, procs, nil, func(int32) int32 { return -1 }, 2*time.Second)
+	rows := mergeApps(prev, procs, nil, 2*time.Second, testGroup)
 	if got := mustAppUsage(rows, "app:/applications/a.app"); got.CPU != 75 {
 		t.Errorf("CPU = %v, want 75", got.CPU)
 	}
@@ -337,7 +307,7 @@ func TestMergeAppsCPUCanExceed100(t *testing.T) {
 		{Pid: 1, Path: "/Applications/A.app/Contents/MacOS/a", UserNs: 4_000_000_000, SysNs: 4_000_000_000, Start: 1},
 	}
 	prev := map[int32]procSample{1: {Pid: 1, UserNs: 0, SysNs: 0, Start: 1}}
-	rows := mergeApps(prev, procs, nil, func(int32) int32 { return -1 }, time.Second)
+	rows := mergeApps(prev, procs, nil, time.Second, testGroup)
 	if got := mustAppUsage(rows, "app:/applications/a.app"); got.CPU != 800 {
 		t.Errorf("single-core percent can exceed 100, want 800, got %v", got.CPU)
 	}

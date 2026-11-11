@@ -126,13 +126,6 @@ type OrphanItem struct {
 	IsDir     bool   `json:"isDir"`
 }
 
-// OrphanScanResult aggregates leftover detection results.
-type OrphanScanResult struct {
-	Items     []OrphanItem `json:"items"`
-	TotalSize int64        `json:"totalSize"`
-	ElapsedMs int64        `json:"elapsedMs"`
-}
-
 // SystemInfo describes the app and the machine it runs on.
 type SystemInfo struct {
 	Version   string `json:"version"` // the app's, from mygo.config.ts; empty under go test
@@ -521,17 +514,13 @@ func readBundleInfo(plistPath string) (name, bid, version string) {
 	if err != nil {
 		return "", "", ""
 	}
-	m := plistStrings(out)
+	m := plistValues(out)
 	name = m["CFBundleDisplayName"]
 	if name == "" {
 		name = m["CFBundleName"]
 	}
 	return name, m["CFBundleIdentifier"], m["CFBundleShortVersionString"]
 }
-
-// plistStrings returns the string values of the top-level dictionary of an
-// XML property list.
-func plistStrings(data []byte) map[string]string { return plistValues(data) }
 
 // plistValues reads strings and dates from the top-level plist dictionary.
 func plistValues(data []byte) map[string]string {

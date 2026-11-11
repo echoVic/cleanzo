@@ -49,14 +49,11 @@ func readMemoryStatus() MemoryStatus {
 	return memoryFromVM(total, page, vm, pressure, swapUsed, swapTotal)
 }
 
-// readSwapUsage is the wiring: vm.swapusage is a struct sysctl, so the
-// binary parse runs first; the text parse only remains as a fallback for
-// the CLI's rendered shape, used when the raw read itself failed.
+// readSwapUsage reads vm.swapusage, a struct sysctl; a failed read is
+// zero swap.
 func readSwapUsage() (used, total uint64) {
-	if su, ok := parseSwapUsageBytes(nativeSysctlRaw("vm.swapusage")); ok {
-		return su.Used, su.Total
-	}
-	return parseSwapUsage(nativeSysctlString("vm.swapusage"))
+	su, _ := parseSwapUsageBytes(nativeSysctlRaw("vm.swapusage"))
+	return su.Used, su.Total
 }
 
 // statusBattery runs system_profiler, whose JSON is the only source that

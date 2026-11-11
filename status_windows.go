@@ -52,7 +52,7 @@ func realStatusSource() statusSource {
 			return windowsProcReadings(procs)
 		},
 		apps: func() []workspaceApp { return apps },
-		group: func(r procReading, byPid map[int32]procReading, _ func(int32) int32) (string, string) {
+		group: func(r procReading, byPid map[int32]procReading) (string, string) {
 			return windowsAppGroup(r, byPid, ancestors)
 		},
 		memory: readMemoryStatus, cpu: windowsCPUTicks, battery: statusBattery, disk: diskStat,

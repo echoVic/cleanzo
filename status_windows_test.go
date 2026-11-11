@@ -124,8 +124,8 @@ func TestWindowsSystemAppsStayListedWithoutQuit(t *testing.T) {
 			if statusAppExcluded(a) != wantExcluded || canQuit(path, []workspaceApp{a}) == wantExcluded || (len(quitMatches(path, []workspaceApp{a})) == 0) != wantExcluded {
 				t.Fatalf("incorrect quit eligibility for %s", path)
 			}
-			rows := mergeApps(nil, []procReading{{Pid: a.Pid, Path: path, Footprint: 20, Start: 1}}, []workspaceApp{a}, nativeResponsiblePid, time.Second,
-				func(procReading, map[int32]procReading, func(int32) int32) (string, string) {
+			rows := mergeApps(nil, []procReading{{Pid: a.Pid, Path: path, Footprint: 20, Start: 1}}, []workspaceApp{a}, time.Second,
+				func(procReading, map[int32]procReading) (string, string) {
 					return "app:" + strings.ToLower(path), path
 				})
 			if len(rows) != 1 || rows[0].Quit == wantExcluded {
@@ -234,7 +234,7 @@ func TestWindowsAppUsageGroupsChildren(t *testing.T) {
 	procs := []procReading{{Pid: 900001, Path: path, Footprint: 20, UserNs: 200, Start: 1}, {Pid: 900002, Path: path + ".worker", Footprint: 30, UserNs: 300, Start: 2}, {Pid: 900003, Path: path + ".daemon", Footprint: 50}}
 	prev := map[int32]procSample{900001: {Start: 1, UserNs: 100}, 900002: {Start: 2, UserNs: 100}}
 	ancestors := map[uint32]uint32{900001: 900001, 900002: 900001}
-	rows := mergeApps(prev, procs, apps, nativeResponsiblePid, time.Nanosecond*100, func(r procReading, byPid map[int32]procReading, _ func(int32) int32) (string, string) {
+	rows := mergeApps(prev, procs, apps, time.Nanosecond*100, func(r procReading, byPid map[int32]procReading) (string, string) {
 		return windowsAppGroup(r, byPid, ancestors)
 	})
 	if len(rows) != 1 || rows[0].Name != "Example Product" || rows[0].Memory != 50 || rows[0].CPU != 300 || rows[0].Procs != 2 || rows[0].Path != path || !rows[0].Quit {

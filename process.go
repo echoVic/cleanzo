@@ -60,7 +60,6 @@ type ProcessSample struct {
 // otherProc is another account's process as ps reports it.
 type otherProc struct {
 	Pid    int32
-	UID    uint32
 	CPU    float64 // ps %cpu, a decaying average
 	Memory uint64  // resident size in bytes
 	Path   string  // the executable's full path, or a bare name like kernel_task
@@ -301,7 +300,7 @@ func groupProcesses(prev, cur map[int32]procReading, others []otherProc, apps []
 	for _, g := range groups {
 		row := g.row
 		if row.Kind == "app" {
-			row.Name = displayName(row.Key, row.Path, apps, nil)
+			row.Name = displayName(row.Path, apps)
 			id := workspaceIDs[strings.ToLower(row.Path)]
 			if id == "" {
 				id = bundleID(row.Path)
@@ -390,7 +389,7 @@ func parsePsOutput(out []byte, self uint32) []otherProc {
 		if errPid != nil || errUID != nil || errCPU != nil || errRSS != nil || uint32(uid) == self {
 			continue
 		}
-		procs = append(procs, otherProc{Pid: int32(pid), UID: uint32(uid), CPU: cpu, Memory: rss * 1024, Path: path, Name: path})
+		procs = append(procs, otherProc{Pid: int32(pid), CPU: cpu, Memory: rss * 1024, Path: path, Name: path})
 	}
 	return procs
 }

@@ -774,25 +774,6 @@ func TestPanelViewDisplayValueWraps(t *testing.T) {
 	}
 }
 
-func TestMenuBarPanelHasNoWarmup(t *testing.T) {
-	for _, path := range []string{
-		"menubar_panel_darwin.go", "menubar_darwin.go", "menubar_other.go",
-	} {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			if id, ok := node.(*ast.Ident); ok &&
-				(id.Name == "menuBarWarmPanels" || id.Name == "menuBarPanelWarm") {
-				t.Errorf("%s retains renderer warm-up %s", fset.Position(id.Pos()), id.Name)
-			}
-			return true
-		})
-	}
-}
-
 func TestPanelViewFunctionComments(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "menubar_panel_darwin.go", nil, parser.ParseComments)

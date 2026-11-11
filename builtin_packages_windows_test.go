@@ -59,8 +59,8 @@ func TestWindowsPackagedAppsStayListedWithoutQuit(t *testing.T) {
 			if statusAppExcluded(a) != tt.excluded || canQuit(a.Path, []workspaceApp{a}) == tt.excluded || (len(quitMatches(a.Path, []workspaceApp{a})) == 0) != tt.excluded {
 				t.Fatal("incorrect package quit eligibility")
 			}
-			rows := mergeApps(nil, []procReading{{Pid: a.Pid, Path: a.Path, Footprint: 20, Start: 1}}, []workspaceApp{a}, nativeResponsiblePid, time.Second,
-				func(procReading, map[int32]procReading, func(int32) int32) (string, string) {
+			rows := mergeApps(nil, []procReading{{Pid: a.Pid, Path: a.Path, Footprint: 20, Start: 1}}, []workspaceApp{a}, time.Second,
+				func(procReading, map[int32]procReading) (string, string) {
 					return "app:" + a.Path, a.Path
 				})
 			if len(rows) != 1 || rows[0].Quit == tt.excluded {

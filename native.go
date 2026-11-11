@@ -304,17 +304,11 @@ func nativeSysctlRaw(name string) []byte {
 // nativeMachineInfo reads the About This Mac line: chip, memory, cores,
 // macOS version and boot time. Unreadable fields come back zero or empty.
 func nativeMachineInfo() (chip string, memory, cores uint64, osVersion string, bootTime int64) {
-	boot := parseBootTimeBytes(nativeSysctlRaw("kern.boottime"))
-	if boot == 0 {
-		// Struct read failed; the CLI's rendered text is the only other
-		// shape kern.boottime could arrive in.
-		boot = parseBootTime(nativeSysctlString("kern.boottime"))
-	}
 	return nativeSysctlString("machdep.cpu.brand_string"),
 		nativeSysctlUint64("hw.memsize"),
 		nativeSysctlUint64("hw.logicalcpu"),
 		nativeSysctlString("kern.osproductversion"),
-		boot
+		parseBootTimeBytes(nativeSysctlRaw("kern.boottime"))
 }
 
 // ---- NSWorkspace / NSRunningApplication ----------------------------------

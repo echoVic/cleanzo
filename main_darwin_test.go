@@ -104,9 +104,6 @@ func TestUninstallPaths(t *testing.T) {
 		if it.Path == appPath {
 			foundApp = true
 		}
-		if it.Size != 0 && it.Path == appPath {
-			// app itself has 4096 bytes
-		}
 	}
 	if !foundApp {
 		t.Fatal("app bundle not in items")
@@ -168,8 +165,8 @@ func TestFullScanTargets(t *testing.T) {
 	if strings.Contains(joined, filepath.Join(home, ".Trash")) {
 		t.Errorf(".Trash must not be scanned:\n%s", joined)
 	}
-	if strings.Contains(joined, filepath.Join(home, "Library\n")) && false {
-		t.Errorf("Library itself must be expanded, not scanned as a whole")
+	if slices.Contains(targets, filepath.Join(home, "Library")) {
+		t.Errorf("Library itself must be expanded, not scanned as a whole:\n%s", joined)
 	}
 }
 
