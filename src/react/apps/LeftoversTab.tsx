@@ -314,7 +314,8 @@ export function LeftoversTab({ active, onCountChange, onBusyChange }: LeftoversT
       {!scanning && error && (
         <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
-          <div>{t("orphans.fail", { msg: errText(error) })}</div>
+          {/* 占用检查没做完时扫描根本没开始：单独说明，不借用卸载那句「未移动」 */}
+          <div>{error === "usage-unknown" ? t("orphans.usageUnknown") : t("orphans.fail", { msg: errText(error) })}</div>
           <button className="btn ghost retry-btn" type="button" onClick={() => void startScan()}>
             {t("btn.retry")}
           </button>

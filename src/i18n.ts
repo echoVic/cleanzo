@@ -1143,6 +1143,7 @@ export const dict = {
     "orphans.foot": "共 {n} 项残留 · {size} · 用时 {t}s",
     "orphans.empty": "没有发现残留",
     "orphans.fail": "扫描失败：{msg}",
+    "orphans.usageUnknown": "无法检查哪些文件正在使用，这次没有扫描。请重试。",
     "orphans.safeNote": "残留项可能包含仍在使用的数据，移入废纸篓前请先确认。",
     // similar photos
     "photos.sub": "找出近乎重复、相似截图与连拍的照片簇",
@@ -2307,6 +2308,7 @@ export const dict = {
     "orphans.foot": "{n} {n|leftover/leftovers} · {size} · {t}s",
     "orphans.empty": "No leftovers found",
     "orphans.fail": "Scan failed: {msg}",
+    "orphans.usageUnknown": "Could not check which files are in use, so nothing was scanned. Try again.",
     "orphans.safeNote": "Leftovers may include data still in use; please verify before moving to Trash.",
     // similar photos
     "photos.sub": "Find near-duplicates, similar screenshots and burst shots",

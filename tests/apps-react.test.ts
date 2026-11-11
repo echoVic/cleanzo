@@ -1231,6 +1231,18 @@ test("残留扫描失败：tab 角标回退为未知 null（不用 0 误导）�
   } finally { h.close(); }
 });
 
+test("残留扫描因占用检查没能完成而失败：说这次没有扫描，不提应用、不说移动", async () => {
+  const { t } = await import("../src/i18n");
+  const h = await leftoversHarness();
+  try {
+    h.configure({ fail: new Error("usage-unknown") });
+    await h.settle();
+    expect(h.hasAlert()).toBe(true);
+    expect(h.text()).toContain(t("orphans.usageUnknown"));
+    expect(h.text()).not.toContain(t("fs.usageUnknown"));
+  } finally { h.close(); }
+});
+
 test("残留扫描成功：tab 角标实时为残留数量", async () => {
   const h = await leftoversHarness();
   try {
