@@ -1235,9 +1235,14 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 			continue
 		}
 		// What reached the Trash after the scan stays recoverable: an entry
-		// stays whole when anything inside it changed since.
+		// stays whole when anything inside it changed since, and the result
+		// counts it, so the row does not read as emptied. The Trash row's own
+		// entries are judged so on every system.
 		inTrash := runtime.GOOS != "windows" && trash != "" && within(key, trash)
-		if inTrash && !scannedAt.IsZero() && !trashUnchanged(ctx, e.path, scannedAt) {
+		if (inTrash || spec.item.ID == "sys.trash") && !scannedAt.IsZero() && !trashUnchanged(ctx, e.path, scannedAt) {
+			if ctx.Err() == nil {
+				res.Failed = append(res.Failed, "changed")
+			}
 			continue
 		}
 		permanent := !spec.item.Trash || inTrash

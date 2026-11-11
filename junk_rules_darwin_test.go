@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,8 @@ func TestCleanJunkTrashFirstAndScannedAt(t *testing.T) {
 }
 
 // TestCleanKeepsWhatReachedTheTrashAfterTheScan: emptying the Trash deletes
-// what the scan showed; what arrives later stays recoverable.
+// what the scan showed; what arrives later stays recoverable, and the result
+// says the Trash was not emptied.
 func TestCleanKeepsWhatReachedTheTrashAfterTheScan(t *testing.T) {
 	env := testEnv(t)
 	home := env.home
@@ -95,7 +97,7 @@ func TestCleanKeepsWhatReachedTheTrashAfterTheScan(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	writeFile(t, filepath.Join(trash, "new.bin"), 700)
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.UnixMilli(scannedAt.UnixMilli()), cleanHooks{})[0]
-	if exists(filepath.Join(trash, "old.bin")) || !exists(filepath.Join(trash, "new.bin")) || res.Freed != 1500 {
+	if exists(filepath.Join(trash, "old.bin")) || !exists(filepath.Join(trash, "new.bin")) || res.Freed != 1500 || !slices.Equal(res.Failed, []string{"changed"}) {
 		t.Fatalf("result = %+v", res)
 	}
 }
@@ -115,7 +117,7 @@ func TestCleanKeepsAFolderThatChangedInTheTrash(t *testing.T) {
 	fresh := filepath.Join(trash, "folder", "nested", "new.bin")
 	writeFile(t, fresh, 300)
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "sys.trash"}}, time.UnixMilli(scannedAt.UnixMilli()), cleanHooks{})[0]
-	if exists(filepath.Join(trash, "old.bin")) || !exists(kept) || !exists(fresh) || res.Freed != 100 {
+	if exists(filepath.Join(trash, "old.bin")) || !exists(kept) || !exists(fresh) || res.Freed != 100 || !slices.Equal(res.Failed, []string{"changed"}) {
 		t.Fatalf("result = %+v", res)
 	}
 }

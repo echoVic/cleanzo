@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -255,8 +256,8 @@ func TestTrashReminderRechecksBeforeEachRemoval(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	fresh := filepath.Join(trash, "b-folder", "nested", "new.bin")
 	r := cleanTrashReminder(context.Background(), env, s, func(int64) { writeFile(t, fresh, 100) })
-	if r.Freed != 100 || !exists(fresh) {
-		t.Fatalf("changed subtree removed: %+v", r)
+	if r.Freed != 100 || !exists(fresh) || !slices.Equal(r.Failed, []string{"changed"}) {
+		t.Fatalf("changed subtree removed or not reported: %+v", r)
 	}
 }
 
@@ -280,6 +281,10 @@ func TestTrashReminderSnapshotLimitsDeletion(t *testing.T) {
 	r := cleanTrashReminder(context.Background(), env, s, nil)
 	if r.Freed != 100 || exists(old) || !exists(changed) || !exists(fresh) || !exists(outside) {
 		t.Fatalf("scope/cutoff: %+v", r)
+	}
+	// The folder that changed is reported, so the popup says what it kept.
+	if !slices.Equal(r.Failed, []string{"changed"}) {
+		t.Fatalf("kept folder not reported: %+v", r)
 	}
 }
 
