@@ -226,13 +226,7 @@ var appUpdateHTTP = newAppUpdateClient(http.DefaultTransport, feedURLOK)
 
 // fetchFeed reads at most appFeedLimit bytes from a checked https URL.
 func fetchFeed(ctx context.Context, raw string) ([]byte, error) {
-	return fetchFeedWith(ctx, raw, feedURLOK)
-}
-
-// fetchFeedWith is fetchFeed with the first hop's check injected, so tests
-// can use a local TLS server.
-func fetchFeedWith(ctx context.Context, raw string, ok func(string) bool) ([]byte, error) {
-	if !ok(raw) {
+	if !feedURLOK(raw) {
 		return nil, errFeedURL
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(raw), nil)

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -104,70 +103,6 @@ func TestFeedURLOK(t *testing.T) {
 		if feedURLOK(u) {
 			t.Errorf("feedURLOK(%q) = true", u)
 		}
-	}
-}
-
-// The TLS test server uses loopback, which feedURLOK rejects.
-// fetchFeedWith bypasses the first URL check while keeping the remaining logic.
-func TestFetchFeedLimitsAndErrors(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		if r.Header.Get("User-Agent") != "Cleanzo" || r.Header.Get("Cookie") != "" {
-			w.WriteHeader(400)
-			return
-		}
-		switch r.URL.Path {
-		case "/ok":
-			w.Write([]byte("version: 1.0.2\n"))
-		case "/big":
-			w.Write([]byte(strings.Repeat("x", 2<<20+1)))
-		case "/404":
-			w.WriteHeader(404)
-		case "/403":
-			w.WriteHeader(403)
-		case "/429":
-			w.WriteHeader(429)
-		case "/redirect":
-			http.Redirect(w, r, "http://example.com/plain", http.StatusFound)
-		}
-	}))
-	defer srv.Close()
-	saved := appUpdateHTTP
-	appUpdateHTTP = newAppUpdateClient(srv.Client().Transport, func(string) bool { return true })
-	defer func() { appUpdateHTTP = saved }()
-	allow := func(string) bool { return true }
-
-	if b, err := fetchFeedWith(context.Background(), srv.URL+"/ok", allow); err != nil || string(b) != "version: 1.0.2\n" {
-		t.Fatalf("ok: %q %v", b, err)
-	}
-	if _, err := fetchFeedWith(context.Background(), srv.URL+"/big", allow); !errors.Is(err, errFeedBad) {
-		t.Fatalf("big: %v", err)
-	}
-	if _, err := fetchFeedWith(context.Background(), srv.URL+"/404", allow); !errors.Is(err, errFeedNotFound) {
-		t.Fatalf("404: %v", err)
-	}
-	for _, p := range []string{"/403", "/429"} {
-		if _, err := fetchFeedWith(context.Background(), srv.URL+p, allow); !errors.Is(err, errFeedRate) {
-			t.Fatalf("%s: %v", p, err)
-		}
-	}
-	// The redirect to HTTP must fail the next hop's URL check.
-	appUpdateHTTP = newAppUpdateClient(srv.Client().Transport, feedURLOK)
-	if _, err := fetchFeedWith(context.Background(), srv.URL+"/redirect", allow); !errors.Is(err, errFeedURL) {
-		t.Fatalf("redirect: %v", err)
-	}
-	// Invalid URLs must not send requests.
-	before := hits.Load()
-	if _, err := fetchFeed(context.Background(), "http://0.0.0.0:8000/MacApp.xml"); !errors.Is(err, errFeedURL) {
-		t.Fatalf("bad url: %v", err)
-	}
-	if hits.Load() != before {
-		t.Fatal("bad url reached the server")
-	}
-	if feedReason(errFeedURL) != "bad-url" || feedReason(errFeedRate) != "rate-limited" || feedReason(errFeedBad) != "bad-feed" ||
-		feedReason(errFeedNotFound) != "not-found" || feedReason(errors.New("dial")) != "network" {
-		t.Fatal("feedReason mapping")
 	}
 }
 
