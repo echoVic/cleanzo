@@ -102,19 +102,17 @@ func takeUninstallListed(app string) (map[string]bool, bool) {
 
 // uninstallApp moves the app's bundle and its related files to the Trash.
 // They are found again, and when a detail of the app is on record, only those
-// it listed are moved: one that appeared since its confirm stays.
+// it listed are moved: one that appeared since its confirm stays. An
+// uninstall refused before moving anything leaves the detail on record for
+// the next try; one that goes ahead drops it.
 func uninstallApp(path string) UninstallResult {
 	name, bid, _ := readBundleInfo(filepath.Join(path, "Contents", "Info.plist"))
 	app := AppInfo{ID: path, Publisher: "", Name: name, Path: path, BundleID: bid}
 	res := UninstallResult{Path: path}
-	listed, confirmed := takeUninstallListed(path)
 	items := uninstallPaths(app)
 	if len(items) == 0 || items[0].Kind != "app" {
 		res.Failed = append(res.Failed, path+": not-app")
 		return res
-	}
-	if confirmed {
-		items = slices.DeleteFunc(items, func(it UninstallItem) bool { return !listed[it.Path] })
 	}
 	// A running app would recreate what is removed under it, or keep its
 	// moved bundle running. A failed probe says nothing about whether it runs.
@@ -126,6 +124,9 @@ func uninstallApp(path string) UninstallResult {
 	if g.inUse(resolvePath(path)) || g.running[strings.ToLower(bid)] {
 		res.Failed = append(res.Failed, path+": "+errInUse.Error())
 		return res
+	}
+	if listed, ok := takeUninstallListed(path); ok {
+		items = slices.DeleteFunc(items, func(it UninstallItem) bool { return !listed[it.Path] })
 	}
 	for _, item := range items {
 		if item.Kind != "app" && g.inUse(resolvePath(item.Path)) {

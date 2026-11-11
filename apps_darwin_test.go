@@ -49,6 +49,43 @@ func TestUninstallMovesOnlyWhatItsDetailListed(t *testing.T) {
 	}
 }
 
+// An uninstall refused because the app runs, or because its use could not be
+// told, moves nothing and keeps its detail: trying again without reading the
+// detail still leaves a folder that appeared since in place.
+func TestRefusedUninstallKeepsItsDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		refuse *usageGuard
+	}{
+		{"in use", &usageGuard{running: map[string]bool{"com.example.testapp": true}}},
+		{"usage unknown", &usageGuard{failed: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			setHome(t, home)
+			resetUninstallListed()
+			t.Cleanup(resetUninstallListed)
+			app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+			pref := filepath.Join(home, "Library", "Preferences", "com.example.testapp.plist")
+			writeFile(t, pref, 256)
+			stubUsage(t, &usageGuard{running: map[string]bool{}})
+			d := Cleaner{}.AppUninstallDetail(app)
+			cache := filepath.Join(home, "Library", "Caches", "com.example.testapp")
+			writeFile(t, filepath.Join(cache, "a"), 8192)
+
+			stubUsage(t, tc.refuse)
+			if res := (Cleaner{}).UninstallApp(app); res.Moved != 0 || len(res.Failed) != 1 || !exists(app) {
+				t.Fatalf("refused: %+v", res)
+			}
+			stubUsage(t, &usageGuard{running: map[string]bool{}})
+			res := Cleaner{}.UninstallApp(app)
+			if res.Moved != 2 || res.Freed != d.TotalSize || len(res.Failed) != 0 || exists(app) || exists(pref) || !exists(cache) {
+				t.Fatalf("again: %+v, want the 2 listed items, %d bytes; cache appeared since exists %v", res, d.TotalSize, exists(cache))
+			}
+		})
+	}
+}
+
 // Only the last details' paths are kept, the latest detail of an app
 // replacing its earlier one, and a detail that lists no bundle leaves none.
 func TestUninstallListedIsBounded(t *testing.T) {
