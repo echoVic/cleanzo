@@ -938,6 +938,49 @@ echo "==> Upgrading ghostty"`)
 	}
 }
 
+// WeChat's cask is 4.1.15.55,270135 while the bundle shows 4.1.15 with build
+// 270135: the same release. The check offers the update before the upgrade
+// only, and the upgrade counts as done.
+func TestBrewCaskWithAFourPartVersion(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	app := fakeBundle(t, filepath.Join(home, "Applications"), "WeChat", map[string]string{
+		"CFBundleIdentifier": "com.tencent.xinWeChat", "CFBundleShortVersionString": "4.1.14", "CFBundleVersion": "260000",
+	}, false, "")
+	bin := t.TempDir()
+	plist := filepath.Join(app, "Contents", "Info.plist")
+	fakeTool(t, bin, "brew", `sed -i '' 's/4.1.14/4.1.15/; s/260000/270135/' `+shellPath(plist)+`
+echo "==> Upgrading wechat"`)
+	savedDirs := toolDirs
+	toolDirs = func() []string { return []string{bin} }
+	t.Cleanup(func() { toolDirs = savedDirs })
+	resetAppActions()
+	t.Cleanup(resetAppActions)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	src, _ := testSources(nil, nil)
+	casks := caskIndex([]brewCask{{token: "wechat", version: "4.1.15.55,270135", apps: []string{"WeChat.app"}}})
+	check := func() (AppUpdate, appUpdateAction) {
+		t.Helper()
+		b, ok := readAppBundle(context.Background(), app)
+		if !ok {
+			t.Fatal("readAppBundle failed")
+		}
+		return checkTarget(context.Background(), b, src, casks)
+	}
+	u, a := check()
+	if u.Source != "brew" || u.State != "update" || u.Latest != "4.1.15.55" || a.kind != "brew" {
+		t.Fatalf("before the upgrade: %+v %+v", u, a)
+	}
+	rememberAppAction(app, a)
+	res, err := (Cleaner{}).UpgradeApp(context.Background(), app)
+	if err != nil || !res.Done || res.Code != "" || res.Version != "4.1.15" {
+		t.Fatalf("upgrade: %+v %v", res, err)
+	}
+	if u, a := check(); u.State != "current" || u.Action != "" || a.kind != "" {
+		t.Fatalf("after the upgrade: %+v %+v", u, a)
+	}
+}
+
 // Closing the window cancels the page's context while brew runs. brew must
 // still finish, and the bundle must still be read afterwards: killing it can
 // leave the old app removed and the new one not yet moved in.

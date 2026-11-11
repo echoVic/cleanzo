@@ -331,7 +331,11 @@ func checkTarget(ctx context.Context, b appBundle, src appUpdateSources, casks m
 	case casks[strings.ToLower(filepath.Base(b.path))].token != "":
 		c := casks[strings.ToLower(filepath.Base(b.path))]
 		u.Source, u.Latest = "brew", cleanVersion(c.version)
-		return settle(b.short, c.version, appUpdateAction{kind: "brew", token: c.token, path: b.path, latest: cleanVersion(c.version)})
+		if u.State, u.Reason = caskState(b.short, b.build, c.version); u.State != "update" {
+			return u, appUpdateAction{}
+		}
+		u.Action = "brew"
+		return u, appUpdateAction{kind: "brew", token: c.token, path: b.path, latest: c.version}
 	case b.feed != "":
 		u.Source = "sparkle"
 		if !feedURLOK(b.feed) {
@@ -689,10 +693,9 @@ func upgradeApp(ctx context.Context, id string) AppUpgradeResult {
 	// bounds it, and the bundle is read afterwards either way.
 	run := context.WithoutCancel(ctx)
 	out, err := runTool(run, tool, []string{"upgrade", "--cask", a.token}, 10*time.Minute)
-	if after, ok := readAppBundle(run, a.path); ok {
-		res.Version = after.short
-	}
-	if v, l := versionParts(cleanVersion(res.Version)), versionParts(cleanVersion(a.latest)); v != nil && l != nil && compareVersions(v, l) >= 0 {
+	after, read := readAppBundle(run, a.path)
+	res.Version = after.short
+	if state, _ := caskState(after.short, after.build, a.latest); read && state == "current" {
 		forgetAppAction(id, a.revision)
 		res.Done, res.Command = true, ""
 		return res

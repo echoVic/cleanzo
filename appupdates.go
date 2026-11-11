@@ -47,7 +47,7 @@ type appUpdateAction struct {
 	token    string // brew cask token
 	path     string // the app bundle
 	url      string // macappstore:// link
-	latest   string // what the check found, to confirm a brew upgrade
+	latest   string // the cask's version as the check found it, to confirm a brew upgrade
 	revision uint64 // distinguishes even identical concurrent publications
 }
 
@@ -129,6 +129,42 @@ func updateState(current, latest string) (state, reason string) {
 		return "update", ""
 	}
 	return "current", ""
+}
+
+// caskState compares a bundle with its Homebrew cask, whose version can be
+// "version,build" (4.1.15.55,270135). It is updateState of the short
+// versions, unless the cask's version only adds components to the bundle's
+// short version (4.1.15). The short version cannot tell those releases apart,
+// so CFBundleVersion decides, as for Sparkle feeds:
+//   - a build that extends the short version (16.69.23010700), against the
+//     cask's dotted version;
+//   - any other build (270135), against the cask's part after the comma.
+//
+// With no build to compare on either side, the bundle is current.
+func caskState(short, build, cask string) (state, reason string) {
+	s, l := versionParts(cleanVersion(short)), versionParts(cleanVersion(cask))
+	if s == nil || !extendsVersion(l, s) {
+		return updateState(short, cask)
+	}
+	b := versionParts(cleanVersion(build))
+	var against []int
+	switch {
+	case b == nil, compareVersions(b, s) == 0: // no build, or one that says no more than the short version
+	case extendsVersion(b, s):
+		against = l
+	default:
+		_, after, _ := strings.Cut(strings.TrimSpace(cask), ",")
+		against = versionParts(cleanVersion(after))
+	}
+	if against != nil && compareVersions(against, b) > 0 {
+		return "update", ""
+	}
+	return "current", ""
+}
+
+// extendsVersion reports whether v is base followed by more components.
+func extendsVersion(v, base []int) bool {
+	return len(v) > len(base) && compareVersions(v[:len(base)], base) == 0
 }
 
 // ---- fetching feeds -----------------------------------------------------------

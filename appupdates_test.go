@@ -61,6 +61,35 @@ func TestUpdateState(t *testing.T) {
 	}
 }
 
+func TestCaskState(t *testing.T) {
+	cases := []struct{ short, build, cask, state, reason string }{
+		// The cask only adds components to the short version: CFBundleVersion decides.
+		{"4.1.15", "270135", "4.1.15.55,270135", "current", ""},      // WeChat, its build after the comma
+		{"4.1.15", "270135", "4.1.15.60,270200", "update", ""},       // a newer build of the same short version
+		{"16.69", "16.69.23010700", "16.69.23010700", "current", ""}, // a build that is the full dotted version
+		{"16.69", "16.69.23010700", "16.69.23011000", "update", ""},  // and a newer one
+		{"16.69", "16.69.23011000", "16.69.23010700", "current", ""}, // the bundle is newer
+		{"4.1.15", "", "4.1.15.55,270135", "current", ""},            // no build to compare
+		{"2.0", "100", "2.0.1", "current", ""},                       // a counter build, but no cask build
+		{"0.10.3", "0.10.3", "0.10.3.1", "current", ""},              // a build that says no more than the short version
+		{"4.1.15", "270135", "4.1.15.55,abc", "current", ""},         // a cask build that is not a number
+		// Otherwise the short versions compare, as for every other source.
+		{"156.0.8078.76", "8078.76", "156.0.8078.80", "update", ""},
+		{"4.1.15", "270135", "4.1.16.10,271000", "update", ""},
+		{"4.1.16", "271000", "4.1.15.55,270135", "current", ""},
+		{"7.0.0", "52194", "7.0.0_260812_01,9.9.33,126b7ce6", "current", ""}, // QQ
+		{"1.2", "45", "1.2.0", "current", ""},
+		{"1.0", "", "nightly", "unknown", "uncomparable"},
+		{"", "1", "1.0", "unknown", "uncomparable"},
+	}
+	for _, c := range cases {
+		s, r := caskState(c.short, c.build, c.cask)
+		if s != c.state || r != c.reason {
+			t.Errorf("caskState(%q, %q, %q) = %q/%q, want %q/%q", c.short, c.build, c.cask, s, r, c.state, c.reason)
+		}
+	}
+}
+
 func TestFeedURLOK(t *testing.T) {
 	good := []string{"https://iterm2.com/appcasts/final_modern.xml", "https://github.com/a/b/releases/latest/download/latest-mac.yml"}
 	bad := []string{"", "  ", "http://iterm2.com/x.xml", "https://127.0.0.1/x", "http://0.0.0.0:8000/MacApp.xml",
