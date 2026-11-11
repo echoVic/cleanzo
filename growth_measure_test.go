@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -78,19 +79,19 @@ func TestTakeGrowthSnapshot(t *testing.T) {
 		writeFile(t, filepath.Join(p, "f"), 10)
 		ts = append(ts, growthTarget{path: p, kind: growthHome})
 	}
-	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0))
+	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, true, time.Unix(1000, 0))
 	if s.Cut || len(s.Entries) != 3 || s.At != 1000 || !s.FDA || !slices.IsSortedFunc(s.Entries, func(a, b growthEntry) int { return strings.Compare(a.Path, b.Path) }) {
 		t.Fatalf("snapshot = %+v", s)
 	}
 	// A folder that could not be listed left entries out: the run is cut,
 	// though it measured every target it had.
-	if unlisted := takeGrowthSnapshot(context.Background(), ts, true, nil, true, time.Unix(1000, 0)); !unlisted.Cut || len(unlisted.Entries) != 3 {
+	if unlisted := takeGrowthSnapshot(context.Background(), ts, true, nil, true, true, time.Unix(1000, 0)); !unlisted.Cut || len(unlisted.Entries) != 3 {
 		t.Fatalf("a run missing a folder's entries must be cut: %+v", unlisted)
 	}
 	limit := growthRunLimit
 	growthRunLimit = 0
 	t.Cleanup(func() { growthRunLimit = limit })
-	if cut := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0)); !cut.Cut || len(cut.Entries) != 0 {
+	if cut := takeGrowthSnapshot(context.Background(), ts, false, nil, true, true, time.Unix(1000, 0)); !cut.Cut || len(cut.Entries) != 0 {
 		t.Fatalf("a run out of time must be cut and keep nothing unstarted: %+v", cut)
 	}
 }
@@ -180,13 +181,36 @@ func TestTakeGrowthSnapshotHonorsEntryLimit(t *testing.T) {
 		writeFile(t, filepath.Join(p, "f"), 10)
 		ts = append(ts, growthTarget{path: p, kind: growthHome})
 	}
-	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, time.Unix(1000, 0))
+	s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, true, time.Unix(1000, 0))
 	if s.Cut || len(s.Entries) != 3 {
 		t.Fatalf("snapshot = %+v", s)
 	}
 	for _, e := range s.Entries {
 		if e.Complete {
 			t.Fatalf("entry measured past its limit: %+v", e)
+		}
+	}
+}
+
+// Only a background run puts its measuring threads in the background; a run
+// the user asked for keeps normal priority.
+func TestTakeGrowthSnapshotLowersPriorityOnlyInTheBackground(t *testing.T) {
+	var lowered atomic.Int32
+	saved := growthLowerPriority
+	growthLowerPriority = func() { lowered.Add(1) }
+	t.Cleanup(func() { growthLowerPriority = saved })
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a", "f"), 10)
+	ts := []growthTarget{{path: filepath.Join(dir, "a"), kind: growthHome}}
+	for _, background := range []bool{false, true} {
+		lowered.Store(0)
+		s := takeGrowthSnapshot(context.Background(), ts, false, nil, true, background, time.Unix(1000, 0))
+		want := int32(0)
+		if background {
+			want = growthWorkers
+		}
+		if len(s.Entries) != 1 || lowered.Load() != want {
+			t.Errorf("background %v: %d threads lowered, want %d; entries %+v", background, lowered.Load(), want, s.Entries)
 		}
 	}
 }

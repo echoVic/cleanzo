@@ -122,15 +122,19 @@ func growthOrder(targets []growthTarget, prev *growthSnapshot) []growthTarget {
 	return out
 }
 
-// takeGrowthSnapshot measures targets with growthWorkers background threads
-// (spec §四):
+// growthLowerPriority puts the calling measuring thread in the background
+// (backgroundThread); tests replace it.
+var growthLowerPriority = backgroundThread
+
+// takeGrowthSnapshot measures targets with growthWorkers threads (spec §四),
+// background ones when background is set:
 //   - each entry gets at most growthEntryLimit;
 //   - the run stops at growthRunLimit;
 //   - entries measured until then are kept, and Cut tells that some never
 //     started, or, with unlisted (growthTargets), that some were never listed.
 //
 // Entries come sorted by path.
-func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, unlisted bool, prev *growthSnapshot, fda bool, now time.Time) growthSnapshot {
+func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, unlisted bool, prev *growthSnapshot, fda, background bool, now time.Time) growthSnapshot {
 	order := growthOrder(targets, prev)
 	run, cancel := context.WithTimeout(ctx, growthRunLimit)
 	defer cancel()
@@ -141,7 +145,9 @@ func takeGrowthSnapshot(ctx context.Context, targets []growthTarget, unlisted bo
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			backgroundThread() // lowest CPU priority and throttled disk I/O; never unlocked, so Go retires the thread with them
+			if background {
+				growthLowerPriority() // lowest CPU priority and throttled disk I/O; never unlocked, so Go retires the thread with them
+			}
 			for t := range jobs {
 				ectx, ecancel := context.WithTimeout(run, growthEntryLimit)
 				results <- measureGrowthEntry(ectx, t)

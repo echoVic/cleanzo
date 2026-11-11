@@ -21,11 +21,12 @@ import (
 // Seams. Tests replace these; the app uses them as they are.
 var (
 	growthNow = time.Now
-	// growthMeasure takes one record of this Mac.
-	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+	// growthMeasure takes one record of this Mac, on background threads when
+	// background is set.
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, background bool) growthSnapshot {
 		fda := fullDiskAccess()
 		targets, unlisted := growthTargets(growthRoots(homeDir(), string(filepath.Separator)), fda, filepath.Dir(configPath()))
-		return takeGrowthSnapshot(ctx, targets, unlisted, prev, fda, growthNow())
+		return takeGrowthSnapshot(ctx, targets, unlisted, prev, fda, background, growthNow())
 	}
 	growthNotify = postGrowthNotification
 	// growthChanged tells the pages and the menu that something moved. Its
@@ -254,6 +255,8 @@ func (m *growthMonitor) run(manual bool) bool {
 // saving what it picked, on a goroutine of their own (post): a post can wait
 // for the user to answer the permission prompt, and neither the run nor the
 // log of what was picked waits for it. It saves nothing when ctx ends first.
+// A run the user asked for measures at normal priority: the user waits for it,
+// and big folders finish within their limit.
 func (m *growthMonitor) measureOnce(ctx context.Context) {
 	dir := growthDir()
 	history := growthHistory(dir, growthNow())
@@ -261,7 +264,10 @@ func (m *growthMonitor) measureOnce(ctx context.Context) {
 	if len(history) > 0 {
 		prev = &history[len(history)-1]
 	}
-	snap := growthMeasure(ctx, prev)
+	m.mu.Lock()
+	background := !m.manual
+	m.mu.Unlock()
+	snap := growthMeasure(ctx, prev, background)
 	if ctx.Err() != nil {
 		return
 	}

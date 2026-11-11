@@ -74,7 +74,7 @@ func stubGrowth(t *testing.T, now *time.Time, size *int64, sent *[]GrowthAlert) 
 		growthNow, growthMeasure, growthNotify, growthChanged, growthOwnerOf, growthPower = n, m, notify, changed, owner, power
 	})
 	growthNow = func() time.Time { return *now }
-	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, _ bool) growthSnapshot {
 		return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, *size)}}
 	}
 	growthNotify = func(a GrowthAlert) error { *sent = append(*sent, a); return nil }
@@ -427,7 +427,7 @@ func TestGrowthRunIsOneAtATime(t *testing.T) {
 	stubGrowth(t, &now, &size, &sent)
 	w := watchGrowth(t)
 	atWork, proceed := make(chan struct{}), make(chan struct{})
-	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, _ bool) growthSnapshot {
 		atWork <- struct{}{}
 		<-proceed
 		return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, size)}}
@@ -466,6 +466,31 @@ func TestGrowthRunIsOneAtATime(t *testing.T) {
 	}
 	if got := len(loadGrowthSnapshots(growthDir())); got != 2 {
 		t.Errorf("records = %d, want one per run", got)
+	}
+}
+
+// Measure Now runs at normal priority; an automatic run in the background.
+func TestManualRunsMeasureAtNormalPriority(t *testing.T) {
+	now, size := t0, 10*gb
+	var sent []GrowthAlert
+	stubGrowth(t, &now, &size, &sent)
+	w := watchGrowth(t)
+	var got []bool
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, background bool) growthSnapshot {
+		got = append(got, background)
+		return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, size)}}
+	}
+	m := &growthMonitor{launched: t0, notifs: "unknown"}
+	for _, manual := range []bool{true, false} {
+		if !m.run(manual) {
+			t.Fatalf("run(%v) did not start", manual)
+		}
+		w.started()
+		w.ended()
+		now = now.Add(time.Hour)
+	}
+	if want := []bool{false, true}; !slices.Equal(got, want) {
+		t.Fatalf("background per run (manual, then automatic) = %v, want %v", got, want)
 	}
 }
 
@@ -523,7 +548,7 @@ func TestGrowthAutomaticAttemptsKeepAnHourApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	measured := 0
-	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, _ bool) growthSnapshot {
 		measured++
 		// Monitoring goes off during the run, so that the run tells its end once.
 		_ = saveGrowthConfig(growthDir(), defaultGrowthConfig())
@@ -663,7 +688,7 @@ func TestMeasureOnceLeavesOutRecordsFromTheFuture(t *testing.T) {
 		}
 	}
 	var prevAt int64
-	growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+	growthMeasure = func(ctx context.Context, prev *growthSnapshot, _ bool) growthSnapshot {
 		if prev != nil {
 			prevAt = prev.At
 		}
@@ -812,7 +837,7 @@ func TestTurningMonitoringOffStopsABackgroundRun(t *testing.T) {
 			updates := make(chan GrowthStatus, 16)
 			growthChanged = func(s GrowthStatus) { updates <- s }
 			atWork := make(chan struct{}, 1)
-			growthMeasure = func(ctx context.Context, prev *growthSnapshot) growthSnapshot {
+			growthMeasure = func(ctx context.Context, prev *growthSnapshot, _ bool) growthSnapshot {
 				atWork <- struct{}{}
 				<-ctx.Done()
 				return growthSnapshot{At: now.Unix(), FDA: true, Entries: []growthEntry{done(todesk, size)}}
