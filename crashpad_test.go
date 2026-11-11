@@ -194,6 +194,39 @@ func TestEmptyQueueManyFiles(t *testing.T) {
 	}
 }
 
+// TestCrashDumpsFollowTheActiveCatalog: the status page's total covers the
+// databases the junk rule of the running system finds, Windows's under
+// AppData among them, named after the browser rather than its User Data.
+func TestCrashDumpsFollowTheActiveCatalog(t *testing.T) {
+	env := windowsReviewEnv(t)
+	chrome := filepath.Join(env.localAppData, "Google", "Chrome", "User Data", "Crashpad")
+	writeFile(t, filepath.Join(chrome, "settings.dat"), 40)
+	writeFile(t, filepath.Join(chrome, "pending", "c.dmp"), 64*1024)
+	sum, err := crashDumps(context.Background(), env)
+	if err != nil || len(sum.Dirs) != 1 || sum.Dirs[0].App != "Chrome" || sum.Dirs[0].Size < 64*1024 || resolvePath(sum.Dirs[0].Path) != resolvePath(chrome) {
+		t.Fatalf("summary %+v err %v", sum, err)
+	}
+}
+
+// TestCrashpadOwnerLooksPastUserData: Chromium browsers keep the database
+// in their User Data folder, which names no app.
+func TestCrashpadOwnerLooksPastUserData(t *testing.T) {
+	home := t.TempDir()
+	cases := map[string]string{
+		filepath.Join(home, "AppData", "Local", "Google", "Chrome", "User Data", "Crashpad"):         "Chrome",
+		filepath.Join(home, "AppData", "Local", "Microsoft", "Edge", "User Data", "Crashpad"):        "Edge",
+		filepath.Join(home, "AppData", "Roaming", "Code", "Crashpad"):                                "Code",
+		filepath.Join(home, "Library", "Application Support", "Arc", "User Data", "Crashpad"):        "Arc",
+		filepath.Join(home, "Library", "Application Support", "Google", "Chrome", "Crashpad"):        "Chrome",
+		filepath.Join(home, "Library", "Application Support", "com.openai.codex", "web", "Crashpad"): "Codex",
+	}
+	for db, want := range cases {
+		if got := crashpadOwner(home, db, buildAppIndex(nil)); got != want {
+			t.Errorf("%s: owner %q, want %q", db, got, want)
+		}
+	}
+}
+
 // TestMeasureCrashpadStopsWhenCancelled: a scan that ends stops measuring
 // report queues.
 func TestMeasureCrashpadStopsWhenCancelled(t *testing.T) {

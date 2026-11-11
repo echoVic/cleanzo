@@ -100,8 +100,16 @@ type junkEnv struct {
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
 func currentJunkEnv() junkEnv {
-	env := junkEnv{windowsLayout: runtime.GOOS == "windows", home: homeDir(), tmp: filepath.Clean(os.TempDir()), apps: buildAppIndex(appDirs()), guard: probeUsage(), fda: fullDiskAccess(), settings: loadSettings(), findTool: findTool}
-	if runtime.GOOS == "windows" {
+	env := pathJunkEnv(homeDir())
+	env.apps, env.guard, env.fda, env.settings, env.findTool = buildAppIndex(appDirs()), probeUsage(), fullDiskAccess(), loadSettings(), findTool
+	return env
+}
+
+// pathJunkEnv holds where the host's rules look: the home and temporary
+// folders, and on Windows the application data folders inside the profile.
+func pathJunkEnv(home string) junkEnv {
+	env := junkEnv{windowsLayout: runtime.GOOS == "windows", home: home, tmp: filepath.Clean(os.TempDir())}
+	if env.windowsLayout {
 		env.localAppData = env.appDataRoot(os.Getenv("LOCALAPPDATA"))
 		env.appData = env.appDataRoot(os.Getenv("APPDATA"))
 	}

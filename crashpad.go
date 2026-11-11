@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -171,13 +172,20 @@ func emptyQueue(ctx context.Context, dir string, guard *usageGuard, progress fun
 // crashpadOwner names the app a Crashpad database belongs to, from the
 // folder it sits in: an installed app's name when it is known.
 func crashpadOwner(home, db string, apps *appIndex) string {
-	rel := strings.TrimPrefix(resolvePath(db), resolvePath(filepath.Join(home, "Library/Application Support"))+string(filepath.Separator))
+	resolved := resolvePath(db)
+	rel := strings.TrimPrefix(resolved, resolvePath(filepath.Join(home, "Library/Application Support"))+string(filepath.Separator))
 	folder := strings.SplitN(rel, string(filepath.Separator), 2)[0]
 	if crashpadCodex[strings.ToLower(folder)] {
 		return "Codex"
 	}
-	if rel == db || folder == "" {
-		return filepath.Base(filepath.Dir(db))
+	// Chromium browsers keep it in their User Data folder, which names no app:
+	// Google/Chrome/User Data/Crashpad, Arc/User Data/Crashpad.
+	parent := filepath.Dir(db)
+	if strings.EqualFold(filepath.Base(parent), "User Data") {
+		parent = filepath.Dir(parent)
+	}
+	if rel == resolved || folder == "" {
+		return filepath.Base(parent)
 	}
 	if apps != nil {
 		if app, ok := apps.lookup(folder); ok && app.Name != "" {
@@ -185,8 +193,8 @@ func crashpadOwner(home, db string, apps *appIndex) string {
 		}
 	}
 	// Chrome keeps it in Google/Chrome/Crashpad: the folder next to it says more.
-	if parent := filepath.Base(filepath.Dir(db)); parent != folder {
-		return parent
+	if name := filepath.Base(parent); name != folder {
+		return name
 	}
 	return folder
 }
@@ -227,12 +235,14 @@ type CrashDumpSummary struct {
 // status page to point out runaway ones when Cleanzo opens. Nothing is
 // listed file by file and nothing is changed.
 func (Cleaner) CrashDumps(ctx context.Context) (CrashDumpSummary, error) {
-	return crashDumps(ctx, homeDir(), buildAppIndex(appDirs()))
+	env := pathJunkEnv(homeDir())
+	env.apps = buildAppIndex(appDirs())
+	return crashDumps(ctx, env)
 }
 
-// crashDumps is CrashDumps for a given home and app index.
-func crashDumps(ctx context.Context, home string, apps *appIndex) (CrashDumpSummary, error) {
-	env := junkEnv{home: home, tmp: filepath.Clean(os.TempDir())}
+// crashDumps is CrashDumps for a given environment.
+func crashDumps(ctx context.Context, env junkEnv) (CrashDumpSummary, error) {
+	home, apps := env.home, env.apps
 	out := CrashDumpSummary{Threshold: crashThresholdNow(), Dirs: []CrashDumpDir{}}
 	for _, db := range crashpadDatabases(env) {
 		if ctx.Err() != nil {
@@ -261,13 +271,19 @@ func crashDumps(ctx context.Context, home string, apps *appIndex) (CrashDumpSumm
 	return out, nil
 }
 
-// crashpadDatabases lists the Crashpad folders the crash dump rule covers.
+// crashpadDatabases lists the Crashpad folders the crash dump rule of env's
+// catalog covers.
 func crashpadDatabases(env junkEnv) []string {
 	var dbs []string
-	for _, t := range crashpadTargets() {
-		for _, p := range env.resolve(t.Pattern) {
-			if info, err := os.Lstat(p); err == nil && info.IsDir() && safeToClean(p) {
-				dbs = append(dbs, p)
+	for _, r := range env.catalog() {
+		if r.ID != crashRuleID {
+			continue
+		}
+		for _, t := range r.Targets {
+			for _, p := range env.resolve(t.Pattern) {
+				if info, err := os.Lstat(p); err == nil && info.IsDir() && !slices.Contains(dbs, p) && safeToClean(p) {
+					dbs = append(dbs, p)
+				}
 			}
 		}
 	}

@@ -14,7 +14,7 @@ func TestCrashDumpsSummary(t *testing.T) {
 	env := testEnv(t)
 	codexWeb, _, _ := crashpadFixture(t, env)
 	writeFile(t, filepath.Join(codexWeb, "pending/big.dmp"), 64*1024)
-	sum, err := crashDumps(context.Background(), env.home, buildAppIndex(nil))
+	sum, err := crashDumps(context.Background(), env)
 	if err != nil || sum.Threshold != crashThreshold || len(sum.Dirs) == 0 {
 		t.Fatalf("summary %+v err %v", sum, err)
 	}
