@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -1388,6 +1390,74 @@ func TestAppsSharingABundleID(t *testing.T) {
 		if it.Path == prefs {
 			t.Error("uninstalling Xcode would remove Xcode-beta's preferences")
 		}
+	}
+}
+
+// TestSharesBundleIDReadsInParallel: the other apps' bundle IDs are read
+// several at a time rather than one plutil after another, and a match among
+// them is still found.
+func TestSharesBundleIDReadsInParallel(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	apps := filepath.Join(home, "Applications")
+	for _, n := range []string{"A.app", "B.app", "C.app", "D.app"} {
+		mustMkdir(t, filepath.Join(apps, n))
+	}
+	self := AppInfo{Path: filepath.Join(apps, "A.app"), BundleID: "com.example.a"}
+	prev := appBundleID
+	t.Cleanup(func() { appBundleID = prev })
+
+	var calls, inFlight, most atomic.Int32
+	second := make(chan struct{})
+	var once sync.Once
+	appBundleID = func(path string) string {
+		n := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+		}
+		if n >= 2 {
+			once.Do(func() { close(second) })
+		}
+		if calls.Add(1) == 1 {
+			select {
+			case <-second:
+			case <-time.After(2 * time.Second):
+			}
+		}
+		return "com.example.other"
+	}
+	if sharesBundleID(self) {
+		t.Fatal("no other app has com.example.a")
+	}
+	if most.Load() < 2 {
+		t.Fatalf("read %d bundle at a time, want several", most.Load())
+	}
+
+	appBundleID = func(path string) string {
+		if filepath.Base(path) == "C.app" {
+			return "COM.example.A"
+		}
+		return ""
+	}
+	if !sharesBundleID(self) {
+		t.Fatal("C.app has the same bundle ID")
+	}
+}
+
+// TestUninstallDetailSizesTheBundle: the detail's app size is its bundle's,
+// the same as its "app" item.
+func TestUninstallDetailSizesTheBundle(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	a := makeApp(t, filepath.Join(home, "Applications"), "Sized.app", "com.example.sized", "Sized")
+	writeFile(t, filepath.Join(a, "Contents", "MacOS", "Sized"), 8192)
+	want, _ := scanPath(a)
+	d := appUninstallDetail(a)
+	if len(d.Items) == 0 || d.Items[0].Kind != "app" {
+		t.Fatalf("items = %+v, want the app first", d.Items)
+	}
+	if d.App.Size != want || d.Items[0].Size != want || d.App.Name != "Sized" || d.App.BundleID != "com.example.sized" {
+		t.Fatalf("app = %+v, item = %+v, want size %d", d.App, d.Items[0], want)
 	}
 }
 

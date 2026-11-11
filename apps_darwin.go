@@ -24,14 +24,20 @@ func listInstalledApps() []AppInfo {
 	return apps
 }
 
-// appUninstallDetail preserves the macOS AppUninstallDetail behavior.
+// appUninstallDetail preserves the macOS AppUninstallDetail behavior. The
+// app's size is that of its "app" item, so the bundle is walked once.
 func appUninstallDetail(path string) UninstallDetail {
-	apps := []AppInfo{appInfoFromPath(path)}
+	apps := []AppInfo{appMetadata(path)}
 	if ids, paths, err := runningApps(); err == nil {
 		markRunning(apps, ids, paths)
 	}
 	app := apps[0]
 	items := uninstallPaths(app)
+	if len(items) > 0 && items[0].Kind == "app" {
+		app.Size = items[0].Size
+	} else {
+		app.Size, _ = scanPath(path)
+	}
 	var total int64
 	for _, it := range items {
 		total += it.Size

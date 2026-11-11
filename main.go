@@ -799,12 +799,18 @@ func (Cleaner) ListApps() []AppInfo {
 
 // appInfoFromPath builds an AppInfo for a single app bundle path.
 func appInfoFromPath(appPath string) AppInfo {
+	a := appMetadata(appPath)
+	a.Size, _ = scanPath(appPath)
+	return a
+}
+
+// appMetadata is appInfoFromPath without the size, which walks the bundle.
+func appMetadata(appPath string) AppInfo {
 	name, bid, version := readBundleInfo(filepath.Join(appPath, "Contents", "Info.plist"))
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(appPath), ".app")
 	}
-	size, _ := scanPath(appPath)
-	return AppInfo{ID: appPath, Publisher: "", Name: name, Path: appPath, BundleID: bid, Version: version, Size: size, LastOpened: lastOpened(appPath)}
+	return AppInfo{ID: appPath, Publisher: "", Name: name, Path: appPath, BundleID: bid, Version: version, LastOpened: lastOpened(appPath)}
 }
 
 // installedApp reports whether path is an app ListApps lists: a .app bundle
@@ -816,23 +822,49 @@ func installedApp(path string) bool {
 		(dir == canonical("/Applications") || dir == canonical(filepath.Join(homeDir(), "Applications")))
 }
 
+// appBundleID reads the bundle ID of the app at path. Tests replace it.
+var appBundleID = func(path string) string { return readAppIdentity(path).bid }
+
 // sharesBundleID reports whether another installed app, such as Xcode-beta
-// next to Xcode, has app's bundle ID.
+// next to Xcode, has app's bundle ID. It reads up to 16 bundles at a time
+// and starts no more reads once one matches.
 func sharesBundleID(app AppInfo) bool {
 	if app.BundleID == "" {
 		return false
 	}
+	self := canonical(app.Path)
+	var others []string
 	for _, dir := range []string{"/Applications", filepath.Join(homeDir(), "Applications")} {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			other := filepath.Join(dir, e.Name())
-			if strings.HasSuffix(e.Name(), ".app") && canonical(other) != canonical(app.Path) &&
-				strings.EqualFold(readAppIdentity(other).bid, app.BundleID) {
-				return true
+			if strings.HasSuffix(e.Name(), ".app") && canonical(other) != self {
+				others = append(others, other)
 			}
 		}
 	}
-	return false
+	var (
+		found atomic.Bool
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, 16)
+	)
+	for _, other := range others {
+		sem <- struct{}{}
+		if found.Load() {
+			<-sem
+			break
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if strings.EqualFold(appBundleID(other), app.BundleID) {
+				found.Store(true)
+			}
+		}()
+	}
+	wg.Wait()
+	return found.Load()
 }
 
 // fileName reports whether s can name a single file in a folder. The names
