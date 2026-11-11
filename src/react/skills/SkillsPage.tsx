@@ -191,9 +191,9 @@ export function SkillsPage() {
 
   /** 行内升级：要覆盖本地改动的先确认，和「全部升级」同一个确认框；没改过的直接升级。 */
   const upgradeRow = (path: string, force: boolean) => {
+    if (!force) { void upgradeOne(path, false, { setBusy, scan, checkUpdates, t }); return; }
     const u = updates[path];
-    if (force && u) setUpgradeAsk([u]);
-    else void upgradeOne(path, force, { setBusy, scan, checkUpdates, t });
+    if (u) setUpgradeAsk([u]);
   };
 
   const doUpgrade = async (targets: SkillUpdate[], force: boolean) => {
