@@ -1015,11 +1015,22 @@ echo "==> Upgrading ghostty"`)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	done := make(chan AppUpgradeResult, 1)
+	done, returned := make(chan AppUpgradeResult, 1), make(chan struct{})
 	go func() {
+		defer close(returned)
 		res, _ := (Cleaner{}).UpgradeApp(ctx, app)
 		done <- res
 	}()
+	// However the test ends, brew is let go and UpgradeApp returns, so its
+	// hold on Cleanzo does not reach the tests after this one.
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, []byte("release"), 0o644)
+		select {
+		case <-returned:
+		case <-time.After(15 * time.Second):
+			t.Error("UpgradeApp did not return, and its hold stays")
+		}
+	})
 	deadline := time.Now().Add(5 * time.Second)
 	for !exists(started) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -1030,8 +1041,6 @@ echo "==> Upgrading ghostty"`)
 	// Closing the last window now must leave Cleanzo running, or brew would
 	// lose its parent mid-upgrade.
 	if !holdingOpen() {
-		writeText(t, release, "release")
-		<-done
 		t.Fatal("brew runs, and nothing holds Cleanzo open")
 	}
 	cancel()
