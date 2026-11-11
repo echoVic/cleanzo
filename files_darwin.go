@@ -96,18 +96,24 @@ func platformLoadPhotoImage(ctx context.Context, path string) (image.Image, imag
 	return img, cfg, cleanup, nil
 }
 
-// collectPhotoFiles walks the given roots recursively and collects known image
-// files, stopping once cap files are found. Packages and hidden folders are
-// skipped.
+// platformCollectPhotoFiles walks the given roots recursively and collects
+// known image files, stopping once cap files are found or ctx ends. Packages
+// and hidden folders are skipped.
 func platformCollectPhotoFiles(ctx context.Context, roots []string, cap int) []string {
 	var out []string
 	stop := errors.New("stop")
 	for _, root := range roots {
+		if ctx.Err() != nil {
+			break
+		}
 		info, err := os.Stat(root)
 		if err != nil || !info.IsDir() {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil || d == nil {
 				return nil
 			}
@@ -158,10 +164,12 @@ func platformDirChildren(ctx context.Context, path string) (DirListing, error) {
 	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
 	for _, j := range jobs {
+		// A goroutine starts once a slot is free: a folder of a hundred
+		// thousand entries does not park a goroutine for each.
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(j job) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 			size := int64(-1)
 			if j.isDir {
