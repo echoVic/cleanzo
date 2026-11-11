@@ -733,7 +733,11 @@ func cleanAppCache(path string) UninstallResult {
 	items := appCachePaths(app)
 	// Probe after measuring so an app launched during the scan is protected.
 	g := probeUsage()
-	if g.failed || g.inUse(resolvePath(path)) || (app.BundleID != "" && g.running[strings.ToLower(app.BundleID)]) {
+	if g.failed {
+		res.Failed = append(res.Failed, path+": "+errUsageUnknown.Error())
+		return res
+	}
+	if g.inUse(resolvePath(path)) || (app.BundleID != "" && g.running[strings.ToLower(app.BundleID)]) {
 		res.Failed = append(res.Failed, path+": "+errInUse.Error())
 		return res
 	}

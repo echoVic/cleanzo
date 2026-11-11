@@ -1112,14 +1112,19 @@ func TestCleanAppCacheRefusesUsageAndSkipsBusyCache(t *testing.T) {
 	writeFile(t, filepath.Join(cache, "a"), 1000)
 	writeFile(t, filepath.Join(cacheByName, "b"), 500)
 
-	for _, g := range []*usageGuard{
-		{failed: true},
-		{open: []string{strings.ToLower(resolvePath(filepath.Join(app, "Contents", "Info.plist")))}},
+	// A probe that failed cannot tell whether the app runs: the cache stays,
+	// and the answer says usage is unknown rather than that the app is in use.
+	for _, c := range []struct {
+		g    *usageGuard
+		want string
+	}{
+		{&usageGuard{failed: true}, app + ": usage-unknown"},
+		{&usageGuard{open: []string{strings.ToLower(resolvePath(filepath.Join(app, "Contents", "Info.plist")))}}, app + ": in-use"},
 	} {
-		stubUsage(t, g)
+		stubUsage(t, c.g)
 		res := Cleaner{}.CleanAppCache(app)
-		if res.Moved != 0 || res.Freed != 0 || len(res.Failed) != 1 || res.Failed[0] != app+": in-use" || !exists(cache) || !exists(cacheByName) {
-			t.Fatalf("unsafe probe: %+v", res)
+		if res.Moved != 0 || res.Freed != 0 || len(res.Failed) != 1 || res.Failed[0] != c.want || !exists(cache) || !exists(cacheByName) {
+			t.Fatalf("unsafe probe: %+v, want failed %q", res, c.want)
 		}
 	}
 
