@@ -361,7 +361,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     const key = rowFocus;
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`.pr-item[data-key="${CSS.escape(key)}"]`);
-      if (!el) return; // 这一行还没画出来：下一次渲染再试
+      if (!el) return; // 这一行还没画出来：下一次采样换了 rows 再试
       el.scrollIntoView({ block: "center" });
       setHl(key);
       setRowFocus(null);
