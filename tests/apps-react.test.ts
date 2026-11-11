@@ -1230,7 +1230,8 @@ async function leftoversPage(overrides: Record<string, unknown> = {}) {
   const { pageHarness, fakeStream } = await import("./list-page-harness");
   const { LeftoversTab } = await import("../src/react/apps/LeftoversTab");
   const { appsApi } = await import("../src/react/apps/api");
-  const { setPref } = await import("../src/i18n");
+  const { getPref, setPref } = await import("../src/i18n");
+  const savedPref = getPref();
   setPref("zh");
   const saved = { ...appsApi };
   const stream = fakeStream<OrphanItem>();
@@ -1240,7 +1241,7 @@ async function leftoversPage(overrides: Record<string, unknown> = {}) {
   return {
     h, stream,
     rows: () => h.find((n) => n.type?.name === "ListRows")!.props,
-    dispose() { h.dispose(); Object.assign(appsApi, saved); setPref("system"); },
+    dispose() { h.dispose(); Object.assign(appsApi, saved); setPref(savedPref); },
   };
 }
 

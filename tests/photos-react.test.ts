@@ -172,7 +172,8 @@ async function photosPage(overrides: Partial<typeof import("../src/react/photos/
   const { pageHarness, fakeStream } = await import("./list-page-harness");
   const { PhotosPage } = await import("../src/react/photos/PhotosPage");
   const { photosApi } = await import("../src/react/photos/api");
-  const { setPref } = await import("../src/i18n");
+  const { getPref, setPref } = await import("../src/i18n");
+  const savedPref = getPref();
   setPref("zh");
   const saved = { ...photosApi };
   const stream = fakeStream<never>();
@@ -189,7 +190,7 @@ async function photosPage(overrides: Partial<typeof import("../src/react/photos/
       h.find((n) => n.props.variant === "destructive")!.props.onClick();
       await h.flush();
     },
-    dispose() { h.dispose(); Object.assign(photosApi, saved); setPref("system"); },
+    dispose() { h.dispose(); Object.assign(photosApi, saved); setPref(savedPref); },
   };
 }
 

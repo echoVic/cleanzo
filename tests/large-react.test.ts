@@ -173,8 +173,8 @@ test("a large-file scan that fails while its stream is open shows the error and 
   const { pageHarness, fakeStream } = await import("./list-page-harness");
   const { LargePage } = await import("../src/react/large/LargePage");
   const { largeApi } = await import("../src/react/large/api");
-  const { setPref } = await import("../src/i18n");
-  const saved = { ...largeApi };
+  const { getPref, setPref } = await import("../src/i18n");
+  const saved = { ...largeApi }, savedPref = getPref();
   const stream = fakeStream<never>();
   Object.assign(largeApi, { startScan: () => stream });
   setPref("zh");
@@ -189,7 +189,7 @@ test("a large-file scan that fails while its stream is open shows the error and 
     await h.flush();
     const alert = h.find((n) => n.props.role === "alert");
     expect(alert && h.text(alert)).toContain("disk denied");
-  } finally { h.dispose(); Object.assign(largeApi, saved); setPref("system"); }
+  } finally { h.dispose(); Object.assign(largeApi, saved); setPref(savedPref); }
 });
 
 test("human and displayPath match the rest of the UI", () => {
