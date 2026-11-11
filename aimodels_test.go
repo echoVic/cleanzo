@@ -364,11 +364,12 @@ func TestCleanAIModelsOllamaOrphans(t *testing.T) {
 
 // TestCleanAIModelsOllamaUnreadableManifest: when another model's manifest
 // cannot be parsed or read, the blobs it names are unknown, so the clean
-// stops for the model rather than treating a shared blob as an orphan.
+// stops for the model rather than treating a shared blob as an orphan, and
+// names the file that stopped it.
 func TestCleanAIModelsOllamaUnreadableManifest(t *testing.T) {
-	for _, broken := range []string{"truncated", "unreadable"} {
+	for _, broken := range []string{"truncated", "unreadable", "folder"} {
 		t.Run(broken, func(t *testing.T) {
-			if broken == "unreadable" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+			if broken != "truncated" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
 				t.Skip("file modes do not deny reading here")
 			}
 			home := aiModelsFixture(t)
@@ -379,15 +380,25 @@ func TestCleanAIModelsOllamaUnreadableManifest(t *testing.T) {
 			}
 			ollama := aiModelSourceOf(t, scan, "ollama")
 			big, small := aiModelNamed(t, ollama, "qwen3-coder:30b"), aiModelNamed(t, ollama, "qwen3-coder:30b-small")
-			if broken == "truncated" {
+			bad := small.Path
+			switch broken {
+			case "truncated":
 				if err := os.WriteFile(small.Path, []byte(`{"config":{"digest":"sha256:eeee4444"},"layers":[{"dig`), 0o644); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			case "unreadable":
 				if err := os.Chmod(small.Path, 0); err != nil {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { os.Chmod(small.Path, 0o644) })
+			case "folder":
+				// Another model's folder that cannot be listed may hold manifests.
+				bad = filepath.Join(home, ".ollama/models/manifests/registry.ollama.ai/library/other")
+				mustMkdir(t, bad)
+				if err := os.Chmod(bad, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Chmod(bad, 0o755) })
 			}
 			res, err := (Cleaner{}).CleanAIModels(context.Background(), []AIModelSelection{{Source: "ollama", Models: []string{big.Path}}})
 			if err != nil || len(res.Parts) != 1 {
@@ -395,6 +406,9 @@ func TestCleanAIModelsOllamaUnreadableManifest(t *testing.T) {
 			}
 			if r := res.Parts[0]; r.Skipped != "blocked" || r.Moved != 0 || r.Freed != 0 || len(*trashed) != 0 {
 				t.Fatalf("part = %+v, trashed %v", r, *trashed)
+			}
+			if r := res.Parts[0]; !slices.Equal(r.Failed, []string{displayHome(bad) + ": unreadable"}) {
+				t.Fatalf("failed = %q, want the file that stopped the clean", r.Failed)
 			}
 			if !exists(filepath.Join(home, ".ollama/models/blobs/sha256-aaaa1111")) || !exists(big.Path) {
 				t.Fatal("the shared blob or the model left")

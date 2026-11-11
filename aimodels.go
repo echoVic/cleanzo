@@ -213,14 +213,16 @@ type ollamaManifestJSON struct {
 	} `json:"layers"`
 }
 
-// errOllamaManifestUnreadable reports a file or folder under manifests that
-// could not be read or parsed: the blobs it names are unknown.
-var errOllamaManifestUnreadable = errors.New("ollama manifest unreadable")
+// ollamaUnreadable names a file or folder under manifests that could not be
+// read or parsed: the blobs it names are unknown.
+type ollamaUnreadable struct{ path string }
+
+func (e ollamaUnreadable) Error() string { return displayHome(e.path) + ": unreadable" }
 
 // ollamaManifests reads every model manifest under root/manifests, sorted by
 // path so the blob ownership below is the same on every scan. A scan lists
-// what it can read; with strict set, any manifest file or folder that cannot
-// be read or parsed returns errOllamaManifestUnreadable instead.
+// what it can read; with strict set, the first manifest file or folder that
+// cannot be read or parsed returns an ollamaUnreadable instead.
 func ollamaManifests(ctx context.Context, root string, strict bool) ([]aiOllamaManifest, error) {
 	dir := filepath.Join(root, "manifests")
 	out := []aiOllamaManifest{}
@@ -231,7 +233,7 @@ func ollamaManifests(ctx context.Context, root string, strict bool) ([]aiOllamaM
 		if err != nil {
 			// Without a manifests folder there are no manifests to read.
 			if strict && !(p == dir && errors.Is(err, fs.ErrNotExist)) {
-				return errOllamaManifestUnreadable
+				return ollamaUnreadable{p}
 			}
 			return nil
 		}
@@ -247,7 +249,7 @@ func ollamaManifests(ctx context.Context, root string, strict bool) ([]aiOllamaM
 		}
 		m, ok, err := readOllamaManifest(root, p)
 		if err != nil && strict {
-			return errOllamaManifestUnreadable
+			return ollamaUnreadable{p}
 		}
 		if ok {
 			out = append(out, m)
@@ -595,11 +597,13 @@ func cleanAIModelDir(ctx context.Context, src aiModelSource, root string, entry 
 // names. The manifest goes first, so the runtime stops offering the model
 // even when a blob cannot be moved; blobs still named by another manifest
 // stay put. When any manifest cannot be read, the blobs it names are unknown,
-// so nothing moves and the part is blocked.
+// so nothing moves: the part is blocked and Failed names the file.
 func cleanOllamaModel(ctx context.Context, root, modelPath string, r AIPartResult) AIPartResult {
 	manifests, err := ollamaManifests(ctx, root, true)
-	if errors.Is(err, errOllamaManifestUnreadable) {
+	var unreadable ollamaUnreadable
+	if errors.As(err, &unreadable) {
 		r.Skipped = "blocked"
+		r.Failed = append(r.Failed, unreadable.Error())
 		return r
 	}
 	if err != nil {
