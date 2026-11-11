@@ -16,12 +16,40 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // untarSafe unpacks an archive the way an upgrade does, without recording
 // modes.
 func untarSafe(r io.Reader, dest string) (string, error) {
 	return untarSafeModes(r, dest, nil)
+}
+
+// TestSkillDownloadsAreNotCutShort: GitHub must start answering within a
+// minute, but an archive download has no total limit beyond the caller's
+// context. A tree listing is still bounded as a whole.
+func TestSkillDownloadsAreNotCutShort(t *testing.T) {
+	tr, ok := skillUpdateHTTP.Transport.(*http.Transport)
+	if skillUpdateHTTP.Timeout != 0 || !ok || tr.ResponseHeaderTimeout != 60*time.Second || skillListTimeout != 60*time.Second {
+		t.Fatalf("client timeout %s, transport %T", skillUpdateHTTP.Timeout, skillUpdateHTTP.Transport)
+	}
+	saved := skillListTimeout
+	skillListTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { skillListTimeout = saved })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(server.Close)
+	savedAPI := skillGitHubAPI
+	skillGitHubAPI = server.URL
+	t.Cleanup(func() { skillGitHubAPI = savedAPI })
+	start := time.Now()
+	if _, _, err := fetchGitHubTree(context.Background(), "acme/skills", ""); err == nil || time.Since(start) > 3*time.Second {
+		t.Fatalf("listing not bounded: %v after %s", err, time.Since(start))
+	}
 }
 
 // TestUntarSafeStopsAtLimits: an archive stops unpacking with an error once

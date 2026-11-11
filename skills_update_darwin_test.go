@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestGitTreeHashMatchesGit compares gitTreeHash with git itself on a
@@ -58,6 +61,42 @@ func TestGitTreeHashMatchesGit(t *testing.T) {
 	want := git("write-tree")
 	if got != want {
 		t.Fatalf("gitTreeHash = %s, git write-tree = %s", got, want)
+	}
+}
+
+// TestSkillGitCallsTimeOut: a git call that hangs is stopped at its timeout,
+// children included, as the official cleanup tools are.
+func TestSkillGitCallsTimeOut(t *testing.T) {
+	if skillGitTimeout != 60*time.Second {
+		t.Fatalf("git timeout = %s", skillGitTimeout)
+	}
+	saved := skillGitTimeout
+	skillGitTimeout = time.Second
+	t.Cleanup(func() { skillGitTimeout = saved })
+	bin, work := t.TempDir(), t.TempDir()
+	pidFile := filepath.Join(work, "child")
+	script := "#!/bin/sh\n/bin/sleep 10 &\necho $! > " + pidFile + "\nwait\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	start := time.Now()
+	_, err := skillGitCommand(context.Background(), work, "fetch", "--quiet", "origin")
+	if err == nil || time.Since(start) > 6*time.Second {
+		t.Fatalf("hanging git: %v after %s", err, time.Since(start))
+	}
+	data, _ := os.ReadFile(pidFile)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("child pid %q: %v", data, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatal("git's child outlived the timeout")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

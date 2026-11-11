@@ -88,8 +88,23 @@ type SkillUpdate struct {
 	CheckedAt int64       `json:"checkedAt"`
 }
 
-// skillUpdateHTTP fetches from GitHub; tests replace it.
-var skillUpdateHTTP = &http.Client{Timeout: 60 * time.Second}
+// skillUpdateHTTP fetches from GitHub; tests replace it. GitHub must start
+// answering within a minute; how long a body may take is up to the request:
+// an archive is read for as long as the caller waits.
+var skillUpdateHTTP = &http.Client{Transport: skillTransport()}
+
+func skillTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 60 * time.Second
+	return t
+}
+
+// skillListTimeout bounds a whole tree listing, skillGitTimeout one git
+// call; tests lower them.
+var (
+	skillListTimeout = 60 * time.Second
+	skillGitTimeout  = 60 * time.Second
+)
 
 // skillGitHubAPI and skillCodeload are GitHub's endpoints; tests replace them.
 var (
@@ -97,12 +112,19 @@ var (
 	skillCodeload  = "https://codeload.github.com"
 )
 
-// skillGitCommand runs git; tests replace it.
+// skillGitCommand runs git, bounded by skillGitTimeout; a call that ends
+// early takes the processes it started with it. Tests replace it.
 var skillGitCommand = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, skillGitTimeout)
+	defer cancel()
 	cmd := quietCommand(exec.CommandContext(ctx, "git", args...))
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return cmd.CombinedOutput()
+	out, err := runToolCmd(cmd)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return out, err
 }
 
 // skillArchiveLimit bounds a downloaded repository archive.
@@ -543,6 +565,8 @@ func fetchGitHubTree(ctx context.Context, repo, ref string) (map[string]string, 
 	if ref == "" {
 		ref = "HEAD"
 	}
+	ctx, cancel := context.WithTimeout(ctx, skillListTimeout)
+	defer cancel()
 	u := fmt.Sprintf("%s/repos/%s/git/trees/%s?recursive=1", skillGitHubAPI, repo, url.PathEscape(ref))
 	resp, err := githubRequest(ctx, u)
 	if err != nil {
