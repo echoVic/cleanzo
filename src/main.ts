@@ -62,14 +62,6 @@ function applyStaticI18n() {
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     el.textContent = t(el.dataset.i18n as never);
   });
-  document.querySelectorAll<HTMLElement>("[data-i18n-ph]").forEach((el) => {
-    el.setAttribute("placeholder", t(el.dataset.i18nPh as never));
-  });
-  document.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
-    const text = t(el.dataset.i18nTitle as never);
-    el.title = text;
-    el.setAttribute("aria-label", text);
-  });
 }
 
 /** Re-render the current view so all dynamic text follows the new language. */
