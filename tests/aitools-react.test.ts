@@ -62,7 +62,8 @@ test("session groups need entries beyond today's and an age outside the window",
 test("human formats bytes the same way the rest of the UI does", () => {
   expect(human(0)).toBe("0 B");
   expect(human(512)).toBe("512 B");
-  expect(human(2048)).toBe("2 KB");
+  expect(human(1536)).toBe("1.5 KB");
+  expect(human(2048)).toBe("2.0 KB");
   expect(human(5 * 1024 * 1024)).toBe("5.0 MB");
   expect(human(5 * 1024 ** 3)).toBe("5.0 GB");
   expect(human(1500 * 1024 ** 3)).toBe("1.5 TB");

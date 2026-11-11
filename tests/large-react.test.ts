@@ -123,7 +123,8 @@ test("threshold buckets are the four persisted tiers", () => {
 
 test("human and displayPath match the rest of the UI", () => {
   expect(human(0)).toBe("0 B");
-  expect(human(1024)).toBe("1 KB");
+  expect(human(1024)).toBe("1.0 KB");
+  expect(human(1536)).toBe("1.5 KB");
   expect(human(1500 * 1024 ** 3)).toBe("1.5 TB");
   expect(displayPath("/Users/alice/foo/bar")).toBe("~/foo/bar");
   expect(displayPath("/var/tmp/x")).toBe("/var/tmp/x");

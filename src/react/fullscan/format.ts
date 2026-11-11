@@ -2,15 +2,8 @@ import { shortHome } from "../../platform";
 // 全盘扫描页纯展示 / 过滤逻辑：不依赖 DOM / React，可单测。
 import type { BigItem, DiskStat } from "../../mygo";
 
-/** 与 shared.ts 相同的字节展示。 */
-export function human(n: number): string {
-  if (n < 1024) return `${n} B`;
-  let v = n / 1024;
-  const units = ["KB", "MB", "GB", "TB"];
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
-}
+/** 字节展示就是 shared.ts 那一份。 */
+export { human } from "../../shared";
 
 export function displayPath(p: string): string {
   return shortHome(p, true);

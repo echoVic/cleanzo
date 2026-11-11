@@ -1,4 +1,4 @@
-// 被测试文件最先 import：先于 shared.ts 的顶层 querySelector 装好最小 DOM 环境。
+// 被测试文件最先 import：装好最小 DOM 环境与 localStorage。
 import { setPref, type Lang } from "../src/i18n";
 
 class Element {

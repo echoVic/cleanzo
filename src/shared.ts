@@ -120,10 +120,10 @@ function focusNextAfter(rowEl: Element | null) {
   (next ?? list[0])?.focus({ preventScroll: true });
 }
 
-const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
-
+// 用到时才查侧栏，模块本身不碰 DOM：各页的 format.ts 经这里取 human，可以直接单测。
 function setNavBusy(view: View, on: boolean) {
-  navItems.find((b) => b.dataset.view === view)?.classList.toggle("busy", on);
+  const items = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
+  items.find((b) => b.dataset.view === view)?.classList.toggle("busy", on);
 }
 
 const VIEWS = ["clean", "status", "process", "aitools", "aispace", "skills", "fullscan", "large", "photos", "apps", "settings"] as const;

@@ -98,7 +98,8 @@ test("gone filter hides rows removed to Trash and collapses selection", () => {
 
 test("human and displayPath match the rest of the UI", () => {
   expect(human(0)).toBe("0 B");
-  expect(human(1024)).toBe("1 KB");
+  expect(human(1024)).toBe("1.0 KB");
+  expect(human(1536)).toBe("1.5 KB");
   expect(human(1500 * 1024 ** 3)).toBe("1.5 TB");
   expect(displayPath("/Users/alice/foo/bar")).toBe("~/foo/bar");
   expect(displayPath("/var/tmp/x")).toBe("/var/tmp/x");
@@ -188,9 +189,9 @@ test("expansion measures unknown children, re-sorts, and includes the late size 
     await measured.promise;
     const html = fixture.markup();
     expect(html).not.toContain("计算中…");
-    expect(html).toContain("8 KB");
+    expect(html).toContain("8.0 KB");
     expect(html.indexOf('title="/docs/slow"')).toBeLessThan(html.indexOf('title="/docs/small"'));
-    expect(fixture.toolbar()).toContain("已选 1 项 · 8 KB");
+    expect(fixture.toolbar()).toContain("已选 1 项 · 8.0 KB");
   } finally { setPref("system"); }
 });
 
