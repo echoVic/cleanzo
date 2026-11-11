@@ -11,7 +11,7 @@
     "generate:icon": "sh scripts/generate-icon.sh",
     "dev:web": "vite",
     "build:web": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
     "test:web": "bun test tests/css-tokens.test.ts && bun test tests/clean-react.test.ts && bun test tests/status-react.test.ts && bun test tests/language.test.ts && bun test tests/aitools-react.test.ts && bun test tests/aispace-react.test.ts && bun test tests/settings-react.test.ts && bun test tests/large-react.test.ts && bun test tests/photos-react.test.ts && bun test tests/apps-react.test.ts && bun test tests/fullscan-react.test.ts && bun test tests/skills-react.test.ts && bun test tests/crash-dumps.test.ts && bun test tests/platform.test.ts && bun test tests/i18n-windows.test.ts && bun test tests/motion.test.ts && bun test tests/growth-react.test.ts && bun test tests/process-react.test.ts && bun test tests/app-icon.test.ts && bun test tests/native-i18n.test.ts"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4",
+    "@types/bun": "1.4.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

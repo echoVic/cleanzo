@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "bun"
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "../vite.config.ts",
+    "../mygo.config.ts"
+  ]
+}
