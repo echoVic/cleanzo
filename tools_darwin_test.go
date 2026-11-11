@@ -516,6 +516,36 @@ func TestToolCleanupRespectsPriorClaims(t *testing.T) {
 	}
 }
 
+// TestToolCleanupRefusesUnwalkedInstallerFolders: a clean walks the
+// installer folders only for a selected row that reaches into them, and a
+// command's folders are known only when it runs. A command whose folders
+// overlap a folder left unwalked is refused, as it is when the walk finds an
+// installer there.
+func TestToolCleanupRefusesUnwalkedInstallerFolders(t *testing.T) {
+	for _, kind := range []string{"installer", "no-installer"} {
+		t.Run(kind, func(t *testing.T) {
+			env := testEnv(t)
+			bin := t.TempDir()
+			root := filepath.Join(env.home, "Downloads", "pnpm-store")
+			writeFile(t, filepath.Join(root, "data"), 100)
+			installer := filepath.Join(root, "Tool.dmg")
+			if kind == "installer" {
+				writeFile(t, installer, 100)
+			}
+			log := filepath.Join(bin, "called")
+			fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; *) touch `+shellPath(log)+`;; esac`)
+			stageTools(t, &env, bin)
+			res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.pnpm-store"}}, time.Time{}, cleanHooks{})
+			if exists(log) || len(res) != 1 || res[0].Skipped != "failed" || !slices.Equal(res[0].Failed, []string{"blocked"}) {
+				t.Fatalf("a command ran in an unwalked installer folder: %+v", res)
+			}
+			if kind == "installer" && !exists(installer) {
+				t.Fatal("the installer is gone")
+			}
+		})
+	}
+}
+
 // TestIgnoredToolDoesNotEstimate preserves catalog claims without querying hidden tools.
 func TestIgnoredToolDoesNotEstimate(t *testing.T) {
 	env := testEnv(t)

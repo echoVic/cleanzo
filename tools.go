@@ -322,6 +322,18 @@ func cleanTool(ctx context.Context, rule *Rule, env junkEnv, hooks cleanHooks, c
 	if err == nil && env.commandClaims[rule.ID].overlaps(roots) {
 		err = errBlocked
 	}
+	// The clean left the installer folders unwalked, so it does not know the
+	// installers in them: a command reaching into one is refused, as it is
+	// when the walk finds an installer there.
+	if err == nil && len(env.unwalked) > 0 {
+		keys := make([]string, len(roots))
+		for i, root := range roots {
+			keys[i] = canonical(root)
+		}
+		if reachesInto(itemSpec{roots: keys}, env.unwalked) {
+			err = errBlocked
+		}
+	}
 	if err == nil && ctx.Err() != nil {
 		err = ctx.Err()
 	}
