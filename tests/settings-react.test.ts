@@ -139,6 +139,36 @@ test("after a failed rename the folder-name input shows the saved name again", a
   } finally { env.restore(); }
 });
 
+test("a failed rename puts the saved name back when the input lost focus because the window did", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const { page, field } = await renameFailsPage(env);
+    const input = { value: "Renamed" };
+    // 切到别的应用：输入框收到 blur，activeElement 却仍是它，只是窗口没有焦点。
+    page.document.activeElement = input;
+    page.document.hasFocus = () => false;
+    field().props.onBlur({ target: input });
+    await page.settle();
+    expect(page.text()).toContain("disk full");
+    expect(input.value).toBe("Work");
+  } finally { env.restore(); }
+});
+
+test("a failed rename leaves the input alone once the user is typing in it again", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const { page, field } = await renameFailsPage(env);
+    const input = { value: "Renamed" };
+    field().props.onBlur({ target: input });
+    // 保存还没回来，用户已经回到框里接着改。
+    page.document.activeElement = input;
+    input.value = "Renamed again";
+    await page.settle();
+    expect(page.text()).toContain("disk full");
+    expect(input.value).toBe("Renamed again");
+  } finally { env.restore(); }
+});
+
 test("toggleMenuBarItem keeps the menu bar's order and drops names it doesn't know", () => {
   expect(toggleMenuBarItem(["mem", "cpu"], "gpu", true)).toEqual(["cpu", "mem", "gpu"]);
   expect(toggleMenuBarItem(["cpu", "mem"], "cpu", false)).toEqual(["mem"]);

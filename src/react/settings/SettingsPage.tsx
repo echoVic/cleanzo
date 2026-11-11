@@ -340,8 +340,10 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
     void save((s) => ({ ...s, custom: s.custom.map((c) => c.path === folder.path ? { ...c, name } : c) }), `custom:${folder.path}`, false)
       .then((ok) => {
         // 没存上：输入框回到已保存的名称（用户已经回到框里接着改时不打断）。
+        // 窗口失焦时 activeElement 仍是这个框，但用户不在改：窗口没有焦点也照样放回。
         const kept = savedFolderName(settingsRef.current, folder.path);
-        if (!ok && kept !== null && document.activeElement !== input) input.value = kept;
+        const editing = document.activeElement === input && document.hasFocus();
+        if (!ok && kept !== null && !editing) input.value = kept;
       });
   };
   const onRemoveFolder = (folder: CustomFolder) => {
