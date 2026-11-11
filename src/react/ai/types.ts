@@ -1,19 +1,6 @@
 import type { AIPart, AIGroup } from "../../mygo";
 
-export type Level = "safe" | "optional" | "sensitive" | "unknown" | "protected";
 export type WindowDays = 7 | 30 | 90;
-
-export interface ToolViewState {
-  result: AIPart[] | null;
-  phase: "idle" | "scanning" | "scanned" | "cleaned";
-  error: string | null;
-  picked: Set<string>;
-  pickedGroups: Map<string, Set<string>>;
-  expanded: Set<string>;
-  showLocked: boolean;
-  freed: number | null;
-  scannedAt: number;
-}
 
 export const offered = (p: AIPart) => p.level !== "protected" && p.level !== "unknown";
 export const isSessions = (p: AIPart) => p.level === "sensitive";

@@ -312,7 +312,6 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
             <div>{visible.map((p) => (
               <PartRow
                 key={p.id}
-                tool={tool}
                 part={p}
                 windowDays={windowDays}
                 scannedAt={scannedAt}
@@ -347,7 +346,6 @@ export function AIToolPage({ toolId, toolName }: AIToolPageProps) {
                   {lockedParts.map((p) => (
                     <PartRow
                       key={p.id}
-                      tool={tool}
                       part={p}
                       windowDays={windowDays}
                       scannedAt={scannedAt}

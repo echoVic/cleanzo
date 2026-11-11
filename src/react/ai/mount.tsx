@@ -18,8 +18,3 @@ export function mountAITool(el: HTMLElement, toolId: string, toolName: string) {
     </React.StrictMode>,
   );
 }
-
-export function unmountAITool(toolId: string) {
-  roots.get(toolId)?.unmount();
-  roots.delete(toolId);
-}

@@ -1,5 +1,5 @@
 import { isWindows } from "../../platform";
-import type { Skill, SkillCopy, SkillSource, SkillUpdate } from "../../mygo";
+import type { Skill, SkillCopy, SkillUpdate } from "../../mygo";
 
 export type SkillFilter = "all" | "idle" | "issues" | "updates" | "unobserved";
 export type SkillSort = "last" | "count" | "size" | "name";
@@ -116,9 +116,6 @@ export function linkCandidates(s: Skill): { path: string; target: string }[] {
     .filter((c) => c !== target && c.hash === target.hash && c.real !== target.real && c.removable && c.linkedBy.length === 0)
     .map((c) => ({ path: c.path, target: target.path }));
 }
-
-/** 能读到调用记录的来源。 */
-export const okSources = (sources: SkillSource[]) => sources.filter((s) => s.status === "ok");
 
 /**
  * 「全部升级」要升级的文件夹：检查结果是「有更新」、而且是这次扫描里某个技能的副本指向的文件夹。

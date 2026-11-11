@@ -1,7 +1,7 @@
 import { pathSep } from "../../platform";
 import * as React from "react";
 import { ChevronRight, FolderOpen, Lock } from "lucide-react";
-import type { AIPart, AITool } from "../../mygo";
+import type { AIPart } from "../../mygo";
 import { Checkbox } from "../../ui/components/checkbox";
 import { Badge } from "../../ui/components/badge";
 import { cn } from "../../ui/cn";
@@ -22,7 +22,6 @@ const levelBadge: Record<AIPart["level"], { label: DictKey; variant: "safe" | "o
 const WINDOW_OPTIONS = [7, 30, 90] as const;
 
 interface Props {
-  tool: AITool;
   part: AIPart;
   windowDays: WindowDays;
   scannedAt: number;
@@ -46,7 +45,6 @@ export function PartRow(p: Props) {
   const badge = levelBadge[part.level as AIPart["level"]] ?? levelBadge.safe!;
   const blockedByRun = runBlocked(part);
   const hasDetails = part.groups.length > 0 || part.top.length > 0 || part.more > 0;
-  const sessions = isSessions(part);
 
   const name = part.id.startsWith("unknown:") ? part.name : (() => {
     const k = `ai.part.${part.id}.name` as DictKey;

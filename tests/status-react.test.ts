@@ -71,8 +71,6 @@ test("STATUS_ALERT thresholds match the spec constants", () => {
   expect(STATUS_ALERT.swapMentionGB).toBe(1);
   expect(STATUS_ALERT.swapStandaloneGB).toBe(8);
   expect(STATUS_ALERT.diskFreeWarnGB).toBe(20);
-  expect(STATUS_ALERT.pressure[2]).toBe("warn");
-  expect(STATUS_ALERT.pressure[4]).toBe("crit");
 });
 
 test("fmtMem strips .0 on whole GiB, MB below 1 GiB, dash for zero", () => {
@@ -323,7 +321,7 @@ test("Windows disk legend keeps full labels and 103.3 GB in full-width rows in z
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
 
-test("the top-apps list is Windows-only, without View All; macOS lists no apps", async () => {
+test("the top-apps list is Windows-only; macOS lists no apps", async () => {
   await import("./setup-dom");
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -339,7 +337,6 @@ test("the top-apps list is Windows-only, without View All; macOS lists no apps",
     const win = renderToStaticMarkup(createElement(StatusPage, props));
     expect(win).toContain("st-listcard");
     expect(win).toContain(t("status.apps.title"));
-    expect(win).not.toContain("st-viewall");
   } finally { setPlatformForTest(undefined); }
 });
 

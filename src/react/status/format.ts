@@ -8,8 +8,6 @@ export const MiB = 2 ** 20;
 export const SPARK_POINTS = 30;
 
 export const STATUS_ALERT = {
-  /** kern.memorystatus_vm_pressure_level：1 正常 / 2 紧张 / 4 严重，未知当正常 */
-  pressure: { 1: "ok", 2: "warn", 4: "crit" } as Record<number, string>,
   /** 内存提示条里追加交换文件那行的下限 */
   swapMentionGB: 1,
   /** 压力正常时独立提示交换文件的下限 */

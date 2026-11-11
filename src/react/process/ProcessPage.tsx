@@ -338,7 +338,6 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   }
   const tags = growthTags(growth);
   const diag = React.useMemo(() => (tab === "disk" ? null : diagnose(sample, cpuHist)), [tab, sample, cpuHist]);
-  const busyCount = quit.busy.size + (quitTarget !== null ? 1 : 0) + (forceTarget !== null ? 1 : 0);
   // 读屏里程碑：播报监控状态 + 当前标签；退出/诊断等细节由 toast 和页面自身结构承担。
   const liveMsg = sample
     ? (running ? "" : t("process.paused")) + (tab === "cpu" ? t("process.tab.cpu") : tab === "mem" ? t("process.tab.mem") : t("process.tab.disk"))
