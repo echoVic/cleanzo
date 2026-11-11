@@ -211,15 +211,26 @@ func (c claimSet) clone() claimSet {
 // protected reports hard protected paths and their descendants.
 func (env junkEnv) protected(p string) bool { return env.protectedKey(canonical(p)) }
 
-// protectedKey is protected for a path already in comparison form.
+// protectedKey is protected for a path already in comparison form. The home
+// folder is resolved once a call: resolving it for each folder and pattern
+// made a clean of thousands of entries spend seconds in the guard.
 func (env junkEnv) protectedKey(key string) bool {
-	for path := key; within(path, canonical(env.home)); path = filepath.Dir(path) {
-		for _, pattern := range protectedPatterns {
-			if hit, _ := filepath.Match(strings.ToLower(filepath.Join(resolvePath(env.home), pattern)), path); hit {
+	home := canonical(env.home)
+	if !within(key, home) {
+		return false
+	}
+	base := strings.ToLower(resolvePath(env.home))
+	patterns := make([]string, len(protectedPatterns))
+	for i, pattern := range protectedPatterns {
+		patterns[i] = filepath.Join(base, strings.ToLower(pattern))
+	}
+	for path := key; within(path, home); path = filepath.Dir(path) {
+		for _, pattern := range patterns {
+			if hit, _ := filepath.Match(pattern, path); hit {
 				return true
 			}
 		}
-		if path == canonical(env.home) {
+		if path == home {
 			break
 		}
 	}
@@ -1244,7 +1255,8 @@ func cleanItem(ctx context.Context, spec itemSpec, env junkEnv, paths []string, 
 
 // removable applies the shared guards to resolved home and temporary paths.
 func (env junkEnv) removable(path string, trash bool) bool {
-	if env.traversalBlocked(path) || env.protected(path) || !safeToClean(path) {
+	key := canonical(path)
+	if env.traversalBlocked(path) || env.protectedKey(key) || !safeToClean(path) {
 		return false
 	}
 	home := resolvePath(env.home)
@@ -1252,7 +1264,8 @@ func (env junkEnv) removable(path string, trash bool) bool {
 		return cleanable(filepath.Join(env.home, strings.TrimPrefix(path, home)))
 	}
 	// Temporary junk is permanently removed; trashable intentionally only accepts home paths.
-	return !trash && within(canonical(path), canonical(env.tmp)) && canonical(path) != canonical(env.tmp)
+	tmp := canonical(env.tmp)
+	return !trash && within(key, tmp) && key != tmp
 }
 
 // Channel send seams let acceptance tests exercise the bound methods without a WebView.
