@@ -17,7 +17,7 @@ import {
 } from "../src/react/fullscan/format";
 
 test("usage probe failure does not tell users an app is running", () => {
-  for (const lang of ["zh", "en"]) {
+  for (const lang of ["zh", "en"] as const) {
     setLang(lang);
     expect(errText("usage-unknown")).toBe(t("fs.usageUnknown"));
     expect(errText("usage-unknown")).not.toBe(errText("in-use"));
@@ -39,7 +39,7 @@ test("type hints distinguish data from caches and do not change cleanup eligibil
   ] as const;
   for (const [path, isDir, expected] of cases) {
     expect(pathHintKind(path, isDir)).toBe(expected);
-    for (const lang of ["zh", "en"]) {
+    for (const lang of ["zh", "en"] as const) {
       setLang(lang);
       const key = `fs.type.${expected}` as Parameters<typeof t>[0];
       expect(t(key)).not.toBe(key);

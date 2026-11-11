@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { baseName, dirName, isWindows, isWithin, pathSep, setPlatformForTest, shortHome, splitPath } from "../src/platform";
 import { displayPath } from "../src/react/large/format";
-import { pathHintKind } from "../src/react/list/type-hint";
+import { pathHintKind, type PathHintKind } from "../src/react/list/type-hint";
 import { under } from "../src/react/list/selection";
 
 afterEach(() => setPlatformForTest(undefined));
@@ -40,7 +40,7 @@ test("Windows paths abbreviate home and compare complete components without case
 
 test("Windows file hints use the leaf name and cover installers, shortcuts and images", () => {
   setPlatformForTest("win32");
-  for (const [ext, kind] of Object.entries({ exe: "app", msi: "installer", msix: "installer", lnk: "app", zip: "archive", "7z": "archive", iso: "installer", vhdx: "vm" })) {
+  for (const [ext, kind] of Object.entries<PathHintKind>({ exe: "app", msi: "installer", msix: "installer", lnk: "app", zip: "archive", "7z": "archive", iso: "installer", vhdx: "vm" })) {
     expect(pathHintKind(`C:\\has.dot\\file.${ext.toUpperCase()}`)).toBe(kind);
   }
 });

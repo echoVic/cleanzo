@@ -23,7 +23,7 @@ test("native strings equal the web dictionary's raw strings, including placehold
     const web = rawMessages(block);
     expect(Object.keys(web).length).toBeGreaterThan(700);
     for (const [key, value] of Object.entries(nativeMessages[lang])) {
-      if (Object.hasOwn(web, key)) expect({ lang, key, value }).toEqual({ lang, key, value: web[key] });
+      if (Object.hasOwn(web, key)) expect({ lang, key, value }).toEqual({ lang, key, value: web[key]! });
     }
   }
 });

@@ -327,7 +327,7 @@ test("the top-apps list is Windows-only; macOS lists no apps", async () => {
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { StatusPage } = await import("../src/react/status/StatusPage");
   const { setPlatformForTest } = await import("../src/platform");
-  const props = { active: false, goClean() {}, goProcess() {} };
+  const props = { active: false, goClean() {}, goProcess() {}, goAISpace() {} };
   try {
     setPlatformForTest("darwin");
     const mac = renderToStaticMarkup(createElement(StatusPage, props));
@@ -568,7 +568,7 @@ async function statusQuitHarness() {
   const { setPlatformForTest } = await import("../src/platform");
   const previous = {
     document: globalThis.document, window: globalThis.window, html: globalThis.HTMLElement,
-    raf: globalThis.requestAnimationFrame, css: globalThis.CSS, mygo: globalThis.mygo,
+    raf: globalThis.requestAnimationFrame, css: globalThis.CSS, mygo: (globalThis as { mygo?: unknown }).mygo,
   };
   const slots: { value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }[] = [];
   const effects: (() => void)[] = [];
@@ -591,7 +591,7 @@ async function statusQuitHarness() {
     }
   };
   const spies = [
-    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+    spyOn(React, "useState").mockImplementation((initial?: unknown) => {
       const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial };
       return [slot.value, (value: unknown) => {
         const next = typeof value === "function" ? value(slot.value) : value;
@@ -678,7 +678,7 @@ async function statusQuitHarness() {
       for (let i = 0; i < 20; i++) {
         if (dirty) {
           dirty = false; cursor = 0;
-          tree = StatusPage({ active: true, goClean() {}, goProcess() {} });
+          tree = StatusPage({ active: true, goClean() {}, goProcess() {}, goAISpace() {} });
           commitRows();
           for (const effect of effects.splice(0)) effect();
         }

@@ -54,7 +54,7 @@ test("排序：按 7 天增长时没有数据的排后面，再按占用", () =>
     app({ key: "c", size: 2, week: { bytes: 5 * GB, atLeast: false, days: 7 } }), app({ key: "d", size: 5 })];
   expect(sortApps(apps, "week").map((a) => a.key)).toEqual(["c", "a", "b", "d"]);
   expect(sortApps(apps, "size").map((a) => a.key)).toEqual(["b", "d", "c", "a"]);
-  expect(apps[0].key).toBe("a"); // 不改原数组
+  expect(apps[0]?.key).toBe("a"); // 不改原数组
 });
 
 test("迷你曲线：-1 处断开，少于两个点不画", () => {
@@ -107,7 +107,7 @@ async function pageHarness(focusKey: string | null = null) {
   const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
     !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
   const spies = [
-    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+    spyOn(React, "useState").mockImplementation((initial?: unknown) => {
       const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial };
       return [slot.value, (value: unknown) => {
         const next = typeof value === "function" ? value(slot.value) : value;
@@ -305,13 +305,12 @@ test("状态页提示：监控开着时取最大的一条；崩溃转储提示�
 });
 
 test("状态页提示：最大的提醒已被忽略时返回下一条，全部忽略时不提示", () => {
-  const alerts = [
-    { key: "app:codex", name: "Codex", window: "day", days: 1, bytes: 40 * GB, atLeast: false, folder: "/Codex/cache", total: 40 * GB, at: 1 },
-    { key: "app:todesk", name: "ToDesk", window: "week", days: 5, bytes: 5 * GB, atLeast: true, folder: "/ToDesk/dumps", total: 10 * GB, at: 1 },
-  ];
+  const codex = { key: "app:codex", name: "Codex", window: "day", days: 1, bytes: 40 * GB, atLeast: false, folder: "/Codex/cache", total: 40 * GB, at: 1 };
+  const todesk = { key: "app:todesk", name: "ToDesk", window: "week", days: 5, bytes: 5 * GB, atLeast: true, folder: "/ToDesk/dumps", total: 10 * GB, at: 1 };
+  const alerts = [codex, todesk];
   const config = { ...state({}).config, enabled: true, ignored: ["app:codex"] };
   const s = state({ config, alerts });
-  expect(growthHint(s, [])).toBe(alerts[1]);
+  expect(growthHint(s, [])).toBe(todesk);
   expect(growthHint(state({ config: { ...config, ignored: ["app:codex", "app:todesk"] }, alerts }), [])).toBeNull();
   expect(s.alerts).toEqual(alerts); // 不改后端返回的提醒顺序。
 });
@@ -377,7 +376,7 @@ async function growthSettingsHarness(snapshot: GrowthState, menuBarItems: string
   const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined) =>
     !before || !after || before.length !== after.length || before.some((v, i) => !Object.is(v, after[i]));
   const spies = [
-    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+    spyOn(React, "useState").mockImplementation((initial?: unknown) => {
       const slot = slots[cursor++] ??= { value: typeof initial === "function" ? initial() : initial };
       return [slot.value, (value: unknown) => {
         const next = typeof value === "function" ? value(slot.value) : value;

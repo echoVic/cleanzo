@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createElement } from "react";
+import { createElement, type ReactElement, type Ref } from "react";
 
 const { hasAppIcon, loadIcon, peekIcon, resetIconsForTest } = await import("../src/react/icons/cache");
 
@@ -39,8 +39,8 @@ test("AppIcon shows the letter until the icon is known, then the image in the sa
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { AppIcon } = await import("../src/react/icons/AppIcon");
   resetIconsForTest(async () => "data:image/png;base64,AAAA");
-  const letter = createElement("div", { className: "st-ico", style: { background: "#f00" } }, "S");
-  const render = (path: string) => renderToStaticMarkup(createElement(AppIcon, { path, box: "st-ico" }, letter));
+  const letter = createElement("div", { className: "st-ico", style: { background: "#f00" } }, "S") as ReactElement<{ ref?: Ref<HTMLElement> }>;
+  const render = (path: string) => renderToStaticMarkup(createElement(AppIcon, { path, box: "st-ico", children: letter }));
   const before = render("/Applications/Safari.app");
   expect(before).toBe('<div class="st-ico" style="background:#f00">S</div>');
   await loadIcon("/Applications/Safari.app");

@@ -272,8 +272,8 @@ test("all backend catalog rules have names and descriptions in both languages", 
   const ids = readdirSync(root).filter((name) => name.endsWith("rules.go")).flatMap((name) =>
     [...readFileSync(new URL(name, root), "utf8").matchAll(/ID: "([^"]+)"/g)].map((m) => m[1]!));
   expect(ids.length).toBeGreaterThanOrEqual(55);
-  for (const lang of ["zh", "en"]) {
-    setLang( lang);
+  for (const lang of ["zh", "en"] as const) {
+    setLang(lang);
     for (const id of ids) {
       expect(ruleName(id)).not.toBe(id);
       expect(ruleDesc(id)).not.toBe(id);
@@ -290,7 +290,7 @@ test("v3 errors from ignoring an item are translated rather than showing raw JSO
 });
 
 test("unsupported platform operations have a translated error in both languages", () => {
-  for (const lang of ["zh", "en"]) {
+  for (const lang of ["zh", "en"] as const) {
     setLang(lang);
     expect(errText(Error("unsupported"))).toBe(t("fs.unsupported"));
     expect(errText(Error("unsupported"))).not.toBe("unsupported");
@@ -325,7 +325,7 @@ test("stopping cleanup retains completed results and marks the remaining rows", 
   expect(totals.freed).toBe(1024);
   expect(rowStateNote(final.get("dev.npx")!, t, human).text).toBe("已释放 1.0 KB");
   // 进度条按已清理比例（1024 / 3072 ≈ 33%）。
-  expect(cleanBarWidth(1024, 3072, true, false, "")).toBeCloseTo(33.33, 1);
+  expect(cleanBarWidth(1024, 3072, true, false, false)).toBeCloseTo(33.33, 1);
 });
 
 test("cleanup completion retains final results before React commits the queued render", () => {

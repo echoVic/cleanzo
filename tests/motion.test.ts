@@ -33,9 +33,9 @@ test("leaving items go back to their old positions and a returning key is not du
 });
 
 test("Collapse renders open content statically and nothing when closed", () => {
-  expect(renderToStaticMarkup(createElement(Collapse, { open: true }, "child")))
+  expect(renderToStaticMarkup(createElement(Collapse, { open: true, children: "child" })))
     .toBe('<div class="cz-collapse" data-state="open"><div class="cz-collapse-in">child</div></div>');
-  expect(renderToStaticMarkup(createElement(Collapse, { open: false }, "child"))).toBe("");
+  expect(renderToStaticMarkup(createElement(Collapse, { open: false, children: "child" }))).toBe("");
 });
 
 test("NumberTicker renders the final text, or the starting text when it counts up", () => {
@@ -54,7 +54,7 @@ test("containRect letterboxes a 4:3 photo in a wide stage", () => {
 
 test("Collapse appear stays open in static rendering without Web Animations", () => {
   expect(motionLevel()).toBe("none");
-  expect(renderToStaticMarkup(createElement(Collapse, { open: true, appear: true }, "child")))
+  expect(renderToStaticMarkup(createElement(Collapse, { open: true, appear: true, children: "child" })))
     .toBe('<div class="cz-collapse" data-state="open"><div class="cz-collapse-in">child</div></div>');
 });
 

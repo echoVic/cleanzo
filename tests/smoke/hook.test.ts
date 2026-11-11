@@ -59,6 +59,7 @@ test("clean tour uses scan controls in both phases and rejects a caught scan err
 test("theme readiness rejects an ambiguous native palette", async () => {
   for (const dark of [false, true]) {
     const win = Object.assign(new EventTarget(), { matchMedia: () => ({ matches: dark }) }) as EventTarget & {
+      matchMedia: () => { matches: boolean };
       __cleanzoSmoke: { waitTheme(dark: boolean): Promise<boolean> };
     };
     let scheme = "light dark";

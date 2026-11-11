@@ -1023,7 +1023,7 @@ test("详情晚于升级返回时，卸载确认仍使用升级后的版本", as
   const a = app({ name: "A", path: "/Applications/A.app", version: "1.170.0" });
   const stream = updateStream();
   let resolve!: (d: UninstallDetail) => void;
-  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => await new Promise((yes) => { resolve = yes; }), upgradeApp: async () => ({ path: a.path, done: true, version: "1.171.0", code: "", detail: "", command: "" }) });
+  const h = await appsHarness({ listApps: async () => [a], startUpdateCheck: () => stream as any, uninstallDetail: async () => await new Promise((yes) => { resolve = yes; }), upgradeApp: async (id) => ({ id, done: true, version: "1.171.0", code: "", detail: "", command: "" }) });
   try {
     await h.flush({ active: true }); stream.emit(upd({ id: a.id, state: "update", action: "brew" })); stream.finish(); await h.flush(); h.rows()[0].props.onToggle(a.id); await h.flush();
     h.rows()[0].props.onUpgrade(a.id); await h.flush(); expect(h.rows()[0].props.app.version).toBe("1.171.0");
@@ -1117,7 +1117,7 @@ async function leftoversHarness() {
     !b || !a || b.length !== a.length || b.some((v, i) => !Object.is(v, a[i]));
 
   const spies = [
-    spyOn(React, "useState").mockImplementation((initial: unknown) => {
+    spyOn(React, "useState").mockImplementation((initial?: unknown) => {
       const slot = slots[cursor++] ??= { value: typeof initial === "function" ? (initial as () => unknown)() : initial };
       return [slot.value, (value: unknown) => {
         const next = typeof value === "function" ? (value as (p: unknown) => unknown)(slot.value) : value;
@@ -1140,7 +1140,7 @@ async function leftoversHarness() {
         pending.push(() => { slot.cleanup?.(); slot.cleanup = effect() || undefined; });
       }
     }),
-    spyOn(React, "useSyncExternalStore").mockImplementation((_subscribe: unknown, snapshot: () => unknown) => snapshot()),
+    spyOn(React, "useSyncExternalStore").mockImplementation(<T>(_subscribe: unknown, snapshot: () => T) => snapshot()),
     spyOn(appsApi, "startOrphanScan").mockImplementation(() => {
       let i = 0;
       const evs = scan.evs;
@@ -1158,9 +1158,10 @@ async function leftoversHarness() {
     }),
   ];
 
-  function nodes(node: React.ReactNode): React.ReactElement<Record<string, unknown>>[] {
+  type Props = { children?: React.ReactNode; [prop: string]: unknown };
+  function nodes(node: React.ReactNode): React.ReactElement<Props>[] {
     if (Array.isArray(node)) return node.flatMap(nodes);
-    if (!React.isValidElement<Record<string, unknown>>(node)) return [];
+    if (!React.isValidElement<Props>(node)) return [];
     return [node, ...nodes(node.props.children)];
   }
   const textOf = (node: React.ReactNode): string => Array.isArray(node) ? node.map(textOf).join("") :
