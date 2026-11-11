@@ -249,8 +249,10 @@ export interface RowNote {
   text: string;
   /** done 且 result.skipped 时的跳过原因（warn 标签）。 */
   skipWarn?: string;
-  /** done 时 failed 数组长度。 */
+  /** done 时 failed 数组长度；失败全是 changed 时不填，改填 changedNote。 */
   failedCount?: number;
+  /** done 且失败全是 changed（扫描后有变动或新放进来、特意保留的回收站项）时的标签文字。 */
+  changedNote?: string;
 }
 
 /** 行清理状态注记（旧 stateNote 的纯函数版，组件负责排版标签）。 */
@@ -260,6 +262,8 @@ export function rowStateNote(row: RowState, t: TFn, human: (n: number) => string
   if (row.state === "stopped") return { kind: "stopped", text: t("cat.stopped") };
   if (row.state === "skipped") return { kind: "skipped", text: t("cat.notCleaned") };
   const res = row.result!;
+  const failed = res.failed ?? [];
+  const onlyChanged = failed.length > 0 && failed.every((f) => f === "changed");
   const parts = [
     res.freed > 0 ? t("cat.freed", { size: human(res.freed) }) : "",
     res.trashed > 0 ? t("cat.trashed", { size: human(res.trashed) }) : "",
@@ -268,7 +272,8 @@ export function rowStateNote(row: RowState, t: TFn, human: (n: number) => string
     kind: "done",
     text: parts.join(t("phrase.sep")) || t("cat.cleanedNothing"),
     skipWarn: res.skipped ? t(`junk.skip.${res.skipped}` as never) : undefined,
-    failedCount: res.failed?.length ? res.failed.length : undefined,
+    failedCount: failed.length && !onlyChanged ? failed.length : undefined,
+    changedNote: onlyChanged ? t("cat.changedN", { n: failed.length }) : undefined,
   };
 }
 

@@ -267,6 +267,21 @@ test("tool failure shows both its skip reason and failed count", () => {
   expect(row.failedCount).toBe(1);
 });
 
+test("Trash entries kept because they changed after the scan read as kept, not failed, yet the row is still a partial clean", () => {
+  const kept = { name: "sys.trash", freed: 2048, trashed: 0, inUse: 0, files: 3, failed: ["changed", "changed"] };
+  const note = rowStateNote({ state: "done", result: kept }, t, human);
+  expect(note.failedCount).toBeUndefined();
+  expect(note.changedNote).toBe("2 项有变动，已保留");
+  setLang("en");
+  expect(rowStateNote({ state: "done", result: { ...kept, failed: ["changed"] } }, t, human).changedNote).toBe("1 item changed, kept");
+  setLang("zh");
+  // 还有别的失败时照旧按失败计数。
+  const mixed = rowStateNote({ state: "done", result: { ...kept, failed: ["changed", "blocked"] } }, t, human);
+  expect(mixed.failedCount).toBe(2);
+  expect(mixed.changedNote).toBeUndefined();
+  expect(cleanTotals(new Map<string, RowState>([["sys.trash", { state: "done", result: kept }]])).failedNames).toEqual(["sys.trash"]);
+});
+
 test("all backend catalog rules have names and descriptions in both languages", () => {
   const root = new URL("../", import.meta.url);
   const ids = readdirSync(root).filter((name) => name.endsWith("rules.go")).flatMap((name) =>

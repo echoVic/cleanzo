@@ -519,8 +519,9 @@ export function CleanPage() {
       if (note.kind === "skipped") return <Tag text={note.text} kind="warn" />;
       const skipTag = note.skipWarn ? <Tag text={note.skipWarn} kind="warn" /> : null;
       const failedTag = note.failedCount ? <Tag text={t("cat.failedN", { n: note.failedCount })} kind="warn" /> : null;
+      const changedTag = note.changedNote ? <Tag text={note.changedNote} /> : null;
       return (
-        <span className="cat-note-text ok"><svg className="cz-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.8 8.9 9.8 3.4" /></svg>{note.text} {skipTag} {failedTag}</span>
+        <span className="cat-note-text ok"><svg className="cz-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.8 8.9 9.8 3.4" /></svg>{note.text} {skipTag} {failedTag} {changedTag}</span>
       );
     }
     if (st.pending.has(it.id)) return <span className="spin" aria-label={t("cat.scanning")} />;
