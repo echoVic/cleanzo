@@ -188,6 +188,7 @@ export interface CleanPlan {
   bytes: number;
   deleteItems: JunkItem[];
   trashItems: JunkItem[];
+  review: { item: JunkItem; bytes: number; paths: string[] }[];
 }
 
 /** 由当前勾选生成清理计划；没有勾中字节时返回 null（弹层不出现）。 */
@@ -201,6 +202,10 @@ export function buildCleanPlan(items: JunkItem[], sel: JunkSel): CleanPlan | nul
     bytes: chosen.reduce((n, it) => n + chosenSize(it, sel), 0),
     deleteItems: chosen.filter((it) => !it.trash),
     trashItems: chosen.filter((it) => it.trash),
+    review: chosen.map((it) => ({
+      item: it, bytes: chosenSize(it, sel),
+      paths: hasSubs(it) ? [...(sel.subSel.get(it.id) ?? [])] : [...(it.paths ?? [])],
+    })),
   };
 }
 

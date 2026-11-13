@@ -406,6 +406,25 @@ test("占用拆成本体、数据、缓存", () => {
   expect(splitUsage(d)).toEqual({ app: 800, data: 2005, cache: 400, cachePaths: ["~/Library/Caches/a", "~/Library/Caches/Arc"] });
 });
 
+test("uninstall review groups every associated path once and retains unknown kinds under data", async () => {
+  const { uninstallGroups } = await import("../src/react/apps/UninstallDialog");
+  const items: UninstallDetail["items"] = [
+    { path: "/Applications/A.app", kind: "app", size: 100 },
+    { path: "/cache", kind: "cache", size: 20 },
+    { path: "/prefs", kind: "prefs", size: 5 },
+    { path: "/support", kind: "support", size: 40 },
+    { path: "/unknown", kind: "new-kind", size: 10 },
+  ];
+  const groups = uninstallGroups(items);
+  const webStorage = uninstallGroups([
+    { path: "/Library/WebKit/demo", kind: "webkit", size: 10 },
+    { path: "/Library/HTTPStorages/demo.localstorage", kind: "http", size: 20 },
+  ]);
+  expect(webStorage.map((g) => g.key)).toEqual(["data"]);
+  expect(groups.map((g) => [g.key, g.bytes])).toEqual([["app", 100], ["cache", 20], ["settings", 5], ["data", 50]]);
+  expect(groups.flatMap((g) => g.items.map((it) => it.path)).sort()).toEqual(items.map((it) => it.path).sort());
+});
+
 test("增长按 appPath 对上；小标签按 bundle ID", () => {
   const a = app({ name: "Arc", path: "/Applications/Arc.app", bundleId: "company.thebrowser.Browser" });
   const g = { key: "app:company.thebrowser.Browser", appPath: "/Applications/Arc.app", week: { bytes: 3 * 2 ** 30, atLeast: false } } as GrowthApp;

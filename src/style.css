@@ -1013,6 +1013,50 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .detail-item .size { font-weight: 620; font-variant-numeric: tabular-nums; }
 .warn-text { color: var(--danger-text) !important; font-weight: 550; }
 
+/* Cleanup explanations and action reviews use the existing list hierarchy. */
+.hero-status { margin-top: 6px; overflow-wrap: anywhere; }
+.cleanup-explanation { margin: 8px 0 12px; font-size: 13px; }
+.cleanup-explanation > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; margin: 6px 0; }
+.cleanup-explanation dt { color: var(--muted); }
+.cleanup-explanation dd { margin: 0; overflow-wrap: anywhere; }
+.cleanup-locations { padding: 10px 0; border-top: 1px solid var(--border); }
+.cleanup-locations > div + div { margin-top: 4px; }
+.action-review-dialog { display: flex; flex-direction: column; }
+.action-review-dialog > :not(.action-review-list) { flex-shrink: 0; }
+.action-review-dialog > .action-review-list { min-height: 0; flex-shrink: 1; }
+.action-review-list { max-height: 36vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); }
+.action-review-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; font-size: 13px; }
+.action-review-row + .action-review-row { border-top: 1px solid var(--border); }
+.action-review-row > div { min-width: 0; overflow-wrap: anywhere; }
+.action-review-row strong { font-weight: 600; }
+.action-review-row .small { margin-top: 3px; }
+.action-review-size { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.action-review-total { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; font-size: 14px; }
+.cleanup-results { margin: 20px 0; padding: 18px 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+.cleanup-results h2 { margin: 0; font-size: 16px; font-weight: 620; }
+.cleanup-results > p { margin: 8px 0 12px; }
+.cleanup-result-group + .cleanup-result-group { border-top: 1px solid var(--border); }
+.cleanup-result-group summary { padding: 10px 0; cursor: pointer; font-size: 13px; font-weight: 600; }
+.cleanup-result-group summary span { margin-left: 8px; font-weight: 400; }
+.cleanup-result-rows { max-height: 32vh; overflow: auto; }
+.cleanup-result-row { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; padding: 8px 0; }
+.cleanup-result-row > div { min-width: 0; overflow-wrap: anywhere; }
+.cleanup-result-row strong { font-size: 13px; font-weight: 550; }
+.cleanup-result-row > span { text-align: right; font-variant-numeric: tabular-nums; }
+.uninstall-review-group { padding: 8px 4px 4px; }
+.uninstall-review-group h3 { display: flex; justify-content: space-between; gap: 12px; margin: 2px 8px 6px; font-size: 13px; }
+.uninstall-review-group > p { margin: 4px 8px 8px; }
+@container content (max-width: 420px) {
+  .cleanup-explanation > div { grid-template-columns: 1fr; gap: 3px; }
+  .cleanup-results { padding: 14px; }
+  .cleanup-result-row { flex-direction: column; gap: 3px; }
+  .cleanup-result-row > span { text-align: left; }
+}
+@media (max-width: 600px) {
+  .uninstall-review-group .detail-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .uninstall-review-group .detail-item .kind { grid-column: 1 / -1; }
+}
+
 /* ---- 骨架屏 ---- */
 .skeleton {
   height: 76px;

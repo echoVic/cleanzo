@@ -5,6 +5,12 @@ import { setLang } from "./setup-dom";
 import type { JunkItem, Settings, ScanSummary } from "../src/mygo";
 import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
+import { changes, fakeStream } from "./page-harness";
+import { CleanPage } from "../src/react/clean/CleanPage";
+import { cleanApi } from "../src/react/clean/api";
+import { NumberTicker } from "../src/ui/motion/NumberTicker";
+import { CleanResults } from "../src/react/clean/CleanResults";
+import { cleanupExplanation } from "../src/react/clean/explanations";
 import {
   applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeCleanRows, finalizeScan, createCleanRowTracker, groupCheckState, groupToggleOn, isSelectable, isVisible, itemTitle,
@@ -16,6 +22,124 @@ import {
 
 beforeEach(() => {
   setLang("zh");
+});
+
+test("the scanned headline follows selection and completion excludes recoverable Trash bytes", async () => {
+  const env = changes();
+  try {
+    const stream = fakeStream<import("../src/mygo").JunkScanEvent>();
+    const cleanup = fakeStream<import("../src/mygo").JunkCleanEvent>();
+    let sent: unknown;
+    env.assign(cleanApi, { startScan: () => stream, startClean: (sels: unknown) => { sent = sels; return cleanup; } });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const cache = item("dev.npm", "dev", 1024);
+    const review = item("review.installers", "review", 2048, { default: false, trash: true });
+    stream.emit({ kind: "start", items: [cache, review] });
+    stream.emit({ kind: "item", item: cache });
+    stream.emit({ kind: "item", item: review });
+    stream.finish();
+    await h.settle();
+    const headline = () => h.ofType(NumberTicker)[0]!.props.value;
+    expect(headline()).toBe(1024);
+    h.find((n) => n.props.ariaLabel === t("junk.select", { name: ruleName(review.id) }))!.props.onChange(true);
+    await h.settle();
+    expect(headline()).toBe(3072);
+    h.click("清理所选");
+    await h.settle();
+    h.click(t("clean.confirm"));
+    await h.settle();
+    expect(sent).toEqual([{ id: "dev.npm" }, { id: "review.installers" }]);
+    cleanup.emit({ kind: "done", id: "dev.npm", bytes: 1024, result: { name: "dev.npm", freed: 1024, trashed: 0, files: 1, inUse: 0, failed: [] } });
+    cleanup.emit({ kind: "done", id: "review.installers", bytes: 3072, result: { name: "review.installers", freed: 0, trashed: 2048, files: 1, inUse: 0, failed: [] } });
+    cleanup.finish();
+    await h.settle();
+    expect(headline()).toBe(1024);
+  } finally { env.restore(); }
+});
+
+test("mixed cleanup results retain freed and Trash bytes and explain skipped, changed and stopped items", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const rows = new Map<string, RowState>([
+    ["dev.npm", { state: "done", result: { name: "dev.npm", freed: 1024, trashed: 0, files: 1, inUse: 0, failed: [] } }],
+    ["review.installers", { state: "done", result: { name: "review.installers", freed: 0, trashed: 2048, files: 1, inUse: 0, failed: [] } }],
+    ["app:running", { state: "done", result: { name: "app:running", freed: 0, trashed: 0, files: 0, inUse: 0, failed: [], skipped: "running" } }],
+    ["sys.logs", { state: "done", result: { name: "sys.logs", freed: 4096, trashed: 0, files: 1, inUse: 2, failed: ["blocked", "blocked", "changed"] } }],
+    ["dev.pip", { state: "stopped" }],
+    ["dev.npx", { state: "skipped" }],
+  ]);
+  const env = changes();
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      env.lang(lang);
+      const html = renderToStaticMarkup(createElement(CleanResults, { rows, items: [] }));
+      expect(html).toContain(t("clean.result.count", { n: 2 }));
+      expect(html).toContain(t("clean.result.count", { n: 1 }));
+      expect(html).toContain(t("clean.result.count", { n: 3 }));
+      expect(html).toContain(t("junk.skip.running"));
+      expect(html).toContain(t("clean.done.inUse", { n: 2 }));
+      expect(html).toContain(t("cat.changedN", { n: 1 }));
+      expect(html).toContain(t("clean.result.reason", { n: 2, reason: errText("blocked") }).replaceAll("'", "&#x27;"));
+      expect(html).toContain(t("clean.result.stopped"));
+      expect(html).toContain(t("clean.result.notStarted"));
+      expect(html).toContain(t("clean.done.freed", { size: human(4096) }));
+      expect(html).toContain(t("cat.trashed", { size: human(2048) }));
+    }
+  } finally { env.restore(); }
+});
+
+test("stopping after a removal keeps unconfirmed totals honest", async () => {
+  const env = changes();
+  try {
+    const stream = fakeStream<import("../src/mygo").JunkScanEvent>();
+    const cleanup = fakeStream<import("../src/mygo").JunkCleanEvent>();
+    env.assign(cleanApi, { startScan: () => stream, startClean: () => cleanup });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const cache = item("dev.npm", "dev", 2048);
+    stream.emit({ kind: "start", items: [cache] });
+    stream.emit({ kind: "item", item: cache });
+    stream.finish();
+    await h.settle();
+    h.click(t("clean.now"));
+    await h.settle();
+    h.click(t("clean.confirm"));
+    await h.settle();
+    cleanup.emit({ kind: "start", id: cache.id });
+    cleanup.emit({ kind: "removed", id: cache.id, path: "/cache/npm/a", bytes: 1024 });
+    await h.settle();
+    h.click(t("clean.stop"));
+    cleanup.finish();
+    await h.settle();
+    expect(h.find((n) => n.props.className === "hero-num")!.props.children).toBe("--");
+    const text = h.text();
+    expect(text).toContain(t("clean.result.unconfirmedTotal"));
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const result = renderToStaticMarkup(createElement(CleanResults, { rows: new Map<string, RowState>([[cache.id, { state: "stopped" }]]), items: [cache] }));
+    expect(result).toContain(t("clean.result.unconfirmed"));
+    expect(result).not.toContain(t("cat.notCleaned"));
+  } finally { env.restore(); }
+});
+
+test("cache explanations preserve known browser scope and avoid inferring custom-folder safety", () => {
+  const env = changes();
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      env.lang(lang);
+      const browser = cleanupExplanation(item("browser.chrome", "browsers", 1), t);
+      expect(browser.consequence).toContain(lang === "zh" ? "保留浏览历史" : "preserving history");
+      const appCache = cleanupExplanation(item("app:example", "apps", 1), t);
+      expect(appCache.consequence).toContain(lang === "zh" ? "离线内容" : "offline content");
+      const custom = cleanupExplanation(item("custom:/work", "custom", 1), t);
+      expect(custom.content).toContain(lang === "zh" ? "用途待确认" : "Purpose needs review");
+      expect(custom.consequence).toContain(lang === "zh" ? "个人文件" : "personal files");
+      expect(cleanupExplanation(item("dev.go-mod", "dev", 1), t).method).toBe(t("clean.explain.tool"));
+    }
+  } finally { env.restore(); }
 });
 
 const item = (id: string, group: string, size: number, extra: Partial<JunkItem> = {}): JunkItem => ({

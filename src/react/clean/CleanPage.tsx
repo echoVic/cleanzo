@@ -1,7 +1,7 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
 import type { JunkItem, ScanSummary } from "../../mygo";
-import { ruleDesc, ruleName } from "../../i18n";
+import { ruleName } from "../../i18n";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
@@ -21,6 +21,8 @@ import { setCleanStaleHandler } from "./entry";
 import { cleanApi } from "./api";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import { playCleanFocal, shouldPlayFocal } from "./focal";
+import { cleanupExplanation } from "./explanations";
+import { CleanResults } from "./CleanResults";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
@@ -157,7 +159,7 @@ export function CleanPage() {
   React.useEffect(() => {
     if (phase !== "cleaned") return;
     const totals = cleanTotals(rowStates);
-    if (shouldPlayFocal({ stopped: progress.stopped, failed: totals.failedNames.length, error: progress.error !== "", bytes: progress.bytes })) {
+    if (shouldPlayFocal({ stopped: progress.stopped, failed: totals.failedNames.length, error: progress.error !== "", bytes: totals.freed })) {
       playCleanFocal(heroRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -421,6 +423,7 @@ export function CleanPage() {
   let heroValue: number | null = null;
   let heroText = "--";
   let heroSub = t("clean.idleSub");
+  let heroStatus = "";
   let heroBarWidth = 0;
   let cleanBtnLabel = t("clean.now");
   let cleanBtnDisabled = true;
@@ -436,16 +439,18 @@ export function CleanPage() {
     heroText = "--";
     heroSub = t("clean.idleSub");
   } else if (phase === "scanning" || phase === "scanned") {
-    heroPrefix = t(phase === "scanning" ? "scan.found" : "clean.foundPrefix");
-    heroValue = phase === "scanning" && st.items.every((it) => st.pending.has(it.id)) ? null : foundBytes;
+    heroPrefix = t(phase === "scanning" ? "scan.found" : "clean.selectedPrefix");
+    heroValue = phase === "scanned" ? selectedBytes : st.items.every((it) => st.pending.has(it.id)) ? null : foundBytes;
     const text = phase === "scanning"
       ? (phaseGroup ? t(`scan.phase.${phaseGroup}` as DictKey) : t("scan.hero"))
-      : t("clean.selected", { size: human(selectedBytes) });
+      : t("clean.candidateTotal", { size: human(foundBytes) });
     heroSub = [
       text,
       t("junk.availableTotal", { size: human(totals.availableBytes) }),
+    ].filter(Boolean).join(t("phrase.sep"));
+    heroStatus = [
       totals.runningBytes > 0 ? t("junk.runningTotal", { size: human(totals.runningBytes) }) : "",
-      reviewBytes > 0 ? t("junk.reviewTotal", { size: human(reviewBytes) }) : "",
+      reviewBytes > 0 ? t("clean.reviewTotal", { size: human(reviewBytes) }) : "",
       totals.incompleteItems > 0 ? t("junk.incompleteTotal", { n: totals.incompleteItems }) : "",
     ].filter(Boolean).join(t("phrase.sep"));
     cleanBtnLabel = t("clean.now");
@@ -463,8 +468,9 @@ export function CleanPage() {
     cleanBtnVariant = "ghost";
   } else {
     const totals = cleanTotals(rowStates);
+    const unconfirmed = [...rowStates.values()].some((row) => row.state === "stopped" && !row.result);
     const parts = [
-      totals.freed > 0 ? t("clean.done.freed", { size: human(totals.freed) }) : "",
+      t(progress.stopped ? "clean.stoppedPrefix" : "clean.donePrefix"),
       totals.trashed > 0 ? t("clean.done.trashed", { size: human(totals.trashed) }) : "",
       totals.inUse > 0 ? t("clean.done.inUse", { n: totals.inUse }) : "",
     ].filter(Boolean);
@@ -472,14 +478,15 @@ export function CleanPage() {
       const it = st.items.find((x) => x.id === id);
       return it ? itemTitle(it, ruleName) : id;
     });
-    heroPrefix = t(progress.stopped ? "clean.stoppedPrefix" : "clean.donePrefix");
-    heroValue = progress.bytes;
+    heroPrefix = t(unconfirmed ? "clean.confirmedReleasedPrefix" : "clean.releasedPrefix");
+    heroValue = unconfirmed && totals.freed === 0 ? null : totals.freed;
     heroSub = [
       parts.join(t("phrase.sep")) || t("clean.nothing"),
       progress.stopped ? t("clean.stoppedSub") : "",
       failedNames.length ? t("junk.partial", { names: failedNames.join(t("list.sep")) }) : "",
       progress.error,
     ].filter(Boolean).join(t("phrase.sep"));
+    heroStatus = unconfirmed ? t("clean.result.unconfirmedTotal") : "";
     heroBarWidth = cleanBarWidth(progress.bytes, progress.total, progress.stopped, failedNames.length > 0, progress.error !== "");
     cleanBtnLabel = t("fs.rescan");
     cleanBtnDisabled = false;
@@ -493,11 +500,11 @@ export function CleanPage() {
     : phase === "scanning"
       ? t("scan.busy")
       : phase === "scanned"
-        ? t("junk.availableTotal", { size: human(totals.availableBytes) })
+        ? t("clean.selected", { size: human(selectedBytes) })
         : phase === "cleaning"
           ? t("clean.busy")
           : phase === "cleaned"
-            ? [heroPrefix, heroSub].filter(Boolean).join(t("phrase.sep"))
+            ? [heroValue === null ? "" : `${heroPrefix} ${human(heroValue)}`, heroSub, heroStatus].filter(Boolean).join(t("phrase.sep"))
             : "";
 
   const barShown = (phase === "scanning" && prog.total > 0) || (phase === "scanned" && barHold) || phase === "cleaning" || phase === "cleaned";
@@ -547,8 +554,7 @@ export function CleanPage() {
       const app = isDynamicId(it.id) ? it.name : t(`rule.${it.id}.app` as never);
       return t("junk.quit", { app: app.startsWith("rule.") ? ruleName(it.id) : app });
     }
-    if (isDynamicId(it.id)) return it.paths?.[0] ?? "";
-    return ruleDesc(it.id);
+    return cleanupExplanation(it, t).content;
   };
 
   const renderRow = (it: JunkItem) => {
@@ -556,7 +562,8 @@ export function CleanPage() {
     const row = rowStates.get(it.id);
     const used = row?.result?.inUse ?? it.inUse;
     const dimmed = (phase === "cleaning" || phase === "cleaned") && !row;
-    const expandable = hasSubs(it) || (it.details?.length ?? 0) > 0 || (it.top?.length ?? 0) > 0;
+    const expandable = !st.pending.has(it.id);
+    const explanation = cleanupExplanation(it, t);
     const open = expanded.has(it.id);
     const noteKey = row ? `row:${row.state}` : st.pending.has(it.id) ? "pending" : "size";
     return (
@@ -579,7 +586,7 @@ export function CleanPage() {
               {it.denied ? <Tag text={t("junk.denied")} kind="warn" /> : null}
               {it.trash ? <Tag text={t("cat.toTrash")} /> : null}
             </div>
-            <div className="cat-desc muted"><PathText path={rowDesc(it)} /></div>
+            <div className="cat-desc muted">{rowDesc(it)}</div>
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
             {it.size >= 0 && !it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
@@ -632,6 +639,15 @@ export function CleanPage() {
         </div>
         <Collapse open={open}>
           <div className="junk-details">
+            <dl className="cleanup-explanation">
+              <div><dt>{t("clean.explain.content")}</dt><dd>{explanation.content}</dd></div>
+              <div><dt>{t("clean.explain.effect")}</dt><dd>{explanation.consequence}</dd></div>
+              <div><dt>{t("clean.explain.method")}</dt><dd>{explanation.method}</dd></div>
+            </dl>
+            {(it.paths ?? []).length > 0 && <div className="cleanup-locations">
+              <div className="muted small">{t("clean.explain.locations")}</div>
+              {it.paths.map((path) => <div className="junk-path small" key={path}><PathText path={displayPath(path)} /></div>)}
+            </div>}
             {hasSubs(it) ? subsOf(it).map((s) => (
               <div className="junk-sub-row" key={s.path}>
                 <TriCheck
@@ -688,16 +704,6 @@ export function CleanPage() {
 
   // ---- 确认弹层文案 ----
 
-  const names = (list: JunkItem[]) => list.length > 6
-    ? t("junk.andMore", { names: list.slice(0, 6).map((it) => itemTitle(it, ruleName)).join(t("list.sep")), n: list.length })
-    : list.map((it) => itemTitle(it, ruleName)).join(t("list.sep"));
-  const sumSel = (list: JunkItem[]) => human(list.reduce((n, it) => n + chosenSize(it, st.sel), 0));
-  const confirmLines = plan ? [
-    plan.deleteItems.length ? t("clean.body.delete", { size: sumSel(plan.deleteItems), names: names(plan.deleteItems) }) : "",
-    plan.trashItems.length ? t("clean.body.trash", { size: sumSel(plan.trashItems), names: names(plan.trashItems) }) : "",
-    t("clean.body.inUse"),
-  ].filter(Boolean) : [];
-
   return (
     <div className="cz-react">
       <header className="view-head">
@@ -735,6 +741,7 @@ export function CleanPage() {
               </span>
             </div>
             <div className={`hero-sub${phase === "scanning" ? "" : " hero-sub-wrap"}`} title={phase === "scanning" && scanningPath ? displayPath(scanningPath) : undefined}>{heroSub}</div>
+            {heroStatus && <div className="hero-status muted small">{heroStatus}</div>}
             <Collapse open={barShown}>
               <div className="hero-prog-row">
                 <div className="hero-progress"><div className="hero-bar" style={{ width: `${barWidth}%` }} /></div>
@@ -756,6 +763,8 @@ export function CleanPage() {
           </div>
         </div>
       )}
+
+      {phase === "cleaned" && <CleanResults rows={rowStates} items={st.items} />}
 
       {phase === "idle" ? (
         <IdleHero
@@ -876,15 +885,23 @@ export function CleanPage() {
       )}
 
       <Dialog open={confirmOpen} onOpenChange={(v) => setConfirmOpen(v)}>
-        <DialogContent>
+        <DialogContent className="action-review-dialog">
           <DialogHeader>
             <DialogTitle>{t("clean.sel.title")}</DialogTitle>
           </DialogHeader>
-          <DialogDescription asChild>
-            <div>
-              {confirmLines.map((line, i) => <p key={i}>{line}</p>)}
-            </div>
-          </DialogDescription>
+          <DialogDescription>{t("clean.body.inUse")}</DialogDescription>
+          <div className="action-review-list">
+            {(plan?.review ?? []).map(({ item: it, bytes, paths }) => <div className="action-review-row" key={it.id}>
+              <div><strong>{itemTitle(it, ruleName)}</strong>
+                <div className="muted small">{cleanupExplanation(it, t).method}</div>
+                {paths.map((path) => <div className="muted small" key={path}><PathText path={displayPath(path)} /></div>)}
+              </div>
+              <span className="action-review-size">{human(bytes)}</span>
+            </div>)}
+          </div>
+          <div className="action-review-total"><strong>{t("fs.review.total")}</strong><strong>{human(plan?.bytes ?? 0)}</strong></div>
+          {plan?.deleteItems.length ? <p className="muted small">{t("clean.explain.deleteEffect")}</p> : null}
+          {plan?.trashItems.length ? <p className="muted small">{t("clean.result.trashNote")}</p> : null}
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
             <Button variant="destructive" onClick={() => void doClean()}>{t("clean.confirm")}</Button>

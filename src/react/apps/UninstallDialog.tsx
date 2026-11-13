@@ -12,6 +12,16 @@ import { human, displayPath } from "../../shared";
 
 export type UninstallStage = "analyzing" | "detail" | "fail" | "launched";
 
+export function uninstallGroups(items: UninstallDetail["items"]) {
+  const groupOf = (kind: string) => kind === "app" ? "app"
+    : ["cache", "logs"].includes(kind) ? "cache"
+    : ["prefs", "savedState", "launchAgent"].includes(kind) ? "settings" : "data";
+  return (["app", "cache", "settings", "data"] as const).map((key) => {
+    const members = items.filter((it) => groupOf(it.kind) === key);
+    return { key, items: members, bytes: members.reduce((sum, it) => sum + it.size, 0) };
+  }).filter((group) => group.items.length > 0);
+}
+
 interface UninstallDialogProps {
   open: boolean;
   stage: UninstallStage;
@@ -91,13 +101,17 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
             <DialogTitle>{t("apps.title", { name: detail.app.name })}</DialogTitle>
           </DialogHeader>
           {!isWindows() && <div className="detail-list">
-            {detail.items.map((it) => (
+            {uninstallGroups(detail.items).map((group) => <section className="uninstall-review-group" key={group.key}>
+              <h3><span>{t(`apps.review.${group.key}`)}</span><span>{human(group.bytes)}</span></h3>
+              {group.key === "data" && <p className="muted small">{t("apps.review.dataNote")}</p>}
+              {group.items.map((it) => (
               <div className="detail-item" key={it.path}>
                 <span className="kind">{kindLabel(it.kind)}</span>
                 <span className="path" title={it.path}><PathText path={displayPath(it.path)} /></span>
                 <span className="size">{human(it.size)}</span>
               </div>
-            ))}
+              ))}
+            </section>)}
           </div>}
           <DialogDescription className="warn-text">
             {running

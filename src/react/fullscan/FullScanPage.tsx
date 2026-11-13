@@ -7,7 +7,8 @@ import {
 } from "../../ui/components/dialog";
 import { useT } from "../../ui/i18n-react";
 import { Collapse } from "../../ui/motion/Collapse";
-import { errText, toast } from "../../shared";
+import { baseName, errText, toast } from "../../shared";
+import { PathText } from "../../ui/components/path-text";
 import {
   applyRemovalToItems, collapseRow, keepShown, subtractRemoved, emptySelection, isGone, pickedPaths, toggleChild, toggleRow, type ListSelection,
 } from "../list/selection";
@@ -42,7 +43,7 @@ export function FullScanPage() {
   const [currentPath, setCurrentPath] = React.useState("");
   const [selection, setSelection] = React.useState<ListSelection>(emptySelection());
   const [trashTarget, setTrashTarget] = React.useState<{ path: string; size: number; isDir: boolean } | null>(null);
-  const [trashBatchOpen, setTrashBatchOpen] = React.useState(false);
+  const [trashBatch, setTrashBatch] = React.useState<{ path: string; size: number | undefined }[] | null>(null);
   const [actionErrors, setActionErrors] = React.useState<string[]>([]);
 
   // 异步循环里读最新值，避免闭包捕获旧 state。
@@ -227,13 +228,13 @@ export function FullScanPage() {
   const onTrashChecked = () => {
     const paths = pickedPaths(selection);
     if (paths.length === 0 || busy) return;
-    setTrashBatchOpen(true);
+    setTrashBatch(paths.map((path) => ({ path, size: sizeOf(path) })));
   };
 
   const batchRef = React.useRef(false);
   const doTrashBatch = async () => {
-    setTrashBatchOpen(false);
-    const paths = pickedPaths(selection);
+    const paths = (trashBatch ?? []).map((target) => target.path);
+    setTrashBatch(null);
     if (paths.length === 0 || batchRef.current) return; // 弹窗退场时还能点到：第二次点击不再发一遍
     batchRef.current = true;
     setBusy(true);
@@ -394,16 +395,25 @@ export function FullScanPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={trashBatchOpen} onOpenChange={(v) => { if (!v) setTrashBatchOpen(false); }}>
-        <DialogContent>
+      <Dialog open={trashBatch !== null} onOpenChange={(v) => { if (!v) setTrashBatch(null); }}>
+        <DialogContent className="action-review-dialog">
           <DialogHeader>
             <DialogTitle>{t("fs.trashChecked.title")}</DialogTitle>
             <DialogDescription>
-              {t("fs.trashChecked.body", { n: pickedPaths(selection).length })}
+              {t("fs.review.body", { n: trashBatch?.length ?? 0 })}
             </DialogDescription>
           </DialogHeader>
+          <div className="action-review-list">
+            {(trashBatch ?? []).map(({ path, size }) => <div className="action-review-row" key={path}>
+              <div><strong>{baseName(path)}</strong><div className="muted small"><PathText path={displayPath(path)} /></div></div>
+              <span className="action-review-size" title={size == null || size < 0 ? t("fs.review.unknown") : undefined}>{size == null || size < 0 ? "--" : human(size)}</span>
+            </div>)}
+          </div>
+          <div className="action-review-total"><strong>{t("fs.review.total")}</strong><strong>{human((trashBatch ?? []).reduce((sum, target) => sum + Math.max(0, target.size ?? 0), 0))}</strong></div>
+          {(trashBatch ?? []).some((target) => target.size == null || target.size < 0) && <p className="muted small">{t("fs.review.partial")}</p>}
+          <p className="muted small">{t("clean.result.trashNote")}</p>
           <div className="mt-4 flex justify-end gap-2">
-            <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
+            <DialogClose asChild><Button variant="ghost">{t("fs.review.back")}</Button></DialogClose>
             <Button variant="destructive" onClick={() => void doTrashBatch()}>{t("fs.trash.confirm")}</Button>
           </div>
         </DialogContent>

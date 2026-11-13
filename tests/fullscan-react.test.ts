@@ -54,6 +54,83 @@ function dir(path: string, size: number, trashable = true): BigItem {
   return { path, size, trashable };
 }
 
+test("batch review lists effective roots and executes the reviewed paths even if selection changes", async () => {
+  const { changes, fakeStream } = await import("./page-harness");
+  const { FullScanPage } = await import("../src/react/fullscan/FullScanPage");
+  const { fullscanApi } = await import("../src/react/fullscan/api");
+  const env = changes();
+  try {
+    env.lang("zh");
+    const stream = fakeStream<import("../src/mygo").FullScanEvent>();
+    let moved: unknown;
+    env.assign(fullscanApi, {
+      startScan: () => stream, disk: async () => ({ total: 0, used: 0, free: 0 }),
+      cleanPaths: async (paths: unknown) => { moved = paths; return { moved: 0, freed: 0, files: 0, inUse: 0, failed: [], removed: [] }; },
+    });
+    const h = env.page(FullScanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "EmptyGuide")!.props.onCta();
+    stream.emit({ kind: "done", result: { items: [dir("/h/Downloads", 1024), dir("/h/Other", 2048)], disk: { total: 0, used: 0, free: 0 }, scanned: 2, skipped: 0, elapsedMs: 10 } });
+    stream.finish();
+    await h.settle();
+    h.ofType(ListRows)[0]!.props.onToggleRow("/h/Downloads", true);
+    await h.settle();
+    h.ofType(ListToolbar)[0]!.props.onTrashChecked();
+    await h.settle();
+    const review = h.find((n) => n.props.className === "action-review-list");
+    expect(review).toBeDefined();
+    expect(h.text()).toContain("1.0 KB");
+    h.ofType(ListRows)[0]!.props.onToggleRow("/h/Other", true);
+    await h.settle();
+    h.all().filter((n) => typeof n.props.onClick === "function" && n.props.children === t("fs.trash.confirm")).at(-1)!.props.onClick();
+    await h.settle();
+    expect(moved).toEqual(["/h/Downloads"]);
+  } finally { env.restore(); }
+});
+
+test("batch review does not double-count selected children and preserves unknown sizes during late measurement", async () => {
+  const { changes, fakeStream } = await import("./page-harness");
+  const { FullScanPage } = await import("../src/react/fullscan/FullScanPage");
+  const { fullscanApi } = await import("../src/react/fullscan/api");
+  const env = changes();
+  try {
+    env.lang("zh");
+    const stream = fakeStream<import("../src/mygo").FullScanEvent>();
+    const measured = deferred<number>();
+    env.assign(fullscanApi, {
+      startScan: () => stream, disk: async () => ({ total: 0, used: 0, free: 0 }),
+      dirChildren: async () => ({ items: [{ path: "/h/Downloads/slow", size: -1, isDir: true, trashable: true }], total: 1 }),
+      dirSize: () => measured.promise,
+    });
+    const h = env.page(FullScanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "EmptyGuide")!.props.onCta();
+    stream.emit({ kind: "done", result: { items: [dir("/h/Downloads", 1024)], disk: { total: 0, used: 0, free: 0 }, scanned: 1, skipped: 0, elapsedMs: 10 } });
+    stream.finish();
+    await h.settle();
+    h.ofType(ListRows)[0]!.props.onExpand("/h/Downloads");
+    await h.settle();
+    h.ofType(ListRows)[0]!.props.onToggleChild("/h/Downloads", "/h/Downloads/slow", true);
+    await h.settle();
+    h.ofType(ListToolbar)[0]!.props.onTrashChecked();
+    await h.settle();
+    expect(h.text()).toContain(t("fs.review.partial"));
+    expect(h.find((n) => n.props.className === "action-review-size")!.props.children).toBe("--");
+    measured.resolve(8192);
+    await h.settle();
+    expect(h.find((n) => n.props.className === "action-review-size")!.props.children).toBe("--");
+    h.find((n) => n.type?.name === "Dialog" && n.props.open)!.props.onOpenChange(false);
+    h.ofType(ListRows)[0]!.props.onToggleRow("/h/Downloads", true);
+    await h.settle();
+    h.ofType(ListToolbar)[0]!.props.onTrashChecked();
+    await h.settle();
+    const reviewRows = h.all().filter((n) => n.props.className === "action-review-row");
+    expect(reviewRows).toHaveLength(1);
+    expect(h.find((n) => n.props.className === "action-review-size")!.props.children).toBe("1.0 KB");
+    expect(h.text()).not.toContain(t("fs.review.partial"));
+  } finally { env.restore(); }
+});
+
 test("topBySize sorts desc and caps at 30", () => {
   const items = Array.from({ length: 50 }, (_, i) => dir(`/d${i}`, i));
   const top = topBySize(items);
