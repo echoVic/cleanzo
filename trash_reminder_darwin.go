@@ -129,6 +129,8 @@ var trashReminderQuitting atomic.Bool
 
 func markTrashReminderQuitting() { trashReminderQuitting.Store(true) }
 
+func resetTrashReminderQuitting() { trashReminderQuitting.Store(false) }
+
 func showTrashReminder(s trashReminderSnapshot, closed func()) {
 	mygo.RunOnMain(func() {
 		if trashReminderQuitting.Load() || !trashReminderOn() {
