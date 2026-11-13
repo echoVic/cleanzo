@@ -96,7 +96,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.5.0", chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
+    version: "0.5.2", chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
     model: "MacBook Pro (16-inch, 2023)", modelId: "Mac14,10", perfCores: 8, effCores: 4, gpuCores: 19,
