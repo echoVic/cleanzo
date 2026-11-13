@@ -65,6 +65,8 @@ async function stream<T>(channel: Channel<T>, run: (emit: (value: T, ms?: number
 
 // 每次加载页面重新开始，所有写操作只改内存中的示例数据。
 function createRuntime(): Runtime {
+  // ?mock&lang=en renders the mock in English for docs screenshots.
+  const mockLocale = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh-Hans";
   const now = Math.floor(Date.now() / 1000);
   let settings: Settings = { disabledGroups: [], ignored: [], custom: [] };
   let theme = "system";
@@ -773,7 +775,11 @@ function createRuntime(): Runtime {
       for (const it of items) await emit(it, 320);
       await emit({ kind: "__done", path: "960", size: sum(items), trashable: false, isDir: false });
     }),
-    "LanguageSettings.SetLanguage": async (_preference) => "zh-Hans",
+    "LanguageSettings.SetLanguage": async (preference) => {
+      if (preference === "en") return "en";
+      if (preference === "zh-Hans" || preference === "zh") return "zh-Hans";
+      return mockLocale;
+    },
     "ThemeSettings.GetTheme": async () => theme,
     "ThemeSettings.SetTheme": async (preference) => {
       if (preference !== "system" && preference !== "light" && preference !== "dark") {
@@ -790,7 +796,7 @@ function createRuntime(): Runtime {
       return structuredClone(await handler(...args)) as T;
     },
     channel: <T>(onmessage?: (value: T) => void) => new MockChannel<T>(onmessage),
-    on: () => () => {}, once: () => () => {}, platform: "darwin", windowId: 1, version: "mock", locale: new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh-Hans", dir: "ltr",
+    on: () => () => {}, once: () => () => {}, platform: "darwin", windowId: 1, version: "mock", locale: mockLocale, dir: "ltr",
     // mygo 0.8: the runtime tells whether the hosting window is drawn active.
     windowActive: true,
     preferences: { accent: null, reduceMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, reduceTransparency: false, highContrast: false, textScale: 1 },
