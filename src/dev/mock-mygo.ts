@@ -790,7 +790,7 @@ function createRuntime(): Runtime {
       return structuredClone(await handler(...args)) as T;
     },
     channel: <T>(onmessage?: (value: T) => void) => new MockChannel<T>(onmessage),
-    on: () => () => {}, once: () => () => {}, platform: "darwin", windowId: 1, version: "mock", locale: "zh-Hans", dir: "ltr",
+    on: () => () => {}, once: () => () => {}, platform: "darwin", windowId: 1, version: "mock", locale: new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh-Hans", dir: "ltr",
     // mygo 0.8: the runtime tells whether the hosting window is drawn active.
     windowActive: true,
     preferences: { accent: null, reduceMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, reduceTransparency: false, highContrast: false, textScale: 1 },
