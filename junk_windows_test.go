@@ -421,3 +421,24 @@ func TestWindowsTempInsideDownloadsKeepsInstallers(t *testing.T) {
 		t.Fatalf("result = %+v, installer kept %v", res, exists(setup))
 	}
 }
+
+// TestWindowsNoProjectRows: an idle project's build folders are not offered
+// on Windows.
+func TestWindowsNoProjectRows(t *testing.T) {
+	env := testEnv(t)
+	env.rules = []Rule{}
+	app := filepath.Join(env.home, "code", "app")
+	dep := filepath.Join(app, "node_modules", "dep", "index.js")
+	writeFile(t, filepath.Join(app, "package.json"), 2)
+	writeFile(t, dep, 100)
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	for _, p := range []string{dep, filepath.Dir(dep), filepath.Join(app, "node_modules"), filepath.Join(app, "package.json"), app} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	specs, _ := expandItems(&env)
+	if slices.ContainsFunc(specs, func(s itemSpec) bool { return s.item.Group == string(groupProjects) }) {
+		t.Fatalf("specs = %v", itemIDs(specs))
+	}
+}

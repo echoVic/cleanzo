@@ -99,6 +99,7 @@ type junkEnv struct {
 	observe               bool            // scanning only: measure excluded capacity, never create extra deletion entries
 	walked                map[string]bool // cleaning only: the rules whose recursiveFiles targets are walked; nil walks every rule's
 	unwalked              []string        // cleaning only: the folders (comparison form) of the recursiveFiles targets left unwalked
+	skipProjects          bool            // cleaning only: no project row is selected, so projects are not looked for
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
@@ -608,6 +609,24 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		claims.claim(folder.Path)
 		emit(spec)
 	}
+	// Build folders of idle projects. Finding them walks the home folder, so a
+	// clean looks for them only when a project row is selected.
+	if !env.skipProjects && !slices.Contains(env.settings.DisabledGroups, string(groupProjects)) {
+		for _, p := range env.idleProjects(claims) {
+			spec := itemSpec{item: JunkItem{ID: projectIDPrefix + p.root, Group: string(groupProjects), Name: filepath.Base(p.root), Size: -1, Trash: true, IdleDays: p.idleDays}}
+			for _, dir := range p.folders {
+				n := len(spec.cands)
+				env.collect(dir, 0, claims, &spec)
+				if len(spec.cands) > n {
+					spec.addRoot(*env, dir)
+				}
+			}
+			for _, c := range spec.cands {
+				claims.claim(c.path)
+			}
+			emit(spec)
+		}
+	}
 	containers, _ := env.readDir(filepath.Join(env.home, "Library/Containers"))
 	if !env.fda {
 		for _, e := range containers {
@@ -1094,6 +1113,7 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 	for _, sel := range selections {
 		env.walked[sel.ID] = true
 	}
+	env.skipProjects = !slices.ContainsFunc(selections, func(sel JunkSelection) bool { return strings.HasPrefix(sel.ID, projectIDPrefix) })
 	specs, _ := expandItems(&env)
 	byID := make(map[string]itemSpec, len(specs))
 	for _, s := range specs {
@@ -1151,6 +1171,11 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 			}
 		}
 		res := CleanResult{Name: sel.ID}
+		// A project row the fresh look did not find again changed since the
+		// scan, or its folders no longer look like build folders.
+		if !ok && strings.HasPrefix(sel.ID, projectIDPrefix) && !slices.Contains(env.settings.Ignored, sel.ID) && !slices.Contains(env.settings.DisabledGroups, string(groupProjects)) {
+			res.Failed = []string{"changed"}
+		}
 		if ok {
 			owners := spec.owners
 			if spec.rule != nil {
