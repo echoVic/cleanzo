@@ -692,8 +692,19 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), "com.apple.") {
 				continue
 			}
+			dir := filepath.Join(env.home, "Library/Application Support", e.Name())
 			for _, name := range chromiumCacheDirs {
-				addApp(e.Name(), filepath.Join(env.home, "Library/Application Support", e.Name(), name), false)
+				addApp(e.Name(), filepath.Join(dir, name), false)
+			}
+			// Electron keeps a profile for each session partition, each with
+			// its own cache folders.
+			partitions, _ := env.readDir(filepath.Join(dir, "Partitions"))
+			for _, p := range partitions {
+				if p.IsDir() {
+					for _, name := range chromiumCacheDirs {
+						addApp(e.Name(), filepath.Join(dir, "Partitions", p.Name(), name), false)
+					}
+				}
 			}
 		}
 	}

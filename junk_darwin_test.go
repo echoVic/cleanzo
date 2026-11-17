@@ -65,6 +65,33 @@ func TestAppItemsMergeSourcesByOwner(t *testing.T) {
 	}
 }
 
+// TestAppCachesTakeElectronPartitions: an Electron app's row also takes the
+// cache folders inside each of its partitions, never a partition's Service
+// Worker or storage folders, and never a partition reached through a link.
+func TestAppCachesTakeElectronPartitions(t *testing.T) {
+	env := testEnv(t)
+	app := filepath.Join(env.home, "Library/Application Support/X")
+	for _, rel := range []string{"GPUCache/data", "Partitions/a/Cache/data", "Partitions/a/Code Cache/js/data", "Partitions/b/GPUCache/data"} {
+		writeFile(t, filepath.Join(app, rel), 100)
+	}
+	for _, rel := range []string{"Partitions/a/Service Worker/CacheStorage/blob", "Partitions/a/Service Worker/ScriptCache/blob", "Partitions/a/IndexedDB/db", "Partitions/a/Cookies"} {
+		writeFile(t, filepath.Join(app, rel), 1000)
+	}
+	outside := filepath.Join(env.home, "elsewhere")
+	writeFile(t, filepath.Join(outside, "Cache", "data"), 1000)
+	if err := os.Symlink(outside, filepath.Join(app, "Partitions", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	specs, _ := expandItems(&env)
+	want := []string{"app:dir:x GPUCache/data", "app:dir:x Partitions/a/Cache/data", "app:dir:x Partitions/a/Code Cache/js", "app:dir:x Partitions/b/GPUCache/data"}
+	if got := offeredIn(specs, app); !slices.Equal(got, want) {
+		t.Fatalf("offered = %q\nwant %q", got, want)
+	}
+	if got := offeredIn(specs, outside); len(got) > 0 {
+		t.Fatalf("offered through a link: %q", got)
+	}
+}
+
 // TestNoFullDiskAccessStaysOutOfContainers checks junk expansion.
 func TestNoFullDiskAccessStaysOutOfContainers(t *testing.T) {
 	env := testEnv(t)
