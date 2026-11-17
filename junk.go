@@ -561,6 +561,28 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		if len(r.ExcludeNames) > 0 {
 			spec.cands = slices.DeleteFunc(spec.cands, func(c junkCand) bool { return nameMatches(filepath.Base(c.path), r.ExcludeNames) })
 		}
+		// The entries Keep names stay claimed, so no later rule, custom folder
+		// or app row offers them. That covers what lies inside one, which an
+		// earlier claim there splits into its own candidates. A rule that
+		// cannot tell its entries apart holds them all back and shows no row.
+		hidden := false
+		if r.Keep != nil {
+			names, ok := r.Keep(*env)
+			hidden = !ok
+			held := func(c junkCand) bool {
+				key := strings.ToLower(c.path) // candidates are resolved; comparison form is lower case
+				return !ok || slices.ContainsFunc(names, func(name string) bool {
+					return strings.EqualFold(filepath.Base(c.path), name) ||
+						slices.ContainsFunc(spec.roots, func(root string) bool { return within(key, filepath.Join(root, strings.ToLower(name))) })
+				})
+			}
+			for _, c := range spec.cands {
+				if held(c) {
+					claims.claim(c.path)
+				}
+			}
+			spec.cands = slices.DeleteFunc(spec.cands, held)
+		}
 		for _, c := range spec.cands {
 			claims.claim(c.path)
 		}
@@ -572,7 +594,9 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 				claims.claim(root)
 			}
 		}
-		emit(spec)
+		if !hidden {
+			emit(spec)
+		}
 	}
 	for _, folder := range env.settings.Custom {
 		if !folder.Enabled || env.traversalBlocked(folder.Path) || !safeToClean(folder.Path) || env.protected(folder.Path) {

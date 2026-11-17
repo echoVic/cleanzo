@@ -105,6 +105,52 @@ func TestHomebrewKeepsItsIndex(t *testing.T) {
 	}
 }
 
+// TestKeepHoldsBackEntries: the entries a rule's Keep names are offered
+// neither by the rule nor by a later rule or custom folder, also when an
+// earlier claim inside one splits it; a rule whose Keep cannot tell its
+// entries apart shows no row and still holds them all back.
+func TestKeepHoldsBackEntries(t *testing.T) {
+	for _, ok := range []bool{true, false} {
+		t.Run(fmt.Sprint(ok), func(t *testing.T) {
+			env := testEnv(t)
+			tools := filepath.Join(env.home, "tools")
+			for _, rel := range []string{"old/x", "Current/x", "Current/inner/y"} {
+				writeFile(t, filepath.Join(tools, rel), 100)
+			}
+			calls := 0
+			env.rules = []Rule{
+				{ID: "test.inner", Group: groupDev, Targets: []Target{{Pattern: "tools/Current/inner", Mode: entriesOf}}},
+				{ID: "test.versions", Group: groupReview, Trash: true, Targets: []Target{{Pattern: "tools", Mode: entriesOf}},
+					Keep: func(junkEnv) ([]string, bool) { calls++; return []string{"current"}, ok }},
+				{ID: "test.later", Group: groupDev, Targets: []Target{{Pattern: "tools/Current", Mode: entriesOf}, {Pattern: "tools/old", Mode: entriesOf}}},
+			}
+			env.settings.Custom = []CustomFolder{{Path: tools, Enabled: true}}
+			specs, _ := expandItems(&env)
+			if calls != 1 {
+				t.Fatalf("Keep called %d times", calls)
+			}
+			var offered []string
+			for _, s := range specs {
+				for _, c := range s.cands {
+					rel, _ := filepath.Rel(resolvePath(tools), c.path)
+					offered = append(offered, s.item.ID+" "+rel)
+				}
+			}
+			slices.Sort(offered)
+			want := []string{"test.inner Current/inner/y", "test.versions old"}
+			if !ok {
+				want = want[:1]
+			}
+			if !slices.Equal(offered, want) {
+				t.Fatalf("offered = %q, want %q", offered, want)
+			}
+			if got := slices.Contains(itemIDs(specs), "test.versions"); got != ok {
+				t.Fatalf("test.versions row shown = %v, items = %v", got, itemIDs(specs))
+			}
+		})
+	}
+}
+
 // TestDeviceSupportKeepsNewestPerPlatform checks item measurement.
 func TestDeviceSupportKeepsNewestPerPlatform(t *testing.T) {
 	env := testEnv(t)
