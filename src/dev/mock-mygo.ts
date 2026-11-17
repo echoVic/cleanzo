@@ -158,6 +158,8 @@ function createRuntime(): Runtime {
     junk("dev.npm", "dev", "npm 缓存", 2.9 * GB, "~/.npm/_cacache"),
     junk("dev.xcode", "dev", "Xcode 构建缓存", 7.4 * GB, "~/Library/Developer/Xcode/DerivedData"),
     junk("dev.playwright", "dev", "Playwright 浏览器", 1.6 * GB, "~/Library/Caches/ms-playwright", { default: false }),
+    // pnpm 装着但跑不起来（corepack 太旧）：行留着、不能选、展开看到它最后一行输出。
+    junk("dev.pnpm-store", "dev", "pnpm 存储", 0, "", { paths: [], problem: "tool-failed", problemDetail: "Internal Error: Cannot find matching keyid: {\"signatures\":[{\"keyid\":\"SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U\"}]}" }),
     junk("review.installers", "review", "安装包", sum(installers), "~/Downloads", { files: 3, default: false, trash: true, subs: installers }),
   ];
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });
