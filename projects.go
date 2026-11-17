@@ -34,6 +34,10 @@ const projectWalkLevels = 6
 // projectIdleLevels is how deep into a project its last change is looked for.
 const projectIdleLevels = 3
 
+// projectGitLevels is how far below a build folder a .git entry is looked
+// for, such as that of an editable install pip cloned into .venv/src.
+const projectGitLevels = 3
+
 // buildFolderNames are the folders the walk records and never enters.
 var buildFolderNames = map[string]bool{
 	"node_modules": true, ".next": true, ".nuxt": true, ".svelte-kit": true, ".turbo": true,
@@ -117,6 +121,7 @@ func (env junkEnv) idleProjects(claims claimSet) []devProject {
 	env.keepIgnored(idle, repos)
 	var found []devProject
 	for _, p := range idle {
+		p.folders = slices.DeleteFunc(p.folders, func(dir string) bool { return holdsGit(dir, 0) })
 		if len(p.folders) > 0 {
 			found = append(found, *p)
 		}
@@ -277,11 +282,6 @@ func subfolders(dir string) []string {
 // its name needs. needsGit is true for build, dist and out, which are often
 // source: only a repository that ignores them makes them build output.
 func buildFolder(dir string) (ok, needsGit bool) {
-	// A folder holding .git is a worktree or a repository of its own, with
-	// work that may be nowhere else, whatever its name and whatever git says.
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); !errors.Is(err, fs.ErrNotExist) {
-		return false, false
-	}
 	parent := filepath.Dir(dir)
 	beside := func(name string) bool { return regularFile(filepath.Join(parent, name)) }
 	inside := func(name string) bool { return regularFile(filepath.Join(dir, name)) }
@@ -298,6 +298,27 @@ func buildFolder(dir string) (ok, needsGit bool) {
 		return slices.ContainsFunc(projectFiles, beside), true
 	}
 	return false, false
+}
+
+// holdsGit reports whether dir, or a folder down to projectGitLevels below
+// it, holds a .git entry of any kind: a worktree, a repository or a checkout,
+// with work that may be nowhere else, so dir is never offered, whatever its
+// name and whatever git says. Links are not followed. A folder that cannot
+// be read may hold one, and counts as holding one.
+func holdsGit(dir string, level int) bool {
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); !errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if level == projectGitLevels {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	return slices.ContainsFunc(entries, func(e fs.DirEntry) bool {
+		return e.IsDir() && holdsGit(filepath.Join(dir, e.Name()), level+1)
+	})
 }
 
 // regularFile reports whether p is a regular file, not a link.

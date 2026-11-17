@@ -639,6 +639,48 @@ func TestProjectBuildFolderHoldingGitIsKept(t *testing.T) {
 	}
 }
 
+// TestProjectBuildFolderHoldingCheckoutIsKept: a checkout inside a build
+// folder, such as an editable install pip cloned into .venv/src, keeps the
+// whole folder out, down to three levels below it. Links are not followed
+// while looking, and a .git deeper than that does not count.
+func TestProjectBuildFolderHoldingCheckoutIsKept(t *testing.T) {
+	env := projectEnv(t)
+	git := installedGit(t)
+	projectClock(t)
+	code := filepath.Join(env.home, "code")
+	modules := func(project string) string {
+		writeText(t, filepath.Join(code, project, "package.json"), "{}")
+		writeFile(t, filepath.Join(code, project, "node_modules", "dep", "index.js"), 100)
+		return filepath.Join(code, project, "node_modules")
+	}
+	py := filepath.Join(code, "py")
+	modules("py")
+	writeText(t, filepath.Join(py, ".venv", "pyvenv.cfg"), "home = /usr/bin")
+	writeFile(t, filepath.Join(py, ".venv", "lib", "site.py"), 100)
+	writeText(t, filepath.Join(py, ".venv", "src", "x", "setup.py"), "edited here")
+	gitRepo(t, git, filepath.Join(py, ".venv", "src", "x"), "")
+	mustMkdir(t, filepath.Join(modules("one-down"), "x", ".git"))
+	writeText(t, filepath.Join(modules("scoped"), "@s", "x", ".git"), "gitdir: /elsewhere\n")
+	linkedGit := filepath.Join(modules("linked-git"), "x")
+	mustMkdir(t, linkedGit)
+	if err := os.Symlink(t.TempDir(), filepath.Join(linkedGit, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(modules("three-down"), "a", "b", "c", ".git"))
+	mustMkdir(t, filepath.Join(modules("four-down"), "a", "b", "c", "d", ".git"))
+	outside := t.TempDir()
+	mustMkdir(t, filepath.Join(outside, ".git"))
+	if err := os.Symlink(outside, filepath.Join(modules("link-to-checkout"), "x")); err != nil {
+		t.Fatal(err)
+	}
+	modules("plain")
+	rows := projectRows(t, env)
+	want := []string{"~/code/four-down/node_modules", "~/code/link-to-checkout/node_modules", "~/code/plain/node_modules", "~/code/py/node_modules"}
+	if got := offered(rows); !slices.Equal(got, want) {
+		t.Fatalf("offered:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // TestProjectLinkedWorktreeIdleness: a linked worktree's index, HEAD and
 // HEAD log live where its .git file points, and a change there means the
 // worktree is in use. A .git file that leads nowhere leaves its idleness
