@@ -136,6 +136,59 @@ func TestAppRulesOfferOnlyLogsAndCaches(t *testing.T) {
 	}
 }
 
+// TestPnpmHomeStoreOffersOnlyIdleEntries: an entry of ~/.pnpm-store changed
+// within 30 days is too new; an older one is offered, unselected, and goes to
+// the Trash.
+func TestPnpmHomeStoreOffersOnlyIdleEntries(t *testing.T) {
+	env := testEnv(t)
+	store := filepath.Join(env.home, ".pnpm-store")
+	writeFile(t, filepath.Join(store, "v3", "files", "00", "blob"), 100)
+	saved := now
+	t.Cleanup(func() { now = saved })
+	for _, c := range []struct {
+		days   time.Duration
+		reason string
+		size   int64
+	}{{29, "too-new", 0}, {31, "eligible", 100}} {
+		now = func() time.Time { return time.Now().Add(c.days * 24 * time.Hour) }
+		spec := catalogRow(t, &env, "dev.pnpm-store-home")
+		if spec.item.Group != string(groupDev) || spec.item.Default || !spec.item.Trash {
+			t.Fatalf("item = %+v", spec.item)
+		}
+		plan := planItem(context.Background(), *spec, env, make(chan struct{}, 4), nil)
+		if plan.item.Size != c.size || len(plan.item.Details) != 1 || plan.item.Details[0].Reason != c.reason {
+			t.Fatalf("%d days on: size = %d, details = %+v", c.days, plan.item.Size, plan.item.Details)
+		}
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.pnpm-store-home"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Trashed != 100 || exists(filepath.Join(store, "v3")) || !exists(filepath.Join(env.home, ".Trash", "v3")) {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+// TestPnpmStoreInTheHomeFolderIsOfferedOnce: when pnpm's own store lies in
+// ~/.pnpm-store, the home store row claims it first, and the prune row
+// yields, as it does to the download cache, so no store is offered twice.
+func TestPnpmStoreInTheHomeFolderIsOfferedOnce(t *testing.T) {
+	env := testEnv(t)
+	bin := t.TempDir()
+	root := filepath.Join(env.home, ".pnpm-store", "v10")
+	writeFile(t, filepath.Join(root, "files", "blob"), 100)
+	log := filepath.Join(bin, "called")
+	fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; *) touch `+shellPath(log)+`;; esac`)
+	stageTools(t, &env, bin)
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	for _, item := range items {
+		if item.ID == "dev.pnpm-store" && item.Size != 0 {
+			t.Fatalf("the prune row also offers the store: %+v", item)
+		}
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.pnpm-store"}}, time.Time{}, cleanHooks{})
+	if exists(log) || len(res) != 1 || res[0].Skipped != "failed" {
+		t.Fatalf("prune ran on a claimed store: %+v", res)
+	}
+}
+
 // TestCleanJunkTrashFirstAndScannedAt checks recoverability and scan cutoffs.
 func TestCleanJunkTrashFirstAndScannedAt(t *testing.T) {
 	env := testEnv(t)
