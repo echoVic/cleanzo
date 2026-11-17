@@ -32,6 +32,9 @@ func onDisk(info fs.FileInfo) int64 { return info.Size() }
 // hardLinkID is never set on Windows, where sizes stay logical.
 func hardLinkID(fs.FileInfo) (uint64, bool) { return 0, false }
 
+// cloneRefs is never set on Windows, where sizes stay logical.
+func cloneRefs(string) (id uint64, refs uint32, ok bool) { return 0, 0, false }
+
 // deviceOf is constant on Windows, where the growth monitor does not run.
 func deviceOf(fs.FileInfo) uint64 { return 0 }
 
