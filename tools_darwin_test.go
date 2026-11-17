@@ -188,13 +188,15 @@ func TestFailedToolMeasurementKeepsRow(t *testing.T) {
 	for _, c := range []struct {
 		name, tool, script, problem, detail string
 		timeout                             *time.Duration
+		limit                               time.Duration
 	}{
 		{name: "brew", tool: "brew", script: `echo "would free approximately 1GB"; echo "Error: no space left"; echo; exit 1`, problem: "tool-failed", detail: "Error: no space left"},
 		{name: "pnpm", tool: "pnpm", script: "cat >&2 <<'EOF'\n" + nodeModuleNotFound + "EOF\nexit 1", problem: "tool-failed", detail: "Error: Cannot find module '/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'"},
 		{name: "silent", tool: "go", script: `exit 3`, problem: "tool-failed", detail: ""},
 		{name: "long", tool: "brew", script: `echo ` + strings.Repeat("错", 400) + `; exit 1`, problem: "tool-failed", detail: strings.Repeat("错", 300)},
-		{name: "timeout", tool: "go", script: `sleep 5`, problem: "tool-timeout", detail: "", timeout: &goModCleanup.Timeout},
-		{name: "timeout with output", tool: "go", script: "echo 'go: downloading example.com/mod v1.0.0'\nsleep 5", problem: "tool-timeout", detail: "go: downloading example.com/mod v1.0.0", timeout: &goModCleanup.Timeout},
+		{name: "timeout", tool: "go", script: `sleep 5`, problem: "tool-timeout", detail: "", timeout: &goModCleanup.Timeout, limit: 200 * time.Millisecond},
+		// The tool must get to print before its time runs out, even on a busy machine.
+		{name: "timeout with output", tool: "go", script: "echo 'go: downloading example.com/mod v1.0.0'\nsleep 10", problem: "tool-timeout", detail: "go: downloading example.com/mod v1.0.0", timeout: &goModCleanup.Timeout, limit: 2 * time.Second},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			env := testEnv(t)
@@ -203,7 +205,7 @@ func TestFailedToolMeasurementKeepsRow(t *testing.T) {
 			stageTools(t, &env, bin)
 			if c.timeout != nil {
 				saved := *c.timeout
-				*c.timeout = 200 * time.Millisecond
+				*c.timeout = c.limit
 				t.Cleanup(func() { *c.timeout = saved })
 			}
 			specs, _ := expandItems(&env)
