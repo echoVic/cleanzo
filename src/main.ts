@@ -105,7 +105,7 @@ function switchView(v: View, tool?: string) {
   else showReactStatus(false);
   if (v === "clean") showReactClean();
   if (v === "aitools" && tool) {
-    const names: Record<string, string> = { claude: "Claude Code", codex: "Codex", trae: "TRAE" };
+    const names: Record<string, string> = { claude: "Claude Code", codex: "Codex", trae: "TRAE", orca: "Orca" };
     showReactAITool(tool, names[tool] ?? tool);
   }
   if (v === "aispace") showReactAISpace();

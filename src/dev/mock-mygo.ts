@@ -490,6 +490,39 @@ function createRuntime(): Runtime {
         mkPart({ id: "trae.ide.extensions", path: home("~/.trae-cn/extensions"), level: "protected", size: 887 * MB, files: 9000, running: true }),
       ],
     }),
+    // Orca：没在运行；对话按月份分组（和 Codex 同一种目录结构），任务对话逐个清。
+    mkTool({
+      id: "orca", name: "Orca", path: home("~/.orca"), installed: true, running: false,
+      size: 2.45 * GB,
+      parts: [
+        mkPart({ id: "orca.logs", path: home("~/.orca/logs"), level: "safe", size: 38 * MB, files: 120 }),
+        mkPart({ id: "orca.summaryCache", path: home("~/.orca/summary_cache"), level: "safe", size: 12 * MB, files: 340 }),
+        mkPart({ id: "orca.pricingCache", path: home("~/.orca/pricing-cache.json"), level: "safe", size: 200 * 1024, files: 1 }),
+        mkPart({
+          id: "orca.taskSessions", path: home("~/.orca/task-sessions"), level: "optional", size: 110 * MB, files: 860,
+          top: [
+            { name: "5d1c0f3e-6a1b-4c39-9b0e-2f7a8c41d9e2", path: home("~/.orca/task-sessions/5d1c0f3e-6a1b-4c39-9b0e-2f7a8c41d9e2"), size: 24 * MB, isDir: true, last: now - 30 * DAY },
+            { name: "a87e2b90-3f4d-4e6a-8c1b-7d5e9f0a2b3c", path: home("~/.orca/task-sessions/a87e2b90-3f4d-4e6a-8c1b-7d5e9f0a2b3c"), size: 9 * MB, isDir: true, last: now - 3 * DAY },
+          ],
+          more: 41,
+        }),
+        mkPart({
+          id: "orca.sessions", path: home("~/.orca/sessions"), level: "sensitive", size: 2.2 * GB, files: 1310, runSafe: true,
+          groups: [
+            mkGroup({ key: "2026/06", label: "2026-06", path: home("~/.orca/sessions/2026/06"), size: 300 * MB, count: 160, ageDays: 140 }),
+            mkGroup({ key: "2026/07", label: "2026-07", path: home("~/.orca/sessions/2026/07"), size: 420 * MB, count: 230, ageDays: 110 }),
+            mkGroup({ key: "2026/08", label: "2026-08", path: home("~/.orca/sessions/2026/08"), size: 380 * MB, count: 240, ageDays: 80 }),
+            mkGroup({ key: "2026/09", label: "2026-09", path: home("~/.orca/sessions/2026/09"), size: 460 * MB, count: 260, ageDays: 50 }),
+            mkGroup({ key: "2026/10", label: "2026-10", path: home("~/.orca/sessions/2026/10"), size: 520 * MB, count: 290, ageDays: 20 }),
+            mkGroup({ key: "2026/11", label: "2026-11", path: home("~/.orca/sessions/2026/11"), size: 170 * MB, count: 130, ageDays: 0, recent: 6 }),
+          ],
+        }),
+        mkPart({ id: "orca.memory", path: home("~/.orca/memory"), level: "protected", size: 1 * MB, files: 14 }),
+        mkPart({ id: "orca.config", path: home("~/.orca/config.toml"), level: "protected", size: 4096, files: 1 }),
+        mkPart({ id: "orca.auth", path: home("~/.orca/auth.json"), level: "protected", size: 4096, files: 1 }),
+        mkPart({ id: "unknown:rewind", name: "rewind", path: home("~/.orca/rewind"), level: "unknown", size: 64 * MB, files: 210 }),
+      ],
+    }),
   ];
   const aiToolInfos: AIToolInfo[] = aiTools.map(({ id, name, installed }) => ({ id, name, installed }));
   const scanAITool = async (id: string): Promise<AIScanResult> => {

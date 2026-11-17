@@ -273,7 +273,7 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
           safetyText={t("ai.idle.desc")}
           chips={toolId === "codex"
             ? [t("ai.chip.oldVersions"), t("ai.chip.sessions"), t("ai.chip.cache")]
-            : toolId === "trae"
+            : toolId === "trae" || toolId === "orca"
               ? [t("ai.chip.sessions"), t("ai.chip.cache")]
               : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]}
         />

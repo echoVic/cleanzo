@@ -218,3 +218,73 @@ test("a sessions part with no selectable group cannot be ticked into a checked 0
     expect(ai.cleanButton().props.disabled).toBe(true);
   } finally { env.restore(); }
 });
+
+// ---- Orca：第四个工具 ----
+
+test("the Orca sidebar entry starts hidden and shows only when the tool is listed as installed", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  // 侧栏里的工具按钮，按 data-tool 记下各自的 class。
+  const buttons = new Map<string, Set<string>>();
+  for (const m of html.matchAll(/<button class="([^"]*)" data-view="aitools" data-tool="([^"]+)"/g)) {
+    buttons.set(m[2]!, new Set(m[1]!.split(" ")));
+  }
+  expect([...buttons.keys()]).toEqual(["claude", "codex", "trae", "orca"]);
+  expect(buttons.get("orca")!.has("hidden")).toBe(true);
+  const env = (await import("./page-harness")).changes();
+  try {
+    const { aiApi } = await import("../src/react/ai/api");
+    const { initReactAITools } = await import("../src/react/ai/entry");
+    env.assign(globalThis, { document: {
+      querySelector: (sel: string) => {
+        const cls = buttons.get(/data-tool="([^"]+)"/.exec(sel)?.[1] ?? "");
+        return cls ? { classList: { toggle: (c: string, on: boolean) => { if (on) cls.add(c); else cls.delete(c); } } } : null;
+      },
+    } });
+    let orca = true;
+    env.spy(aiApi, "listTools").mockImplementation(async () => [
+      { id: "claude", name: "Claude Code", installed: false },
+      { id: "codex", name: "Codex", installed: true },
+      { id: "trae", name: "TRAE", installed: false },
+      { id: "orca", name: "Orca", installed: orca },
+    ]);
+    await initReactAITools();
+    expect(buttons.get("orca")!.has("hidden")).toBe(false);
+    orca = false;
+    await initReactAITools();
+    expect(buttons.get("orca")!.has("hidden")).toBe(true);
+  } finally { env.restore(); }
+  // 点进去时页面标题用工具自己的名字。
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  expect(main).toContain('orca: "Orca"');
+});
+
+test("Orca's page and every part it can list read in Chinese and English", async () => {
+  const { readFileSync } = await import("node:fs");
+  const go = readFileSync(new URL("../aitools.go", import.meta.url), "utf8");
+  const ids = [...go.matchAll(/\{ID: "(orca\.[A-Za-z]+)"/g)].map((m) => m[1]!);
+  expect(ids).toContain("orca.sessions");
+  expect(ids).toContain("orca.auth");
+  const env = (await import("./page-harness")).changes();
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      env.lang(lang);
+      const keys = ["ai.head.orca", "ai.idle.guide.orca", "ai.part.orca.sessions.lose", "ai.part.orca.taskSessions.lose",
+        ...ids.flatMap((id) => [`ai.part.${id}.name`, `ai.part.${id}.desc`])];
+      for (const key of keys) expect(t(key as never)).not.toBe(key);
+    }
+  } finally { env.restore(); }
+});
+
+test("Orca's idle page names what a scan looks for: conversations and caches, no file snapshots", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const { AIToolPage } = await import("../src/react/ai/AIToolPage");
+    const page = env.page(AIToolPage, { toolId: "orca", toolName: "Orca", visit: 1 });
+    await page.settle();
+    expect(page.text()).toContain(t("ai.head.orca" as never));
+    const hero = page.find((el) => typeof el.props.onCta === "function")!;
+    expect(hero.props.guide).toBe(t("ai.idle.guide.orca" as never));
+    expect(hero.props.chips).toEqual([t("ai.chip.sessions"), t("ai.chip.cache")]);
+  } finally { env.restore(); }
+});
