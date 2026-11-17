@@ -553,9 +553,9 @@ export interface JunkItem {
   detailsDropped?: number;
   /** project rows: whole days since anything in the project changed */
   idleDays?: number;
-  /** why the row cannot be cleaned now: "tool-failed" */
+  /** why the row cannot be cleaned now: "tool-failed" or "tool-timeout" */
   problem?: string;
-  /** the tool's last output line, for Problem "tool-failed" */
+  /** the line of the tool's output that says what went wrong, if any */
   problemDetail?: string;
 }
 
