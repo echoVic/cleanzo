@@ -1,6 +1,6 @@
 # Dev space batch: design
 
-Date: 2026-11-17. Status: awaiting the maintainer's review. Nothing here is implemented.
+Date: 2026-11-17. Status: implemented on `feat/dev-space-batch` (plan: `docs/superpowers/plans/2026-11-17-dev-space-batch.md`). Rulings made while building it are listed at the end of the plan.
 
 The maintainer asked for five additions after a read-only survey of his Mac (macOS 27.2.1). Open questions were decided by the author of this document and are recorded as **Rulings** with their reason, so each can be overturned on its own.
 
