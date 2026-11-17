@@ -95,13 +95,37 @@ func TestListAITools(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := (Cleaner{}).ListAITools()
-	if len(list) != 3 || list[0].ID != "claude" || list[0].Installed || list[1].ID != "codex" || !list[1].Installed || list[1].Name != "Codex" || list[2].ID != "trae" || list[2].Installed {
+	if len(list) != 4 || list[0].ID != "claude" || list[0].Installed || list[1].ID != "codex" || !list[1].Installed || list[1].Name != "Codex" || list[2].ID != "trae" || list[2].Installed || list[3].ID != "orca" || list[3].Name != "Orca" || list[3].Installed {
 		t.Fatalf("list = %+v", list)
 	}
 	// TRAE counts as installed with only its IDE.
 	mustMkdir(t, filepath.Join(home, "Library/Application Support/Trae CN"))
 	if list := (Cleaner{}).ListAITools(); !list[2].Installed {
 		t.Fatalf("trae = %+v", list[2])
+	}
+	// Orca is installed when ~/.orca is a folder, not a file or a link.
+	if err := os.WriteFile(filepath.Join(home, ".orca"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if list := (Cleaner{}).ListAITools(); list[3].Installed {
+		t.Fatalf("orca as a file = %+v", list[3])
+	}
+	if err := os.Remove(filepath.Join(home, ".orca")); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(home, "elsewhere"))
+	if err := os.Symlink(filepath.Join(home, "elsewhere"), filepath.Join(home, ".orca")); err != nil {
+		t.Fatal(err)
+	}
+	if list := (Cleaner{}).ListAITools(); list[3].Installed {
+		t.Fatalf("orca as a link = %+v", list[3])
+	}
+	if err := os.Remove(filepath.Join(home, ".orca")); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(home, ".orca"))
+	if list := (Cleaner{}).ListAITools(); !list[3].Installed {
+		t.Fatalf("orca = %+v", list[3])
 	}
 }
 
@@ -791,6 +815,185 @@ func TestCleanAIToolsTRAEApps(t *testing.T) {
 	}
 	if clean.Parts[1].Skipped != "" || clean.Parts[1].Moved != 1 {
 		t.Fatalf("cli logs = %+v", clean.Parts[1])
+	}
+}
+
+// orcaFixture lays out Orca's folder in a test home: sessions in two months
+// (one written two hours ago), task sessions, logs, caches, sign-in,
+// settings and memory, and entries the table does not know.
+func orcaFixture(t *testing.T) string {
+	t.Helper()
+	home := aiFixture(t)
+	now := aiNow()
+	old, recent := now.Add(-40*24*time.Hour), now.Add(-2*time.Hour)
+	write := func(rel string, size int, mod time.Time) {
+		t.Helper()
+		p := filepath.Join(home, ".orca", rel)
+		mustMkdir(t, filepath.Dir(p))
+		if err := os.WriteFile(p, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("sessions/2026/09/03/session-1757000000000-a.jsonl", 8192, old)
+	write("sessions/2026/10/01/session-1759300000000-b.jsonl", 8192, old)
+	write("sessions/2026/10/16/session-1760600000000-c.jsonl", 4096, recent)
+	write("task-sessions/0b7c/state.json", 4096, old)
+	write("task-sessions/9f21/state.json", 8192, old)
+	write("logs/orca.log", 4096, old)
+	write("summary_cache/a.json", 4096, old)
+	write("pricing-cache.json", 4096, old)
+	write("auth.json", 100, old)
+	write("config.toml", 100, old)
+	write("folder_trust.toml", 100, old)
+	write("onboarding.toml", 100, old)
+	write("memory/notes.md", 4096, old)
+	write("history.jsonl", 4096, old)
+	write("goals.sqlite3", 4096, old)
+	write("sessions-index.sqlite3", 4096, old)
+	write("rewind/r1/snapshot", 4096, old)
+	write("operations/op.json", 4096, old)
+	write("agent-events.jsonl", 4096, old)
+	write("orca.lock", 10, old)
+	return home
+}
+
+func TestScanAIToolOrca(t *testing.T) {
+	home := orcaFixture(t)
+	ctx := context.Background()
+	res, err := (Cleaner{}).ScanAITool(ctx, "orca")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orca := res.Tools[0]
+	root := filepath.Join(home, ".orca")
+	if !orca.Installed || orca.Running || orca.Name != "Orca" || orca.Path != root || orca.Size == 0 {
+		t.Fatalf("orca = %+v", orca)
+	}
+	// Each part has its level and accounts for exactly its own files.
+	for _, want := range []struct {
+		id, level, path string
+	}{
+		{"orca.sessions", aiSensitive, "sessions"},
+		{"orca.taskSessions", aiOptional, "task-sessions"},
+		{"orca.logs", aiSafe, "logs"},
+		{"orca.summaryCache", aiSafe, "summary_cache"},
+		{"orca.pricingCache", aiSafe, "pricing-cache.json"},
+		{"orca.auth", aiProtected, "auth.json"},
+		{"orca.config", aiProtected, "config.toml"},
+		{"orca.folderTrust", aiProtected, "folder_trust.toml"},
+		{"orca.onboarding", aiProtected, "onboarding.toml"},
+		{"orca.memory", aiProtected, "memory"},
+		{"orca.history", aiProtected, "history.jsonl"},
+		{"orca.goals", aiProtected, "goals.sqlite3"},
+		{"orca.sessionsIndex", aiProtected, "sessions-index.sqlite3"},
+		{"unknown:rewind", aiUnknown, "rewind"},
+		{"unknown:operations", aiUnknown, "operations"},
+		{"unknown:agent-events.jsonl", aiUnknown, "agent-events.jsonl"},
+		{"unknown:orca.lock", aiUnknown, "orca.lock"},
+	} {
+		p := aiPart_(t, orca, want.id)
+		size, files, _ := measureAI(ctx, filepath.Join(root, want.path), nil)
+		if p.Level != want.level || p.Path != filepath.Join(root, want.path) || p.Size != size || p.Files != files || size == 0 {
+			t.Errorf("%s = %+v, want level %s, %d bytes in %d files", want.id, p, want.level, size, files)
+		}
+	}
+	if len(orca.Parts) != 17 {
+		t.Errorf("orca has %d parts: %+v", len(orca.Parts), orca.Parts)
+	}
+	// Sessions are offered by month; the one written today counts as recent.
+	sessions := aiPart_(t, orca, "orca.sessions")
+	keys := []string{}
+	for _, g := range sessions.Groups {
+		keys = append(keys, g.Key)
+	}
+	if !slices.Equal(keys, []string{"2026/10", "2026/09"}) || !sessions.RunSafe {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if oct, sep := sessions.Groups[0], sessions.Groups[1]; oct.Count != 2 || oct.Recent != 1 || oct.Path != filepath.Join(root, "sessions/2026/10") || sep.Count != 1 || sep.Recent != 0 {
+		t.Fatalf("months = %+v", sessions.Groups)
+	}
+	// Task sessions go whole, and the page lists them one by one.
+	tasks := aiPart_(t, orca, "orca.taskSessions")
+	if len(tasks.Groups) != 0 || len(tasks.Top) != 2 || tasks.Top[0].Name != "9f21" || !tasks.Top[0].IsDir || tasks.RunSafe {
+		t.Fatalf("task sessions = %+v", tasks)
+	}
+	// The safe parts come first, and the parts add up to the folder.
+	if orca.Parts[0].Level != aiSafe {
+		t.Fatalf("first part = %+v", orca.Parts[0])
+	}
+	var got int64
+	for _, p := range orca.Parts {
+		got += p.Size
+	}
+	if want, _, _ := measureAI(ctx, root, nil); got != want {
+		t.Fatalf("parts add up to %d, the folder holds %d", got, want)
+	}
+}
+
+func TestCleanAIToolsOrca(t *testing.T) {
+	home := orcaFixture(t)
+	ctx := context.Background()
+	root := filepath.Join(home, ".orca")
+	scan, _ := (Cleaner{}).ScanAITool(ctx, "orca")
+	res, err := (Cleaner{}).CleanAITools(ctx, []AISelection{
+		{Tool: "orca", Part: "orca.sessions", Groups: []string{"2026/10"}},
+		{Tool: "orca", Part: "orca.taskSessions"},
+		{Tool: "orca", Part: "orca.logs"},
+		{Tool: "orca", Part: "orca.summaryCache"},
+		{Tool: "orca", Part: "orca.pricingCache"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, tasks := res.Parts[0], res.Parts[1]
+	// October's old session goes; today's stays, and September was not picked.
+	if sessions.Skipped != "" || sessions.Moved != 1 || sessions.Kept != 1 || len(sessions.Failed) != 0 {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if fileExists(filepath.Join(root, "sessions/2026/10/01/session-1759300000000-b.jsonl")) || !trashed(home, "session-1759300000000-b.jsonl") {
+		t.Fatal("the old October session should be in the Trash")
+	}
+	if !fileExists(filepath.Join(root, "sessions/2026/10/16/session-1760600000000-c.jsonl")) || !fileExists(filepath.Join(root, "sessions/2026/09/03/session-1757000000000-a.jsonl")) {
+		t.Fatal("the recent and the unpicked sessions should stay")
+	}
+	// Task sessions go one by one; their folder stays.
+	if tasks.Skipped != "" || tasks.Moved != 2 || tasks.Freed != aiPart_(t, scan.Tools[0], "orca.taskSessions").Size {
+		t.Fatalf("task sessions = %+v", tasks)
+	}
+	if !fileExists(filepath.Join(root, "task-sessions")) || fileExists(filepath.Join(root, "task-sessions/0b7c")) || !trashed(home, "0b7c") || !trashed(home, "9f21") {
+		t.Fatal("each task session should be in the Trash, the folder kept")
+	}
+	for i, id := range []string{"orca.logs", "orca.summaryCache", "orca.pricingCache"} {
+		r := res.Parts[2+i]
+		p := aiPart_(t, scan.Tools[0], id)
+		if r.Skipped != "" || r.Moved != 1 || r.Freed != p.Size || fileExists(p.Path) || !trashed(home, filepath.Base(p.Path)) {
+			t.Fatalf("%s = %+v", id, r)
+		}
+	}
+	// Sign-in, settings, memory and what the table does not know are refused.
+	refused, _ := (Cleaner{}).CleanAITools(ctx, []AISelection{
+		{Tool: "orca", Part: "orca.auth"},
+		{Tool: "orca", Part: "orca.config"},
+		{Tool: "orca", Part: "orca.memory"},
+		{Tool: "orca", Part: "orca.history"},
+		{Tool: "orca", Part: "orca.sessionsIndex"},
+		{Tool: "orca", Part: "unknown:rewind"},
+		{Tool: "orca", Part: "orca.sessions"},
+		{Tool: "orca", Part: "orca.sessions", Groups: []string{"../../auth.json"}},
+	})
+	want := []string{"blocked", "blocked", "blocked", "blocked", "blocked", "unknown", "blocked", "blocked"}
+	for i, r := range refused.Parts {
+		if r.Skipped != want[i] || r.Moved != 0 {
+			t.Fatalf("part %d = %+v, want %s", i, r, want[i])
+		}
+	}
+	for _, kept := range []string{"auth.json", "config.toml", "folder_trust.toml", "onboarding.toml", "memory/notes.md", "history.jsonl", "goals.sqlite3", "sessions-index.sqlite3", "rewind/r1/snapshot", "operations/op.json", "agent-events.jsonl", "orca.lock"} {
+		if !fileExists(filepath.Join(root, kept)) {
+			t.Fatalf("%s should stay", kept)
+		}
 	}
 }
 

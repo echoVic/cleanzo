@@ -76,7 +76,7 @@ type aiPart struct {
 type aiTool struct {
 	ID      string
 	Name    string
-	Home    string   // folder in the home folder
+	Home    string   // folder in the home folder; "" when it has none on this platform
 	Process []string // command fragments that mean the tool is running
 	Parts   []aiPart
 	// Roots are more folders of the same tool, kept by another app of it
@@ -214,6 +214,35 @@ var aiTools = []aiTool{
 			{ID: "trae.ide.updatePending", Root: "ideCache", Path: "pending/", Level: aiSafe},
 		},
 	},
+	{
+		// Orca (@blade-ai/orca), a terminal coding agent. Its sessions
+		// follow Codex's layout: sessions/yyyy/mm/dd/session-*.jsonl.
+		ID: "orca", Name: "Orca", Home: orcaHome(),
+		Parts: []aiPart{
+			{ID: "orca.sessions", Path: "sessions/", Level: aiSensitive, Sessions: "codex-months", RunSafe: true},
+			{ID: "orca.taskSessions", Path: "task-sessions/", Level: aiOptional, Entries: true},
+			{ID: "orca.logs", Path: "logs/", Level: aiSafe},
+			{ID: "orca.summaryCache", Path: "summary_cache/", Level: aiSafe},
+			{ID: "orca.pricingCache", Path: "pricing-cache.json", Level: aiSafe},
+			{ID: "orca.config", Path: "config.toml", Level: aiProtected},
+			{ID: "orca.folderTrust", Path: "folder_trust.toml", Level: aiProtected},
+			{ID: "orca.onboarding", Path: "onboarding.toml", Level: aiProtected},
+			{ID: "orca.memory", Path: "memory/", Level: aiProtected},
+			{ID: "orca.history", Path: "history.jsonl", Level: aiProtected},
+			{ID: "orca.goals", Path: "goals.sqlite3", Level: aiProtected},
+			{ID: "orca.sessionsIndex", Path: "sessions-index.sqlite3", Level: aiProtected},
+			{ID: "orca.auth", Path: "auth.json", Level: aiProtected},
+		},
+	},
+}
+
+// orcaHome is Orca's folder in the home folder. Only its macOS layout is
+// known, so on Windows it has none and the tool is absent there.
+func orcaHome() string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	return ".orca"
 }
 
 // traeIDEData lists where the TRAE IDE may keep its Electron data, the
@@ -248,6 +277,9 @@ func traeIDENamed(parent string) []string {
 // it has none here.
 func aiRootDir(tool aiTool, key string) string {
 	if key == "" {
+		if tool.Home == "" {
+			return ""
+		}
 		root := filepath.Join(homeDir(), tool.Home)
 		if info, err := os.Lstat(root); err == nil && info.IsDir() {
 			return root

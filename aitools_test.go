@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 )
@@ -118,6 +120,26 @@ func TestScanAIToolsMissing(t *testing.T) {
 		if info.Installed {
 			t.Fatalf("listed as installed: %+v", info)
 		}
+	}
+}
+
+// TestAIToolWithoutHome: a tool with no folder on this platform (Orca on
+// Windows) is absent; its empty Home is not the home folder itself.
+func TestAIToolWithoutHome(t *testing.T) {
+	setHome(t, t.TempDir())
+	if dir := aiRootDir(aiTool{ID: "x"}, ""); dir != "" {
+		t.Fatalf("a tool without a folder resolves to %q", dir)
+	}
+	i := slices.IndexFunc(aiTools, func(t aiTool) bool { return t.ID == "orca" })
+	if i < 0 {
+		t.Fatal("orca is not in the table")
+	}
+	want := ".orca"
+	if runtime.GOOS == "windows" {
+		want = ""
+	}
+	if aiTools[i].Home != want {
+		t.Fatalf("orca home = %q, want %q", aiTools[i].Home, want)
 	}
 }
 
