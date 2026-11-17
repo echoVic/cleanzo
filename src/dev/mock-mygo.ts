@@ -135,6 +135,11 @@ function createRuntime(): Runtime {
     { path: home("~/Downloads/Docker.dmg"), name: "Docker.dmg", detail: "~/Downloads", size: 486 * MB, default: false, ageDays: 12 },
     { path: home("~/Desktop/Cleanzo 0.2.3 arm64.dmg"), name: "Cleanzo 0.2.3 arm64.dmg", detail: "~/Desktop", size: 18 * MB, default: false, ageDays: 0 },
   ];
+  // nvm 的默认版本不列出；其余每个版本是一个子项，子项默认勾上，整行不预选。
+  const nodeVersions: SubItem[] = [
+    { path: home("~/.nvm/versions/node/v18.20.4"), name: "v18.20.4", detail: "2025-03-14", size: 186 * MB, default: true },
+    { path: home("~/.nvm/versions/node/v20.11.0"), name: "v20.11.0", detail: "2025-06-02", size: 203 * MB, default: true },
+  ];
   const junk = (id: string, group: string, name: string, size: number, path: string, extra: Partial<JunkItem> = {}): JunkItem => ({
     id, group, name, size, files: size > 0 ? 240 : 0, default: true, trash: false,
     running: false, inUse: 0, denied: false, estimate: false, paths: [home(path)], top: [], subs: [], ...extra,
@@ -152,6 +157,8 @@ function createRuntime(): Runtime {
     junk("app:com.tencent.xinwechat", "apps", "微信", 1.9 * GB, "~/Library/Containers/com.tencent.xinWeChat/Data/Library/Caches"),
     junk("app:com.bytedance.lark", "apps", "飞书", 3.1 * GB, "~/Library/Caches/com.bytedance.lark"),
     junk("app:com.netease.163music", "apps", "网易云音乐", 2.6 * GB, "~/Library/Caches/com.netease.163music", { default: false }),
+    // 飞书正在运行：行留着、不能选，提示先退出它。
+    junk("app.lark", "apps", "飞书日志与缓存", 640 * MB, "~/Library/Application Support/LarkShell/sdk_storage/log", { default: false, running: true }),
     junk("browser.chrome", "browsers", "Chrome 缓存", 1.1 * GB, "~/Library/Caches/Google/Chrome"),
     junk("browser.safari", "browsers", "Safari 缓存", 420 * MB, "~/Library/Caches/com.apple.Safari"),
     junk("browser.firefox", "browsers", "Firefox / Zen 缓存", 0, "~/Library/Caches/Firefox"),
@@ -166,6 +173,9 @@ function createRuntime(): Runtime {
       paths: [home("~/Documents/Projects/old-site/node_modules"), home("~/Documents/Projects/old-site/.next")],
     }),
     junk("review.installers", "review", "安装包", sum(installers), "~/Downloads", { files: 3, default: false, trash: true, subs: installers }),
+    junk("review.node-versions", "review", "旧的 Node 版本", sum(nodeVersions), "~/.nvm/versions/node", {
+      default: false, trash: true, paths: nodeVersions.map((s) => s.path), subs: nodeVersions,
+    }),
   ];
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });
   const bigItems: BigItem[] = [
