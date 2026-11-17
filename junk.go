@@ -749,7 +749,17 @@ func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}
 			measuring(tool)
 		}
 		size, upper, roots, err := estimateCommand(env, spec.rule.Command, tool)
-		if err != nil || ctx.Err() != nil || env.commandClaims[spec.rule.ID].overlaps(roots) {
+		if ctx.Err() != nil {
+			return plan
+		}
+		// A tool that cannot run keeps its row, without a size, saying what it
+		// printed last. Refused and overlapping roots stay hidden.
+		var failure *toolFailure
+		if errors.As(err, &failure) {
+			plan.item.Problem, plan.item.ProblemDetail = "tool-failed", failure.line
+			return plan
+		}
+		if err != nil || env.commandClaims[spec.rule.ID].overlaps(roots) {
 			return plan
 		}
 		plan.item.Size, plan.item.Estimate = size, upper

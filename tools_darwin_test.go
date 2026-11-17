@@ -128,7 +128,7 @@ echo "would free approximately 1GB"`)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	plan := planItem(ctx, specs[0], env, sem, nil)
-	if plan.item.Size != 0 || ctx.Err() == nil {
+	if plan.item.Size != 0 || plan.item.Problem != "" || ctx.Err() == nil {
 		t.Errorf("pool wait ignored cancellation: %+v, %v", plan.item, ctx.Err())
 	}
 	if data, err := os.ReadFile(log); err != nil && !os.IsNotExist(err) || len(data) != 0 {
@@ -172,7 +172,7 @@ echo "would free approximately 1GB"`)
 	cancel()
 	select {
 	case plan := <-done:
-		if plan.item.Size != 0 || time.Since(start) > 2*time.Second {
+		if plan.item.Size != 0 || plan.item.Problem != "" || time.Since(start) > 2*time.Second {
 			t.Fatalf("estimate ignored scan cancellation: %+v after %s", plan.item, time.Since(start))
 		}
 	case <-time.After(2 * time.Second):
@@ -180,19 +180,75 @@ echo "would free approximately 1GB"`)
 	}
 }
 
-// TestFailedToolMeasurementHidesRow keeps estimate failures local to their row.
-func TestFailedToolMeasurementHidesRow(t *testing.T) {
-	env := testEnv(t)
-	bin := t.TempDir()
-	fakeTool(t, bin, "brew", `echo "would free approximately 1GB"; exit 1`)
-	stageTools(t, &env, bin)
-	specs, _ := expandItems(&env)
-	if len(specs) != 1 {
-		t.Fatalf("failed tool must still start pending: %v", itemIDs(specs))
+// TestFailedToolMeasurementKeepsRow keeps estimate failures local to their
+// row: a tool whose estimate command fails or runs out of time stays listed
+// without a size and says what it printed last, and a clean of it is
+// skipped as before.
+func TestFailedToolMeasurementKeepsRow(t *testing.T) {
+	for _, c := range []struct {
+		name, tool, script, detail string
+		timeout                    *time.Duration
+	}{
+		{name: "brew", tool: "brew", script: `echo "would free approximately 1GB"; echo "Error: no space left"; echo; exit 1`, detail: "Error: no space left"},
+		{name: "pnpm", tool: "pnpm", script: `printf 'Preparing pnpm@12.0.0\nInternal Error: Cannot find matching keyid\n  \n' >&2; exit 1`, detail: "Internal Error: Cannot find matching keyid"},
+		{name: "silent", tool: "go", script: `exit 3`, detail: "exit status 3"},
+		{name: "long", tool: "brew", script: `echo ` + strings.Repeat("错", 400) + `; exit 1`, detail: strings.Repeat("错", 300)},
+		{name: "timeout", tool: "go", script: `sleep 5`, detail: context.DeadlineExceeded.Error(), timeout: &goModCleanup.Timeout},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := testEnv(t)
+			bin := t.TempDir()
+			fakeTool(t, bin, c.tool, c.script)
+			stageTools(t, &env, bin)
+			if c.timeout != nil {
+				saved := *c.timeout
+				*c.timeout = 200 * time.Millisecond
+				t.Cleanup(func() { *c.timeout = saved })
+			}
+			specs, _ := expandItems(&env)
+			if len(specs) != 1 {
+				t.Fatalf("failed tool must still start pending: %v", itemIDs(specs))
+			}
+			items := measureItems(context.Background(), specs, env, nil, nil)
+			if len(items) != 1 || items[0].Size != 0 || items[0].Problem != "tool-failed" || items[0].ProblemDetail != c.detail || len(items[0].Paths) != 0 {
+				t.Fatalf("failed estimate = %+v, want detail %q", items, c.detail)
+			}
+			if c.name != "brew" {
+				return
+			}
+			res := cleanJunk(context.Background(), env, []JunkSelection{{ID: items[0].ID}}, time.Time{}, cleanHooks{})
+			if len(res) != 1 || res[0].Skipped != "failed" || !slices.Equal(res[0].Failed, []string{"exit status 1"}) {
+				t.Fatalf("clean of a failed tool = %+v", res)
+			}
+		})
 	}
-	items := measureItems(context.Background(), specs, env, nil, nil)
-	if len(items) != 1 || items[0].Size != 0 {
-		t.Fatalf("failed estimate = %+v", items)
+}
+
+// TestRefusedToolMeasurementStaysHidden: a tool that runs but names a store
+// the safety checks refuse is not a tool that cannot run; its row stays
+// hidden.
+func TestRefusedToolMeasurementStaysHidden(t *testing.T) {
+	for _, kind := range []string{"relative", "outside", "protected"} {
+		t.Run(kind, func(t *testing.T) {
+			env := testEnv(t)
+			bin := t.TempDir()
+			root := "store"
+			switch kind {
+			case "outside":
+				root = t.TempDir()
+				writeFile(t, filepath.Join(root, "data"), 100)
+			case "protected":
+				root = filepath.Join(env.home, ".cache/huggingface")
+				writeFile(t, filepath.Join(root, "data"), 100)
+			}
+			fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; *) exit 1;; esac`)
+			stageTools(t, &env, bin)
+			specs, _ := expandItems(&env)
+			items := measureItems(context.Background(), specs, env, nil, nil)
+			if len(items) != 1 || items[0].ID != "dev.pnpm-store" || items[0].Size != 0 || items[0].Problem != "" || items[0].ProblemDetail != "" {
+				t.Fatalf("refused store %s = %+v", root, items)
+			}
+		})
 	}
 }
 
@@ -500,7 +556,7 @@ func TestToolCleanupRespectsPriorClaims(t *testing.T) {
 			for _, item := range measureItems(context.Background(), specs, env, nil, nil) {
 				if item.ID == "dev.pnpm-store" {
 					measured = true
-					if item.Size != 0 {
+					if item.Size != 0 || item.Problem != "" {
 						t.Errorf("overlapping estimate must be hidden: %+v", item)
 					}
 				}

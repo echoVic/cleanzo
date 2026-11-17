@@ -25,11 +25,58 @@ type toolCommand struct {
 	Estimate func(env junkEnv, tool string) (size int64, upper bool, roots []string, err error)
 }
 
+// toolFailure is an estimate whose tool command failed or ran out of time.
+// It reads as the command's error; line is what the tool said last.
+type toolFailure struct {
+	err  error
+	line string
+}
+
+func (f *toolFailure) Error() string { return f.err.Error() }
+func (f *toolFailure) Unwrap() error { return f.err }
+
+// toolLineLimit is how many characters of a failed tool's line a row keeps.
+const toolLineLimit = 300
+
+// lastToolLine is a failed command's last non-empty output line, or the
+// error text when the command printed nothing.
+func lastToolLine(out string, err error) string {
+	line := strings.TrimSpace(out)
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	if line == "" {
+		line = err.Error()
+	}
+	return line
+}
+
+// estimateError makes a failed estimate command carry the tool's last line,
+// cut to toolLineLimit characters. A command the safety checks refused is
+// not the tool failing and is returned as it is.
+func estimateError(out string, err error) error {
+	if err == nil || errors.Is(err, errBlocked) {
+		return err
+	}
+	line := lastToolLine(out, err)
+	if r := []rune(line); len(r) > toolLineLimit {
+		line = string(r[:toolLineLimit])
+	}
+	return &toolFailure{err: err, line: line}
+}
+
+// runEstimate runs a tool's read-only estimate command; a failure carries
+// the tool's last line (see estimateError).
+func runEstimate(ctx context.Context, tool string, args []string, timeout time.Duration) (string, error) {
+	out, err := runTool(ctx, tool, args, timeout)
+	return out, estimateError(out, err)
+}
+
 // brewCleanup lets Homebrew remove old versions and downloads.
 var brewCleanup = toolCommand{
 	Tool: "brew", Args: []string{"cleanup", "--prune=30"}, Busy: []string{"Homebrew/brew.rb", "Homebrew/brew.sh"}, Timeout: 5 * time.Minute,
 	Estimate: func(env junkEnv, tool string) (int64, bool, []string, error) {
-		out, err := runTool(env.toolContext(), tool, []string{"cleanup", "--prune=30", "--dry-run"}, 5*time.Minute)
+		out, err := runEstimate(env.toolContext(), tool, []string{"cleanup", "--prune=30", "--dry-run"}, 5*time.Minute)
 		return parseBrewFreed(out), false, nil, err
 	},
 }
@@ -73,7 +120,7 @@ var simctlCleanup = toolCommand{
 		if _, ok := env.apps.lookup("com.apple.dt.Xcode"); !ok {
 			return 0, false, nil, errBlocked
 		}
-		out, err := runTool(env.toolContext(), tool, []string{"simctl", "list", "devices", "unavailable", "-j"}, 2*time.Minute)
+		out, err := runEstimate(env.toolContext(), tool, []string{"simctl", "list", "devices", "unavailable", "-j"}, 2*time.Minute)
 		if err != nil {
 			return 0, false, nil, err
 		}
@@ -209,7 +256,7 @@ func (env junkEnv) toolContext() context.Context {
 
 // estimateToolFolder queries and measures a tool-owned directory under home.
 func estimateToolFolder(env junkEnv, tool string, args []string, timeout time.Duration) (int64, []string, error) {
-	out, err := runTool(env.toolContext(), tool, args, timeout)
+	out, err := runEstimate(env.toolContext(), tool, args, timeout)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -372,14 +419,7 @@ func cleanTool(ctx context.Context, rule *Rule, env junkEnv, hooks cleanHooks, c
 		if errors.Is(err, context.DeadlineExceeded) {
 			res.Skipped = "timeout"
 		} else if !errors.Is(err, context.Canceled) {
-			line := strings.TrimSpace(out)
-			if i := strings.LastIndexByte(line, '\n'); i >= 0 {
-				line = line[i+1:]
-			}
-			if line == "" {
-				line = err.Error()
-			}
-			res.Failed = []string{line}
+			res.Failed = []string{lastToolLine(out, err)}
 		}
 		return res
 	}
