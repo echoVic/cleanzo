@@ -227,9 +227,12 @@ func (env junkEnv) validToolRoot(root string) bool {
 	return filepath.IsAbs(root) && !env.traversalBlocked(root) && within(canonical(root), canonical(env.home)) && env.removable(resolvePath(root), false)
 }
 
-// toolRootsSize validates roots and measures without following links or ignoring cancellation.
+// toolRootsSize validates roots and measures without following links or
+// ignoring cancellation. It counts what removing the roots gives back:
+// blocks that APFS clones share count once, and only when every file
+// sharing them is under the roots (see reclaimTally).
 func (env junkEnv) toolRootsSize(roots []string) (int64, error) {
-	var size int64
+	var tally reclaimTally
 	for _, root := range roots {
 		if !env.validToolRoot(root) {
 			return 0, errBlocked
@@ -269,7 +272,7 @@ func (env junkEnv) toolRootsSize(roots []string) (int64, error) {
 				return err
 			}
 			if info.Mode().IsRegular() {
-				size += onDisk(info)
+				tally.add(path, info)
 			}
 			return nil
 		})
@@ -277,7 +280,7 @@ func (env junkEnv) toolRootsSize(roots []string) (int64, error) {
 			return 0, err
 		}
 	}
-	return size, nil
+	return tally.size, nil
 }
 
 // commandOwners includes the Simulator app for simulator cleanup.

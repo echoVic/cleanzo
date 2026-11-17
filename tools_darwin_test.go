@@ -653,3 +653,28 @@ func TestToolCleanupSkipsSpecialEntries(t *testing.T) {
 		t.Fatalf("tool cleanup with special entries: %+v", res)
 	}
 }
+
+// TestToolRootsCountClonesOnce sizes a tool's store by what its cleanup
+// gives back: a file cloned into a project frees nothing when the store's
+// copy goes.
+func TestToolRootsCountClonesOnce(t *testing.T) {
+	env := testEnv(t)
+	bin := t.TempDir()
+	root := filepath.Join(env.home, "tool-store")
+	shared, own := filepath.Join(root, "shared"), filepath.Join(root, "own")
+	inProject := filepath.Join(env.home, "proj/node_modules/shared")
+	writeFile(t, shared, 3000)
+	writeFile(t, own, 700)
+	cloneFile(t, shared, inProject)
+	fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; "store prune") rm -f `+shellPath(shared)+` `+shellPath(own)+`;; *) exit 1;; esac`)
+	stageTools(t, &env, bin)
+
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || items[0].ID != "dev.pnpm-store" || items[0].Size != 700 || !items[0].Estimate {
+		t.Fatalf("items = %+v, want dev.pnpm-store at 700", items)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.pnpm-store"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Freed != 700 || exists(own) || !exists(inProject) {
+		t.Fatalf("result = %+v", res)
+	}
+}
