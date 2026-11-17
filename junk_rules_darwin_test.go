@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// keepFixtures stage what a rule's Keep reads, and the entry it keeps beside
+// the staged one; that entry must not count.
+var keepFixtures = map[string]func(t *testing.T, home string){
+	"review.node-versions": func(t *testing.T, home string) {
+		stageNvm(t, home, map[string]string{"default": "v1.2.3"}, "v1.2.3")
+	},
+}
+
 // TestRuleCatalogMeasuresEachTarget checks every non-command rule with staged paths.
 func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 	for _, rule := range junkRules {
@@ -18,6 +26,13 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 		}
 		t.Run(rule.ID, func(t *testing.T) {
 			env := testEnv(t)
+			if rule.Keep != nil {
+				stage := keepFixtures[rule.ID]
+				if stage == nil {
+					t.Fatalf("%s has a Keep hook and no fixture for what it reads", rule.ID)
+				}
+				stage(t, env.home)
+			}
 			unit := int64(100)
 			if rule.Contents {
 				unit = crashpadMinSize // smaller databases are not listed

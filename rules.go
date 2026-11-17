@@ -100,6 +100,10 @@ var darwinJunkRules = []Rule{
 		Targets: []Target{{Pattern: "Downloads", Mode: entriesOf, Names: []string{"*.download", "*.crdownload", "*.part"}}}},
 	{ID: "review.mail-downloads", Group: groupReview, Trash: true,
 		Targets: []Target{{Pattern: "Library/Containers/com.apple.mail/Data/Library/Mail Downloads", Mode: entriesOf}}},
+	// Old toolchain versions go to the Trash folder by folder; nvm and rustup
+	// both delete for good, and nvm is a shell function.
+	{ID: "review.node-versions", Group: groupReview, Trash: true, Detail: detailFiles, Keep: nvmKeep,
+		Targets: []Target{{Pattern: ".nvm/versions/node", Mode: entriesOf}}},
 
 	// browsers: caches only, never profiles, cookies or history
 	{ID: "browser.chrome", Group: groupBrowsers, Default: true, Owners: []string{"com.google.Chrome"},

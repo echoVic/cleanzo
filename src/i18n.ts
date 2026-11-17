@@ -284,6 +284,8 @@ export const dict = {
     "rule.review.partial-downloads.desc": "下载目录里 1 天未改动且未使用的下载临时文件",
     "rule.review.mail-downloads.name": "邮件附件下载",
     "rule.review.mail-downloads.desc": "邮件下载的附件，移到废纸篓后可恢复",
+    "rule.review.node-versions.name": "旧的 Node 版本",
+    "rule.review.node-versions.desc": "nvm 安装的非默认版本，各自的全局包一并移除；固定使用某个版本的项目需要重新安装它",
     // a11y
     "a11y.skipMain": "跳到主内容",
     // nav
@@ -1536,6 +1538,8 @@ export const dict = {
     "rule.review.partial-downloads.desc": "Unused partial downloads untouched for 1 day",
     "rule.review.mail-downloads.name": "Mail Attachment Downloads",
     "rule.review.mail-downloads.desc": "Downloaded attachments; recoverable from the Trash",
+    "rule.review.node-versions.name": "Old Node Versions",
+    "rule.review.node-versions.desc": "Versions nvm installed besides the default, each with its global packages; a project pinned to one needs it installed again",
     // a11y
     "a11y.skipMain": "Skip to main content",
     "nav.section.overview": "Overview",
