@@ -5,14 +5,14 @@ import { setLang } from "./setup-dom";
 import type { JunkItem, Settings, ScanSummary } from "../src/mygo";
 import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
-import { changes, fakeStream } from "./page-harness";
+import { changes, fakeStream, textOf } from "./page-harness";
 import { CleanPage } from "../src/react/clean/CleanPage";
 import { cleanApi } from "../src/react/clean/api";
 import { NumberTicker } from "../src/ui/motion/NumberTicker";
 import { CleanResults } from "../src/react/clean/CleanResults";
 import { cleanupExplanation } from "../src/react/clean/explanations";
 import {
-  applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
+  applyCleanEvent, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals, emptySel,
   finalizeCleanRows, finalizeScan, createCleanRowTracker, groupCheckState, groupToggleOn, isSelectable, isVisible, itemTitle,
   keepLatestVisible, removeFromSel,
   rowStateNote, scanItem, scanStart, scanPhase, scanProgress, splitApps, toggleGroup, toggleRow, toggleSub,
@@ -381,6 +381,55 @@ test("group selection never includes a running app or a denied item", () => {
     { state: "done", result: { name: "app:ready", freed: 0, trashed: 0, inUse: 0, files: 0, failed: [], skipped: "running" } },
     t, human);
   expect(note.skipWarn).toBe("运行中，已跳过");
+});
+
+test("a tool that cannot run stays visible but is never selected, alone, by its group or in the total", () => {
+  const broken = item("dev.pnpm-store", "dev", 0, { paths: [], problem: "tool-failed", problemDetail: "Internal Error: Cannot find matching keyid" });
+  expect(scan([item("dev.npx", "dev", 1024), broken]).items.filter(isVisible).map((i) => i.id)).toEqual(["dev.npx", "dev.pnpm-store"]);
+  // 带着大小也一样：问题行不默勾、不能单选、组选跳过它，已选总量和清理计划都不算它。
+  const sized = { ...broken, size: 2048 };
+  const st = scan([item("dev.npx", "dev", 1024), sized]);
+  expect(isSelectable(sized)).toBe(false);
+  expect([...st.sel.selected]).toEqual(["dev.npx"]);
+  expect(toggleRow(sized, true, st.sel).selected.has(sized.id)).toBe(false);
+  const all = toggleGroup("dev", groupToggleOn("dev", st.items, emptySel()), st.items, emptySel());
+  expect([...all.selected]).toEqual(["dev.npx"]);
+  const forced = { ...all, selected: new Set([...all.selected, sized.id]) };
+  expect(heroTotals(st.items, forced).selectedBytes).toBe(1024);
+  expect(buildCleanPlan(st.items, forced)!.selections).toEqual([{ id: "dev.npx" }]);
+});
+
+test("a tool that cannot run reads why where its size would be and shows the tool's line in its details", async () => {
+  const env = changes();
+  try {
+    const stream = fakeStream<import("../src/mygo").JunkScanEvent>();
+    env.assign(cleanApi, { startScan: () => stream });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const broken = item("dev.pnpm-store", "dev", 0, { paths: [], problem: "tool-failed", problemDetail: "Internal Error: Cannot find matching keyid" });
+    stream.emit({ kind: "start", items: [{ ...broken, size: -1 }] });
+    stream.emit({ kind: "item", item: broken });
+    stream.finish();
+    await h.settle();
+    for (const [lang, reason] of [["zh", "pnpm 无法运行，暂时不能清理"], ["en", "pnpm cannot run, so this cannot be cleaned for now"]] as const) {
+      env.lang(lang);
+      h.setProps({});
+      await h.settle();
+      const row = h.find((n) => n.props["data-key"] === broken.id);
+      expect(row).toBeDefined();
+      const note = h.find((n) => n.props.className === "cat-note" && textOf(n).includes(reason));
+      expect(note).toBeDefined();
+      expect(textOf(note!)).not.toContain(human(0));
+      // 展开区：规则原有的说明在上，工具最后一行输出在下。
+      const details = h.find((n) => n.props.className === "junk-details" && textOf(n).includes(broken.problemDetail!))!;
+      expect(details).toBeDefined();
+      const text = textOf(details);
+      expect(text.indexOf(cleanupExplanation(broken, t).method)).toBeLessThan(text.indexOf(broken.problemDetail!));
+      expect(h.find((n) => n.props.ariaLabel === t("junk.select", { name: ruleName(broken.id) }))!.props.disabled).toBe(true);
+      expect(h.find((n) => n.props.ariaLabel === t("junk.select", { name: t("junk.group.dev") }))!.props.disabled).toBe(true);
+    }
+  } finally { env.restore(); }
 });
 
 test("tool failure shows both its skip reason and failed count", () => {

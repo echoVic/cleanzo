@@ -26,14 +26,14 @@ export function itemTitle(it: JunkItem, ruleName: (id: string) => string): strin
   return isDynamicId(it.id) ? it.name : ruleName(it.id);
 }
 
-/** pending、已测到容量、权限失败或读取错误都可见，未知不冒充零。 */
+/** pending、已测到容量、权限失败、读取错误或工具无法运行都可见，未知不冒充零。 */
 export function isVisible(it: JunkItem): boolean {
-  return it.size === -1 || discoveredSize(it) > 0 || it.denied || (it.readErrors ?? 0) > 0;
+  return it.size === -1 || discoveredSize(it) > 0 || it.denied || (it.readErrors ?? 0) > 0 || !!it.problem;
 }
 
-/** 运行中 / 权限拒绝 / 无可清容量的行不可选；发现容量另行统计。 */
+/** 运行中 / 权限拒绝 / 工具无法运行 / 无可清容量的行不可选；发现容量另行统计。 */
 export function isSelectable(it: JunkItem): boolean {
-  return it.size > 0 && !it.running && !it.denied;
+  return it.size > 0 && !it.running && !it.denied && !it.problem;
 }
 
 export function subsOf(it: JunkItem): SubItem[] {

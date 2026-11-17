@@ -21,7 +21,7 @@ import { setCleanStaleHandler } from "./entry";
 import { cleanApi } from "./api";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import { playCleanFocal, shouldPlayFocal } from "./focal";
-import { cleanupExplanation } from "./explanations";
+import { cleanupExplanation, commandTool } from "./explanations";
 import { CleanResults } from "./CleanResults";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
@@ -532,6 +532,8 @@ export function CleanPage() {
       );
     }
     if (st.pending.has(it.id)) return <span className="spin" aria-label={t("cat.scanning")} />;
+    // 工具无法运行：不显示大小，写明原因。
+    if (it.problem) return <span className="cat-note-text muted">{t(`junk.problem.${it.problem}` as DictKey, { tool: commandTool(it.id) ?? itemTitle(it, ruleName) })}</span>;
     if (it.denied && discoveredSize(it) === 0) return "--";
     return (
       <>
@@ -644,6 +646,7 @@ export function CleanPage() {
               <div><dt>{t("clean.explain.effect")}</dt><dd>{explanation.consequence}</dd></div>
               <div><dt>{t("clean.explain.method")}</dt><dd>{explanation.method}</dd></div>
             </dl>
+            {it.problemDetail ? <div className="cleanup-locations"><div className="junk-path small">{it.problemDetail}</div></div> : null}
             {(it.paths ?? []).length > 0 && <div className="cleanup-locations">
               <div className="muted small">{t("clean.explain.locations")}</div>
               {it.paths.map((path) => <div className="junk-path small" key={path}><PathText path={displayPath(path)} /></div>)}
