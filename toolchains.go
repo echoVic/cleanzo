@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -115,5 +116,114 @@ func readSettingsFile(env junkEnv, path string, limit int64) ([]byte, bool) {
 	return data, err == nil
 }
 
-// rustupKeep names the toolchains rustup's settings choose.
-func rustupKeep(env junkEnv) ([]string, bool) { return nil, false }
+// rustupKeep names the toolchains ~/.rustup/settings.toml chooses, so
+// review.rust-toolchains never offers them: default_toolchain and every
+// folder's toolchain under [overrides]. Settings that cannot be read in full,
+// or that choose no default, leave them unresolved.
+func rustupKeep(env junkEnv) ([]string, bool) {
+	data, ok := readSettingsFile(env, filepath.Join(env.home, ".rustup", "settings.toml"), 1<<20)
+	if !ok {
+		return nil, false
+	}
+	var names []string
+	host, section, found := "", "", false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		if line[0] == '[' {
+			header, _, _ := strings.Cut(line, "#")
+			section = strings.TrimSpace(strings.Trim(strings.TrimSpace(header), "[]"))
+			continue
+		}
+		key, value, isString, parsed := tomlStringPair(line)
+		switch {
+		case section == "overrides":
+			if !parsed || !isString {
+				return nil, false
+			}
+			names = append(names, value)
+		case section != "" || !parsed:
+			// Other tables, and lines of values spanning several lines, name no toolchain.
+		case key == "default_toolchain":
+			if !isString || found || value == "" {
+				return nil, false
+			}
+			names, found = append([]string{value}, names...), true
+		case key == "default_host_triple" && isString:
+			host = value
+		case key == "overrides":
+			return nil, false // an inline table
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	// rustup writes full names, such as stable-aarch64-apple-darwin; a short
+	// one names the toolchain for the host.
+	if host != "" {
+		for _, name := range slices.Clone(names) {
+			if !strings.HasSuffix(name, "-"+host) {
+				names = append(names, name+"-"+host)
+			}
+		}
+	}
+	return names, true
+}
+
+// tomlStringPair reads a TOML line `key = value`, the key bare or quoted.
+// isString reports a one-line string value, which comes back unquoted, with
+// only a comment after it.
+func tomlStringPair(line string) (key, value string, isString, parsed bool) {
+	key, rest, ok := tomlString(line)
+	if !ok {
+		end := strings.IndexFunc(line, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+		})
+		if end <= 0 {
+			return "", "", false, false
+		}
+		key, rest = line[:end], line[end:]
+	}
+	rest, ok = strings.CutPrefix(strings.TrimLeft(rest, " \t"), "=")
+	if !ok {
+		return "", "", false, false
+	}
+	value, rest, ok = tomlString(strings.TrimLeft(rest, " \t"))
+	rest = strings.TrimSpace(rest)
+	if !ok || rest != "" && rest[0] != '#' {
+		return key, "", false, true
+	}
+	return key, value, true, true
+}
+
+// tomlString reads the one-line TOML string s starts with, basic ("…", with
+// escapes) or literal ('…'), and returns what follows it.
+func tomlString(s string) (value, rest string, ok bool) {
+	if strings.HasPrefix(s, `"""`) || strings.HasPrefix(s, "'''") {
+		return "", s, false
+	}
+	if strings.HasPrefix(s, "'") {
+		if end := strings.IndexByte(s[1:], '\''); end >= 0 {
+			return s[1 : 1+end], s[2+end:], true
+		}
+		return "", s, false
+	}
+	if !strings.HasPrefix(s, `"`) {
+		return "", s, false
+	}
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '"':
+			value, err := strconv.Unquote(s[:i+1])
+			if err != nil {
+				return "", s, false
+			}
+			return value, s[i+1:], true
+		}
+	}
+	return "", s, false
+}

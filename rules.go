@@ -104,6 +104,8 @@ var darwinJunkRules = []Rule{
 	// both delete for good, and nvm is a shell function.
 	{ID: "review.node-versions", Group: groupReview, Trash: true, Detail: detailFiles, Keep: nvmKeep,
 		Targets: []Target{{Pattern: ".nvm/versions/node", Mode: entriesOf}}},
+	{ID: "review.rust-toolchains", Group: groupReview, Trash: true, Detail: detailFiles, Keep: rustupKeep,
+		Targets: []Target{{Pattern: ".rustup/toolchains", Mode: entriesOf}}},
 
 	// browsers: caches only, never profiles, cookies or history
 	{ID: "browser.chrome", Group: groupBrowsers, Default: true, Owners: []string{"com.google.Chrome"},

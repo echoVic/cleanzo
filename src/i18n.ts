@@ -286,6 +286,8 @@ export const dict = {
     "rule.review.mail-downloads.desc": "邮件下载的附件，移到废纸篓后可恢复",
     "rule.review.node-versions.name": "旧的 Node 版本",
     "rule.review.node-versions.desc": "nvm 安装的非默认版本，各自的全局包一并移除；固定使用某个版本的项目需要重新安装它",
+    "rule.review.rust-toolchains.name": "旧的 Rust 工具链",
+    "rule.review.rust-toolchains.desc": "rustup 安装的非默认、未被目录覆盖使用的工具链，装进去的组件和编译目标一并移除；固定使用某个版本的项目需要重新安装它",
     // a11y
     "a11y.skipMain": "跳到主内容",
     // nav
@@ -1540,6 +1542,8 @@ export const dict = {
     "rule.review.mail-downloads.desc": "Downloaded attachments; recoverable from the Trash",
     "rule.review.node-versions.name": "Old Node Versions",
     "rule.review.node-versions.desc": "Versions nvm installed besides the default, each with its global packages; a project pinned to one needs it installed again",
+    "rule.review.rust-toolchains.name": "Old Rust Toolchains",
+    "rule.review.rust-toolchains.desc": "Toolchains rustup installed besides the default and folder overrides, with the components and targets added to them; a project pinned to one needs it installed again",
     // a11y
     "a11y.skipMain": "Skip to main content",
     "nav.section.overview": "Overview",

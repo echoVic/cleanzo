@@ -16,6 +16,9 @@ var keepFixtures = map[string]func(t *testing.T, home string){
 	"review.node-versions": func(t *testing.T, home string) {
 		stageNvm(t, home, map[string]string{"default": "v1.2.3"}, "v1.2.3")
 	},
+	"review.rust-toolchains": func(t *testing.T, home string) {
+		stageRustup(t, home, rustupSettings, "stable-aarch64-apple-darwin")
+	},
 }
 
 // TestRuleCatalogMeasuresEachTarget checks every non-command rule with staged paths.

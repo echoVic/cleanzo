@@ -145,3 +145,97 @@ func catalogRow(t *testing.T, env *junkEnv, id string) *itemSpec {
 	t.Fatalf("no %s row in %v", id, itemIDs(specs))
 	return nil
 }
+
+// stageRustup writes ~/.rustup/settings.toml (unless settings is "-") and a
+// folder for each installed toolchain.
+func stageRustup(t *testing.T, home, settings string, toolchains ...string) {
+	t.Helper()
+	for _, name := range toolchains {
+		writeFile(t, filepath.Join(home, ".rustup", "toolchains", name, "bin", "rustc"), 100)
+	}
+	if settings == "-" {
+		return
+	}
+	path := filepath.Join(home, ".rustup", "settings.toml")
+	mustMkdir(t, filepath.Dir(path))
+	if err := os.WriteFile(path, []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rustupSettings is what rustup writes after `rustup default stable` and two
+// `rustup override set` calls, one in a folder whose name holds an equals sign.
+const rustupSettings = `default_host_triple = "aarch64-apple-darwin"
+default_toolchain = "stable-aarch64-apple-darwin"
+profile = "default"
+version = "12"
+
+[overrides]
+"/Users/me/old = project" = "1.79.0-aarch64-apple-darwin"
+'/Users/me/edge' = "nightly-aarch64-apple-darwin" # pinned
+`
+
+// TestRustupKeepsDefaultAndOverrides reads the default toolchain and every
+// override, and gives up when the settings cannot be read in full.
+func TestRustupKeepsDefaultAndOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings string
+		keep           []string // nil when unresolved
+	}{
+		{"default and overrides", rustupSettings, []string{"stable-aarch64-apple-darwin", "1.79.0-aarch64-apple-darwin", "nightly-aarch64-apple-darwin"}},
+		{"no overrides", "default_toolchain = \"stable-aarch64-apple-darwin\"\n", []string{"stable-aarch64-apple-darwin"}},
+		{"short names for the host", "default_host_triple = \"aarch64-apple-darwin\"\ndefault_toolchain = 'stable'\n[overrides]\n\"/p\" = \"nightly\"\n", []string{"stable", "nightly", "stable-aarch64-apple-darwin", "nightly-aarch64-apple-darwin"}},
+		{"escaped strings", "default_toolchain = \"stable-aarch64-apple-darwin\"\n[overrides]\n\"/a\\\"b\" = \"1.80.0-\\u0061arch64-apple-darwin\"\n", []string{"stable-aarch64-apple-darwin", "1.80.0-aarch64-apple-darwin"}},
+		{"other sections", "default_toolchain = \"stable-aarch64-apple-darwin\"\n[other]\ndefault_toolchain = \"x\"\n", []string{"stable-aarch64-apple-darwin"}},
+		{"missing settings", "-", nil},
+		{"no default", "profile = \"default\"\n[overrides]\n\"/p\" = \"nightly-aarch64-apple-darwin\"\n", nil},
+		{"default only in a section", "[overrides]\ndefault_toolchain = \"stable-aarch64-apple-darwin\"\n", nil},
+		{"default not a string", "default_toolchain = 1\n", nil},
+		{"override not a string", "default_toolchain = \"stable-aarch64-apple-darwin\"\n[overrides]\n\"/p\" = [\"nightly\"]\n", nil},
+		{"unterminated override", "default_toolchain = \"stable-aarch64-apple-darwin\"\n[overrides]\n\"/p = \"nightly\"\n", nil},
+		{"inline overrides", "default_toolchain = \"stable-aarch64-apple-darwin\"\noverrides = { \"/p\" = \"nightly\" }\n", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			stageRustup(t, env.home, tc.settings)
+			names, ok := rustupKeep(env)
+			if tc.keep == nil {
+				if ok {
+					t.Fatalf("resolved to %q, want unresolved", names)
+				}
+				return
+			}
+			if !ok || !slices.Equal(names, tc.keep) {
+				t.Fatalf("keep = %q, %v; want %q", names, ok, tc.keep)
+			}
+		})
+	}
+}
+
+// TestRustToolchainsOfferAllButTheChosen: the review row lists the other
+// toolchains on their own, unselected and bound for the Trash; without
+// readable settings there is no row.
+func TestRustToolchainsOfferAllButTheChosen(t *testing.T) {
+	env := testEnv(t)
+	stageRustup(t, env.home, rustupSettings, "stable-aarch64-apple-darwin", "1.79.0-aarch64-apple-darwin", "nightly-aarch64-apple-darwin", "1.92.0-aarch64-apple-darwin", "beta-aarch64-apple-darwin")
+	toolchains := filepath.Join(env.home, ".rustup", "toolchains")
+	specs, _ := expandItems(&env)
+	if got, want := offeredIn(specs, toolchains), []string{"review.rust-toolchains 1.92.0-aarch64-apple-darwin", "review.rust-toolchains beta-aarch64-apple-darwin"}; !slices.Equal(got, want) {
+		t.Fatalf("offered = %q, want %q", got, want)
+	}
+	spec := catalogRow(t, &env, "review.rust-toolchains")
+	if spec.item.Group != string(groupReview) || spec.item.Default || !spec.item.Trash {
+		t.Fatalf("item = %+v", spec.item)
+	}
+	if plan := planItem(context.Background(), *spec, env, make(chan struct{}, 4), nil); len(plan.item.Subs) != 2 {
+		t.Fatalf("subs = %+v", plan.item.Subs)
+	}
+
+	if err := os.Remove(filepath.Join(env.home, ".rustup", "settings.toml")); err != nil {
+		t.Fatal(err)
+	}
+	specs, _ = expandItems(&env)
+	if got := offeredIn(specs, toolchains); len(got) > 0 || slices.Contains(itemIDs(specs), "review.rust-toolchains") {
+		t.Fatalf("without settings: offered = %q, items = %v", got, itemIDs(specs))
+	}
+}
