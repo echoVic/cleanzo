@@ -71,7 +71,7 @@
   - `func (t *reclaimTally) add(path string, info fs.FileInfo)`; read the total from `t.size`
   - test helper `cloneFile(t *testing.T, src, dst string)` in `clones_darwin_test.go`, used by Tasks 2 and 3
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `clones_darwin_test.go`:
 
@@ -188,12 +188,12 @@ func TestReclaimTallySumsPlainFiles(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go vet .`
 Expected: FAIL with `undefined: reclaimTally` (and `undefined: cloneRefs`).
 
-- [ ] **Step 3: Write `clones_darwin.go`**
+- [x] **Step 3: Write `clones_darwin.go`**
 
 ```go
 package main
@@ -273,7 +273,7 @@ Why this shape:
 - `cloneID` lands at offset 24 and `refs` at 32, which is where Go's natural alignment puts them. Do not reorder the fields.
 - A macOS that does not know `ATTR_CMNEXT_CLONE_REFCNT` fails the call or leaves the bit out of `returned`; both give `ok == false`.
 
-- [ ] **Step 4: Write `reclaim.go`**
+- [x] **Step 4: Write `reclaim.go`**
 
 ```go
 package main
@@ -322,7 +322,7 @@ func (t *reclaimTally) add(path string, info fs.FileInfo) {
 }
 ```
 
-- [ ] **Step 5: Add the Windows stub**
+- [x] **Step 5: Add the Windows stub**
 
 In `fs_windows.go`, directly after
 
@@ -339,7 +339,7 @@ add
 func cloneRefs(string) (id uint64, refs uint32, ok bool) { return 0, 0, false }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `go test -race -count=1 -run 'TestCloneRefs|TestReclaimTally' -v .`
 Expected: PASS for `TestCloneRefs`, `TestReclaimTallyCountsClonesOnce`, `TestReclaimTallySumsPlainFiles`. A SKIP of the first two means the temp folder is not on APFS; report it, do not weaken the test.
@@ -347,7 +347,7 @@ Expected: PASS for `TestCloneRefs`, `TestReclaimTallyCountsClonesOnce`, `TestRec
 Run: `test -z "$(gofmt -l .)" && go vet . && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet . && GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go vet .`
 Expected: no output.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add clones_darwin.go clones_darwin_test.go reclaim.go reclaim_test.go fs_windows.go
@@ -367,7 +367,7 @@ git commit -m "feat(junk): read APFS clone counts and tally what removal gives b
 - Consumes: `reclaimTally`, `(*reclaimTally).add`, test helper `cloneFile` (Task 1); `testEnv`, `scanJunk`, `cleanJunk`, `JunkSelection`, `cleanHooks`, `writeFile`, `exists`.
 - Produces: `measureReclaimable(p string, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int)`, same contract as `measureChecked`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `junk_darwin_test.go`:
 
@@ -399,12 +399,12 @@ func TestJunkSizesCountClonesOnce(t *testing.T) {
 
 2700 is `first.bin` and `second.bin` once (2000) plus `meta` (700); `lib.so` (3000) stays alive in the project.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test -race -count=1 -run TestJunkSizesCountClonesOnce .`
 Expected: FAIL with `items = [{ID:dev.uv … Size:7700 …}], want dev.uv at 2700`.
 
-- [ ] **Step 3: Split the walk in `main.go`**
+- [x] **Step 3: Split the walk in `main.go`**
 
 Replace the head of `measureChecked`
 
@@ -473,7 +473,7 @@ with
 
 The body between the two (context check, error counting, `platformMeasureEntry`, `changedAt`) stays untouched.
 
-- [ ] **Step 4: Use it for junk candidates**
+- [x] **Step 4: Use it for junk candidates**
 
 In `junk.go` line 807, inside the candidate goroutine, change
 
@@ -489,12 +489,12 @@ to
 
 Leave the `measureCrashpad` branch above it and every other caller of `measureChecked` alone.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `go test -race -count=1 -run 'TestJunkSizesCountClonesOnce|TestExpandShowsOnlyWhatExists|TestNestedJunkItemsCountOnce' .`
 Expected: `ok  	cleanzo`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add main.go junk.go junk_darwin_test.go
@@ -513,7 +513,7 @@ git commit -m "fix(junk): size rows by what removing them frees when files are A
 - Consumes: `reclaimTally`, `(*reclaimTally).add`, test helper `cloneFile` (Task 1); `testEnv`, `fakeTool`, `stageTools`, `shellPath`, `scanJunk`, `cleanJunk`.
 - Produces: nothing new. `toolRootsSize(roots []string) (int64, error)` keeps its signature; `cleanTool` keeps computing `res.Freed = max(0, before-after)` from it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tools_darwin_test.go`:
 
@@ -545,12 +545,12 @@ func TestToolRootsCountClonesOnce(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test -race -count=1 -run TestToolRootsCountClonesOnce .`
 Expected: FAIL with `items = [{ID:dev.pnpm-store … Size:3700 …}], want dev.pnpm-store at 700`.
 
-- [ ] **Step 3: Tally the tool roots**
+- [x] **Step 3: Tally the tool roots**
 
 In `tools.go`, change the head of `toolRootsSize`
 
@@ -605,16 +605,16 @@ to
 
 One tally covers all roots of a command, so a clone family spread over two roots still counts once. The guards before the walk stay untouched.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test -race -count=1 -run 'TestToolRootsCountClonesOnce|TestToolRootsAreMeasured|TestToolEstimateSkipsLinksAndSpecialFiles|TestSimulatorCleanupUsesDeviceRoots' .`
 Expected: `ok  	cleanzo`.
 
-- [ ] **Step 5: Run the full checks from Global Constraints**
+- [x] **Step 5: Run the full checks from Global Constraints**
 
 Expected: every command exits 0; the full suite prints `ok  	cleanzo` (about 195 s).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tools.go tools_darwin_test.go
@@ -623,14 +623,19 @@ git commit -m "fix(junk): report what a tool's cleanup frees when its store hold
 
 ---
 
-## Controller verification (after the tasks, outside any sandbox)
+## Validation ledger (2026-11-17)
 
-Run by the reviewer on the maintainer's Mac, read-only:
+Branch `fix/clone-aware-sizes`, three task commits on top of the plan. All runs on the maintainer's Mac (macOS 27.2.1), read-only; no real clean was run.
 
-- [ ] A throwaway test that calls `measureChecked` and `measureReclaimable` on `~/Library/pnpm/store` and `~/.cache/uv/archive-v0` prints about 5.91 → 2.72 GB and 0.58 → 0.25 GB, with 0 read errors. Delete the test afterwards.
-- [ ] `bun run dev`: the pnpm store row reads about 2.7 GB (was about 5.9 GB), the uv row about 0.27 GB (was about 0.60 GB), and rows without clones (Go build cache, npm cache) read as before.
-- [ ] The junk scan's wall time on this Mac stays within about 10% of a build from `master`.
-- [ ] No real clean is run for verification.
+- `test -z "$(gofmt -l .)"`, `go vet ./...` and both Windows `go vet` runs: clean.
+- `go test -race -count=1 ./...` with the CI skip: `ok  	cleanzo	202.136s`.
+- `measureChecked` against `measureReclaimable` on the real folders: pnpm store 5.91 → 2.72 GB, `~/.cache/uv/archive-v0` 0.58 → 0.25 GB, 0 read errors.
+- One real junk scan through `currentJunkEnv()`, built from `master` and from the branch, 121 rows each:
+  - `dev.uv` found size 598.7 → 272.8 MB (`archive-v0` 580.4 → 254.5 MB). Its selected size is 18.3 MB in both, because `archive-v0` is in use by a running `uv tool` process.
+  - `app:com.tencent.inputmethod.wetype` 28.4 → 17.9 MB. Every other row differs by under 0.2 MB, which is files changing between runs.
+  - `dev.pnpm-store` is 0 in both: `pnpm store path` fails on this Mac for both installed launchers (a Node module loader error), so the row is hidden with or without this change. The 3.19 GB the store overstates is therefore not visible in the app here until pnpm works again.
+  - Scan time: 21.8, 14.0 and 14.1 s from `master`; 13.4, 15.1 and 14.6 s from the branch. No measurable difference.
+- Not done: opening the built app and reading the rows on screen. The scan above runs the same code the page calls.
 
 ## Not in this plan
 
