@@ -417,6 +417,15 @@ func TestAIRunningMatches(t *testing.T) {
 		"/Applications/Trae CN.app/Contents/Frameworks/Trae CN Helper.app/Contents/MacOS/Trae CN Helper\n":           {"trae:ide"},
 		"/Applications/Trae.app/Contents/MacOS/Electron\n":                                                           {"trae:ide"},
 		"vim trae-notes.md\n":                                                                                        {},
+		"node /Users/me/.nvm/versions/node/v22.23.1/bin/orca\n":                                                      {"orca"},
+		"node /Users/me/.nvm/versions/node/v22.23.1/bin/orca --resume\n":                                             {"orca"},
+		"node /Users/me/.nvm/versions/node/v22.23.1/lib/node_modules/@blade-ai/orca/bin/orca.js\n":                   {"orca"},
+		"/Users/me/.nvm/versions/node/v22.23.1/lib/node_modules/@blade-ai/orca/node_modules/@blade-ai/orca-darwin-arm64/vendor/aarch64-apple-darwin/bin/orca --resume\n": {"orca"},
+		"/opt/homebrew/lib/node_modules/@blade-ai/orca-darwin-arm64/vendor/aarch64-apple-darwin/bin/orca\n":                                                              {"orca"},
+		"orca --continue\n": {"orca"},
+		"node /Users/me/work/node_modules/@blade-ai/orca-sdk/dist/index.js\n": {},
+		"/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer\n":            {},
+		"vim orca-notes.md\n": {},
 	}
 	for ps, want := range cases {
 		aiProcesses = func() (string, error) { return ps, nil }
@@ -994,6 +1003,43 @@ func TestCleanAIToolsOrca(t *testing.T) {
 		if !fileExists(filepath.Join(root, kept)) {
 			t.Fatalf("%s should stay", kept)
 		}
+	}
+}
+
+func TestCleanAIToolsOrcaRunning(t *testing.T) {
+	home := orcaFixture(t)
+	root := filepath.Join(home, ".orca")
+	aiProcesses = func() (string, error) {
+		return "/bin/zsh\nnode /Users/me/.nvm/versions/node/v22.23.1/bin/orca --resume\n", nil
+	}
+	scan, _ := (Cleaner{}).ScanAITools(context.Background())
+	orca := aiTool_(t, scan, "orca")
+	if !orca.Running || !slices.Equal(orca.RunningApps, []string{"cli"}) || aiTool_(t, scan, "claude").Running || aiTool_(t, scan, "codex").Running {
+		t.Fatalf("orca = %+v", orca)
+	}
+	if p := aiPart_(t, orca, "orca.logs"); !p.Running || p.RunSafe {
+		t.Fatalf("logs = %+v", p)
+	}
+	res, _ := (Cleaner{}).CleanAITools(context.Background(), []AISelection{
+		{Tool: "orca", Part: "orca.logs"},
+		{Tool: "orca", Part: "orca.summaryCache"},
+		{Tool: "orca", Part: "orca.pricingCache"},
+		{Tool: "orca", Part: "orca.taskSessions"},
+		{Tool: "orca", Part: "orca.sessions", Groups: []string{"2026/09"}},
+	})
+	// Only sessions last written over a day ago may go while Orca runs.
+	for i, r := range res.Parts[:4] {
+		if r.Skipped != "running" || r.Moved != 0 {
+			t.Fatalf("part %d = %+v", i, r)
+		}
+	}
+	for _, kept := range []string{"logs/orca.log", "summary_cache/a.json", "pricing-cache.json", "task-sessions/0b7c/state.json"} {
+		if !fileExists(filepath.Join(root, kept)) {
+			t.Fatalf("%s should stay while Orca runs", kept)
+		}
+	}
+	if r := res.Parts[4]; r.Skipped != "" || r.Moved != 1 || fileExists(filepath.Join(root, "sessions/2026/09/03/session-1757000000000-a.jsonl")) {
+		t.Fatalf("sessions while running = %+v", r)
 	}
 }
 

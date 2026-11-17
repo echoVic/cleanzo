@@ -218,6 +218,9 @@ var aiTools = []aiTool{
 		// Orca (@blade-ai/orca), a terminal coding agent. Its sessions
 		// follow Codex's layout: sessions/yyyy/mm/dd/session-*.jsonl.
 		ID: "orca", Name: "Orca", Home: orcaHome(),
+		// The npm launcher runs as "node …/orca" and starts the native
+		// binary …/vendor/<triple>/bin/orca from its package folder.
+		Process: []string{"/orca ", "/orca\n", "@blade-ai/orca/"},
 		Parts: []aiPart{
 			{ID: "orca.sessions", Path: "sessions/", Level: aiSensitive, Sessions: "codex-months", RunSafe: true},
 			{ID: "orca.taskSessions", Path: "task-sessions/", Level: aiOptional, Entries: true},
