@@ -86,6 +86,28 @@ test("Windows settings omit the permission section; macOS keeps its controls", a
   } finally { setPlatformForTest(undefined); }
 });
 
+test("dev projects can be turned off right after developer tools on macOS; Windows has no such group", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { SettingsPage } = await import("../src/react/settings/SettingsPage");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { t } = await import("../src/i18n");
+  const render = () => renderToStaticMarkup(createElement(SettingsPage, { callbacks: { changeLanguage: async () => {} }, session: 0 }));
+  try {
+    setPlatformForTest("darwin");
+    const html = render();
+    const dev = html.indexOf(`<span>${t("junk.group.dev")}</span>`);
+    const projects = html.indexOf(`<span>${t("junk.group.projects")}</span>`);
+    expect(dev).toBeGreaterThan(-1);
+    expect(projects).toBeGreaterThan(dev);
+    expect(html.indexOf(`<span>${t("settings.reviewItems")}</span>`)).toBeGreaterThan(projects);
+    setPlatformForTest("win32");
+    expect(render()).not.toContain(`<span>${t("junk.group.projects")}</span>`);
+  } finally { setPlatformForTest(undefined); }
+  expect(nextDisabledGroups([], "projects", false)).toEqual(["projects"]);
+});
+
 test("settings page offers system, light and dark appearance modes", async () => {
   await import("./setup-dom");
   const { createElement } = await import("react");

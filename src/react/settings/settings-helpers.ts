@@ -1,8 +1,8 @@
 import { baseName } from "../../platform";
 import type { Settings } from "../../mygo";
 
-/** 设置页的 6 个扫描分组，顺序与旧原生页一致。 */
-export const GROUPS = ["system", "apps", "browsers", "updates", "dev", "review"] as const;
+/** 设置页可关闭的扫描分组，顺序与垃圾清理页一致；开发项目只在 macOS 上有。 */
+export const GROUPS = ["system", "apps", "browsers", "updates", "dev", "projects", "review"] as const;
 export type GroupId = (typeof GROUPS)[number];
 
 /** 空数组在 Go 的绑定中可能为 null。 */

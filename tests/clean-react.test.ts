@@ -6,6 +6,7 @@ import type { JunkItem, Settings, ScanSummary } from "../src/mygo";
 import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
 import { changes, fakeStream, nodes, textOf } from "./page-harness";
+import { PathText } from "../src/ui/components/path-text";
 import { CleanPage } from "../src/react/clean/CleanPage";
 import { cleanApi } from "../src/react/clean/api";
 import { NumberTicker } from "../src/ui/motion/NumberTicker";
@@ -616,11 +617,61 @@ test("scan progress counts measured rules and the phase is the first group still
 test("scan phase labels exist in both languages", () => {
   for (const lang of ["zh", "en"] as const) {
     setLang(lang);
-    for (const g of ["system", "apps", "browsers", "updates", "dev", "review", "custom"]) {
+    for (const g of ["system", "apps", "browsers", "updates", "dev", "projects", "review", "custom"]) {
       expect(t(`scan.phase.${g}` as never)).not.toBe(`scan.phase.${g}`);
     }
     expect(t("scan.progressCount", { done: 3, total: 56 })).toBe(lang === "zh" ? "已检查 3 / 56 项" : "Checked 3 of 56");
   }
+});
+
+test("dev projects come right after developer tools, unselected, with the project's path and idle days beneath", async () => {
+  const env = changes();
+  try {
+    const stream = fakeStream<import("../src/mygo").JunkScanEvent>();
+    env.assign(cleanApi, { startScan: () => stream });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const cache = item("dev.npm", "dev", 1024);
+    const project = item("project:/Users/demo/code/site", "projects", 4096, {
+      name: "site", default: false, trash: true, idleDays: 37, paths: ["~/code/site/node_modules", "~/code/site/.next"],
+    });
+    const review = item("review.installers", "review", 2048, { default: false, trash: true });
+    stream.emit({ kind: "start", items: [review, project, cache] });
+    for (const it of [review, project, cache]) stream.emit({ kind: "item", item: it });
+    stream.finish();
+    await h.settle();
+    const groups = h.all().filter((n) => n.props.className === "group-name").map((n) => textOf(n));
+    expect(groups).toEqual([t("junk.group.dev"), t("junk.group.projects"), t("junk.group.review")]);
+    expect(itemTitle(project, ruleName)).toBe("site");
+    expect(h.find((n) => n.props.ariaLabel === t("junk.select", { name: "site" }))!.props.checked).toBe(false);
+    expect(h.ofType(NumberTicker)[0]!.props.value).toBe(1024);
+    const row = nodes(h.find((n) => n.props["data-key"] === project.id));
+    const desc = row.find((n) => n.props.className === "cat-desc muted")!;
+    expect(nodes(desc.props.children).find((n) => n.type === PathText)?.props.path).toBe("~/code/site");
+    expect(row.some((n) => n.props.className === "cat-sub muted" && textOf(n) === "37 天没有改动")).toBe(true);
+  } finally { env.restore(); }
+  setLang("en");
+  expect(t("junk.projectIdle", { n: 37 })).toBe("No changes for 37 days");
+  expect(t("junk.group.projects")).toBe("Dev Projects");
+  setLang("zh");
+  expect(t("junk.group.projects")).toBe("开发项目");
+});
+
+test("a project row explains its rebuildable contents, how they come back, and that they go to the Trash", () => {
+  const env = changes();
+  try {
+    for (const lang of ["zh", "en"] as const) {
+      env.lang(lang);
+      const e = cleanupExplanation(item("project:/Users/demo/code/site", "projects", 1, { default: false, trash: true }), t);
+      expect(e.content).toBe(t("clean.explain.project"));
+      expect(e.content).toContain(lang === "zh" ? "构建产物" : "build output");
+      expect(e.content).toContain(lang === "zh" ? "依赖" : "dependencies");
+      expect(e.consequence).toBe(t("clean.explain.projectEffect"));
+      expect(e.consequence).toContain(lang === "zh" ? "重新生成" : "recreates");
+      expect(e.method).toBe(t("clean.explain.trash"));
+    }
+  } finally { env.restore(); }
 });
 
 test("the clean-complete moment plays only for a full, error-free clean that freed space", async () => {

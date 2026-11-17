@@ -3,7 +3,7 @@
 // 扫描 / 清理事件归约、确认计划与收尾统计。
 import type { CleanResult, JunkItem, JunkSelection, ScanSummary, Settings, SubItem } from "../../mygo";
 
-export const GROUPS = ["system", "apps", "browsers", "updates", "dev", "review", "custom"] as const;
+export const GROUPS = ["system", "apps", "browsers", "updates", "dev", "projects", "review", "custom"] as const;
 
 /** 扫描进度：已测完（离开 pending）的规则数 / 规则总数；start 事件已经给出全部规则。 */
 export function scanProgress(st: ScanState): { done: number; total: number } {
@@ -16,9 +16,14 @@ export function scanPhase(st: ScanState): (typeof GROUPS)[number] | null {
   return GROUPS.find((g) => st.items.some((it) => it.group === g && st.pending.has(it.id))) ?? null;
 }
 
-/** app:/custom: 前缀的项名称来自后端 name，其余规则名来自 i18n。 */
+/** app:/custom:/project: 前缀的项名称来自后端 name，其余规则名来自 i18n。 */
 export function isDynamicId(id: string): boolean {
-  return id.startsWith("app:") || id.startsWith("custom:");
+  return id.startsWith("app:") || id.startsWith("custom:") || id.startsWith("project:");
+}
+
+/** 开发项目行的项目路径（ID 去掉 project: 前缀）；其他行为 null。 */
+export function projectPath(it: JunkItem): string | null {
+  return it.id.startsWith("project:") ? it.id.slice("project:".length) : null;
 }
 
 /** 行 / 分组显示名：动态项用后端 name，规则项用 i18n 规则名。 */

@@ -16,12 +16,14 @@ export function commandTool(id: string): string | undefined {
 export function cleanupExplanation(it: JunkItem, t: ReturnType<typeof useT>) {
   const custom = it.id.startsWith("custom:");
   const app = it.id.startsWith("app:");
+  const project = it.id.startsWith("project:");
   const browser = it.group === "browsers";
   const command = commandTool(it.id) !== undefined;
-  const content = custom ? t("clean.explain.custom") : app ? t("clean.explain.app") : ruleDesc(it.id);
+  const content = custom ? t("clean.explain.custom") : app ? t("clean.explain.app") : project ? t("clean.explain.project") : ruleDesc(it.id);
   const consequence = custom ? t("clean.explain.customEffect")
     : browser ? t("clean.explain.browserEffect")
     : app ? t("clean.explain.appEffect")
+    : project ? t("clean.explain.projectEffect")
     : it.trash ? t("clean.explain.trashEffect")
     : command ? t("clean.explain.toolEffect") : t("clean.explain.deleteEffect");
   const method = t(command ? "clean.explain.tool" : it.trash ? "clean.explain.trash" : "clean.explain.delete");

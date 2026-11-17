@@ -26,7 +26,7 @@ import { CleanResults } from "./CleanResults";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
-  isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible, problemKey,
+  isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible, problemKey, projectPath,
   removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
   type CleanPlan, type RowState, type ScanState, emptySel,
@@ -40,6 +40,7 @@ const groupIcons: Record<string, React.ReactNode> = {
   browsers: <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></>,
   updates: <path d="M4 10a8 8 0 0 1 14-5l2 2M20 3v4h-4M20 14a8 8 0 0 1-14 5l-2-2M4 21v-4h4" />,
   dev: <path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 4l-4 16" />,
+  projects: <><path d="M3 7V5h7l2 3h9v12H3z" /><path d="m10 12-2 2 2 2m4-4 2 2-2 2" /></>,
   review: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6m0 3v1" /></>,
   custom: <path d="M3 7V5h7l2 3h9v12H3z" />,
 };
@@ -568,6 +569,7 @@ export function CleanPage() {
     const explanation = cleanupExplanation(it, t);
     const open = expanded.has(it.id);
     const noteKey = row ? `row:${row.state}` : st.pending.has(it.id) ? "pending" : "size";
+    const project = projectPath(it);
     return (
       <div className={`junk-item${dimmed ? " is-dim" : ""}`} key={it.id} data-key={it.id}>
         <div className="cat-row junk-row">
@@ -588,7 +590,8 @@ export function CleanPage() {
               {it.denied ? <Tag text={t("junk.denied")} kind="warn" /> : null}
               {it.trash ? <Tag text={t("cat.toTrash")} /> : null}
             </div>
-            <div className="cat-desc muted">{rowDesc(it)}</div>
+            <div className="cat-desc muted">{project ? <PathText path={displayPath(project)} /> : rowDesc(it)}</div>
+            {project && it.idleDays != null ? <div className="cat-sub muted">{t("junk.projectIdle", { n: it.idleDays })}</div> : null}
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
             {it.size >= 0 && !it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}

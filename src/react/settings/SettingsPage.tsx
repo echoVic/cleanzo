@@ -465,7 +465,7 @@ export function SettingsPage({ callbacks, session, focus }: Props) {
           <div className="setting-row setting-stack">
             <h3 className="setting-label">{t("settings.scope")}</h3>
             <div className="settings-groups">
-              {GROUPS.map((g) => (
+              {GROUPS.filter((g) => g !== "projects" || !isWindows()).map((g) => (
                 <div key={g}>
                   <label className="check">
                     <Checkbox

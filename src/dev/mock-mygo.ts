@@ -161,6 +161,10 @@ function createRuntime(): Runtime {
     // pnpm 装着但跑不起来（corepack 载入不了它）：行留着、不能选。真实输出以堆栈和
     // 「Node.js v22.23.1」结尾，展开看到的是其中点名错误的那一行。
     junk("dev.pnpm-store", "dev", "pnpm 存储", 0, "", { paths: [], problem: "tool-failed", problemDetail: "Error: Cannot find module '/Users/demo/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'" }),
+    junk("project:" + home("~/Documents/Projects/old-site"), "projects", "old-site", 1.2 * GB, "~/Documents/Projects/old-site/node_modules", {
+      default: false, trash: true, idleDays: 37,
+      paths: [home("~/Documents/Projects/old-site/node_modules"), home("~/Documents/Projects/old-site/.next")],
+    }),
     junk("review.installers", "review", "安装包", sum(installers), "~/Downloads", { files: 3, default: false, trash: true, subs: installers }),
   ];
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });

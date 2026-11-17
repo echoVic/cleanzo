@@ -1352,6 +1352,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .junk-icon-browsers { --c: #0891b2; }
 .junk-icon-updates { --c: #d97706; }
 .junk-icon-dev { --c: #6366f1; }
+.junk-icon-projects { --c: #7c3aed; }
 .junk-icon-review { --c: #c24162; }
 .junk-icon-custom { --c: #64748b; }
 .junk-details { padding: 4px 16px 12px 74px; }
