@@ -713,3 +713,70 @@ func TestProjectLinkedWorktreeIdleness(t *testing.T) {
 		})
 	}
 }
+
+// TestProjectGitHardening: the scan's git runs no file system monitor the
+// repository configures, takes no optional locks, never prompts, and answers
+// for the repository it is pointed at, not one an inherited GIT_DIR names.
+func TestProjectGitHardening(t *testing.T) {
+	env := projectEnv(t)
+	git := useGit(t, &env)
+	projectClock(t)
+	app := filepath.Join(env.home, "code", "app")
+	writeText(t, filepath.Join(app, "package.json"), "{}")
+	writeFile(t, filepath.Join(app, "node_modules", "dep", "index.js"), 100)
+	gitRepo(t, git, app, "", "package.json")
+	writeText(t, filepath.Join(app, ".git", "info", "exclude"), "node_modules/\n")
+	tools := t.TempDir()
+	marker := filepath.Join(tools, "fsmonitor-ran")
+	fakeTool(t, tools, "fsmonitor", "touch '"+marker+"'\n")
+	gitIn(t, git, app, "config", "core.fsmonitor", filepath.Join(tools, "fsmonitor"))
+	other := filepath.Join(tools, "other")
+	gitRepo(t, git, other, "")
+	logged := filepath.Join(tools, "git.log")
+	fakeTool(t, tools, "git", `printf '%s\n' "optional_locks=${GIT_OPTIONAL_LOCKS-unset} terminal_prompt=${GIT_TERMINAL_PROMPT-unset} git_dir=${GIT_DIR-unset} args=$*" >> '`+logged+`'
+GIT_CONFIG_NOSYSTEM=1 exec '`+git+`' "$@"
+`)
+	env.findTool = func(name string) string {
+		if name == "git" {
+			return filepath.Join(tools, "git")
+		}
+		return ""
+	}
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	rows := projectRows(t, env)
+	log, _ := os.ReadFile(logged)
+	want := "optional_locks=0 terminal_prompt=0 git_dir=unset args=-C " + app + " -c core.fsmonitor=false check-ignore -z --stdin\n"
+	if got := rowIDs(rows); !slices.Equal(got, []string{"project:" + app}) || exists(marker) || string(log) != want {
+		t.Fatalf("rows = %v, fsmonitor ran %v, git saw:\n%s\nwant:\n%s", got, exists(marker), log, want)
+	}
+}
+
+// TestProjectHomeIsNeverAProject: neither a repository in the home folder
+// nor a package.json there makes the home folder a project.
+func TestProjectHomeIsNeverAProject(t *testing.T) {
+	notHome := func(t *testing.T, env junkEnv) {
+		t.Helper()
+		if got := rowIDs(projectRows(t, env)); slices.Contains(got, "project:"+env.home) {
+			t.Fatalf("rows = %v", got)
+		}
+	}
+	t.Run("repository", func(t *testing.T) {
+		env := projectEnv(t)
+		git := useGit(t, &env)
+		projectClock(t)
+		app := filepath.Join(env.home, "code", "app")
+		writeText(t, filepath.Join(app, "package.json"), "{}")
+		writeFile(t, filepath.Join(app, "node_modules", "dep", "index.js"), 100)
+		gitRepo(t, git, env.home, "node_modules/\n")
+		notHome(t, env)
+	})
+	t.Run("package", func(t *testing.T) {
+		env := projectEnv(t)
+		projectClock(t)
+		writeText(t, filepath.Join(env.home, "package.json"), "{}")
+		writeFile(t, filepath.Join(env.home, "node_modules", "dep", "index.js"), 100)
+		notHome(t, env)
+	})
+}
