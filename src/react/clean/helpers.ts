@@ -36,6 +36,11 @@ export function isSelectable(it: JunkItem): boolean {
   return it.size > 0 && !it.running && !it.denied && !it.problem;
 }
 
+/** 行不能清理的原因文案；不认识的原因码按「工具无法运行」显示，不露出原始键名。 */
+export function problemKey(problem: string): DictKey {
+  return problem === "tool-timeout" ? "junk.problem.tool-timeout" : "junk.problem.tool-failed";
+}
+
 export function subsOf(it: JunkItem): SubItem[] {
   return it.subs ?? [];
 }

@@ -26,7 +26,7 @@ import { CleanResults } from "./CleanResults";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
-  isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible,
+  isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible, problemKey,
   removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
   type CleanPlan, type RowState, type ScanState, emptySel,
@@ -532,8 +532,8 @@ export function CleanPage() {
       );
     }
     if (st.pending.has(it.id)) return <span className="spin" aria-label={t("cat.scanning")} />;
-    // 工具无法运行：不显示大小，写明原因。
-    if (it.problem) return <span className="cat-note-text muted">{t(`junk.problem.${it.problem}` as DictKey, { tool: commandTool(it.id) ?? itemTitle(it, ruleName) })}</span>;
+    // 工具无法运行或响应超时：不显示大小，写明原因。
+    if (it.problem) return <span className="cat-note-text muted">{t(problemKey(it.problem), { tool: commandTool(it.id) ?? itemTitle(it, ruleName) })}</span>;
     if (it.denied && discoveredSize(it) === 0) return "--";
     return (
       <>

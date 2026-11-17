@@ -5,7 +5,7 @@ import { setLang } from "./setup-dom";
 import type { JunkItem, Settings, ScanSummary } from "../src/mygo";
 import { ruleDesc, ruleName, t } from "../src/i18n";
 import { errText, human } from "../src/shared";
-import { changes, fakeStream, textOf } from "./page-harness";
+import { changes, fakeStream, nodes, textOf } from "./page-harness";
 import { CleanPage } from "../src/react/clean/CleanPage";
 import { cleanApi } from "../src/react/clean/api";
 import { NumberTicker } from "../src/ui/motion/NumberTicker";
@@ -407,7 +407,7 @@ test("a tool that cannot run reads why where its size would be and shows the too
     const h = env.page(CleanPage, {});
     await h.settle();
     h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
-    const broken = item("dev.pnpm-store", "dev", 0, { paths: [], problem: "tool-failed", problemDetail: "Internal Error: Cannot find matching keyid" });
+    const broken = item("dev.pnpm-store", "dev", 0, { paths: [], problem: "tool-failed", problemDetail: "Error: Cannot find module '/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'" });
     stream.emit({ kind: "start", items: [{ ...broken, size: -1 }] });
     stream.emit({ kind: "item", item: broken });
     stream.finish();
@@ -421,13 +421,48 @@ test("a tool that cannot run reads why where its size would be and shows the too
       const note = h.find((n) => n.props.className === "cat-note" && textOf(n).includes(reason));
       expect(note).toBeDefined();
       expect(textOf(note!)).not.toContain(human(0));
-      // 展开区：规则原有的说明在上，工具最后一行输出在下。
+      // 展开区：规则原有的说明在上，工具输出里说明出错的那一行在下。
       const details = h.find((n) => n.props.className === "junk-details" && textOf(n).includes(broken.problemDetail!))!;
       expect(details).toBeDefined();
       const text = textOf(details);
       expect(text.indexOf(cleanupExplanation(broken, t).method)).toBeLessThan(text.indexOf(broken.problemDetail!));
       expect(h.find((n) => n.props.ariaLabel === t("junk.select", { name: ruleName(broken.id) }))!.props.disabled).toBe(true);
       expect(h.find((n) => n.props.ariaLabel === t("junk.select", { name: t("junk.group.dev") }))!.props.disabled).toBe(true);
+    }
+  } finally { env.restore(); }
+});
+
+test("a timed-out tool says so, an unknown problem reads as a tool that cannot run, and an empty detail adds no line", async () => {
+  const env = changes();
+  try {
+    const stream = fakeStream<import("../src/mygo").JunkScanEvent>();
+    env.assign(cleanApi, { startScan: () => stream });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const slow = item("dev.go-mod", "dev", 0, { paths: [], problem: "tool-timeout" });
+    const odd = item("dev.homebrew-old", "dev", 0, { paths: [], problem: "tool-vanished" });
+    stream.emit({ kind: "start", items: [slow, odd].map((it) => ({ ...it, size: -1 })) });
+    stream.emit({ kind: "item", item: slow });
+    stream.emit({ kind: "item", item: odd });
+    stream.finish();
+    await h.settle();
+    for (const [lang, slowText, oddText] of [
+      ["zh", "go 响应超时，暂时不能清理", "brew 无法运行，暂时不能清理"],
+      ["en", "go timed out, so this cannot be cleaned for now", "brew cannot run, so this cannot be cleaned for now"],
+    ] as const) {
+      env.lang(lang);
+      h.setProps({});
+      await h.settle();
+      for (const [it, text] of [[slow, slowText], [odd, oddText]] as const) {
+        const row = h.find((n) => n.props["data-key"] === it.id);
+        expect(row).toBeDefined();
+        expect(textOf(nodes(row).find((n) => n.props.className === "cat-note"))).toBe(text);
+        // 没有可用的输出行：展开区只有规则说明，不多出一行。
+        const details = nodes(row).find((n) => n.props.className === "junk-details");
+        expect(textOf(details)).toContain(cleanupExplanation(it, t).method);
+        expect(nodes(details).some((n) => n.props.className === "cleanup-locations")).toBe(false);
+      }
     }
   } finally { env.restore(); }
 });
