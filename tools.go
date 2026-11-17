@@ -26,7 +26,8 @@ type toolCommand struct {
 }
 
 // toolFailure is an estimate whose tool command failed or ran out of time.
-// It reads as the command's error; line is what the tool said last.
+// It reads as the command's error; line is the line of the tool's output
+// that says what went wrong, empty when none does.
 type toolFailure struct {
 	err  error
 	line string
@@ -38,27 +39,60 @@ func (f *toolFailure) Unwrap() error { return f.err }
 // toolLineLimit is how many characters of a failed tool's line a row keeps.
 const toolLineLimit = 300
 
-// lastToolLine is a failed command's last non-empty output line, or the
-// error text when the command printed nothing.
-func lastToolLine(out string, err error) string {
-	line := strings.TrimSpace(out)
-	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
-		line = line[i+1:]
+// toolNoise matches output lines that never say what went wrong: stack
+// frames, Node's version trailer, caret markers under a source line, lines
+// of brackets and braces alone, Node's internal source locations, and a
+// shell script's report of the child that the timeout killed.
+var toolNoise = regexp.MustCompile(`^(\s+at |\s*Node\.js v\d|\s*\^+\s*$|[\s\[\](){},;]*$|\s*node:internal/|.*: line \d+:\s+\d+ (Killed|Terminated))`)
+
+// toolOutputLine picks the line of a failed tool's output that says what
+// went wrong: the last one naming an error ("Error", "error", an ERR_ code),
+// or else the last line that is not noise. Lines inside an object or list
+// the tool printed (a line ending in "{" or "[" up to its closing line) are
+// details of the line that opened it, which stands for them without its
+// opening bracket. It returns "" when no line is left.
+func toolOutputLine(out string) string {
+	var named, last string
+	depth := 0
+	for _, raw := range strings.Split(out, "\n") {
+		line := strings.TrimSpace(raw)
+		inside := depth > 0
+		if strings.HasPrefix(line, "}") || strings.HasPrefix(line, "]") {
+			depth = max(0, depth-1)
+		}
+		opens := strings.HasSuffix(line, "{") || strings.HasSuffix(line, "[")
+		if opens {
+			depth++
+		}
+		if inside || toolNoise.MatchString(raw) {
+			continue
+		}
+		if opens {
+			line = strings.TrimRight(line, " \t{[:")
+		}
+		if line == "" {
+			continue
+		}
+		last = line
+		if strings.Contains(strings.ToLower(line), "error") || strings.Contains(line, "ERR_") {
+			named = line
+		}
 	}
-	if line == "" {
-		line = err.Error()
+	if named != "" {
+		return named
 	}
-	return line
+	return last
 }
 
-// estimateError makes a failed estimate command carry the tool's last line,
-// cut to toolLineLimit characters. A command the safety checks refused is
-// not the tool failing and is returned as it is.
+// estimateError makes a failed estimate command carry the line of the
+// tool's output that says what went wrong, cut to toolLineLimit characters.
+// A command the safety checks refused is not the tool failing and is
+// returned as it is.
 func estimateError(out string, err error) error {
 	if err == nil || errors.Is(err, errBlocked) {
 		return err
 	}
-	line := lastToolLine(out, err)
+	line := toolOutputLine(out)
 	if r := []rune(line); len(r) > toolLineLimit {
 		line = string(r[:toolLineLimit])
 	}
@@ -66,7 +100,7 @@ func estimateError(out string, err error) error {
 }
 
 // runEstimate runs a tool's read-only estimate command; a failure carries
-// the tool's last line (see estimateError).
+// the tool's line (see estimateError).
 func runEstimate(ctx context.Context, tool string, args []string, timeout time.Duration) (string, error) {
 	out, err := runTool(ctx, tool, args, timeout)
 	return out, estimateError(out, err)
@@ -419,7 +453,11 @@ func cleanTool(ctx context.Context, rule *Rule, env junkEnv, hooks cleanHooks, c
 		if errors.Is(err, context.DeadlineExceeded) {
 			res.Skipped = "timeout"
 		} else if !errors.Is(err, context.Canceled) {
-			res.Failed = []string{lastToolLine(out, err)}
+			line := toolOutputLine(out)
+			if line == "" {
+				line = err.Error()
+			}
+			res.Failed = []string{line}
 		}
 		return res
 	}

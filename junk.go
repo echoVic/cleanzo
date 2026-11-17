@@ -41,8 +41,8 @@ type JunkItem struct {
 	Details        []JunkDetail `json:"details,omitempty"`
 	DetailsDropped int          `json:"detailsDropped,omitempty"`
 	IdleDays       int          `json:"idleDays,omitempty"`      // project rows: whole days since anything in the project changed
-	Problem        string       `json:"problem,omitempty"`       // why the row cannot be cleaned now: "tool-failed"
-	ProblemDetail  string       `json:"problemDetail,omitempty"` // the tool's last output line, for Problem "tool-failed"
+	Problem        string       `json:"problem,omitempty"`       // why the row cannot be cleaned now: "tool-failed" or "tool-timeout"
+	ProblemDetail  string       `json:"problemDetail,omitempty"` // the line of the tool's output that says what went wrong, if any
 }
 
 // JunkDetail records a candidate outcome; it never authorizes deletion.
@@ -752,11 +752,15 @@ func planItem(ctx context.Context, spec itemSpec, env junkEnv, sem chan struct{}
 		if ctx.Err() != nil {
 			return plan
 		}
-		// A tool that cannot run keeps its row, without a size, saying what it
-		// printed last. Refused and overlapping roots stay hidden.
+		// A tool that cannot run, or runs out of its own time, keeps its row,
+		// without a size, with the line of its output that says what went
+		// wrong. Refused and overlapping roots stay hidden.
 		var failure *toolFailure
 		if errors.As(err, &failure) {
 			plan.item.Problem, plan.item.ProblemDetail = "tool-failed", failure.line
+			if errors.Is(err, context.DeadlineExceeded) {
+				plan.item.Problem = "tool-timeout"
+			}
 			return plan
 		}
 		if err != nil || env.commandClaims[spec.rule.ID].overlaps(roots) {

@@ -182,18 +182,19 @@ echo "would free approximately 1GB"`)
 
 // TestFailedToolMeasurementKeepsRow keeps estimate failures local to their
 // row: a tool whose estimate command fails or runs out of time stays listed
-// without a size and says what it printed last, and a clean of it is
-// skipped as before.
+// without a size, saying what went wrong in the tool's own words and never
+// in Go's, and a clean of it is skipped as before.
 func TestFailedToolMeasurementKeepsRow(t *testing.T) {
 	for _, c := range []struct {
-		name, tool, script, detail string
-		timeout                    *time.Duration
+		name, tool, script, problem, detail string
+		timeout                             *time.Duration
 	}{
-		{name: "brew", tool: "brew", script: `echo "would free approximately 1GB"; echo "Error: no space left"; echo; exit 1`, detail: "Error: no space left"},
-		{name: "pnpm", tool: "pnpm", script: `printf 'Preparing pnpm@12.0.0\nInternal Error: Cannot find matching keyid\n  \n' >&2; exit 1`, detail: "Internal Error: Cannot find matching keyid"},
-		{name: "silent", tool: "go", script: `exit 3`, detail: "exit status 3"},
-		{name: "long", tool: "brew", script: `echo ` + strings.Repeat("错", 400) + `; exit 1`, detail: strings.Repeat("错", 300)},
-		{name: "timeout", tool: "go", script: `sleep 5`, detail: context.DeadlineExceeded.Error(), timeout: &goModCleanup.Timeout},
+		{name: "brew", tool: "brew", script: `echo "would free approximately 1GB"; echo "Error: no space left"; echo; exit 1`, problem: "tool-failed", detail: "Error: no space left"},
+		{name: "pnpm", tool: "pnpm", script: "cat >&2 <<'EOF'\n" + nodeModuleNotFound + "EOF\nexit 1", problem: "tool-failed", detail: "Error: Cannot find module '/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'"},
+		{name: "silent", tool: "go", script: `exit 3`, problem: "tool-failed", detail: ""},
+		{name: "long", tool: "brew", script: `echo ` + strings.Repeat("错", 400) + `; exit 1`, problem: "tool-failed", detail: strings.Repeat("错", 300)},
+		{name: "timeout", tool: "go", script: `sleep 5`, problem: "tool-timeout", detail: "", timeout: &goModCleanup.Timeout},
+		{name: "timeout with output", tool: "go", script: "echo 'go: downloading example.com/mod v1.0.0'\nsleep 5", problem: "tool-timeout", detail: "go: downloading example.com/mod v1.0.0", timeout: &goModCleanup.Timeout},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			env := testEnv(t)
@@ -210,8 +211,8 @@ func TestFailedToolMeasurementKeepsRow(t *testing.T) {
 				t.Fatalf("failed tool must still start pending: %v", itemIDs(specs))
 			}
 			items := measureItems(context.Background(), specs, env, nil, nil)
-			if len(items) != 1 || items[0].Size != 0 || items[0].Problem != "tool-failed" || items[0].ProblemDetail != c.detail || len(items[0].Paths) != 0 {
-				t.Fatalf("failed estimate = %+v, want detail %q", items, c.detail)
+			if len(items) != 1 || items[0].Size != 0 || items[0].Problem != c.problem || items[0].ProblemDetail != c.detail || len(items[0].Paths) != 0 {
+				t.Fatalf("failed estimate = %+v, want problem %q, detail %q", items, c.problem, c.detail)
 			}
 			if c.name != "brew" {
 				return
@@ -461,11 +462,11 @@ func TestToolCleanupRejectsUnsafeRoots(t *testing.T) {
 func TestToolFailureContinuesAndUsageFailsClosed(t *testing.T) {
 	env := testEnv(t)
 	bin := t.TempDir()
-	fakeTool(t, bin, "brew", `case "$*" in *--dry-run*) echo "would free approximately 1GB";; *) printf 'first\nlast failure\n'; exit 2;; esac`)
+	fakeTool(t, bin, "brew", `case "$*" in *--dry-run*) echo "would free approximately 1GB";; *) printf 'Error: Permission denied @ apply2files - /opt/homebrew/Cellar/x\nPlease report this issue:\n  https://docs.brew.sh/Troubleshooting\n'; exit 2;; esac`)
 	stageTools(t, &env, bin)
 	writeFile(t, filepath.Join(env.home, ".npm/_npx/x"), 100)
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.homebrew-old"}, {ID: "dev.npx"}}, time.Time{}, cleanHooks{})
-	if len(res) != 2 || res[0].Skipped != "failed" || !slices.Equal(res[0].Failed, []string{"last failure"}) || res[1].Freed != 100 {
+	if len(res) != 2 || res[0].Skipped != "failed" || !slices.Equal(res[0].Failed, []string{"Error: Permission denied @ apply2files - /opt/homebrew/Cellar/x"}) || res[1].Freed != 100 {
 		t.Fatalf("failure isolation = %+v", res)
 	}
 	psCommands = func() ([]byte, error) { return nil, errors.New("cannot list processes") }
