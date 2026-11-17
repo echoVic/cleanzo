@@ -135,20 +135,24 @@ func TestHomebrewKeepsItsIndex(t *testing.T) {
 // TestKeepHoldsBackEntries: the entries a rule's Keep names are offered
 // neither by the rule nor by a later rule or custom folder, also when an
 // earlier claim inside one splits it; a rule whose Keep cannot tell its
-// entries apart shows no row and still holds them all back.
+// entries apart shows no row and still holds them all back. The rule's
+// target filters names, so its folder is not reserved and only the claims on
+// the held entries keep the later rule and the custom folder out.
 func TestKeepHoldsBackEntries(t *testing.T) {
 	for _, ok := range []bool{true, false} {
 		t.Run(fmt.Sprint(ok), func(t *testing.T) {
 			env := testEnv(t)
 			tools := filepath.Join(env.home, "tools")
-			for _, rel := range []string{"old/x", "Current/x", "Current/inner/y"} {
+			for _, rel := range []string{"old/x", "Current/x", "Current/inner/y", "pinned/z"} {
 				writeFile(t, filepath.Join(tools, rel), 100)
 			}
 			calls := 0
 			env.rules = []Rule{
 				{ID: "test.inner", Group: groupDev, Targets: []Target{{Pattern: "tools/Current/inner", Mode: entriesOf}}},
-				{ID: "test.versions", Group: groupReview, Trash: true, Targets: []Target{{Pattern: "tools", Mode: entriesOf}},
-					Keep: func(junkEnv) ([]string, bool) { calls++; return []string{"current"}, ok }},
+				{ID: "test.versions", Group: groupReview, Trash: true, Targets: []Target{{Pattern: "tools", Mode: entriesOf, Names: []string{"*"}}},
+					Keep: func(junkEnv) ([]string, bool) { calls++; return []string{"current", "pinned"}, ok }},
+				// Reaches the kept, split entry and the offered one; the custom
+				// folder on tools is what would take the kept pinned entry.
 				{ID: "test.later", Group: groupDev, Targets: []Target{{Pattern: "tools/Current", Mode: entriesOf}, {Pattern: "tools/old", Mode: entriesOf}}},
 			}
 			env.settings.Custom = []CustomFolder{{Path: tools, Enabled: true}}
