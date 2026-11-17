@@ -162,3 +162,39 @@ Tests to write first: `TestListAITools` expects four tools in order; an Orca fix
 - [ ] `rustup toolchain list` against a staged `RUSTUP_HOME` with one toolchain folder removed still lists the rest without error.
 - [ ] The dev build opened once: the 开发项目 group, a toolchain row, an app row marked running, the pnpm problem row and the Orca page each look right in zh and en, light and dark.
 - [ ] No real clean is run.
+
+## Validation ledger (2026-11-17)
+
+Branch `feat/dev-space-batch`, head `7f339ab`. Five Opus implementers in their own worktrees, a task review each, one fix round for Tasks 1, 2 and 3, a whole-branch review, one fix wave and its re-review. Everything below ran on the maintainer's Mac (macOS 27.2.1), read-only; no real clean was run.
+
+- `test -z "$(gofmt -l .)"`, `go vet ./...` and both Windows `go vet` runs: clean. `bun run generate` leaves `src/mygo.ts` unchanged.
+- `go test -race -count=1 ./...` with the CI skip: `ok  	cleanzo	263.070s`.
+- `bun run typecheck`: clean. `bun run test:web`: 354 pass, 0 fail. `bun run build:web`: built (Vite's existing chunk-size warning).
+- One real junk scan through `currentJunkEnv()`, built from `master` and from the branch, two runs each: `master` 22.6 and 20.7 s, branch 27.0 and 26.8 s (4 to 6 s more, inside the 10 s budget). Expansion before the first screen: 9.4 and 8.4 s against 9.2 and 8.9 s. Rows 122 to 142.
+- New rows on this Mac, none preselected: 12 project rows (5.76 GB, idle 15 to 177 days), `review.node-versions` 5.65 GB, `review.rust-toolchains` 1.47 GB, `app.lark` 7.70 GB, `app.doubao-work` 8.97 GB and `app.aime` 3.60 GB (all three running, so shown and not cleanable), `app.doubao` 0.91 GB, `dev.pnpm-store-home` 1.97 GB.
+- The preselected total grew from 25.0 to 30.2 GB: the generic app rows now take Chromium `Cache` and `Code Cache` under `Partitions/*/` (flux-desktop-app 2.22, Aime 1.53, pilion-browser 1.09, TRAE 0.27, LarkShell 0.05 GB). Checked on disk that only those cache folders are counted.
+- Orca on the real home: 2.52 GB; sessions 2.32 GB, task sessions 89 MB, eight protected parts, five unknown entries.
+- rustup 1.29.0 against a staged `RUSTUP_HOME` with 1.92.0's folder gone and its update-hash left: `toolchain list` works, and `toolchain install 1.92.0` removes the stray hash and installs.
+- Look check in the browser mock, Chinese and English, light: the group, the project row, the Node versions row, the Lark row marked running, the pnpm problem row, Orca in the sidebar. No raw i18n keys.
+- Not checked: the dark theme; the tool problem row with real data (pnpm works again on this Mac since 16:37); Orca's running detection against a live process; the Windows tests, which run only in CI.
+
+## Known gap
+
+- A `:` in a project's parent path cancels `GIT_CEILING_DIRECTORIES` (git reads it as a colon-separated list; Finder stores a `/` in a folder name as `:`). With an empty or corrupt `.git` in the project and an enclosing repository that ignores the folder, a source `build`, `dist` or `out` could then be offered, unselected and to the Trash. Follow-up: skip git when the parent path holds a colon.
+
+## Rulings made during execution
+
+Each is `what was decided — why — what it costs if wrong`.
+
+- Tasks 1–4 run in parallel, each in its own git worktree, against the skill's one-implementer-at-a-time rule — the maintainer's standing workflow (2026-11-11 audit fixes) and worktrees remove the shared working tree — if wrong: conflicts at cherry-pick, which the controller resolves.
+- implementers and reviewers all run on Opus — the maintainer asked for Opus — if wrong: more tokens than a cheaper tier would need for Task 0.
+- the detail is the most informative line of the tool's output, not literally the last — real corepack/Node failures end with a stack frame, `}` or `Node.js v22.23.1`, so "last line" (spec Part D, brief item 1) shows nothing useful for the very failure that motivated the row — if wrong: an odd line is shown for some tool; no safety effect. `JunkItem.ProblemDetail`'s comment and `src/mygo.ts` are updated by Task 3 in a last commit of their own.
+- a command that hits its own timeout gets `Problem: "tool-timeout"` with its own row text, and no raw Go error text is ever shown as detail — "context deadline exceeded" is not a reason a user can read — if wrong: one more i18n key pair; no safety effect.
+- `dev.pnpm-store-home` goes AFTER `dev.pnpm-store` — losing a default-on prune row is a regression for anyone whose pnpm store is ~/.pnpm-store, and the 30-day MinAge already keeps an active store out of the new row — if wrong: an idle ~/.pnpm-store that is also pnpm's configured store shows in two rows. Carried into Task 2's fix round.
+- the Rust description naming "components and targets" instead of "global packages" stands — a toolchain holds no global packages, so the design's wording was wrong for Rust — if wrong: a string change.
+- the four app rows keep the generic "deleted" consequence line for this release — the row name and description already say what is removed — if wrong: a string change after the dev-build look.
+- `nvmKeep` must count only folders as installed versions — a stray file or link named like a version could stand in for the real default, and the real default would then be offered — if wrong: nothing, it only keeps more. Enters fix round 1 with the pnpm order ruling and the Keep test that cannot fail.
+- the three deviations stand — `.claude/worktrees/*` walked at the level of the folder holding `.claude`; outside a repository the project is the build folder's parent (also for `.venv`); home is never a project — each keeps more or matches intent — if wrong: a project without its own `.git` under a `~/.git` dotfiles repository gets no row.
+- minors 1-3 (no test pins git's hardening; the home rule has no test; test git reads XDG and system config) enter fix round 1 — they guard rows of the spec's Risks table, and a test that depends on the developer's global gitignore will fail on someone's machine — if wrong: a few more tests.
+- the check for a nested checkout is general, not venv-only — any candidate holding a `.git` entry within three levels below it is never offered — a checkout under `node_modules/x` is as unrebuildable as one under `.venv/src/x` — if wrong: a few thousand extra directory reads per idle project's folders.
+- parked — a ":" in the project's parent path defeats GIT_CEILING_DIRECTORIES (projects.go:74), so git again answers for an enclosing repository — real and deferred; it needs three things at once (an empty or corrupt `.git` in the project, an enclosing repository that ignores the folder, and a colon in the parent path, which Finder writes for a "/" in a folder name), and the row is still unselected and goes to the Trash — if wrong: in that case a source `dist`, `build` or `out` could be offered. One-line follow-up: skip git when the parent path holds a colon. Surfaced to the maintainer.
