@@ -166,26 +166,32 @@ func TestPnpmHomeStoreOffersOnlyIdleEntries(t *testing.T) {
 	}
 }
 
-// TestPnpmStoreInTheHomeFolderIsOfferedOnce: when pnpm's own store lies in
-// ~/.pnpm-store, the home store row claims it first, and the prune row
-// yields, as it does to the download cache, so no store is offered twice.
-func TestPnpmStoreInTheHomeFolderIsOfferedOnce(t *testing.T) {
+// TestPnpmPruneKeepsAStoreInTheHomeFolder: when pnpm's own store is
+// ~/.pnpm-store, the prune row still shows the store's size as an estimate,
+// and its clean runs pnpm's prune.
+func TestPnpmPruneKeepsAStoreInTheHomeFolder(t *testing.T) {
 	env := testEnv(t)
 	bin := t.TempDir()
-	root := filepath.Join(env.home, ".pnpm-store", "v10")
-	writeFile(t, filepath.Join(root, "files", "blob"), 100)
-	log := filepath.Join(bin, "called")
-	fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; *) touch `+shellPath(log)+`;; esac`)
+	root := filepath.Join(env.home, ".pnpm-store")
+	unused := filepath.Join(root, "v10", "files", "unused")
+	writeFile(t, unused, 100)
+	writeFile(t, filepath.Join(root, "v10", "files", "used"), 50)
+	pruned := filepath.Join(bin, "pruned")
+	fakeTool(t, bin, "pnpm", `case "$*" in "store path") echo `+shellPath(root)+`;; "store prune") rm -f `+shellPath(unused)+`; touch `+shellPath(pruned)+`;; *) exit 1;; esac`)
 	stageTools(t, &env, bin)
 	items, _ := scanJunk(context.Background(), env, nil, nil)
-	for _, item := range items {
-		if item.ID == "dev.pnpm-store" && item.Size != 0 {
-			t.Fatalf("the prune row also offers the store: %+v", item)
+	var prune *JunkItem
+	for i := range items {
+		if items[i].ID == "dev.pnpm-store" {
+			prune = &items[i]
 		}
 	}
+	if prune == nil || prune.Size != 150 || !prune.Estimate || !prune.Default {
+		t.Fatalf("prune row = %+v", prune)
+	}
 	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.pnpm-store"}}, time.Time{}, cleanHooks{})
-	if exists(log) || len(res) != 1 || res[0].Skipped != "failed" {
-		t.Fatalf("prune ran on a claimed store: %+v", res)
+	if len(res) != 1 || res[0].Skipped != "" || res[0].Freed != 100 || !exists(pruned) || exists(unused) {
+		t.Fatalf("prune result = %+v", res)
 	}
 }
 

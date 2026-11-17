@@ -199,11 +199,11 @@ var darwinJunkRules = []Rule{
 	// first run to rebuild, so only downloads are cleaned.
 	{ID: "dev.homebrew", Group: groupDev, Default: true, Targets: []Target{{Pattern: "Library/Caches/Homebrew/downloads", Mode: entriesOf}}, Reserve: []string{"Library/Caches/Homebrew"}},
 	{ID: "dev.homebrew-old", Group: groupDev, Default: true, Command: &brewCleanup},
-	// A second pnpm store, left by older versions or another configuration.
-	// It claims before the prune row, which yields when pnpm's own store lies
-	// inside it, so no store is offered twice.
-	{ID: "dev.pnpm-store-home", Group: groupDev, Trash: true, MinAge: 30 * 24 * time.Hour, Targets: []Target{{Pattern: ".pnpm-store", Mode: entriesOf}}},
 	{ID: "dev.pnpm-store", Group: groupDev, Default: true, Command: &pnpmPrune},
+	// A second pnpm store, left by older versions or another configuration.
+	// It comes after the prune row, which keeps pruning pnpm's own store when
+	// that lies here; an entry pnpm still uses changes and is not idle.
+	{ID: "dev.pnpm-store-home", Group: groupDev, Trash: true, MinAge: 30 * 24 * time.Hour, Targets: []Target{{Pattern: ".pnpm-store", Mode: entriesOf}}},
 
 	// system
 	// Crash dumps Chromium and Electron apps queue for upload. Codex's desktop
