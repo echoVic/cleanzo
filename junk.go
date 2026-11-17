@@ -804,7 +804,7 @@ candidates:
 				// A Crashpad database counts its report queues only.
 				size, files, changed, failures = measureCrashpad(ctx, c.path)
 			} else {
-				size, files, changed, failures = measureChecked(c.path, ctx)
+				size, files, changed, failures = measureReclaimable(c.path, ctx)
 			}
 			measured[i], newest[i], errorsSeen[i] = cleanEntry{c.path, size, files}, changed, failures
 		}()

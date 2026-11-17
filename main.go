@@ -196,9 +196,22 @@ func measure(p string) (size, files int64, newest time.Time) {
 // measureChecked preserves partial byte counts and reports every traversal
 // failure. The walk stops once the optional context is canceled.
 func measureChecked(p string, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int) {
+	return measureTree(p, false, contexts...)
+}
+
+// measureReclaimable is measureChecked for something about to be removed:
+// blocks that APFS clones share count once, and only when every file
+// sharing them is under p (see reclaimTally).
+func measureReclaimable(p string, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int) {
+	return measureTree(p, true, contexts...)
+}
+
+// measureTree walks p for measureChecked and measureReclaimable.
+func measureTree(p string, reclaim bool, contexts ...context.Context) (size, files int64, newest time.Time, readErrors int) {
 	if runtime.GOOS == "windows" && !platformCleanPath(p) {
 		return 0, 0, time.Time{}, 1
 	}
+	var tally reclaimTally
 	filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 		if len(contexts) > 0 && contexts[0] != nil && contexts[0].Err() != nil {
 			return contexts[0].Err()
@@ -222,12 +235,16 @@ func measureChecked(p string, contexts ...context.Context) (size, files int64, n
 			newest = t
 		}
 		if d.Type().IsRegular() {
-			size += onDisk(info)
+			if reclaim {
+				tally.add(path, info)
+			} else {
+				size += onDisk(info)
+			}
 			files++
 		}
 		return nil
 	})
-	return size, files, newest, readErrors
+	return size + tally.size, files, newest, readErrors
 }
 
 // safeToClean guards against cleaning system paths and irreplaceable user

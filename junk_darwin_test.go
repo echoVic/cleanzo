@@ -563,3 +563,26 @@ func TestTempFolderWithTrailingSlash(t *testing.T) {
 	}
 	t.Fatal("no temp item")
 }
+
+// TestJunkSizesCountClonesOnce sizes a cache by what removing it gives
+// back: a file cloned into a project frees nothing, and two clones that
+// both sit in the cache free their blocks once.
+func TestJunkSizesCountClonesOnce(t *testing.T) {
+	env := testEnv(t)
+	cache := filepath.Join(env.home, ".cache/uv/archive-v0")
+	shared, inProject := filepath.Join(cache, "pkg/lib.so"), filepath.Join(env.home, "proj/.venv/lib.so")
+	writeFile(t, shared, 3000)
+	cloneFile(t, shared, inProject)
+	writeFile(t, filepath.Join(cache, "pkg/first.bin"), 2000)
+	cloneFile(t, filepath.Join(cache, "pkg/first.bin"), filepath.Join(cache, "pkg/second.bin"))
+	writeFile(t, filepath.Join(cache, "pkg/meta"), 700)
+
+	items, _ := scanJunk(context.Background(), env, nil, nil)
+	if len(items) != 1 || items[0].ID != "dev.uv" || items[0].Size != 2700 {
+		t.Fatalf("items = %+v, want dev.uv at 2700", items)
+	}
+	res := cleanJunk(context.Background(), env, []JunkSelection{{ID: "dev.uv"}}, time.Time{}, cleanHooks{})
+	if len(res) != 1 || res[0].Freed != 2700 || exists(cache) || !exists(inProject) {
+		t.Fatalf("result = %+v", res)
+	}
+}
