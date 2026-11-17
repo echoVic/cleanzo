@@ -202,7 +202,9 @@ var darwinJunkRules = []Rule{
 	{ID: "dev.pnpm-store", Group: groupDev, Default: true, Command: &pnpmPrune},
 	// A second pnpm store, left by older versions or another configuration.
 	// It comes after the prune row, which keeps pruning pnpm's own store when
-	// that lies here; an entry pnpm still uses changes and is not idle.
+	// that lies here. On APFS pnpm clones files out of the store without
+	// touching their times, so a store in daily use can look idle; the row is
+	// not preselected and goes to the Trash.
 	{ID: "dev.pnpm-store-home", Group: groupDev, Trash: true, MinAge: 30 * 24 * time.Hour, Targets: []Target{{Pattern: ".pnpm-store", Mode: entriesOf}}},
 
 	// system

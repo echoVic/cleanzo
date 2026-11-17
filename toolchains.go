@@ -24,8 +24,9 @@ func nvmKeep(env junkEnv) ([]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	// Only real folders are installed versions: a file or a link named like
-	// one is never offered, so letting it win would offer the real default.
+	// Only real folders are installed versions. A link named like one is
+	// skipped and a stray file is offered for the Trash, but neither counts
+	// as installed: letting one win would offer the real default.
 	var installed []string
 	for _, e := range entries {
 		if v := nvmVersion(e.Name()); e.IsDir() && len(v) == 3 && strings.HasPrefix(e.Name(), "v") {
