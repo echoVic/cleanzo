@@ -551,6 +551,12 @@ export interface JunkItem {
   readErrors?: number;
   details?: JunkDetail[];
   detailsDropped?: number;
+  /** project rows: whole days since anything in the project changed */
+  idleDays?: number;
+  /** why the row cannot be cleaned now: "tool-failed" */
+  problem?: string;
+  /** the tool's last output line, for Problem "tool-failed" */
+  problemDetail?: string;
 }
 
 /** JunkScanEvent reports a streamed junk scan. */
