@@ -158,8 +158,9 @@ function createRuntime(): Runtime {
     junk("dev.npm", "dev", "npm 缓存", 2.9 * GB, "~/.npm/_cacache"),
     junk("dev.xcode", "dev", "Xcode 构建缓存", 7.4 * GB, "~/Library/Developer/Xcode/DerivedData"),
     junk("dev.playwright", "dev", "Playwright 浏览器", 1.6 * GB, "~/Library/Caches/ms-playwright", { default: false }),
-    // pnpm 装着但跑不起来（corepack 太旧）：行留着、不能选、展开看到它最后一行输出。
-    junk("dev.pnpm-store", "dev", "pnpm 存储", 0, "", { paths: [], problem: "tool-failed", problemDetail: "Internal Error: Cannot find matching keyid: {\"signatures\":[{\"keyid\":\"SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U\"}]}" }),
+    // pnpm 装着但跑不起来（corepack 载入不了它）：行留着、不能选。真实输出以堆栈和
+    // 「Node.js v22.23.1」结尾，展开看到的是其中点名错误的那一行。
+    junk("dev.pnpm-store", "dev", "pnpm 存储", 0, "", { paths: [], problem: "tool-failed", problemDetail: "Error: Cannot find module '/Users/demo/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'" }),
     junk("review.installers", "review", "安装包", sum(installers), "~/Downloads", { files: 3, default: false, trash: true, subs: installers }),
   ];
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });
