@@ -756,9 +756,47 @@ func TestProjectLinkedWorktreeIdleness(t *testing.T) {
 	}
 }
 
+// TestProjectGitAnswersOnlyForTheProject: a .git that is not a repository
+// does not let git answer for one enclosing the project; that repository is
+// skipped whole. A linked worktree, whose .git is a file, still gets git's
+// answer.
+func TestProjectGitAnswersOnlyForTheProject(t *testing.T) {
+	t.Run("empty .git inside a repository ignoring everything", func(t *testing.T) {
+		env := projectEnv(t)
+		git := useGit(t, &env)
+		projectClock(t)
+		outer := filepath.Join(env.home, "code", "outer")
+		gitRepo(t, git, outer, "*\n")
+		proj := filepath.Join(outer, "proj")
+		mustMkdir(t, filepath.Join(proj, ".git"))
+		writeText(t, filepath.Join(proj, "package.json"), "{}")
+		writeFile(t, filepath.Join(proj, "dist", "a.js"), 100)
+		if rows := projectRows(t, env); len(rows) != 0 {
+			t.Fatalf("rows = %v, offered %v", rowIDs(rows), offered(rows))
+		}
+	})
+	t.Run("linked worktree", func(t *testing.T) {
+		env := projectEnv(t)
+		git := useGit(t, &env)
+		projectClock(t)
+		main := filepath.Join(env.home, "code", "main")
+		writeText(t, filepath.Join(main, "package.json"), "{}")
+		gitRepo(t, git, main, "dist/\n", "package.json", ".gitignore")
+		gitCommit(t, git, main)
+		worktree := filepath.Join(env.home, "code", "feature")
+		gitIn(t, git, main, "worktree", "add", "-q", "-b", "feature", worktree)
+		writeFile(t, filepath.Join(worktree, "dist", "a.js"), 100)
+		rows := projectRows(t, env)
+		if got := offered(rows); !slices.Equal(got, []string{"~/code/feature/dist"}) {
+			t.Fatalf("rows = %v, offered %v", rowIDs(rows), got)
+		}
+	})
+}
+
 // TestProjectGitHardening: the scan's git runs no file system monitor the
-// repository configures, takes no optional locks, never prompts, and answers
-// for the repository it is pointed at, not one an inherited GIT_DIR names.
+// repository configures, takes no optional locks, never prompts, never looks
+// above the project for a repository, and answers for the repository it is
+// pointed at, not one an inherited GIT_DIR names.
 func TestProjectGitHardening(t *testing.T) {
 	env := projectEnv(t)
 	git := useGit(t, &env)
@@ -775,7 +813,7 @@ func TestProjectGitHardening(t *testing.T) {
 	other := filepath.Join(tools, "other")
 	gitRepo(t, git, other, "")
 	logged := filepath.Join(tools, "git.log")
-	fakeTool(t, tools, "git", `printf '%s\n' "optional_locks=${GIT_OPTIONAL_LOCKS-unset} terminal_prompt=${GIT_TERMINAL_PROMPT-unset} git_dir=${GIT_DIR-unset} args=$*" >> '`+logged+`'
+	fakeTool(t, tools, "git", `printf '%s\n' "optional_locks=${GIT_OPTIONAL_LOCKS-unset} terminal_prompt=${GIT_TERMINAL_PROMPT-unset} ceiling=${GIT_CEILING_DIRECTORIES-unset} git_dir=${GIT_DIR-unset} args=$*" >> '`+logged+`'
 GIT_CONFIG_NOSYSTEM=1 exec '`+git+`' "$@"
 `)
 	env.findTool = func(name string) string {
@@ -787,9 +825,10 @@ GIT_CONFIG_NOSYSTEM=1 exec '`+git+`' "$@"
 	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
 	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
 	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	t.Setenv("GIT_CEILING_DIRECTORIES", "")
 	rows := projectRows(t, env)
 	log, _ := os.ReadFile(logged)
-	want := "optional_locks=0 terminal_prompt=0 git_dir=unset args=-C " + app + " -c core.fsmonitor=false check-ignore -z --stdin\n"
+	want := "optional_locks=0 terminal_prompt=0 ceiling=" + filepath.Dir(app) + " git_dir=unset args=-C " + app + " -c core.fsmonitor=false check-ignore -z --stdin\n"
 	if got := rowIDs(rows); !slices.Equal(got, []string{"project:" + app}) || exists(marker) || string(log) != want {
 		t.Fatalf("rows = %v, fsmonitor ran %v, git saw:\n%s\nwant:\n%s", got, exists(marker), log, want)
 	}

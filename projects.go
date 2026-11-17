@@ -66,8 +66,12 @@ var gitCheckIgnore = func(ctx context.Context, git, repo string, paths []string)
 	input := strings.Join(paths, "\x00") + "\x00"
 	return runToolWith(ctx, git, []string{"-C", repo, "-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"}, 5*time.Second, func(cmd *exec.Cmd) ([]byte, error) {
 		cmd.Stdin = strings.NewReader(input)
-		// An inherited GIT_DIR or GIT_WORK_TREE would point git at another repository.
-		cmd.Env = append(slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "GIT_") }), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
+		// An inherited GIT_DIR or GIT_WORK_TREE would point git at another
+		// repository. The ceiling keeps git from looking above the project
+		// when its .git is not a repository, so it fails instead of
+		// answering for an enclosing one.
+		cmd.Env = append(slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "GIT_") }),
+			"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_CEILING_DIRECTORIES="+filepath.Dir(repo))
 		return runToolCmd(cmd)
 	})
 }
