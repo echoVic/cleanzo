@@ -40,6 +40,9 @@ type JunkItem struct {
 	ReadErrors     int          `json:"readErrors,omitempty"`
 	Details        []JunkDetail `json:"details,omitempty"`
 	DetailsDropped int          `json:"detailsDropped,omitempty"`
+	IdleDays       int          `json:"idleDays,omitempty"`      // project rows: whole days since anything in the project changed
+	Problem        string       `json:"problem,omitempty"`       // why the row cannot be cleaned now: "tool-failed"
+	ProblemDetail  string       `json:"problemDetail,omitempty"` // the tool's last output line, for Problem "tool-failed"
 }
 
 // JunkDetail records a candidate outcome; it never authorizes deletion.

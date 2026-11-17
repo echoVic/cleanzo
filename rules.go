@@ -16,6 +16,7 @@ const (
 	groupBrowsers junkGroup = "browsers"
 	groupUpdates  junkGroup = "updates"
 	groupDev      junkGroup = "dev"
+	groupProjects junkGroup = "projects"
 	groupReview   junkGroup = "review"
 	groupCustom   junkGroup = "custom"
 )
@@ -63,6 +64,10 @@ type Rule struct {
 	Command        *toolCommand
 	ExcludeNames   []string // case-insensitive filename patterns never offered by this rule
 	Reserve        []string // folders the rule cleans only in part; no other item takes the rest
+	// Keep names the entries of the rule's folders that are never offered. ok
+	// false means they cannot be told apart from the rest, and the rule then
+	// offers nothing.
+	Keep func(env junkEnv) (names []string, ok bool)
 	// Contents empties the report queues inside each matched Crashpad folder
 	// and keeps the folders and settings.dat: the app's crash handler keeps
 	// running and writing there.
