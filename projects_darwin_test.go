@@ -594,3 +594,12 @@ func TestProjectCleanLooksOnlyWhenSelected(t *testing.T) {
 		t.Fatalf("result = %+v, git calls %v", res, *calls)
 	}
 }
+
+// TestProjectGroupCanBeTurnedOff: settings accept the projects group among
+// the groups to turn off.
+func TestProjectGroupCanBeTurnedOff(t *testing.T) {
+	got, err := validateSettings(Settings{DisabledGroups: []string{string(groupProjects)}})
+	if err != nil || !slices.Equal(got.DisabledGroups, []string{string(groupProjects)}) {
+		t.Fatalf("validateSettings = %+v, %v", got, err)
+	}
+}

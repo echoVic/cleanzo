@@ -30,7 +30,7 @@ type CustomFolder struct {
 const settingsVersion = 3
 
 // junkGroupNames are the groups a user can turn off.
-var junkGroupNames = []string{"system", "apps", "browsers", "updates", "dev", "review"}
+var junkGroupNames = []string{"system", "apps", "browsers", "updates", "dev", "projects", "review"}
 
 // builtinRuleIDs maps old built-in categories to the rules that replace them.
 var builtinRuleIDs = map[string][]string{
