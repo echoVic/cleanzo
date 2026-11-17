@@ -76,6 +76,38 @@ func TestNvmDefaultResolution(t *testing.T) {
 	}
 }
 
+// TestNvmCountsOnlyFoldersAsInstalled: a file or a link named like a version
+// is not an installed version; it never becomes the default and never
+// stands in for one, so the real folder nvm resolves to stays kept.
+func TestNvmCountsOnlyFoldersAsInstalled(t *testing.T) {
+	for _, tc := range []struct{ alias, keep string }{
+		{"node", "v24.1.0"}, {"stable", "v24.1.0"}, {"24", "v24.1.0"}, {"v24", "v24.1.0"},
+		{"99", ""}, {"98", ""}, {"v99.0.0", ""}, {"v98.0.0", ""},
+	} {
+		t.Run(tc.alias, func(t *testing.T) {
+			env := testEnv(t)
+			stageNvm(t, env.home, map[string]string{"default": tc.alias}, "v22.23.1", "v24.1.0")
+			nodes := filepath.Join(env.home, ".nvm", "versions", "node")
+			writeFile(t, filepath.Join(nodes, "v99.0.0"), 10)
+			elsewhere := filepath.Join(env.home, "elsewhere", "node")
+			mustMkdir(t, filepath.Join(elsewhere, "bin"))
+			if err := os.Symlink(elsewhere, filepath.Join(nodes, "v98.0.0")); err != nil {
+				t.Fatal(err)
+			}
+			names, ok := nvmKeep(env)
+			if tc.keep == "" {
+				if ok {
+					t.Fatalf("resolved to %v, want unresolved", names)
+				}
+				return
+			}
+			if !ok || !slices.Equal(names, []string{tc.keep}) {
+				t.Fatalf("keep = %v, %v; want [%s]", names, ok, tc.keep)
+			}
+		})
+	}
+}
+
 // TestNodeVersionsOfferAllButTheDefault: the review row lists every other
 // version on its own, unselected and bound for the Trash; one version can be
 // cleaned alone; without a resolvable default there is no row and nothing
