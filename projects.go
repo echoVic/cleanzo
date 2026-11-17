@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -276,6 +277,11 @@ func subfolders(dir string) []string {
 // its name needs. needsGit is true for build, dist and out, which are often
 // source: only a repository that ignores them makes them build output.
 func buildFolder(dir string) (ok, needsGit bool) {
+	// A folder holding .git is a worktree or a repository of its own, with
+	// work that may be nowhere else, whatever its name and whatever git says.
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); !errors.Is(err, fs.ErrNotExist) {
+		return false, false
+	}
 	parent := filepath.Dir(dir)
 	beside := func(name string) bool { return regularFile(filepath.Join(parent, name)) }
 	inside := func(name string) bool { return regularFile(filepath.Join(dir, name)) }
@@ -324,7 +330,7 @@ func projectRoot(home, dir string, hasGit map[string]bool) (root string, repo bo
 // lastChange is when anything in the project at root last changed: its
 // entries to projectIdleLevels deep, hidden and build folders left out, and
 // git's index, HEAD and HEAD log. ok is false when a folder could not be
-// read, as a change may hide in it.
+// read, or git's folder could not be found, as a change may hide there.
 func lastChange(root string) (newest time.Time, ok bool) {
 	saw := func(info fs.FileInfo) {
 		if t := changedAt(info); t.After(newest) {
@@ -357,10 +363,55 @@ func lastChange(root string) (newest time.Time, ok bool) {
 		}
 	}
 	walk(root, 1)
-	for _, name := range []string{"index", "HEAD", filepath.Join("logs", "HEAD")} {
-		if info, err := os.Lstat(filepath.Join(root, ".git", name)); err == nil {
-			saw(info)
+	gitDir, found := gitDirOf(root)
+	if !found {
+		return newest, false
+	}
+	if gitDir != "" {
+		for _, name := range []string{"index", "HEAD", filepath.Join("logs", "HEAD")} {
+			if info, err := os.Lstat(filepath.Join(gitDir, name)); err == nil {
+				saw(info)
+			}
 		}
 	}
 	return newest, ok
+}
+
+// gitDirOf is the folder holding the git state of the project at root: its
+// .git folder, or for a linked worktree or a submodule, where its .git file
+// points, a relative path counting from root. It is "" without a .git, and
+// found is false when the .git file cannot be read or leads nowhere.
+func gitDirOf(root string) (dir string, found bool) {
+	dotGit := filepath.Join(root, ".git")
+	info, err := os.Lstat(dotGit)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", true
+	case err != nil:
+		return "", false
+	case !info.Mode().IsRegular():
+		return dotGit, true
+	}
+	f, err := os.Open(dotGit)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, 4096))
+	if err != nil {
+		return "", false
+	}
+	line, _, _ := strings.Cut(string(head), "\n")
+	path, isGitDir := strings.CutPrefix(strings.TrimSpace(line), "gitdir:")
+	path = strings.TrimSpace(path)
+	if !isGitDir || path == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return "", false
+	}
+	return path, true
 }

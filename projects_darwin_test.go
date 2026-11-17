@@ -30,40 +30,53 @@ func projectEnv(t *testing.T) junkEnv {
 	return env
 }
 
-// installedGit finds git for staging repositories and skips the test without one.
+// installedGit finds git for staging repositories and skips the test without
+// one. The developer's global git configuration and ignores under
+// XDG_CONFIG_HOME stay out of the test, as those under HOME do.
 func installedGit(t *testing.T) string {
 	t.Helper()
 	git, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git is not installed")
 	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	return git
 }
 
-// useGit lets the scan run the installed git, as if developer tools were installed.
+// useGit lets the scan run the installed git, as if developer tools were
+// installed, through a wrapper that keeps the system git configuration out.
 func useGit(t *testing.T, env *junkEnv) string {
 	t.Helper()
 	git := installedGit(t)
 	saved := developerToolsInstalled
 	developerToolsInstalled = func(context.Context) bool { return true }
 	t.Cleanup(func() { developerToolsInstalled = saved })
+	bin := t.TempDir()
+	fakeTool(t, bin, "git", "GIT_CONFIG_NOSYSTEM=1 exec '"+git+"' \"$@\"\n")
 	env.findTool = func(name string) string {
 		if name == "git" {
-			return git
+			return filepath.Join(bin, "git")
 		}
 		return ""
 	}
 	return git
 }
 
-// gitIn runs git in dir with none of the caller's GIT_ variables.
+// gitIn runs git in dir with none of the caller's GIT_ variables and without
+// the system git configuration.
 func gitIn(t *testing.T, git, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(git, append([]string{"-C", dir}, args...)...)
-	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GIT_") })
+	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GIT_") }), "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+// gitCommit records what is staged in dir as a commit.
+func gitCommit(t *testing.T, git, dir string) {
+	t.Helper()
+	gitIn(t, git, dir, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "staged")
 }
 
 // gitRepo makes dir a repository with the given ignore file, tracking paths.
@@ -601,5 +614,102 @@ func TestProjectGroupCanBeTurnedOff(t *testing.T) {
 	got, err := validateSettings(Settings{DisabledGroups: []string{string(groupProjects)}})
 	if err != nil || !slices.Equal(got.DisabledGroups, []string{string(groupProjects)}) {
 		t.Fatalf("validateSettings = %+v, %v", got, err)
+	}
+}
+
+// TestProjectBuildFolderHoldingGitIsKept: a build folder that is a worktree
+// or a repository of its own may hold work found nowhere else, so it is
+// never offered, though git ignores it.
+func TestProjectBuildFolderHoldingGitIsKept(t *testing.T) {
+	env := projectEnv(t)
+	git := useGit(t, &env)
+	projectClock(t)
+	site := filepath.Join(env.home, "code", "site")
+	writeText(t, filepath.Join(site, "package.json"), "{}")
+	writeFile(t, filepath.Join(site, "node_modules", "dep", "index.js"), 100)
+	gitRepo(t, git, site, "node_modules/\ndist/\nout/\n", "package.json", ".gitignore")
+	gitCommit(t, git, site)
+	gitIn(t, git, site, "worktree", "add", "-q", "-b", "gh-pages", "dist")
+	writeText(t, filepath.Join(site, "dist", "index.html"), "not committed anywhere")
+	gitRepo(t, git, filepath.Join(site, "out"), "")
+	writeText(t, filepath.Join(site, "out", "notes.md"), "only here")
+	rows := projectRows(t, env)
+	if got := offered(rows); !slices.Equal(got, []string{"~/code/site/node_modules"}) || len(rows) != 1 {
+		t.Fatalf("rows = %v, offered %v", rowIDs(rows), got)
+	}
+}
+
+// TestProjectLinkedWorktreeIdleness: a linked worktree's index, HEAD and
+// HEAD log live where its .git file points, and a change there means the
+// worktree is in use. A .git file that leads nowhere leaves its idleness
+// unknown, so it has no row.
+func TestProjectLinkedWorktreeIdleness(t *testing.T) {
+	stage := func(t *testing.T) (env junkEnv, worktree, gitdir string) {
+		env = projectEnv(t)
+		git := useGit(t, &env)
+		projectClock(t)
+		main := filepath.Join(env.home, "code", "main")
+		writeText(t, filepath.Join(main, "package.json"), "{}")
+		gitRepo(t, git, main, "node_modules/\n", "package.json", ".gitignore")
+		gitCommit(t, git, main)
+		worktree = filepath.Join(env.home, ".codex", "worktrees", "x", "y")
+		gitIn(t, git, main, "worktree", "add", "-q", "-b", "agent", worktree)
+		writeFile(t, filepath.Join(worktree, "node_modules", "dep", "index.js"), 100)
+		gitdir = filepath.Join(main, ".git", "worktrees", "y")
+		for _, name := range []string{"index", "HEAD", filepath.Join("logs", "HEAD")} {
+			if _, err := os.Stat(filepath.Join(gitdir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return env, worktree, gitdir
+	}
+	relative := func(t *testing.T, worktree, gitdir string) {
+		rel, err := filepath.Rel(worktree, gitdir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeText(t, filepath.Join(worktree, ".git"), "gitdir: "+rel+"\n")
+	}
+	rowsAre := func(t *testing.T, env junkEnv, want ...string) {
+		t.Helper()
+		if got := rowIDs(projectRows(t, env)); !slices.Equal(got, want) {
+			t.Fatalf("rows = %v, want %v", got, want)
+		}
+	}
+	t.Run("idle", func(t *testing.T) {
+		env, worktree, _ := stage(t)
+		rowsAre(t, env, "project:"+worktree)
+	})
+	t.Run("idle, relative gitdir", func(t *testing.T) {
+		env, worktree, gitdir := stage(t)
+		relative(t, worktree, gitdir)
+		rowsAre(t, env, "project:"+worktree)
+	})
+	for _, name := range []string{"index", "HEAD", filepath.Join("logs", "HEAD")} {
+		t.Run("changed "+name, func(t *testing.T) {
+			env, _, gitdir := stage(t)
+			touch(t, filepath.Join(gitdir, name))
+			rowsAre(t, env)
+		})
+	}
+	t.Run("changed index, relative gitdir", func(t *testing.T) {
+		env, worktree, gitdir := stage(t)
+		relative(t, worktree, gitdir)
+		touch(t, filepath.Join(gitdir, "index"))
+		rowsAre(t, env)
+	})
+	// git is stubbed to ignore everything here, so only the idle check can
+	// keep these rows out.
+	for name, dotGit := range map[string]string{"gitdir missing": "gitdir: /nonexistent/worktrees/y\n", "no gitdir line": "nonsense\n"} {
+		t.Run(name, func(t *testing.T) {
+			env, worktree, _ := stage(t)
+			writeText(t, filepath.Join(worktree, ".git"), dotGit)
+			saved := gitCheckIgnore
+			gitCheckIgnore = func(_ context.Context, _, _ string, paths []string) (string, error) {
+				return strings.Join(paths, "\x00") + "\x00", nil
+			}
+			t.Cleanup(func() { gitCheckIgnore = saved })
+			rowsAre(t, env)
+		})
 	}
 }
