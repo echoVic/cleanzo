@@ -84,6 +84,19 @@ Error: Cannot find module '/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnp
 Node.js v22.23.1
 `
 
+// nodeTypeError is what Node prints for an uncaught TypeError: the source
+// line it quotes ends in "{", which opens nothing that a later line closes.
+const nodeTypeError = `/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/dist/pnpm.cjs:12
+    x(function () {
+    ^
+
+TypeError: x is not a function
+    at Object.<anonymous> (/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/dist/pnpm.cjs:12:5)
+    at Module._compile (node:internal/modules/cjs/loader:1554:14)
+
+Node.js v22.23.1
+`
+
 // TestToolOutputLinePicksWhatWentWrong reads failed tool output as tools
 // print it: the line naming the error wins wherever it is; otherwise the
 // last line that is not a stack frame, a version trailer, a caret, a
@@ -91,6 +104,7 @@ Node.js v22.23.1
 func TestToolOutputLinePicksWhatWentWrong(t *testing.T) {
 	for _, c := range []struct{ name, out, want string }{
 		{"node dump", nodeModuleNotFound, "Error: Cannot find module '/Users/me/.cache/node/corepack/v1/pnpm/12.0.0/bin/pnpm.cjs'"},
+		{"quoted source line ending in a brace", nodeTypeError, "TypeError: x is not a function"},
 		{"corepack usage error", `The package was not signed by any trusted keys: {
   "signatures": [
     {

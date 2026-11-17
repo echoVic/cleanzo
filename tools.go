@@ -48,14 +48,20 @@ var toolNoise = regexp.MustCompile(`^(\s+at |\s*Node\.js v\d|\s*\^+\s*$|[\s\[\](
 // toolOutputLine picks the line of a failed tool's output that says what
 // went wrong: the last one naming an error ("Error", "error", an ERR_ code),
 // or else the last line that is not noise. Lines inside an object or list
-// the tool printed (a line ending in "{" or "[" up to its closing line) are
-// details of the line that opened it, which stands for them without its
-// opening bracket. It returns "" when no line is left.
+// the tool printed (a line ending in "{" or "[" up to its closing line or a
+// blank line) are details of the line that opened it, which stands for them
+// without its opening bracket. It returns "" when no line is left.
 func toolOutputLine(out string) string {
 	var named, last string
 	depth := 0
 	for _, raw := range strings.Split(out, "\n") {
 		line := strings.TrimSpace(raw)
+		// A printed object has no blank line; one ends a line that only
+		// looked like an opening, such as source code Node quotes.
+		if line == "" {
+			depth = 0
+			continue
+		}
 		inside := depth > 0
 		if strings.HasPrefix(line, "}") || strings.HasPrefix(line, "]") {
 			depth = max(0, depth-1)
