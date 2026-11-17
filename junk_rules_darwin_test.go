@@ -79,6 +79,63 @@ func TestRuleCatalogMeasuresEachTarget(t *testing.T) {
 	}
 }
 
+// TestAppRulesOfferOnlyLogsAndCaches: each of the four apps' rules offers
+// its logs, its sandbox's package caches and its web caches, never the
+// messages, resources or staged update beside them; the generic row keeps the
+// app's other cache folders; a running app's row is listed and cleans nothing.
+func TestAppRulesOfferOnlyLogsAndCaches(t *testing.T) {
+	shared := []string{"sdk_storage/log/main.log", "sandbox_runtime/.cache/node/pkg", "sandbox_runtime/.cache/python/pkg", "aha/users/u1/profile_explorer/Service Worker/CacheStorage/blob"}
+	sharedOffered := []string{"sdk_storage/log/main.log", "sandbox_runtime/.cache/node", "sandbox_runtime/.cache/python", "aha/users/u1/profile_explorer/Service Worker/CacheStorage"}
+	for _, app := range []struct {
+		id, folder, owner string
+		staged, offered   []string // relative to the app's folder
+	}{
+		{"app.lark", "LarkShell", "com.electron.lark", shared, sharedOffered},
+		{"app.doubao-work", "DoubaoWork", "com.work.pc.doubao", shared, sharedOffered},
+		{"app.doubao", "Doubao", "com.bot.pc.doubao", shared, sharedOffered},
+		{"app.aime", "Aime", "com.bytedance.aime.electron", []string{"Partitions/p1/Service Worker/CacheStorage/blob"}, []string{"Partitions/p1/Service Worker/CacheStorage"}},
+	} {
+		t.Run(app.id, func(t *testing.T) {
+			env := testEnv(t)
+			base := filepath.Join(env.home, "Library/Application Support", app.folder)
+			for _, rel := range app.staged {
+				writeFile(t, filepath.Join(base, rel), 100)
+			}
+			for _, rel := range []string{"messages.db", "resources/sticker/a.png", "update/7.40/app.bin", "sdk_storage/messages.db", "sandbox_runtime/bases/x",
+				"aha/users/u1/profile_explorer/Service Worker/ScriptCache/x", "Partitions/p1/Service Worker/ScriptCache/x", "Partitions/p1/IndexedDB/x"} {
+				writeFile(t, filepath.Join(base, rel), 1000)
+			}
+			writeFile(t, filepath.Join(base, "Code Cache/js/x"), 100)
+			specs, _ := expandItems(&env)
+			want := []string{"app:dir:" + strings.ToLower(app.folder) + " Code Cache/js"}
+			for _, rel := range app.offered {
+				want = append(want, app.id+" "+rel)
+			}
+			slices.Sort(want)
+			if got := offeredIn(specs, base); !slices.Equal(got, want) {
+				t.Fatalf("offered = %q\nwant %q", got, want)
+			}
+			spec := catalogRow(t, &env, app.id)
+			if spec.item.Group != string(groupApps) || spec.item.Default || spec.item.Trash || spec.item.Running {
+				t.Fatalf("item = %+v", spec.item)
+			}
+			if plan := planItem(context.Background(), *spec, env, make(chan struct{}, 4), nil); plan.item.Size != int64(100*len(app.staged)) {
+				t.Fatalf("size = %d", plan.item.Size)
+			}
+
+			env.guard.running[app.owner] = true
+			spec = catalogRow(t, &env, app.id)
+			if plan := planItem(context.Background(), *spec, env, make(chan struct{}, 4), nil); !plan.item.Running || len(plan.entries) > 0 {
+				t.Fatalf("running app: item = %+v, entries = %v", plan.item, plan.entries)
+			}
+			res := cleanJunk(context.Background(), env, []JunkSelection{{ID: app.id}}, time.Time{}, cleanHooks{})
+			if len(res) != 1 || res[0].Skipped != "running" || !exists(filepath.Join(base, app.staged[0])) {
+				t.Fatalf("running app cleaned: %+v", res)
+			}
+		})
+	}
+}
+
 // TestCleanJunkTrashFirstAndScannedAt checks recoverability and scan cutoffs.
 func TestCleanJunkTrashFirstAndScannedAt(t *testing.T) {
 	env := testEnv(t)

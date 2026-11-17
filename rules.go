@@ -137,6 +137,25 @@ var darwinJunkRules = []Rule{
 	{ID: "browser.qq", Group: groupBrowsers, Default: true, Owners: []string{"com.tencent.QQBrowser", "com.tencent.QQBrowser3"},
 		Targets: []Target{{Pattern: "Library/Caches/com.tencent.QQBrowser*", Mode: entriesOf}, {Pattern: "Library/Caches/QQBrowser2", Mode: entriesOf}}},
 
+	// apps: logs and caches inside the data folders of apps whose layout is
+	// known; never messages, contacts, media, sessions or a staged update. The
+	// Service Worker caches are taken for these apps only: elsewhere an
+	// offline-first app may need its cache to start without a network.
+	{ID: "app.lark", Group: groupApps, Owners: []string{"com.electron.lark"}, Targets: []Target{
+		{Pattern: "Library/Application Support/LarkShell/sdk_storage/log", Mode: entriesOf},
+		{Pattern: "Library/Application Support/LarkShell/sandbox_runtime/.cache", Mode: entriesOf},
+		{Pattern: "Library/Application Support/LarkShell/aha/users/*/profile_explorer/Service Worker/CacheStorage", Mode: matched}}},
+	{ID: "app.doubao-work", Group: groupApps, Owners: []string{"com.work.pc.doubao"}, Targets: []Target{
+		{Pattern: "Library/Application Support/DoubaoWork/sdk_storage/log", Mode: entriesOf},
+		{Pattern: "Library/Application Support/DoubaoWork/sandbox_runtime/.cache", Mode: entriesOf},
+		{Pattern: "Library/Application Support/DoubaoWork/aha/users/*/profile_explorer/Service Worker/CacheStorage", Mode: matched}}},
+	{ID: "app.doubao", Group: groupApps, Owners: []string{"com.bot.pc.doubao"}, Targets: []Target{
+		{Pattern: "Library/Application Support/Doubao/sdk_storage/log", Mode: entriesOf},
+		{Pattern: "Library/Application Support/Doubao/sandbox_runtime/.cache", Mode: entriesOf},
+		{Pattern: "Library/Application Support/Doubao/aha/users/*/profile_explorer/Service Worker/CacheStorage", Mode: matched}}},
+	{ID: "app.aime", Group: groupApps, Owners: []string{"com.bytedance.aime.electron"}, Targets: []Target{
+		{Pattern: "Library/Application Support/Aime/Partitions/*/Service Worker/CacheStorage", Mode: matched}}},
+
 	// updates: installers apps downloaded for their own updates
 	{ID: "update.shipit", Group: groupUpdates, Default: true,
 		Targets: []Target{{Pattern: "Library/Caches/*.ShipIt", Mode: matched}}},
