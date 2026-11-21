@@ -10,6 +10,7 @@ package main
 // autorelease pool, via mygo.RunOnMain.
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math/bits"
 	"runtime"
@@ -33,6 +34,8 @@ var (
 	procListAllPids  func(buf unsafe.Pointer, size int32) int32
 	procPidPathFn    func(pid int32, buf unsafe.Pointer, size uint32) int32
 	procNameFn       func(pid int32, buf unsafe.Pointer, size uint32) int32
+	procPidInfoFn    func(pid, flavor int32, arg uint64, buf unsafe.Pointer, size int32) int32
+	procPidFdInfoFn  func(pid, fd, flavor int32, buf unsafe.Pointer, size int32) int32
 	responsibleForFn func(pid int32) int32
 	sysctlByNameFn   func(name *byte, oldp unsafe.Pointer, oldlenp *uintptr, newp unsafe.Pointer, newlen uintptr) int32
 	hostPort         uint32
@@ -116,6 +119,8 @@ func nativeInit() {
 		purego.RegisterLibFunc(&procListAllPids, lib, "proc_listallpids")
 		purego.RegisterLibFunc(&procPidPathFn, lib, "proc_pidpath")
 		purego.RegisterLibFunc(&procNameFn, lib, "proc_name")
+		purego.RegisterLibFunc(&procPidInfoFn, lib, "proc_pidinfo")
+		purego.RegisterLibFunc(&procPidFdInfoFn, lib, "proc_pidfdinfo")
 		purego.RegisterLibFunc(&sysctlByNameFn, lib, "sysctlbyname")
 		// Private API: probe instead of hard-wiring it. When absent the
 		// attribution falls back to executable names (see monitor.go).
@@ -250,6 +255,85 @@ func nativeResponsiblePid(pid int32) int32 {
 		return -1
 	}
 	return responsibleForFn(pid)
+}
+
+// Flavors, sizes and offsets of libproc's vnode path reads, as
+// <sys/proc_info.h> lays them out.
+const (
+	procPidVnodePathInfo   = 9    // PROC_PIDVNODEPATHINFO: struct proc_vnodepathinfo
+	procVnodePathInfoSize  = 2352 // sizeof(struct proc_vnodepathinfo)
+	procCwdPathAt          = 152  // offsetof(struct proc_vnodepathinfo, pvi_cdir.vip_path)
+	procPidFdVnodePathInfo = 2    // PROC_PIDFDVNODEPATHINFO: struct vnode_fdinfowithpath
+	procFdVnodePathSize    = 1200 // sizeof(struct vnode_fdinfowithpath)
+	procFdPathAt           = 176  // offsetof(struct vnode_fdinfowithpath, pvip.vip_path)
+	procPathMax            = 1024 // MAXPATHLEN, the NUL included
+)
+
+// nativeCwd reads a process's current folder, or returns empty when libproc
+// cannot read it, as for other accounts' processes.
+func nativeCwd(pid int32) string {
+	nativeInit()
+	if procPidInfoFn == nil {
+		return ""
+	}
+	var info [procVnodePathInfoSize]byte
+	if procPidInfoFn(pid, procPidVnodePathInfo, 0, unsafe.Pointer(&info[0]), int32(len(info))) != int32(len(info)) {
+		return ""
+	}
+	return nulTerminated(info[procCwdPathAt : procCwdPathAt+procPathMax])
+}
+
+// nativeFdPath reads the path of the file open as fd in process pid, or
+// returns empty when it is no file, such as a pipe or a socket, or libproc
+// cannot read it.
+func nativeFdPath(pid, fd int32) string {
+	nativeInit()
+	if procPidFdInfoFn == nil {
+		return ""
+	}
+	var info [procFdVnodePathSize]byte
+	if procPidFdInfoFn(pid, fd, procPidFdVnodePathInfo, unsafe.Pointer(&info[0]), int32(len(info))) != int32(len(info)) {
+		return ""
+	}
+	return nulTerminated(info[procFdPathAt : procFdPathAt+procPathMax])
+}
+
+// nativeFootprint reads a process's footprint, the Activity Monitor
+// "Memory" column, or returns 0 when it cannot be read.
+func nativeFootprint(pid int32) uint64 {
+	nativeInit()
+	if procPidRusage == nil {
+		return 0
+	}
+	var rusage [512]byte
+	if procPidRusage(pid, 2 /* RUSAGE_INFO_V2 */, unsafe.Pointer(&rusage[0])) != 0 {
+		return 0
+	}
+	return binary.LittleEndian.Uint64(rusage[riFootprint:])
+}
+
+// nativeProcName reads a process's kernel name as nativeProcs does, or
+// returns empty when it cannot be read.
+func nativeProcName(pid int32) string {
+	nativeInit()
+	if procNameFn == nil {
+		return ""
+	}
+	var name [256]byte
+	if l := procNameFn(pid, unsafe.Pointer(&name[0]), uint32(len(name))); l > 0 && l <= int32(len(name)) {
+		return strings.TrimRight(string(name[:l]), "\x00")
+	}
+	return ""
+}
+
+// nulTerminated is the C string at the start of b, or empty when b holds no
+// NUL.
+func nulTerminated(b []byte) string {
+	n := bytes.IndexByte(b, 0)
+	if n < 0 {
+		return ""
+	}
+	return string(b[:n])
 }
 
 // ---- sysctl wrappers ------------------------------------------------------
