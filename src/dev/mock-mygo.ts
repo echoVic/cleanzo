@@ -656,6 +656,7 @@ function createRuntime(): Runtime {
       await wait(1000);
       for (;;) { await emit(processSample()); await wait(200); }
     }),
+    "Cleaner.ClaudeRunSummary": async () => ({ idle: 0, left: 0, rows: [] }),
     "Cleaner.CrashDumps": async () => ({ total: 0, threshold: GB, dirs: [] }),
     "Cleaner.ScanJunk": async (ch) => stream(ch, async (emit) => {
       const items = junkItems.filter((it) => !settings.disabledGroups.includes(it.group) && !settings.ignored.includes(it.id));
@@ -750,6 +751,9 @@ function createRuntime(): Runtime {
       freedDisk(freed);
       return { parts: partsResult, freed };
     },
+    "Cleaner.ClaudeRunning": async () => ({ sessions: [], left: [], uncertain: 0, noRecords: false, at: nowSec() }),
+    "Cleaner.EndClaudeProcesses": async () => ({ procs: [], freed: 0 }),
+    "Cleaner.EndClaudeSession": async () => ({ procs: [], freed: 0 }),
     "Cleaner.Disk": async () => disk,
     "Cleaner.FullScan": async (ch) => stream(ch, async (emit) => {
       const items = bigItems.filter((it) => !isGone(it.path)).map((it) => ({ ...it, size: sizeOf(it.path) }));

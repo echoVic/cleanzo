@@ -40,6 +40,14 @@ export interface AIGroup {
   gone: boolean;
   /** the group's folder, for Show in Finder */
   path: string;
+  /** worktree rows: the repository's folder */
+  repo?: string;
+  /** worktree rows: the branch checked out; "" when detached */
+  branch?: string;
+  /** worktree rows: one of the worktree states */
+  state?: string;
+  /** worktree rows in state "dirty": uncommitted entries */
+  changes?: number;
 }
 
 /** AIModelEntry is one model as the page lists it. */
@@ -120,6 +128,8 @@ export interface AIPart {
    * run-safe parts are cleaned then.
    */
   running: boolean;
+  /** the part lists agent worktrees, one group each */
+  worktrees?: boolean;
 }
 
 /** AIPartResult reports one selection's outcome. */
@@ -149,6 +159,8 @@ export interface AISelection {
   part: string;
   /** group keys; required for parts with groups */
   groups: string[];
+  /** worktree parts: each group's State as the user saw it, in the order of Groups */
+  seen?: string[];
 }
 
 /** AITool is one tool's folder as the page lists it. */
@@ -282,6 +294,118 @@ export interface CPUStatus {
   load1: number;
   load5: number;
   load15: number;
+}
+
+/** ClaudeEndResult is what EndClaudeProcesses and EndClaudeSession return. */
+export interface ClaudeEndResult {
+  procs: ClaudeEnded[];
+  /** footprint, read before ending, of the processes that are gone */
+  freed: number;
+}
+
+/** ClaudeEnded is what ending did to one process. */
+export interface ClaudeEnded {
+  pid: number;
+  /** "ended", "forced", "running" or "changed" */
+  result: string;
+}
+
+/** ClaudeLeft is a closed session and the processes it left running. */
+export interface ClaudeLeft {
+  id: string;
+  /** "" when unknown */
+  project: string;
+  /** "" when unknown */
+  title: string;
+  /** oldest first */
+  procs: ClaudeProc[];
+}
+
+/** ClaudeProc is one listed process, with what is folded into its row. */
+export interface ClaudeProc {
+  pid: number;
+  /** unix microseconds; with Pid, its identity */
+  start: number;
+  /** for display: assignments and secret values removed */
+  command: string;
+  cwd: string;
+  /** the linked worktree Cwd is in; "" for none */
+  worktree: string;
+  /** listening TCP ports, ascending */
+  ports: number[];
+  /** footprint, folded processes included */
+  memory: number;
+  /** the processes folded into this row */
+  folded: ClaudeTarget[];
+}
+
+/** ClaudeRowTag is the tag of one process page row. */
+export interface ClaudeRowTag {
+  /** ProcessRow.Key */
+  key: string;
+  /** long-idle sessions whose Claude Code process is in the row */
+  idle: number;
+  /** processes in the row that closed sessions left behind */
+  left: number;
+}
+
+/** ClaudeRunSummary is what the tab's badge and the process page's tags show. */
+export interface ClaudeRunSummary {
+  /** open sessions idle for claudeIdleNote or longer */
+  idle: number;
+  /** rows of processes closed sessions left behind */
+  left: number;
+  /** per process page row, ordered by key */
+  rows: ClaudeRowTag[];
+}
+
+/** ClaudeRunning is one reading of the Claude Code page's Running tab. */
+export interface ClaudeRunning {
+  /** open sessions: idle longest first, working ones last */
+  sessions: ClaudeSession[];
+  /** closed sessions with processes still running, oldest first */
+  left: ClaudeLeft[];
+  /** marked processes left out: their session may still be open */
+  uncertain: number;
+  /** a Claude Code process shows no session id, so nothing is called left behind */
+  noRecords: boolean;
+  /** unix seconds */
+  at: number;
+}
+
+/** ClaudeSession is one open Claude Code session. */
+export interface ClaudeSession {
+  /** "" when its record cannot be read */
+  id: string;
+  /** its Claude Code process */
+  pid: number;
+  /** that process's start, unix microseconds; with Pid, its identity */
+  start: number;
+  /** folder name of Cwd */
+  project: string;
+  cwd: string;
+  title: string;
+  /** "idle", "busy" or "" */
+  status: string;
+  /** when Status last changed, unix seconds; 0 when unknown */
+  since: number;
+  /** the app it runs in; "" when unknown */
+  host: string;
+  /** the record's entrypoint, "cli" for a terminal; "" when unknown */
+  entry: string;
+  /** its process, sub-agents and helpers */
+  memory: number;
+  /** Cleanzo runs under it, so it cannot be ended here */
+  own: boolean;
+  /** what it started that has run for a minute or longer, oldest first */
+  commands: ClaudeProc[];
+}
+
+/** ClaudeTarget names a process to end by pid and start time. */
+export interface ClaudeTarget {
+  pid: number;
+  /** unix microseconds */
+  start: number;
 }
 
 /** CleanResult reports what a clean pass did. */
@@ -1143,6 +1267,23 @@ export const Cleaner = {
     return call("Cleaner.CheckSkillUpdates");
   },
   /**
+   * ClaudeRunSummary counts the long-idle sessions and what closed sessions
+   * left running, for the Running tab's badge and the process page's tags.
+   * Off macOS, and when Claude Code is not installed, it is empty and reads
+   * nothing.
+   */
+  claudeRunSummary(): Promise<ClaudeRunSummary> {
+    return call("Cleaner.ClaudeRunSummary");
+  },
+  /**
+   * ClaudeRunning reads the Claude Code page's Running tab: the open sessions
+   * with what they started, and the processes closed sessions left running.
+   * Off macOS it fails with "unsupported".
+   */
+  claudeRunning(): Promise<ClaudeRunning> {
+    return call("Cleaner.ClaudeRunning");
+  },
+  /**
    * CleanAIModels moves the selected models to the Trash. A model's blobs only
    * go when no manifest left behind still names them, so a digest shared with
    * a model that stays does not break it. Paths outside a runtime's own model
@@ -1204,6 +1345,23 @@ export const Cleaner = {
   /** Disk returns the boot volume's capacity without scanning files. */
   disk(): Promise<DiskStat> {
     return call("Cleaner.Disk");
+  },
+  /**
+   * EndClaudeProcesses ends processes listed under session, each named by pid
+   * and start time; a target that is no longer listed there is left alone.
+   * Off macOS it fails with "unsupported".
+   */
+  endClaudeProcesses(session: string, targets: ClaudeTarget[]): Promise<ClaudeEndResult> {
+    return call("Cleaner.EndClaudeProcesses", session, targets);
+  },
+  /**
+   * EndClaudeSession ends the open session whose Claude Code process is target,
+   * with its sub-agents and helpers, while it is still session in the status
+   * the user saw. What it started keeps running. Off macOS it fails with
+   * "unsupported".
+   */
+  endClaudeSession(target: ClaudeTarget, session: string, status: string): Promise<ClaudeEndResult> {
+    return call("Cleaner.EndClaudeSession", target, session, status);
   },
   /**
    * ForceQuitApp force-terminates the Dock apps at path, like Force Quit in
