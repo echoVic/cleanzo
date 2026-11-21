@@ -14,13 +14,14 @@ import (
 // Ending is tested against endFake, a made-up process table: its snapshot
 // is built from the attribution fixtures, each process answers signals as
 // its endHow says, and sleeping only moves a fake clock. No real process
-// gets a signal.
+// gets a signal: the one test of the real signal function sends the null
+// signal, which delivers nothing.
 
 // endMiB is the fake footprint unit: the process with pid p uses p MiB.
 const endMiB = 1 << 20
 
-// endNewer is how much later than the process it replaces a process that
-// takes over a pid started, in microseconds.
+// endNewer is how much later, in microseconds, a process that takes over a
+// pid started than the one before it.
 const endNewer = int64(time.Hour / time.Microsecond)
 
 // endHow is how a process of an endFake answers signals.
@@ -121,7 +122,7 @@ func (f *endFake) state(pid int32) (start int64, ok bool) {
 	return 0, false
 }
 
-// started answers as the process that has pid does, and notes the look.
+// started answers as the process that has pid does, and records the look.
 func (f *endFake) started(pid int32) (int64, bool) {
 	start, ok := f.state(pid)
 	f.looks[pid] = endLook{start: start, ok: ok, sleeps: f.sleeps}
@@ -143,7 +144,7 @@ func (f *endFake) footprint(pid int32) uint64 {
 }
 
 // signal delivers sig to the process that has pid, which answers as its
-// endHow says, and notes the call. A newer process that took over the pid
+// endHow says, and records the call. A newer process that took over the pid
 // takes the signal and keeps running.
 func (f *endFake) signal(pid int32, sig syscall.Signal) error {
 	p := f.procs[pid]

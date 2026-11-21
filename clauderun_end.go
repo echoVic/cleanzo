@@ -17,7 +17,9 @@ const (
 )
 
 // endClaudeProcsWith ends the targets that are still listed under session,
-// each checked by pid and start time first.
+// each checked by pid and start time first: in a row of what an open session
+// with that id started, of any age, or of what the closed session left. A
+// target that is not is "changed" and gets no signal.
 func endClaudeProcsWith(ctx context.Context, src claudeSource, session string, targets []ClaudeTarget) (ClaudeEndResult, error) {
 	s, err := src.snapshot()
 	if err != nil {
@@ -75,6 +77,7 @@ func endClaudeSessionWith(ctx context.Context, src claudeSource, target ClaudeTa
 	for i := range a.Sessions {
 		if p := a.Sessions[i].Proc; p.Pid == target.Pid && p.Start == target.Start && claudeEndable(p, s.UID) {
 			open = &a.Sessions[i]
+			break
 		}
 	}
 	if open != nil && open.Own {
