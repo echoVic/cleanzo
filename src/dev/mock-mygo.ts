@@ -7,6 +7,7 @@ import type {
   Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate,
   AIGroup, AIPart, AIScanResult, AITool, AIToolInfo,
   AIModelEntry, AIModelSource, AIModelSourceInfo, AIModelsResult,
+  ClaudeEndResult, ClaudeProc, ClaudeRunning, ClaudeSession, ClaudeTarget,
 } from "../mygo";
 
 class MockChannel<V> implements AsyncIterable<V> {
@@ -555,6 +556,80 @@ function createRuntime(): Runtime {
     return { tools: structuredClone(aiTools), scannedAt: nowSec() };
   };
 
+  // ── Claude Code「运行中」：一个在 T3 Code 里干活的会话、三个空闲的（一个满 2 小时，带两条有端口的命令）、
+  //    Cleanzo 自己所在的会话，两个已关闭的会话留下的三行（一行并着包命令的 shell） ──
+  const usec = (sec: number) => sec * 1_000_000;
+  const claudeProc = (p: Partial<ClaudeProc> & Pick<ClaudeProc, "pid" | "command" | "cwd">, ageSec: number): ClaudeProc => ({
+    start: usec(now - ageSec), worktree: "", ports: [], memory: 40 * MB, folded: [], ...p,
+  });
+  const claudeSession = (s: Omit<ClaudeSession, "start" | "cwd" | "commands"> & Partial<Pick<ClaudeSession, "commands">>): ClaudeSession => ({
+    start: usec(now - 9 * DAY), cwd: home(`~/Documents/Projects/${s.project}`), commands: [], ...s,
+  });
+  /** 结束时一直「还在运行」：用来看错误提示。 */
+  const claudeStuckPid = 39377;
+  const claudeRunning: ClaudeRunning = {
+    sessions: [
+      claudeSession({
+        id: "5f0c2a91-3b7e-4d2a-9c61-2e8b7a4d0f13", pid: 48213, project: "web-shop", title: "重做结算页",
+        status: "idle", since: now - 7 * DAY, host: "Ghostty", entry: "cli", memory: 240 * MB, own: false,
+        commands: [
+          claudeProc({ pid: 48390, command: "node node_modules/.bin/vite", cwd: home("~/Documents/Projects/web-shop"), ports: [5173], memory: 380 * MB }, 3 * DAY),
+          claudeProc({ pid: 48412, command: "node server/mock-api.js", cwd: home("~/Documents/Projects/web-shop"), ports: [4010], memory: 96 * MB }, 3 * DAY - 600),
+        ],
+      }),
+      claudeSession({
+        id: "0b6e3d27-91c4-4a8f-a2d5-c7f81e09b4a6", pid: 51877, project: "data-pipeline", title: "",
+        status: "idle", since: now - 75 * 60, host: "Ghostty", entry: "cli", memory: 150 * MB, own: false,
+      }),
+      claudeSession({
+        id: "7d2f9a64-e5b1-4c03-8f7a-3a6c0b2e1d95", pid: 51022, project: "notes-app", title: "整理同步逻辑",
+        status: "idle", since: now - 40 * 60, host: "Ghostty", entry: "cli", memory: 180 * MB, own: false,
+      }),
+      claudeSession({
+        id: "e41a8c0f-2d7b-4b95-9e36-8f5d2c1a7b40", pid: 52340, project: "toolbox", title: "整理发布脚本",
+        status: "", since: 0, host: "Ghostty", entry: "cli", memory: 210 * MB, own: true,
+      }),
+      claudeSession({
+        id: "a9c35e18-7f6d-4e2b-b1c0-4d8e6f9a2c57", pid: 53101, project: "api-gateway", title: "接入限流中间件",
+        status: "busy", since: now - 30, host: "T3 Code", entry: "sdk-ts", memory: 410 * MB, own: false,
+      }),
+    ],
+    left: [
+      {
+        id: "9a1d7e40-6c2b-4f8e-b3a5-71c0d9e2f684", project: "landing-page", title: "改版首页",
+        procs: [
+          claudeProc({
+            pid: 39120, command: "node node_modules/.bin/next dev", cwd: home("~/Documents/Projects/landing-page"), ports: [3000], memory: 410 * MB,
+            folded: [{ pid: 39118, start: usec(now - 2 * DAY) - 2000 }],
+          }, 2 * DAY),
+          claudeProc({
+            pid: claudeStuckPid, command: "python3 -m http.server 8000", cwd: home("~/Documents/Projects/landing-page/.claude/worktrees/hero-copy"),
+            worktree: "hero-copy", ports: [8000], memory: 22 * MB,
+          }, 5 * 3600),
+        ],
+      },
+      {
+        id: "c3e8f215-0a4b-4c7d-8e96-5b2f1a7d3c08", project: "api-mock", title: "",
+        procs: [claudeProc({ pid: 41562, command: "node json-server --port 4100 db.json", cwd: home("~/Documents/Projects/api-mock"), ports: [4100], memory: 64 * MB }, 26 * 3600)],
+      },
+    ],
+    uncertain: 2, noRecords: false, at: now,
+  };
+  /** 结束几个目标：除了那个固定的 pid，都结束，对应的行从样例里去掉；腾出的是去掉的行的占用。 */
+  const endClaudeTargets = (targets: ClaudeTarget[]): ClaudeEndResult => {
+    const ending = new Set(targets.map((t) => t.pid).filter((pid) => pid !== claudeStuckPid));
+    let freed = 0;
+    const keep = (rows: ClaudeProc[]) => rows.filter((p) => {
+      if (!ending.has(p.pid)) return true;
+      freed += p.memory;
+      return false;
+    });
+    for (const s of claudeRunning.sessions) s.commands = keep(s.commands);
+    for (const g of claudeRunning.left) g.procs = keep(g.procs);
+    claudeRunning.left = claudeRunning.left.filter((g) => g.procs.length > 0);
+    return { procs: targets.map(({ pid }) => ({ pid, result: ending.has(pid) ? "ended" : "running" })), freed };
+  };
+
   // ── 本地模型：Ollama 共享 blob、HuggingFace 目录、LM Studio 目录各来一份 ──
   const mkModel = (name: string, path: string, size: number, ageDays: number): AIModelEntry => ({
     name, path, size, last: now - ageDays * DAY,
@@ -755,9 +830,17 @@ function createRuntime(): Runtime {
       freedDisk(freed);
       return { parts: partsResult, freed };
     },
-    "Cleaner.ClaudeRunning": async () => ({ sessions: [], left: [], uncertain: 0, noRecords: false, at: nowSec() }),
-    "Cleaner.EndClaudeProcesses": async () => ({ procs: [], freed: 0 }),
-    "Cleaner.EndClaudeSession": async () => ({ procs: [], freed: 0 }),
+    "Cleaner.ClaudeRunning": async () => ({ ...claudeRunning, at: nowSec() }),
+    "Cleaner.EndClaudeProcesses": async (_session, targets) => { await wait(600); return endClaudeTargets(targets); },
+    "Cleaner.EndClaudeSession": async (target) => {
+      await wait(600);
+      const s = claudeRunning.sessions.find((x) => x.pid === target.pid);
+      if (!s) return { procs: [{ pid: target.pid, result: "changed" }], freed: 0 };
+      claudeRunning.sessions = claudeRunning.sessions.filter((x) => x !== s);
+      // 它启动的命令不动：会话没了以后出现在「已关闭的会话留下的进程」里。
+      if (s.commands.length > 0) claudeRunning.left.push({ id: s.id, project: s.project, title: s.title, procs: s.commands });
+      return { procs: [{ pid: s.pid, result: "ended" }], freed: s.memory };
+    },
     "Cleaner.Disk": async () => disk,
     "Cleaner.FullScan": async (ch) => stream(ch, async (emit) => {
       const items = bigItems.filter((it) => !isGone(it.path)).map((it) => ({ ...it, size: sizeOf(it.path) }));
