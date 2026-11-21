@@ -87,14 +87,23 @@ func claudeWorkingFoldersWith(table func() ([]claudeProc, error), cwd func(pid i
 	return use
 }
 
+// claudeRunningApps lists the running apps for a snapshot. Tests replace it.
+var claudeRunningApps = workspaceList
+
 // procZombie is p_stat of a process that exited and is not reaped yet: it
 // runs nothing.
 const procZombie = 5 // SZOMB
 
 // readClaudeSnapshot reads the process table natively, with the arguments,
 // marker, executable and output file of each of this account's processes,
-// then the session records and the running apps.
+// then the session records and the running apps. Without the running apps
+// nothing tells an app on the Dock from a command a session started, so a
+// snapshot that cannot read them is an error.
 func readClaudeSnapshot() (claudeSnapshot, error) {
+	apps := claudeRunningApps()
+	if len(apps) == 0 {
+		return claudeSnapshot{}, errors.New("the running apps cannot be read")
+	}
 	procs, err := claudeProcTable()
 	if err != nil {
 		return claudeSnapshot{}, err
@@ -120,7 +129,7 @@ func readClaudeSnapshot() (claudeSnapshot, error) {
 	return claudeSnapshot{
 		Procs:   procs,
 		Records: readClaudeRecords(filepath.Join(homeDir(), ".claude", "sessions")),
-		Apps:    workspaceList(),
+		Apps:    apps,
 		Self:    int32(os.Getpid()),
 		UID:     uid,
 	}, nil
@@ -154,12 +163,15 @@ func kinfoStart(kp *unix.KinfoProc) int64 {
 }
 
 // parseProcargs2 reads a kern.procargs2 buffer: argc as a little-endian
-// int32, the executable's path, NUL padding, then argc arguments and the
-// environment, each NUL-terminated, the environment ending at an empty
-// string. Of the environment it keeps Claude Code's three variables, the
-// first of each name as getenv finds it, and whether any variable could be
-// read; no other variable is copied out of buf. A buffer that does not hold
-// argc arguments gives no arguments and no environment.
+// int32, the executable's path with its NUL padded to a multiple of 8
+// bytes, then argc arguments and the environment, each NUL-terminated, the
+// environment ending at an empty string. The arguments are read from where
+// the padding ends, so an empty argument stays an argument and no
+// environment string is taken for one. Of the environment it keeps Claude
+// Code's three variables, the first of each name as getenv finds it, and
+// whether any variable could be read; no other variable is copied out of
+// buf. A buffer that is not laid out so, or does not hold argc arguments,
+// gives no arguments and no environment.
 func parseProcargs2(buf []byte) (args []string, env claudeEnv) {
 	if len(buf) < 4 {
 		return nil, claudeEnv{}
@@ -170,7 +182,11 @@ func parseProcargs2(buf []byte) (args []string, env claudeEnv) {
 	if argc < 0 || int(argc) > len(rest) || path < 0 {
 		return nil, claudeEnv{}
 	}
-	rest = bytes.TrimLeft(rest[path:], "\x00")
+	start := (path + 8) &^ 7 // the path and its NUL, rounded up to 8 bytes
+	if start > len(rest) || len(bytes.Trim(rest[path:start], "\x00")) != 0 {
+		return nil, claudeEnv{}
+	}
+	rest = rest[start:]
 	args = make([]string, 0, argc)
 	for range argc {
 		end := bytes.IndexByte(rest, 0)

@@ -631,7 +631,7 @@ func TestEndClaudeHelper(t *testing.T) {
 // claudeTermWait has passed.
 func TestEndClaudeEndsARealChild(t *testing.T) {
 	setHome(t, t.TempDir())
-	viewNoApps(t)
+	viewSampleApps(t)
 	child := exec.Command(os.Args[0], "-test.run=^TestEndClaudeHelper$")
 	child.Env = []string{"CLEANZO_END_CLAUDE_HELPER=1"}
 	out, err := child.StdoutPipe()

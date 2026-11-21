@@ -80,11 +80,17 @@ func TestNativeFootprintAndProcName(t *testing.T) {
 }
 
 // viewProcargs is a kern.procargs2 buffer as the kernel lays it out: argc,
-// the executable's path, NUL padding, then args and env, each
-// NUL-terminated; after is appended as it is.
+// the executable's path with its NUL padded to a multiple of 8 bytes, then
+// args and env, each NUL-terminated; after is appended as it is.
 func viewProcargs(argc int32, args, env []string, after string) []byte {
+	return viewProcargsOf("/usr/local/bin/node", argc, args, env, after)
+}
+
+// viewProcargsOf is viewProcargs for the executable at path.
+func viewProcargsOf(path string, argc int32, args, env []string, after string) []byte {
 	b := binary.LittleEndian.AppendUint32(nil, uint32(argc))
-	b = append(b, "/usr/local/bin/node\x00\x00\x00\x00"...)
+	b = append(b, path...)
+	b = append(b, make([]byte, 8-len(path)%8)...)
 	for _, s := range append(slices.Clone(args), env...) {
 		b = append(b, s...)
 		b = append(b, 0)
@@ -124,6 +130,13 @@ func TestParseProcargs2(t *testing.T) {
 		{"marker must be 1", viewProcargs(2, args, []string{"CLAUDECODE=true", "CLAUDE_PID=42x"}, "\x00"), args, claudeEnv{Seen: true}},
 		{"the first of a name counts", viewProcargs(2, args, []string{"CLAUDE_CODE_SESSION_ID=S1", "CLAUDE_CODE_SESSION_ID=S2", "CLAUDECODE=1", "CLAUDECODE=0"}, "\x00"), args, claudeEnv{Seen: true, Marked: true, Session: "S1"}},
 		{"an empty argument", viewProcargs(3, []string{"node", "", "x.js"}, nil, ""), []string{"node", "", "x.js"}, claudeEnv{}},
+		// An empty first argument is an argument: the environment stays where it is.
+		{"an empty first argument", viewProcargs(2, []string{"", "server.js"}, env, "\x00"), []string{"", "server.js"}, claudeEnv{true, true, "S1", 4242}},
+		{"every argument empty", viewProcargs(2, []string{"", ""}, env, "\x00"), []string{"", ""}, claudeEnv{true, true, "S1", 4242}},
+		{"a path one byte short of 8", viewProcargsOf("/"+strings.Repeat("p", 30), 2, []string{"", "x"}, env, "\x00"), []string{"", "x"}, claudeEnv{true, true, "S1", 4242}},
+		{"a path of 8 bytes' multiple", viewProcargsOf("/"+strings.Repeat("p", 31), 2, []string{"", "x"}, env, "\x00"), []string{"", "x"}, claudeEnv{true, true, "S1", 4242}},
+		{"a byte in the padding", append(binary.LittleEndian.AppendUint32(nil, 1), "/usr/local/bin/node\x00x\x00\x00\x00node\x00"...), nil, claudeEnv{}},
+		{"the padding is cut short", append(binary.LittleEndian.AppendUint32(nil, 1), "/usr/local/bin/node\x00\x00"...), nil, claudeEnv{}},
 		{"nil", nil, nil, claudeEnv{}},
 		{"no room for argc", []byte{2, 0, 0}, nil, claudeEnv{}},
 		{"negative argc", viewProcargs(-1, args, env, "\x00"), nil, claudeEnv{}},
@@ -135,6 +148,12 @@ func TestParseProcargs2(t *testing.T) {
 			gotArgs, gotEnv := parseProcargs2(c.buf)
 			if !slices.Equal(gotArgs, c.args) || (gotArgs == nil) != (c.args == nil) || gotEnv != c.env {
 				t.Errorf("parseProcargs2 = %q (nil %v), %+v; want %q (nil %v), %+v", gotArgs, gotArgs == nil, gotEnv, c.args, c.args == nil, c.env)
+			}
+			// Whatever the layout, no other variable leaves the buffer.
+			for _, secret := range []string{"hunter2", "SECRET_TOKEN", "PATH"} {
+				if kept := fmt.Sprintf("%+v %+v", gotArgs, gotEnv); strings.Contains(kept, secret) {
+					t.Errorf("%q is kept in %q", secret, kept)
+				}
 			}
 		})
 	}
@@ -195,12 +214,18 @@ func TestReadClaudeRecords(t *testing.T) {
 	}
 }
 
-// viewNoApps makes the snapshot's app list empty: NSWorkspace needs the
-// main thread, which a test binary never serves.
-func viewNoApps(t *testing.T) {
-	prev := runOnMain
-	runOnMain = func(func()) {}
-	t.Cleanup(func() { runOnMain = prev })
+// viewSampleApps gives the snapshot one made-up running app, which is no
+// process of this Mac: NSWorkspace needs the main thread, which a test
+// binary never serves.
+func viewSampleApps(t *testing.T) {
+	viewApps(t, workspaceApp{Pid: -1, Name: "Sample App"})
+}
+
+// viewApps makes apps the running apps the snapshot reads.
+func viewApps(t *testing.T, apps ...workspaceApp) {
+	prev := claudeRunningApps
+	claudeRunningApps = func() []workspaceApp { return apps }
+	t.Cleanup(func() { claudeRunningApps = prev })
 }
 
 // TestClaudeSnapshotHelper is the child TestClaudeSnapshotSeesThisProcess
@@ -215,7 +240,7 @@ func TestClaudeSnapshotHelper(t *testing.T) {
 
 func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 	setHome(t, t.TempDir())
-	viewNoApps(t)
+	viewSampleApps(t)
 	// The child gets only these variables, none of this process's.
 	child := exec.Command(os.Args[0], "-test.run=^TestClaudeSnapshotHelper$")
 	child.Env = []string{"CLEANZO_CLAUDE_SNAPSHOT_HELPER=1", "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=S-test"}
@@ -225,6 +250,20 @@ func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 	t.Cleanup(func() {
 		_ = child.Process.Kill()
 		_ = child.Wait()
+	})
+	// A process may start with an empty first argument: its arguments are
+	// still its own, and nothing of its environment joins them.
+	bare := &exec.Cmd{
+		Path: os.Args[0],
+		Args: []string{"", "-test.run=^TestClaudeSnapshotHelper$"},
+		Env:  []string{"FAKE_FIRST=made-up-value", "CLEANZO_CLAUDE_SNAPSHOT_HELPER=1"},
+	}
+	if err := bare.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = bare.Process.Kill()
+		_ = bare.Wait()
 	})
 	// A child that exited and is not reaped yet is a zombie.
 	zombie := exec.Command("/usr/bin/true")
@@ -270,8 +309,33 @@ func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 	if want := (claudeEnv{true, true, "S-test", 0}); kid.Ppid != int32(os.Getpid()) || kid.Env != want || len(kid.Args) == 0 || kid.Args[0] != os.Args[0] {
 		t.Errorf("child: ppid %d (want %d), env %+v (want %+v), args %q", kid.Ppid, os.Getpid(), kid.Env, want, kid.Args)
 	}
+	odd, ok := byPid[int32(bare.Process.Pid)]
+	if !ok {
+		t.Fatal("the snapshot misses the child with an empty first argument")
+	}
+	if want := []string{"", "-test.run=^TestClaudeSnapshotHelper$"}; !slices.Equal(odd.Args, want) || odd.Env != (claudeEnv{Seen: true}) {
+		t.Errorf("child with an empty first argument: args %q (want %q), env %+v", odd.Args, want, odd.Env)
+	}
 	if _, listed := byPid[int32(zombie.Process.Pid)]; listed {
 		t.Error("the snapshot lists a zombie")
+	}
+}
+
+// Without the running apps nothing tells an app on the Dock from a command
+// a session started, so the snapshot is unreadable and nothing is listed.
+func TestClaudeSnapshotNeedsTheRunningApps(t *testing.T) {
+	setHome(t, t.TempDir())
+	viewApps(t)
+	viewResetPorts(t)
+	if _, err := realClaudeSource().snapshot(); err == nil {
+		t.Error("a snapshot without the running apps gave no error")
+	}
+	_, err := claudeRunningWith(context.Background(), realClaudeSource())
+	if ce, ok := err.(codeError); !ok || ce.Code != "unreadable" {
+		t.Errorf("the reading gave %v, want unreadable", err)
+	}
+	if sum := claudeSummaryWith(realClaudeSource()); sum.Idle != 0 || sum.Left != 0 || sum.Rows == nil || len(sum.Rows) != 0 {
+		t.Errorf("the summary is %+v, want it empty", sum)
 	}
 }
 
@@ -392,14 +456,17 @@ func TestClosedSessionProjectAndTitle(t *testing.T) {
 		long.WriteString(filler)
 	}
 	writeText(t, filepath.Join(projects, "-Users-me-other-app", early+".jsonl"), long.String())
-	// What the session id "../x" would reach from a project folder.
-	writeText(t, filepath.Join(home, ".claude", "x.jsonl"), line(`"type":"user","cwd":"/Users/me/elsewhere"`)+line(`"type":"ai-title","aiTitle":"Elsewhere"`))
+	// What the session ids "../x" and "../../x" would reach from a project folder.
+	for _, outside := range []string{filepath.Join(projects, "x.jsonl"), filepath.Join(home, ".claude", "x.jsonl")} {
+		writeText(t, outside, line(`"type":"user","cwd":"/Users/me/elsewhere"`)+line(`"type":"ai-title","aiTitle":"Elsewhere"`))
+	}
 
 	for _, c := range []struct{ session, project, title string }{
 		{titled, "sample-app", "Rename the widgets"},
 		{early, "other-app", ""},
 		{missing, "", ""},
 		{"../x", "", ""},
+		{"../../x", "", ""},
 		{"S1", "", ""},
 	} {
 		if project, title := claudeClosedSession(c.session); project != c.project || title != c.title {
