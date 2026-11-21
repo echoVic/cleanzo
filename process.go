@@ -352,7 +352,10 @@ func otherProcessKey(o otherProc) (key, kind, bundle string) {
 }
 
 // processName prefers the executable's full file name, unless the kernel
-// name identifies a differently named target (such as a versioned binary).
+// name identifies a differently named target (such as a versioned binary
+// started through a link). An executable named after its version inside a
+// versions folder, as Claude Code installs itself, is named after the
+// folder above that, without a leading dot.
 func processName(path, name string, pid int32) string {
 	if path == "" {
 		if name != "" {
@@ -363,6 +366,11 @@ func processName(path, name string, pid int32) string {
 	base := filepath.Base(path)
 	if name != "" && !strings.HasPrefix(base, name) {
 		return name
+	}
+	if dir := filepath.Dir(path); base == name && filepath.Base(dir) == "versions" {
+		if tool := strings.TrimPrefix(filepath.Base(filepath.Dir(dir)), "."); tool != "" && tool != string(filepath.Separator) {
+			return tool
+		}
 	}
 	return base
 }

@@ -714,6 +714,8 @@ func TestGroupProcessesUsesKernelNames(t *testing.T) {
 		{"symlinked CLI", "/Users/me/.claude/versions/2.1.304", "claude", "cli:claude", "claude", "claude"},
 		{"truncated system name", "/System/Library/PrivateFrameworks/EcosystemAnalytics.framework/Support/ecosystemanalyticsd", "ecosystemanalyt", "sys:ecosystemanalyticsd", "ecosystemanalyticsd", "ecosystemanalyticsd"},
 		{"Chrome helper", "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)", "Google Chrome He", "app:/applications/google chrome.app", "Google Chrome", "Google Chrome Helper (Renderer)"},
+		{"versioned CLI", "/Users/me/.local/share/claude/versions/2.1.321", "2.1.321", "cli:claude", "claude", "claude"},
+		{"versioned CLI in a dot folder", "/Users/me/.claude/versions/2.1.304", "2.1.304", "cli:claude", "claude", "claude"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cur := snapshotProcs([]procReading{{Pid: 1, Path: tc.path, Name: tc.short}})
