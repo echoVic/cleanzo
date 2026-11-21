@@ -650,22 +650,24 @@ test("each worktree state: clean and dirty can be ticked; the other eight are di
   try {
     env.lang("zh");
     const r = await partRow(env, worktreePart("claude", [...WT_STATES, "a-state-from-later"].map((s) => worktree(s, s))));
+    // 第二行（仓库 · 分支 · 几天没动）也连着勾选框，在状态说明前面
+    const note = (name: string) => t("ai.wt.note", { repo: "app", branch: `feat/${name}`, n: 8 });
     for (const state of WT_STATES) {
       const box = r.checkbox(state)!;
       expect(box.props.disabled).toBe(state !== "clean" && state !== "dirty");
       if (state === "clean" || state === "dirty") continue;
       // 说明写在行上，也连着勾选框
-      expect(r.describedBy(box)).toBe(t(`ai.wt.state.${state}` as never));
+      expect(r.describedBy(box)).toBe(`${note(state)} ${t(`ai.wt.state.${state}` as never)}`);
       expect(textOf(r.row(state))).toContain(t(`ai.wt.state.${state}` as never));
     }
     // 干净的不写；带改动的写着有几处
-    expect(r.describedBy(r.checkbox("clean")!)).toBe("");
-    expect(r.describedBy(r.checkbox("dirty")!)).toBe("3 处没提交的改动，会一起进废纸篓");
+    expect(r.describedBy(r.checkbox("clean")!)).toBe(note("clean"));
+    expect(r.describedBy(r.checkbox("dirty")!)).toBe(`${note("dirty")} 3 处没提交的改动，会一起进废纸篓`);
     expect(textOf(r.row("dirty"))).toContain("3 处没提交的改动，会一起进废纸篓");
     // 认不出的新状态：不能勾，说认不出
     const later = r.checkbox("a-state-from-later")!;
     expect(later.props.disabled).toBe(true);
-    expect(r.describedBy(later)).toBe(t("ai.wt.state.unrecognized"));
+    expect(r.describedBy(later)).toBe(`${note("a-state-from-later")} ${t("ai.wt.state.unrecognized")}`);
   } finally { env.restore(); }
 });
 
@@ -721,8 +723,9 @@ test("while Codex runs, its worktree part says Quit It First and every worktree 
     expect(r.checkboxes()).toHaveLength(WT_STATES.length);
     for (const box of r.checkboxes()) expect(box.props.disabled).toBe(true);
     // 读屏也读得到为什么：「先退出」连着每一组，在它自己的说明前面
-    expect(r.describedBy(r.checkbox("clean")!)).toBe(t("ai.quitFirst"));
-    expect(r.describedBy(r.checkbox("in-use")!)).toBe(`${t("ai.quitFirst")} ${t("ai.wt.state.in-use")}`);
+    const note = (name: string) => t("ai.wt.note", { repo: "app", branch: `feat/${name}`, n: 8 });
+    expect(r.describedBy(r.checkbox("clean")!)).toBe(`${t("ai.quitFirst")} ${note("clean")}`);
+    expect(r.describedBy(r.checkbox("in-use")!)).toBe(`${t("ai.quitFirst")} ${note("in-use")} ${t("ai.wt.state.in-use")}`);
   } finally { env.restore(); }
 });
 
@@ -787,16 +790,19 @@ test("the selection carries the state each ticked worktree showed, in order; the
   const env = (await import("./page-harness")).changes();
   try {
     const w = await worktreePage(env, claudeWithWorktrees());
-    await w.tick("claude.worktrees", wtKey("a"));
+    // 先勾列表里靠后的那个：seen 跟的是发出去的 groups，不是列表的顺序
     await w.tick("claude.worktrees", wtKey("b"));
+    await w.tick("claude.worktrees", wtKey("a"));
     // 不能勾的那个，有人叫它勾也不进选择
     await w.tick("claude.worktrees", wtKey("c"));
     await w.clean();
-    expect(w.cleaned).toEqual([[
-      { tool: "claude", part: "claude.cache", groups: [] },
-      { tool: "claude", part: "claude.worktrees", groups: [wtKey("a"), wtKey("b")], seen: ["clean", "dirty"] },
-    ]]);
-    expect(w.cleaned[0]![0]).not.toHaveProperty("seen");
+    const sent = w.cleaned[0] as { tool: string; part: string; groups: string[]; seen?: string[] }[];
+    expect(sent.map((s) => s.part)).toEqual(["claude.cache", "claude.worktrees"]);
+    expect([...sent[1]!.groups].sort()).toEqual([wtKey("a"), wtKey("b")]);
+    const shown: Record<string, string> = { [wtKey("a")]: "clean", [wtKey("b")]: "dirty" };
+    expect(sent[1]!.seen).toEqual(sent[1]!.groups.map((k) => shown[k]!));
+    expect(sent[0]).toEqual({ tool: "claude", part: "claude.cache", groups: [] });
+    expect(sent[0]).not.toHaveProperty("seen");
   } finally { env.restore(); }
 });
 
@@ -840,6 +846,19 @@ test("a worktree that could not be removed is told in an error toast: its path, 
     await w.tick("claude.worktrees", wtKey("a"));
     await w.clean();
     expect(w.page.toasts.at(-1)).toEqual({ text: [t("ai.done", { size: human(0) }), t("ai.done.skipped", { n: 1 }), failure].join(" · "), kind: "err" });
+  } finally { env.restore(); }
+  // 不止一个没能移走：说出第一条，再说还有几条
+  env = changes();
+  try {
+    const several: AICleanResult = {
+      freed: 0,
+      parts: [{ ...answer.parts[0]!, failed: [...answer.parts[0]!.failed, "~/code/app/.claude/worktrees/y: wt-changed", "~/code/app/.claude/worktrees/z: wt-trash"] }],
+    };
+    const tool = claudeWithWorktrees();
+    const w = await worktreePage(env, tool, { answer: several, rescans: [tool] });
+    await w.tick("claude.worktrees", wtKey("a"));
+    await w.clean();
+    expect(w.page.toasts.at(-1)).toEqual({ text: `${failure} · ${t("ai.failedMore", { n: 2 })}`, kind: "err" });
   } finally { env.restore(); }
 });
 

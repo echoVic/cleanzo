@@ -256,15 +256,20 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
         kept: res.parts.reduce((n, r) => n + r.kept, 0),
         skipped: res.parts.filter((r) => r.skipped || r.failed.length).length,
       };
-      const failure = res.parts.find((r) => r.failed.length > 0)?.failed[0];
+      const failures = res.parts.flatMap((r) => r.failed);
+      const failure = failures[0];
       // 重扫成功才把结果写在新列表上；重扫失败页面显示失败，清理结果用提示告诉用户。
       const rescanned = await scan();
       if (rescanned) {
         setPhase("cleaned");
         setLastClean(done);
       }
-      // 没能移走的，用错误提示说出第一条：哪一个、为什么。
-      const notes = [rescanned ? "" : doneText(done, t), failure ? failureText(failure) : ""].filter(Boolean);
+      // 没能移走的，用错误提示说出第一条：哪一个、为什么；不止一条时说还有几条。
+      const notes = [
+        rescanned ? "" : doneText(done, t),
+        failure ? failureText(failure) : "",
+        failures.length > 1 ? t("ai.failedMore", { n: failures.length - 1 }) : "",
+      ].filter(Boolean);
       if (notes.length > 0) toast(notes.join(" · "), failure ? "err" : "ok");
     } catch (e) {
       toast(errText(e), "err");

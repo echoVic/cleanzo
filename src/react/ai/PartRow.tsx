@@ -70,13 +70,14 @@ export function PartRow(p: Props) {
       })()
     : false;
 
-  /** worktree 的一行：文件夹名，「仓库 · 分支 · N 天没动」，状态说明，大小；点行在访达中显示。勾不上的原因连着勾选框。 */
+  /** worktree 的一行：文件夹名，「仓库 · 分支 · N 天没动」，状态说明，大小；点行在访达中显示。第二行和勾不上的原因都连着勾选框：同名的 worktree 靠仓库和分支分得开。 */
   const worktreeRow = (g: AIGroup, i: number) => {
     const can = !locked && groupSelectable(part, g, p.windowDays, p.scannedAt);
     const note = worktreeNote(g, p.scannedAt, t);
     const state = worktreeState(g, t);
     const stateId = `cz-wt-${part.id}-${i}`;
-    const describedBy = [blockedByRun ? quitId : "", state ? stateId : ""].filter(Boolean).join(" ");
+    const noteId = `${stateId}-note`;
+    const describedBy = [blockedByRun ? quitId : "", note ? noteId : "", state ? stateId : ""].filter(Boolean).join(" ");
     return (
       <div key={g.key} className="flex items-center gap-3 py-2">
         <Checkbox
@@ -93,7 +94,7 @@ export function PartRow(p: Props) {
           onClick={() => g.path && p.onReveal(g.path)}
         >
           <span className="block truncate text-[13px] hover:text-accent-strong" title={g.label}>{g.label}</span>
-          {note && <span className="block text-xs text-muted">{note}</span>}
+          {note && <span id={noteId} className="block text-xs text-muted">{note}</span>}
           {state && <span id={stateId} className={cn("block text-xs", g.state === "dirty" ? "text-warning-text" : "text-muted")}>{state}</span>}
         </button>
         <span className="shrink-0 text-xs tabular-nums text-muted">{human(g.size)}</span>
