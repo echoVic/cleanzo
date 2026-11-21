@@ -590,9 +590,10 @@ function createRuntime(): Runtime {
     return { tools: [structuredClone(tool)], scannedAt: nowSec() };
   };
 
+  // 「AI 空间」的扫描和后端一样不带 Agent worktree：它们只在各工具自己的页面上。
   const scanAITools = async (): Promise<AIScanResult> => {
     await wait(800);
-    return { tools: structuredClone(aiTools), scannedAt: nowSec() };
+    return { tools: structuredClone(aiTools).map((t) => ({ ...t, parts: t.parts.filter((p) => !p.worktrees) })), scannedAt: nowSec() };
   };
 
   // ── Claude Code「运行中」：一个在 T3 Code 里干活的会话、三个空闲的（一个满 2 小时，带两条有端口的命令）、
