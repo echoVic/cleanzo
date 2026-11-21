@@ -139,3 +139,39 @@ func wantShape(t *testing.T, a claudeAttribution, want string) {
 		t.Errorf("attribution = %s\n          want %s", got, want)
 	}
 }
+
+// ---- processes under a session ---------------------------------------------
+
+func TestClaudeCommandUnderItsSession(t *testing.T) {
+	a := attributeClaude(ccSnap(wrapper(110, 100, "npm run dev"), marked(111, 110, 110, "S1")))
+	wantShape(t, a, "100:S1 members[] commands[111+110]; uncertain 0")
+}
+
+func TestClaudeOldSessionIDStaysWithItsParent(t *testing.T) {
+	a := attributeClaude(ccSnap(wrapper(110, 100, "npm run dev"), marked(111, 110, 110, "S0")))
+	wantShape(t, a, "100:S1 members[] commands[111+110]; uncertain 0")
+}
+
+func TestClaudeHelpersJoinTheSession(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(101, 100, 100, "S1"), marked(102, 100, 100, "S1"), hidden(103, 100, 100)))
+	wantShape(t, a, "100:S1 members[101 102 103] commands[]; uncertain 0")
+}
+
+func TestClaudeSubAgentIsNotASession(t *testing.T) {
+	a := attributeClaude(ccSnap(ccProc(105, 100)))
+	wantShape(t, a, "100:S1 members[105] commands[]; uncertain 0")
+}
+
+func TestClaudeUnmarkedIsNeverListed(t *testing.T) {
+	// 161 and 162 share the session's process group but hang off launchd:
+	// a process group is no clue.
+	a := attributeClaude(ccSnap(plain(160, 100, 100), plain(161, 1, 100), hidden(162, 1, 100)))
+	wantShape(t, a, "100:S1 members[] commands[]; uncertain 0")
+}
+
+func TestClaudeCleanzoFamilyIsLeftOut(t *testing.T) {
+	// Cleanzo (900), started from the session, and what it starts carry
+	// the session's marker.
+	a := attributeClaude(ccSnap(hidden(890, 100, 890), marked(900, 890, 900, "S1"), marked(901, 900, 901, "S1")))
+	wantShape(t, a, "100:S1 own members[] commands[]; uncertain 0")
+}

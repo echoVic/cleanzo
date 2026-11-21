@@ -1,5 +1,15 @@
 package main
 
+import (
+	"cmp"
+	"iter"
+	"maps"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+)
+
 // claudeProc is one process of a snapshot.
 type claudeProc struct {
 	Pid, Ppid, Pgid int32
@@ -64,21 +74,306 @@ type claudeAttribution struct {
 	NoRecords bool
 }
 
+// Limits of the attribution rules.
+const (
+	claudeIDRounds        = 5                          // generations a session id passes up from a child to a parent that shows no environment
+	claudeProcStartLayout = "Mon Jan _2 15:04:05 2006" // how a session record writes its process's start, in UTC
+)
+
 // attributeClaude sorts the processes of s into the open sessions, with what
 // each started, and the closed sessions that left processes running.
 func attributeClaude(s claudeSnapshot) claudeAttribution {
-	return claudeAttribution{}
+	t := newClaudeTable(s)
+	above := map[int32]bool{} // Cleanzo's ancestors
+	for q := range t.ancestors(s.Self) {
+		above[q.Pid] = true
+	}
+	t.findCandidates(s, above)
+	t.carryIDs()
+
+	open := map[int32]int32{} // each listed candidate to the Claude Code process heading its session
+	for pid := range t.id {
+		if cc, ok := t.climb(pid); ok && cc != 0 {
+			open[pid] = t.claude[cc]
+		}
+	}
+
+	var a claudeAttribution
+	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
+	members := map[int32][]claudeProc{}
+	for pid, head := range t.claude {
+		groups[head] = append(groups[head], t.procs[pid].Pgid)
+		if pid == head {
+			a.Sessions = append(a.Sessions, claudeOpen{Proc: t.procs[pid], Record: t.records[pid], ID: t.records[pid].SessionID, Own: above[pid]})
+		} else {
+			members[head] = append(members[head], t.procs[pid])
+		}
+	}
+	commands := map[int32][]claudeProc{}
+	for pid, head := range open {
+		if p := t.procs[pid]; slices.Contains(groups[head], p.Pgid) {
+			members[head] = append(members[head], p)
+		} else {
+			commands[head] = append(commands[head], p)
+		}
+	}
+	slices.SortFunc(a.Sessions, func(x, y claudeOpen) int { return claudeByStart(x.Proc, y.Proc) })
+	for i := range a.Sessions {
+		head := a.Sessions[i].Proc.Pid
+		slices.SortFunc(members[head], claudeByStart)
+		a.Sessions[i].Members = members[head]
+		a.Sessions[i].Commands = t.rows(commands[head])
+	}
+	return a
+}
+
+// claudeTable is a snapshot indexed for the attribution rules.
+type claudeTable struct {
+	procs    map[int32]claudeProc
+	children map[int32][]int32
+	claude   map[int32]int32        // each Claude Code process to the one heading its session
+	records  map[int32]claudeRecord // the valid records of Claude Code processes
+	cand     map[int32]bool         // the processes that may be listed
+	id       map[int32]string       // the session id each candidate carries; never ""
+}
+
+// newClaudeTable indexes s and finds its Claude Code processes: those with a
+// valid record, and the account's whose argv[0] is claude. One with another
+// above it is part of the topmost one's session.
+func newClaudeTable(s claudeSnapshot) *claudeTable {
+	t := &claudeTable{
+		procs:    make(map[int32]claudeProc, len(s.Procs)),
+		children: map[int32][]int32{},
+		claude:   map[int32]int32{},
+		records:  map[int32]claudeRecord{},
+		cand:     map[int32]bool{},
+		id:       map[int32]string{},
+	}
+	for _, p := range s.Procs {
+		if _, dup := t.procs[p.Pid]; !dup {
+			t.procs[p.Pid] = p
+			t.children[p.Ppid] = append(t.children[p.Ppid], p.Pid)
+		}
+	}
+	for pid, p := range t.procs {
+		if r := s.Records[pid]; claudeRecordValid(p, r, s.UID) {
+			t.records[pid] = r
+			t.claude[pid] = pid
+		} else if p.UID == s.UID && len(p.Args) > 0 && filepath.Base(p.Args[0]) == "claude" {
+			t.claude[pid] = pid
+		}
+	}
+	for pid := range t.claude {
+		for q := range t.ancestors(pid) {
+			if _, ok := t.claude[q.Pid]; ok {
+				t.claude[pid] = q.Pid
+			}
+		}
+	}
+	return t
+}
+
+// findCandidates marks the processes that may be listed: the account's,
+// except its Claude Code processes and Cleanzo with its ancestors (above)
+// and descendants.
+func (t *claudeTable) findCandidates(s claudeSnapshot, above map[int32]bool) {
+	family := maps.Clone(above)
+	family[s.Self] = true
+	for queue := []int32{s.Self}; len(queue) > 0; queue = queue[1:] {
+		for _, child := range t.children[queue[0]] {
+			if !family[child] {
+				family[child] = true
+				queue = append(queue, child)
+			}
+		}
+	}
+	for pid, p := range t.procs {
+		if _, claude := t.claude[pid]; pid > 1 && p.UID == s.UID && !claude && !family[pid] {
+			t.cand[pid] = true
+		}
+	}
+}
+
+// carryIDs gives the candidates the session ids they carry: a marked one its
+// marker's; one that shows no environment the id its children agree on,
+// passed up claudeIDRounds generations, else its parent's.
+func (t *claudeTable) carryIDs() {
+	for pid := range t.cand {
+		if env := t.procs[pid].Env; env.Seen && env.Marked && env.Session != "" {
+			t.id[pid] = env.Session
+		}
+	}
+	for range claudeIDRounds {
+		found := map[int32]string{}
+		for pid := range t.cand {
+			if _, has := t.id[pid]; !has && !t.procs[pid].Env.Seen {
+				if id := t.childrenID(pid); id != "" {
+					found[pid] = id
+				}
+			}
+		}
+		if len(found) == 0 {
+			break
+		}
+		maps.Copy(t.id, found)
+	}
+	settled := map[int32]bool{}
+	for pid := range t.cand {
+		t.fromParent(pid, settled)
+	}
+}
+
+// childrenID is the session id the children of pid carry, or "" when none
+// carries one or they carry different ones.
+func (t *claudeTable) childrenID(pid int32) string {
+	id := ""
+	for _, child := range t.children[pid] {
+		if cid := t.id[child]; cid != "" {
+			if id != "" && cid != id {
+				return ""
+			}
+			id = cid
+		}
+	}
+	return id
+}
+
+// fromParent gives the candidate pid, when it shows no environment and
+// carries no session id, the one of its parent: a candidate carrying one,
+// or a Claude Code process, whose session it joins. The parents on the way
+// that show no environment either get the same id; settled holds the
+// processes already done.
+func (t *claudeTable) fromParent(pid int32, settled map[int32]bool) {
+	var path []int32
+	id := ""
+	for q := pid; ; {
+		if qid, has := t.id[q]; has {
+			id = qid
+			break
+		}
+		p := t.procs[q]
+		if !t.cand[q] || p.Env.Seen || settled[q] || slices.Contains(path, q) {
+			break
+		}
+		path = append(path, q)
+		if _, claude := t.claude[p.Ppid]; claude {
+			id = t.records[p.Ppid].SessionID
+			break
+		}
+		q = p.Ppid
+	}
+	for _, h := range path {
+		settled[h] = true
+		if id != "" {
+			t.id[h] = id
+		}
+	}
+}
+
+// climb follows the parents of the candidate pid while they are candidates
+// carrying its session id. It returns the Claude Code process it reaches, or
+// 0 when it reaches launchd; ok is false when it meets anything else first,
+// such as a process missing from the snapshot.
+func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
+	id, p := t.id[pid], t.procs[pid]
+	for range len(t.procs) {
+		parent := p.Ppid
+		if parent == 1 {
+			return 0, true
+		}
+		if _, cc := t.claude[parent]; cc {
+			return parent, true
+		}
+		if !t.cand[parent] || t.id[parent] != id {
+			return 0, false
+		}
+		p = t.procs[parent]
+	}
+	return 0, false
+}
+
+// rows merges the processes listed in one place into rows: the shell Claude
+// Code runs a command in joins the oldest other row of its process group.
+func (t *claudeTable) rows(procs []claudeProc) []claudeRow {
+	procs = slices.SortedFunc(slices.Values(procs), claudeByStart)
+	into := map[int32]int32{} // a folded process to the lead of its row
+	for _, w := range procs {
+		if _, ok := claudeWrapperCommand(w.Args); !ok || w.Pid != w.Pgid {
+			continue
+		}
+		for _, r := range procs {
+			if r.Pid != w.Pid && r.Pgid == w.Pgid {
+				into[w.Pid] = r.Pid
+				break
+			}
+		}
+	}
+	var rows []claudeRow
+	at := map[int32]int{} // a lead to its row's index
+	for _, p := range procs {
+		if _, folded := into[p.Pid]; !folded {
+			at[p.Pid] = len(rows)
+			rows = append(rows, claudeRow{Lead: p})
+		}
+	}
+	for _, p := range procs {
+		if lead, folded := into[p.Pid]; folded {
+			rows[at[lead]].Folded = append(rows[at[lead]].Folded, p)
+		}
+	}
+	return rows
+}
+
+// ancestors yields the processes above pid, nearest first, up to launchd,
+// as far as the snapshot has them.
+func (t *claudeTable) ancestors(pid int32) iter.Seq[claudeProc] {
+	return func(yield func(claudeProc) bool) {
+		p, ok := t.procs[pid]
+		for range len(t.procs) {
+			if !ok || p.Pid == 1 {
+				return
+			}
+			if p, ok = t.procs[p.Ppid]; ok && !yield(p) {
+				return
+			}
+		}
+	}
+}
+
+// claudeByStart orders processes by start, then by pid.
+func claudeByStart(a, b claudeProc) int {
+	return cmp.Or(cmp.Compare(a.Start, b.Start), cmp.Compare(a.Pid, b.Pid))
 }
 
 // claudeRecordValid reports whether r is the session record of p, a process
 // of the account uid.
 func claudeRecordValid(p claudeProc, r claudeRecord, uid uint32) bool {
-	return false
+	return p.UID == uid && r.ProcStart == time.UnixMicro(p.Start).UTC().Format(claudeProcStartLayout)
 }
 
 // claudeWrapperCommand returns the command inside the shell Claude Code runs
 // a command in; ok is false when args are not that shell.
 func claudeWrapperCommand(args []string) (inner string, ok bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	switch strings.TrimPrefix(filepath.Base(args[0]), "-") {
+	case "zsh", "bash", "sh":
+	default:
+		return "", false
+	}
+	const open = " eval '"
+	for _, arg := range args[1:] {
+		start := strings.Index(arg, open)
+		if start < 0 {
+			continue
+		}
+		rest := arg[start+len(open):]
+		end := max(strings.LastIndex(rest, "' < /dev/null"), strings.LastIndex(rest, `' \< /dev/null`)) // slash-ok: the shell's input redirection, as Claude Code writes it
+		if end >= 0 {
+			return strings.ReplaceAll(rest[:end], `'\''`, "'"), true
+		}
+	}
 	return "", false
 }
 
