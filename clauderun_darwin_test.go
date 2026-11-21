@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Fixtures for the Claude Code attribution rules. A made-up process with
@@ -378,4 +380,87 @@ func TestClaudeTwoProcessesOneSession(t *testing.T) {
 	wantShape(t, attributeClaude(snap(records, first, second, p)), "100:S1 members[] commands[120]; 101:S1 members[] commands[]; uncertain 0")
 	p.Env.Pid = 101
 	wantShape(t, attributeClaude(snap(records, first, second, p)), "100:S1 members[] commands[]; 101:S1 members[] commands[120]; uncertain 0")
+}
+
+// ---- the command a row shows -----------------------------------------------
+
+func TestClaudeWrapperCommand(t *testing.T) {
+	script := `source /x/snap.sh && eval 'npm run dev -- --host '\''0.0.0.0'\''' < /dev/null && pwd -P >| /x/cwd`
+	escaped := strings.Replace(script, `' < /dev/null`, `' \< /dev/null`, 1)
+	const inner = `npm run dev -- --host '0.0.0.0'`
+	for _, c := range []struct {
+		args  []string
+		inner string
+		ok    bool
+	}{
+		{[]string{"/bin/zsh", "-c", "-l", script}, inner, true},
+		{[]string{"/bin/zsh", "-c", "-l", escaped}, inner, true},
+		{[]string{"-zsh", "-c", script}, inner, true},
+		{[]string{"/bin/bash", "-c", script}, inner, true},
+		{[]string{"sh", "-c", script}, inner, true},
+		{wrapper(170, 1, "sort 'a b' < /dev/null").Args, "sort 'a b' < /dev/null", true},
+		{[]string{"/bin/zsh", "-l"}, "", false},
+		{[]string{"/opt/homebrew/bin/node", "-e", script}, "", false},
+		{[]string{""}, "", false},
+		{nil, "", false},
+	} {
+		if got, ok := claudeWrapperCommand(c.args); got != c.inner || ok != c.ok {
+			t.Errorf("claudeWrapperCommand(%q) = %q, %v; want %q, %v", c.args, got, ok, c.inner, c.ok)
+		}
+	}
+}
+
+func TestMaskCommandKeepsThePlainCommand(t *testing.T) {
+	got := maskCommand([]string{"/opt/homebrew/bin/node", "/p/node_modules/.bin/vite", "--port", "5173"})
+	if want := "node /p/node_modules/.bin/vite --port 5173"; got != want {
+		t.Errorf("maskCommand = %q, want %q", got, want)
+	}
+}
+
+func TestMaskCommandHidesSecrets(t *testing.T) {
+	got := maskCommand([]string{"curl", "--api-key=hunter2", "--Token", "abc", "-password=x", "https://example.invalid"})
+	if want := "curl --api-key=… --Token … -password=… https://example.invalid"; got != want {
+		t.Errorf("maskCommand = %q, want %q", got, want)
+	}
+	// Inside the shell, a quoted value is one word however many spaces it holds.
+	got = maskCommand(wrapper(170, 1, `curl --token 'ab cd' --client-secret="ef gh" https://example.invalid`).Args)
+	if want := "curl --token … --client-secret=… https://example.invalid"; got != want {
+		t.Errorf("maskCommand = %q, want %q", got, want)
+	}
+}
+
+func TestMaskCommandDropsLeadingAssignments(t *testing.T) {
+	got := maskCommand(wrapper(170, 1, `API_KEY="a b" TOKEN='c d' node x.js`).Args)
+	if want := "node x.js"; got != want {
+		t.Errorf("maskCommand = %q, want %q", got, want)
+	}
+}
+
+func TestMaskCommandIsOneShortLine(t *testing.T) {
+	long := maskCommand([]string{"node", strings.Repeat("x", 5000)})
+	if n := utf8.RuneCountInString(long); n > 300 || !strings.HasSuffix(long, "…") {
+		t.Errorf("a long command gives %d characters ending %q, want at most 300 ending in …", n, long[max(0, len(long)-8):])
+	}
+	odd := maskCommand([]string{"node", "a\nb\tc\x1bd", "  e  "})
+	if strings.ContainsFunc(odd, unicode.IsControl) || strings.Contains(odd, "  ") || odd != "node a b cd e" {
+		t.Errorf("maskCommand = %q, want %q", odd, "node a b cd e")
+	}
+}
+
+func TestMaskCommandOddInput(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{""}, ""},
+		{[]string{"", "--token"}, "--token"},
+		{wrapper(170, 1, "").Args, ""},
+		{wrapper(170, 1, `API_KEY="a b node x.js`).Args, ""}, // an unclosed quote runs to the end
+		{wrapper(170, 1, `curl --token "a b`).Args, "curl --token …"},
+	} {
+		if got := maskCommand(c.args); got != c.want {
+			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
 }

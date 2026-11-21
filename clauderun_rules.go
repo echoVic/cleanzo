@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // claudeProc is one process of a snapshot.
@@ -77,6 +78,7 @@ type claudeAttribution struct {
 // Limits of the attribution rules.
 const (
 	claudeIDRounds        = 5                          // generations a session id passes up from a child to a parent that shows no environment
+	claudeCommandWidth    = 300                        // characters of a displayed command
 	claudeProcStartLayout = "Mon Jan _2 15:04:05 2006" // how a session record writes its process's start, in UTC
 )
 
@@ -488,5 +490,127 @@ func claudeWrapperCommand(args []string) (inner string, ok bool) {
 // maskCommand is args as one line for display, with leading assignments and
 // secret values removed.
 func maskCommand(args []string) string {
-	return ""
+	var words []string
+	if inner, ok := claudeWrapperCommand(args); ok {
+		words = shellWords(inner)
+	} else if len(args) > 0 {
+		words = slices.Clone(args)
+		if words[0] != "" {
+			words[0] = filepath.Base(words[0])
+		}
+	}
+	for len(words) > 0 && isAssignment(words[0]) {
+		words = words[1:]
+	}
+	for i := 0; i < len(words); i++ {
+		flag, _, hasValue := strings.Cut(words[i], "=")
+		if !strings.HasPrefix(flag, "-") || !secretFlag(flag) {
+			continue
+		}
+		if hasValue {
+			words[i] = flag + "=…"
+		} else if i+1 < len(words) {
+			words[i+1] = "…"
+			i++
+		}
+	}
+	return oneLine(strings.Join(words, " "), claudeCommandWidth)
+}
+
+// shellBlanks are the characters that end an unquoted shell word.
+const shellBlanks = " \t\n\r\v\f"
+
+// shellWords splits s into words where the shell would, at white space
+// outside quotes, keeping each word as written.
+func shellWords(s string) []string {
+	var words []string
+	for {
+		s = strings.TrimLeft(s, shellBlanks)
+		if s == "" {
+			return words
+		}
+		n := shellWordLen(s)
+		words = append(words, s[:n])
+		s = s[n:]
+	}
+}
+
+// shellWordLen is the length of the shell word s starts with: up to the
+// first white space outside quotes and backslash escapes, or all of s when a
+// quote is left open.
+func shellWordLen(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '\'':
+			end := strings.IndexByte(s[i+1:], '\'')
+			if end < 0 {
+				return len(s)
+			}
+			i += end + 1
+		case '"':
+			for i++; i < len(s) && s[i] != '"'; i++ {
+				if s[i] == '\\' {
+					i++
+				}
+			}
+			if i >= len(s) {
+				return len(s)
+			}
+		default:
+			if strings.IndexByte(shellBlanks, s[i]) >= 0 {
+				return i
+			}
+		}
+	}
+	return len(s)
+}
+
+// isAssignment reports whether word sets a shell variable: NAME=value.
+func isAssignment(word string) bool {
+	name, _, ok := strings.Cut(word, "=")
+	if !ok || name == "" {
+		return false
+	}
+	for i, c := range name {
+		letter := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		if !letter && (i == 0 || c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// secretFlag reports whether the name of flag says its value is a secret.
+func secretFlag(flag string) bool {
+	flag = strings.ToLower(flag)
+	return slices.ContainsFunc([]string{"key", "token", "secret", "password"}, func(word string) bool {
+		return strings.Contains(flag, word)
+	})
+}
+
+// oneLine is s as one line of at most width characters: each run of white
+// space is one space, none at either end, other control characters are
+// dropped, and a line cut short ends in "…".
+func oneLine(s string, width int) string {
+	var line []rune
+	space := false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			space = len(line) > 0
+		case unicode.IsControl(r):
+		default:
+			if space {
+				line = append(line, ' ')
+				space = false
+			}
+			line = append(line, r)
+			if len(line) > width {
+				return strings.TrimRight(string(line[:width-1]), " ") + "…"
+			}
+		}
+	}
+	return string(line)
 }
