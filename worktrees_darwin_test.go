@@ -631,6 +631,37 @@ func TestRemoveWorktreeWithAStaleLock(t *testing.T) {
 	}
 }
 
+// TestRemoveWorktreeWhenTheUnlockFails: a stale lock git does not lift
+// stops the removal before the folder moves; at most the lock is gone.
+func TestRemoveWorktreeWhenTheUnlockFails(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	stubPidStart(t, map[int32]time.Time{})
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	wtLock(t, git, repo, wt, "claude agent (pid 4242)")
+	w := wtFound(t, "claude", wt)
+	saved := worktreeGit
+	var forgetting bool
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		switch {
+		case slices.Contains(args, "unlock"):
+			return "", errors.New("exit status 128")
+		case slices.Contains(args, "remove"):
+			forgetting = true
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != wtFailGit || forgetting {
+		t.Fatalf("code %q, git asked to forget it %v", code, forgetting)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(admin) || wtTrashed("agent-1", "") {
+		t.Fatalf("folder in place %v, record there %v, trashed %v", exists(wt), exists(admin), wtTrashed("agent-1", ""))
+	}
+	gitIn(t, git, wt, "status")
+}
+
 // TestRemoveWorktreeWithAnOpenFile: a worktree holding a file a process has
 // open is kept, untouched.
 func TestRemoveWorktreeWithAnOpenFile(t *testing.T) {
@@ -976,9 +1007,9 @@ func TestWorktreePathsWithSpacesAndUnicode(t *testing.T) {
 	if w.State != wtClean || w.Branch != "fix/修复-bug-1" || w.Repo != repo || filepath.Base(admin) == w.Name {
 		t.Fatalf("worktree = %+v, record %s", w, admin)
 	}
-	stubWorktreeUse(t, []string{strings.ToUpper(resolvePath(filepath.Join(wt, "src")))}, nil)
+	stubWorktreeUse(t, []string{strings.ToUpper(resolvePath(wt))}, nil)
 	if w := wtFound(t, "claude", wt); w.State != wtInUse {
-		t.Fatalf("state with a process inside = %s", w.State)
+		t.Fatalf("state with a process working in it = %s", w.State)
 	}
 	stubWorktreeUse(t, nil, nil)
 	if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != "" {
