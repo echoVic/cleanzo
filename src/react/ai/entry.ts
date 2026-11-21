@@ -2,6 +2,9 @@
 import { mountAITool } from "./mount";
 import { aiApi } from "./api";
 
+/** 工具页的页内标签：空间、运行中。 */
+export type AITab = "space" | "running";
+
 const containers = new Map<string, HTMLElement>();
 /** 显示过几次 AI 工具视图：每次显示都给页面一个新的 visit。 */
 let visits = 0;
@@ -31,3 +34,6 @@ export function showReactAITool(toolId: string, toolName: string) {
   for (const [id, el] of containers) el.classList.toggle("hidden", id !== toolId);
   mountAITool(host, toolId, toolName, ++visits);
 }
+
+/** 下次显示这个工具的页面时开在哪个标签；调用方随后切到这个工具的视图。 */
+export function requestAITab(toolId: string, tab: AITab) {}
