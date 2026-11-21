@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"syscall"
@@ -252,5 +253,17 @@ func endWant(t *testing.T, f *endFake, res ClaudeEndResult, err error, want, sen
 	}
 	if got := f.sentText(); got != sent {
 		t.Errorf("signals = %s\n     want %s", got, sent)
+	}
+}
+
+// ---- the real signal -------------------------------------------------------
+
+func TestRealSignalRefusesLowPids(t *testing.T) {
+	signal := realClaudeSource().signal
+	for _, pid := range []int32{1, 0, -1, -4242} {
+		// The null signal delivers nothing, even where the guard would let it through.
+		if err := signal(pid, 0); !errors.Is(err, syscall.EINVAL) {
+			t.Errorf("signal(%d, 0) = %v, want EINVAL", pid, err)
+		}
 	}
 }
