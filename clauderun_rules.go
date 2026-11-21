@@ -165,11 +165,14 @@ type claudeTable struct {
 	records  map[int32]claudeRecord // the valid records of Claude Code processes
 	cand     map[int32]bool         // the processes that may be listed
 	id       map[int32]string       // the session id each candidate carries; never ""
+	dock     map[int32]bool         // the apps on the Dock
+	bundles  []string               // their bundles, lower case
 }
 
 // newClaudeTable indexes s and finds its Claude Code processes: those with a
 // valid record, and the account's whose argv[0] is claude. One with another
-// above it is part of the topmost one's session.
+// above it is part of the topmost one's session, unless a Dock app stands
+// between them.
 func newClaudeTable(s claudeSnapshot) *claudeTable {
 	t := &claudeTable{
 		procs:    make(map[int32]claudeProc, len(s.Procs)),
@@ -178,11 +181,18 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		records:  map[int32]claudeRecord{},
 		cand:     map[int32]bool{},
 		id:       map[int32]string{},
+		dock:     map[int32]bool{},
 	}
 	for _, p := range s.Procs {
 		if _, dup := t.procs[p.Pid]; !dup {
 			t.procs[p.Pid] = p
 			t.children[p.Ppid] = append(t.children[p.Ppid], p.Pid)
+		}
+	}
+	for _, app := range s.Apps {
+		if app.Regular && app.Path != "" {
+			t.dock[app.Pid] = true
+			t.bundles = append(t.bundles, strings.ToLower(app.Path))
 		}
 	}
 	for pid, p := range t.procs {
@@ -194,13 +204,32 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		}
 	}
 	for pid := range t.claude {
-		for q := range t.ancestors(pid) {
-			if _, ok := t.claude[q.Pid]; ok {
-				t.claude[pid] = q.Pid
-			}
-		}
+		t.claude[pid] = t.head(pid)
 	}
 	return t
+}
+
+// head is the Claude Code process heading the session of the Claude Code
+// process pid: the topmost one above it that no process of a Dock app
+// separates from it, or else pid itself.
+func (t *claudeTable) head(pid int32) int32 {
+	head := pid
+	for q := range t.ancestors(pid) {
+		if t.inDock(q) {
+			break
+		}
+		if _, claude := t.claude[q.Pid]; claude {
+			head = q.Pid
+		}
+	}
+	return head
+}
+
+// inDock reports whether p is an app on the Dock or runs from inside the
+// bundle of one.
+func (t *claudeTable) inDock(p claudeProc) bool {
+	path := strings.ToLower(p.Path)
+	return t.dock[p.Pid] || path != "" && slices.ContainsFunc(t.bundles, func(b string) bool { return within(path, b) })
 }
 
 // findCandidates marks the processes that may be listed: the account's,
@@ -217,20 +246,8 @@ func (t *claudeTable) findCandidates(s claudeSnapshot, above map[int32]bool) {
 			}
 		}
 	}
-	dock := map[int32]bool{}
-	var bundles []string
-	for _, app := range s.Apps {
-		if app.Regular && app.Path != "" {
-			dock[app.Pid] = true
-			bundles = append(bundles, strings.ToLower(app.Path))
-		}
-	}
-	inBundle := func(path string) bool {
-		path = strings.ToLower(path)
-		return path != "" && slices.ContainsFunc(bundles, func(b string) bool { return within(path, b) })
-	}
 	for pid, p := range t.procs {
-		if _, claude := t.claude[pid]; pid > 1 && p.UID == s.UID && !claude && !family[pid] && !dock[pid] && !inBundle(p.Path) {
+		if _, claude := t.claude[pid]; pid > 1 && p.UID == s.UID && !claude && !family[pid] && !t.inDock(p) {
 			t.cand[pid] = true
 		}
 	}

@@ -166,6 +166,34 @@ func TestClaudeSubAgentIsNotASession(t *testing.T) {
 	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[]; uncertain 0")
 }
 
+func TestClaudeSessionInsideADockApp(t *testing.T) {
+	// Session 100 runs a development build of an app on the Dock, and the
+	// app runs a Claude Code session of its own through a shell.
+	const app = "/p/out/Sample Studio.app"
+	const executable = app + "/Contents/MacOS/Sample Studio"
+	for _, c := range []struct {
+		between                                 string
+		studioParent, helperParent, shellParent int32
+		studioPath                              string
+	}{
+		{"the app, its helper and a shell", 100, 200, 201, executable},
+		{"the app, its path unreadable, and a shell", 100, 200, 200, ""},
+		{"a helper of the app and a shell", 1, 100, 201, executable},
+	} {
+		t.Run(c.between, func(t *testing.T) {
+			studio := marked(200, c.studioParent, 200, "S1")
+			studio.Path = c.studioPath
+			helper := marked(201, c.helperParent, 200, "S1")
+			helper.Path = app + "/Contents/Frameworks/Sample Studio Helper.app/Contents/MacOS/Sample Studio Helper"
+			inner := ccProc(300, 202)
+			s := ccSnap(studio, helper, marked(202, c.shellParent, 202, "S1"), inner, marked(310, 300, 310, "S3"))
+			s.Records[300] = recordOf(inner, "S3")
+			s.Apps = []workspaceApp{{Pid: 200, Path: app, Name: "Sample Studio", Regular: true}}
+			wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; 300:S3 members[] commands[310]; uncertain 0")
+		})
+	}
+}
+
 func TestClaudeUnmarkedIsNeverListed(t *testing.T) {
 	// 161 and 162 share the session's process group but hang off launchd:
 	// a process group is no clue.
