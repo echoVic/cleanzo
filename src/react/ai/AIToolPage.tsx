@@ -15,7 +15,7 @@ import { useIndicator } from "../../ui/motion/indicator";
 import { isWindows } from "../../platform";
 import { errText, toast } from "../../shared";
 import { human } from "./format";
-import { offered, groupSelectable, blockedByRun, canPick, type WindowDays } from "./types";
+import { offered, isSessions, groupSelectable, blockedByRun, canPick, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
 import { aiApi, runningApi } from "./api";
 import type { AITab, AITabRequest } from "./entry";
@@ -182,7 +182,7 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
         if (on) {
           const keys = p.groups.filter((g) => groupSelectable(p, g, windowDays, scannedAt)).map((g) => g.key);
           next.set(p.id, new Set(keys));
-          if (isSessionsPart(p)) setExpanded((e) => new Set(e).add(p.id));
+          if (isSessions(p)) setExpanded((e) => new Set(e).add(p.id));
         } else next.delete(p.id);
         return next;
       });
@@ -468,10 +468,6 @@ function runningName(tool: AITool, toolName: string, t: (k: DictKey) => string) 
   return t(apps[0] === "ide" ? "ai.app.trae.ide" : "ai.app.trae.cli");
 }
 
-function isSessionsPart(p: AIPart) {
-  return p.level === "sensitive";
-}
-
 function ConfirmDialog({
   open, toolName, total, selections, parts, onClose, onConfirm,
 }: {
@@ -487,7 +483,7 @@ function ConfirmDialog({
     const k = `ai.part.${p.id}.lose` as DictKey;
     const lose = t(k);
     const count = p.groups.length > 0
-      ? t(isSessionsPart(p) ? "ai.confirm.groups" : "ai.confirm.releases", { n: s.groups.length })
+      ? t(isSessions(p) ? "ai.confirm.groups" : "ai.confirm.releases", { n: s.groups.length })
       : "";
     return { name: partName(p, t), size: human(s.size), count, lose: lose.startsWith("ai.part.") ? t("ai.lose.default") : lose };
   }).filter(Boolean) as { name: string; size: string; count: string; lose: string }[];

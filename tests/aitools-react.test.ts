@@ -2,7 +2,7 @@ import "./setup-dom";
 import { expect, test } from "bun:test";
 import type { AIGroup, AIPart, AIScanResult, AITool, ClaudeRunSummary, CrashDumpSummary } from "../src/mygo";
 import { t } from "../src/i18n";
-import { offered, groupSelectable, canPick, type WindowDays } from "../src/react/ai/types";
+import { offered, isSessions, groupSelectable, canPick, worktreeSeen, type WindowDays } from "../src/react/ai/types";
 import { human, displayPath } from "../src/react/ai/format";
 import { textOf, type Changes } from "./page-harness";
 
@@ -517,4 +517,68 @@ test("the header button follows the tab: Rescan on Space after a scan, Refresh o
     expect(c.page.find((el) => el.props.part?.id === "claude.cache")).toBeDefined();
     expect(c.scans).toBe(1);
   } finally { env.restore(); }
+});
+
+// ---- Agent worktree：一个 worktree 一组，只有干净的和带改动的能勾 ----
+
+const MB = 2 ** 20;
+
+/** worktree 的十种状态，后端判定的顺序；只有前两种能移走。 */
+const WT_STATES = ["clean", "dirty", "in-use", "holds-worktrees", "submodules", "mid-operation", "unbranched-commits", "git-unavailable", "index-only", "unrecognized"] as const;
+
+/** 仓库 /Users/a/code/app 里的一个 worktree：key 和 path 是它的文件夹，名字是文件夹名，8 天没动。 */
+function worktree(name: string, state: string, over: Partial<AIGroup> = {}): AIGroup {
+  const path = `/Users/a/code/app/.claude/worktrees/${name}`;
+  return {
+    key: path, label: name, path, size: 10 * MB, count: 1, recent: 0, last: NOW - 8 * DAY, gone: false,
+    repo: "/Users/a/code/app", branch: `feat/${name}`, state, ...(state === "dirty" ? { changes: 3 } : {}), ...over,
+  };
+}
+
+/** 工具的 worktree 那一项：Claude Code 的没有自己的文件夹、边跑边清；Codex 的在 ~/.codex/worktrees 里。 */
+function worktreePart(tool: "claude" | "codex", groups: AIGroup[], over: Partial<AIPart> = {}): AIPart {
+  return fullPart(`${tool}.worktrees`, "sensitive", {
+    path: tool === "codex" ? "/Users/a/.codex/worktrees" : "", worktrees: true, runSafe: tool === "claude",
+    size: groups.reduce((n, g) => n + g.size, 0), files: groups.length, groups, ...over,
+  });
+}
+
+test("groupSelectable: of the worktree states only clean and dirty can be ticked, whatever the window or recent", () => {
+  const p = worktreePart("claude", []);
+  for (const state of [...WT_STATES, "a-state-from-later"]) {
+    // 8 天前、今天、今天写过（recent 和 count 一样多）：和对话记录的规则无关
+    for (const g of [worktree(state, state), worktree(state, state, { last: NOW }), worktree(state, state, { last: NOW, recent: 1 })]) {
+      for (const windowDays of [7, 30, 90] as const) {
+        expect(groupSelectable(p, g, windowDays, NOW)).toBe(state === "clean" || state === "dirty");
+      }
+    }
+  }
+  const { state: _, ...stateless } = worktree("x", "clean");
+  expect(groupSelectable(p, stateless, 30, NOW)).toBe(false);
+});
+
+test("isSessions: the worktree part is no conversation history; the history parts still are", () => {
+  expect(isSessions(worktreePart("claude", [worktree("a", "clean")]))).toBe(false);
+  expect(isSessions(worktreePart("codex", [worktree("a", "clean")]))).toBe(false);
+  expect(isSessions(fullPart("claude.sessions", "sensitive"))).toBe(true);
+  expect(isSessions(fullPart("codex.sessions", "sensitive"))).toBe(true);
+});
+
+test("canPick: a worktree part needs a clean or dirty worktree, and Codex's waits until Codex quits", () => {
+  expect(canPick(worktreePart("claude", [worktree("a", "in-use"), worktree("b", "index-only")]), 30, NOW)).toBe(false);
+  expect(canPick(worktreePart("claude", [worktree("a", "in-use"), worktree("b", "dirty")]), 30, NOW)).toBe(true);
+  // Claude Code 的边跑边清，一个一个判；Codex 在运行（running 真、runSafe 假）时整项不能勾。
+  expect(canPick(worktreePart("claude", [worktree("a", "clean")], { running: true }), 30, NOW)).toBe(true);
+  expect(canPick(worktreePart("codex", [worktree("a", "clean")]), 30, NOW)).toBe(true);
+  expect(canPick(worktreePart("codex", [worktree("a", "clean")], { running: true }), 30, NOW)).toBe(false);
+});
+
+test("worktreeSeen gives the state of each picked worktree in the order of the keys", () => {
+  const p = worktreePart("claude", [worktree("a", "clean"), worktree("b", "dirty"), worktree("c", "in-use")]);
+  const [a, b, c] = p.groups.map((g) => g.key);
+  expect(worktreeSeen(p, [a!, b!])).toEqual(["clean", "dirty"]);
+  expect(worktreeSeen(p, [b!, c!, a!])).toEqual(["dirty", "in-use", "clean"]);
+  expect(worktreeSeen(p, [])).toEqual([]);
+  // 列表里已经没有的：占着位置、和什么状态都对不上，后端照样一个一个回答
+  expect(worktreeSeen(p, ["/Users/a/code/app/.claude/worktrees/gone", a!])).toEqual(["", "clean"]);
 });
