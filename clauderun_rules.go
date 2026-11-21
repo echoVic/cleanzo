@@ -94,31 +94,23 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 	t.carryIDs()
 
 	var a claudeAttribution
-	for pid, head := range t.claude {
-		if pid == head && t.records[pid].SessionID == "" {
+	for pid := range t.claude {
+		if t.records[pid].SessionID == "" {
 			a.NoRecords = true
 		}
 	}
-	type place struct {
-		open   int32  // the Claude Code process heading the open session it belongs to
-		closed string // or the closed session that left it
-	}
-	places := map[int32]place{}
+	places := map[int32]claudePlace{}
+	detached := map[string][]int32{} // the detached candidates carrying each session id
 	for pid, id := range t.id {
-		cc, ok := t.climb(pid)
-		switch p := t.procs[pid]; {
-		case !ok:
-		case cc != 0:
-			places[pid] = place{open: t.claude[cc]}
-		default:
-			if head, open := t.openSession(p, id); open {
-				places[pid] = place{open: head}
-			} else if !a.NoRecords && !t.startedBefore(p.Env.Pid, p.Start) {
-				places[pid] = place{closed: id}
-			} else {
-				a.Uncertain++
-			}
+		switch cc, ok := t.climb(pid); {
+		case ok && cc != 0:
+			places[pid] = claudePlace{open: t.claude[cc]}
+		case ok:
+			detached[id] = append(detached[id], pid)
 		}
+	}
+	for id, pids := range detached {
+		a.Uncertain += t.placeDetached(id, pids, a.NoRecords, places)
 	}
 
 	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
@@ -157,6 +149,12 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		return cmp.Or(cmp.Compare(x.Rows[0].Lead.Start, y.Rows[0].Lead.Start), strings.Compare(x.ID, y.ID))
 	})
 	return a
+}
+
+// claudePlace is where a listed candidate goes.
+type claudePlace struct {
+	open   int32  // the Claude Code process heading the open session it belongs to
+	closed string // or the closed session that left it
 }
 
 // claudeTable is a snapshot indexed for the attribution rules.
@@ -342,14 +340,53 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 	return 0, false
 }
 
-// openSession finds the open session of the detached candidate p carrying
-// id: the one of the Claude Code process its CLAUDE_PID names, else the one
-// of the oldest Claude Code process whose session id is id. It returns the
-// Claude Code process heading that session; ok is false when there is none.
-func (t *claudeTable) openSession(p claudeProc, id string) (head int32, ok bool) {
-	if h, isClaude := t.claude[p.Env.Pid]; isClaude {
-		return h, true
+// placeDetached decides once, for all the detached candidates pids that
+// carry id, whether the session id is open, closed or uncertain, and puts
+// each candidate it lists into places. id is open when a Claude Code process
+// has it now or a CLAUDE_PID among pids names a Claude Code process; it is
+// uncertain when noRecords says a Claude Code process shows no session id,
+// or when a CLAUDE_PID among pids is held by a process older than the
+// candidate carrying it. It returns how many candidates it leaves uncertain.
+func (t *claudeTable) placeDetached(id string, pids []int32, noRecords bool, places map[int32]claudePlace) (uncertain int) {
+	named := map[int32]bool{} // the sessions the CLAUDE_PIDs among pids point into
+	older := false
+	for _, pid := range pids {
+		p := t.procs[pid]
+		if head, isClaude := t.claude[p.Env.Pid]; isClaude {
+			named[head] = true
+		} else if t.startedBefore(p.Env.Pid, p.Start) {
+			older = true
+		}
 	}
+	current, isCurrent := t.currentSession(id)
+	heads := slices.Collect(maps.Keys(named))
+	switch {
+	case isCurrent || len(heads) > 0:
+		for _, pid := range pids {
+			if head, isClaude := t.claude[t.procs[pid].Env.Pid]; isClaude {
+				places[pid] = claudePlace{open: head}
+			} else if isCurrent {
+				places[pid] = claudePlace{open: current}
+			} else if len(heads) == 1 {
+				places[pid] = claudePlace{open: heads[0]}
+			} else {
+				uncertain++
+			}
+		}
+	case noRecords || older:
+		uncertain = len(pids)
+	default:
+		for _, pid := range pids {
+			places[pid] = claudePlace{closed: id}
+		}
+	}
+	return uncertain
+}
+
+// currentSession finds the session of the oldest Claude Code process, a
+// session's own or a sub-agent, whose session id is id now. It returns the
+// Claude Code process heading that session; ok is false when there is none.
+func (t *claudeTable) currentSession(id string) (head int32, ok bool) {
 	var oldest claudeProc
 	for pid := range t.claude {
 		if q := t.procs[pid]; t.records[pid].SessionID == id && (!ok || claudeByStart(q, oldest) < 0) {

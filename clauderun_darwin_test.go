@@ -160,8 +160,10 @@ func TestClaudeHelpersJoinTheSession(t *testing.T) {
 }
 
 func TestClaudeSubAgentIsNotASession(t *testing.T) {
-	a := attributeClaude(ccSnap(ccProc(105, 100)))
-	wantShape(t, a, "100:S1 members[105] commands[]; uncertain 0")
+	agent := ccProc(105, 100)
+	s := ccSnap(agent)
+	s.Records[105] = recordOf(agent, "S5")
+	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[]; uncertain 0")
 }
 
 func TestClaudeUnmarkedIsNeverListed(t *testing.T) {
@@ -189,6 +191,39 @@ func TestClaudeDetachedOpenByClaudePid(t *testing.T) {
 	p := marked(120, 1, 120, "S0")
 	p.Env.Pid = 100
 	wantShape(t, attributeClaude(ccSnap(p)), "100:S1 members[] commands[120]; uncertain 0")
+}
+
+func TestClaudeRelativeOfAnOpenCommandIsOpen(t *testing.T) {
+	// Session 100 was S0 before it became S1. A process carrying S0 whose
+	// CLAUDE_PID names 100 shows S0 is still open, for its relatives too.
+	command := marked(120, 1, 120, "S0")
+	command.Env.Pid = 100
+	a := attributeClaude(ccSnap(command, hidden(121, 120, 120)))
+	wantShape(t, a, "100:S1 members[] commands[120 121]; uncertain 0")
+
+	child := marked(141, 140, 141, "S0")
+	child.Env.Pid = 100
+	a = attributeClaude(ccSnap(hidden(140, 1, 140), child))
+	wantShape(t, a, "100:S1 members[] commands[140 141]; uncertain 0")
+}
+
+func TestClaudeOneClaudePidOpensTheWholeID(t *testing.T) {
+	// Two trees carry S0, and only 120 says which Claude Code started it.
+	command := marked(120, 1, 120, "S0")
+	command.Env.Pid = 100
+	a := attributeClaude(ccSnap(command, hidden(121, 120, 120), hidden(140, 1, 140), marked(141, 140, 141, "S0")))
+	wantShape(t, a, "100:S1 members[] commands[120 121 140 141]; uncertain 0")
+}
+
+func TestClaudeClaudePidsIntoTwoSessions(t *testing.T) {
+	// 120 and 130 carry S0 and name two different sessions, so 140, also
+	// carrying S0 but naming none, may belong to either.
+	first, second := ccProc(100, 1), ccProc(101, 1)
+	records := map[int32]claudeRecord{100: recordOf(first, "S1"), 101: recordOf(second, "S2")}
+	toFirst, toSecond := marked(120, 1, 120, "S0"), marked(130, 1, 130, "S0")
+	toFirst.Env.Pid, toSecond.Env.Pid = 100, 101
+	a := attributeClaude(snap(records, first, second, toFirst, toSecond, marked(140, 1, 140, "S0")))
+	wantShape(t, a, "100:S1 members[] commands[120]; 101:S2 members[] commands[130]; uncertain 1")
 }
 
 func TestClaudeDetachedClosed(t *testing.T) {
@@ -305,6 +340,21 @@ func TestClaudePidTakenByAnOlderProcess(t *testing.T) {
 	// started it.
 	other.Start = p.Start + time.Second.Microseconds()
 	wantShape(t, attributeClaude(ccSnap(p, other)), "100:S1 members[] commands[]; left S9[120]; uncertain 0")
+}
+
+func TestClaudeOlderProcessOnClaudePidMakesTheIDUncertain(t *testing.T) {
+	// 300 may be the Claude Code that started 120, so neither 120 nor 121,
+	// which carries the same id, is called left behind.
+	p := marked(120, 1, 120, "S9")
+	p.Env.Pid = 300
+	other := plain(300, 1, 300)
+	other.Start = p.Start - time.Second.Microseconds()
+	wantShape(t, attributeClaude(ccSnap(p, hidden(121, 120, 120), other)), "100:S1 members[] commands[]; uncertain 2")
+}
+
+func TestClaudeSubAgentWithoutRecordMeansNothingIsLeftBehind(t *testing.T) {
+	a := attributeClaude(ccSnap(ccProc(105, 100), marked(120, 1, 120, "S9")))
+	wantShape(t, a, "100:S1 members[105] commands[]; uncertain 1 norecords")
 }
 
 func TestClaudeMarkedWithoutSessionID(t *testing.T) {
