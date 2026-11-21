@@ -463,3 +463,77 @@ func TestClaudeWorkingFolders(t *testing.T) {
 		t.Errorf("working folders %+v from no process table, want OK false", got)
 	}
 }
+
+// viewMainHere runs what needs the main thread on the calling goroutine:
+// the test binary never serves the main thread, so a queued run would wait
+// forever.
+func viewMainHere(t *testing.T) {
+	prev := runOnMain
+	runOnMain = func(f func()) { f() }
+	t.Cleanup(func() { runOnMain = prev })
+}
+
+// TestClaudeRunningOnThisMac reads the Running tab once on this Mac. It
+// prints counts, and each session's status and idle time, never a command,
+// path, title or session id. Opt in with CLEANZO_PROBE=1.
+func TestClaudeRunningOnThisMac(t *testing.T) {
+	if os.Getenv("CLEANZO_PROBE") == "" {
+		t.Skip("set CLEANZO_PROBE=1 to read the Running tab on this Mac")
+	}
+	viewMainHere(t)
+	viewResetPorts(t)
+	r, err := claudeRunningWith(context.Background(), realClaudeSource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, rows := 0, 0
+	for _, s := range r.Sessions {
+		if s.Status == "idle" && time.Duration(r.At-s.Since)*time.Second >= claudeIdleNote {
+			idle++
+		}
+	}
+	for _, l := range r.Left {
+		rows += len(l.Procs)
+	}
+	t.Logf("%d open sessions, %d idle for %v or longer, %d rows left by closed sessions, %d uncertain, noRecords %v",
+		len(r.Sessions), idle, claudeIdleNote, rows, r.Uncertain, r.NoRecords)
+	for i, s := range r.Sessions {
+		idleFor := "-"
+		if s.Status == "idle" {
+			idleFor = (time.Duration(r.At-s.Since) * time.Second).String()
+		}
+		t.Logf("session %d: status %q, idle for %s", i+1, s.Status, idleFor)
+	}
+}
+
+// TestClaudeRunningBudget measures the Running tab on this Mac: a reading
+// every five seconds, lsof included, may use 3% of one core. Opt in with
+// CLEANZO_PERF=1; it runs for 60 seconds. Don't use -race, which inflates
+// the CPU.
+func TestClaudeRunningBudget(t *testing.T) {
+	if os.Getenv("CLEANZO_PERF") == "" {
+		t.Skip("set CLEANZO_PERF=1 to measure the Running tab's cost on this Mac")
+	}
+	viewMainHere(t)
+	viewResetPorts(t)
+	src := realClaudeSource()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	readings := 0
+	before, start := rusageCPU(), time.Now()
+	for ctx.Err() == nil {
+		if r, err := claudeRunningWith(ctx, src); err == nil {
+			readings++
+			if _, err := json.Marshal(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_ = sleepCtx(ctx, 5*time.Second)
+	}
+	used, wall := rusageCPU()-before, time.Since(start)
+	pct := used.Seconds() / wall.Seconds() * 100
+	t.Logf("%d readings, CPU %v in %v: %.2f%% of one core", readings, used.Round(time.Millisecond), wall.Round(time.Second), pct)
+	if pct > 3 {
+		t.Errorf("the Running tab used %.2f%% of one core, budget 3%%", pct)
+	}
+}
