@@ -732,10 +732,14 @@ function createRuntime(): Runtime {
       await wait(1000);
       for (;;) { await emit(processSample()); await wait(200); }
     }),
-    // 进程样例里 claude 那一行挂「3 个空闲会话」，node 那一行挂「2 个是已关闭会话留下的」。
-    "Cleaner.ClaudeRunSummary": async () => ({
-      idle: 3, left: 2, rows: [{ key: "cli:claude", idle: 3, left: 0 }, { key: "cli:node", idle: 0, left: 2 }],
-    }),
+    // 从「运行中」的样例里数出来，标签上的数和进程页的小标签才对得上：
+    // 进程样例里 claude 那一行挂空闲满 2 小时的会话数，node 那一行挂已关闭会话留下的 node 进程数。
+    "Cleaner.ClaudeRunSummary": async () => {
+      const idle = claudeRunning.sessions.filter((x) => x.status === "idle" && x.since > 0 && nowSec() - x.since >= 2 * 3600).length;
+      const leftProcs = claudeRunning.left.flatMap((g) => g.procs);
+      const nodeLeft = leftProcs.filter((p) => p.command.startsWith("node ")).length;
+      return { idle, left: leftProcs.length, rows: [{ key: "cli:claude", idle, left: 0 }, { key: "cli:node", idle: 0, left: nodeLeft }] };
+    },
     "Cleaner.CrashDumps": async () => ({ total: 0, threshold: GB, dirs: [] }),
     "Cleaner.ScanJunk": async (ch) => stream(ch, async (emit) => {
       const items = junkItems.filter((it) => !settings.disabledGroups.includes(it.group) && !settings.ignored.includes(it.id));
