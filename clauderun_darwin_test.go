@@ -398,6 +398,43 @@ func TestClaudeMarkedWithoutSessionID(t *testing.T) {
 	wantShape(t, a, "100: members[] commands[]; uncertain 0 norecords")
 }
 
+func TestClaudeOddSnapshots(t *testing.T) {
+	// No consistent process table has loops, duplicate pids or a pid 0
+	// named claude, but nothing panics on them and what is odd is left out.
+	const browser = "/p/out/Sample Browser.app/Contents/MacOS/Sample Browser"
+	inBrowser := func(p claudeProc) claudeProc {
+		p.Path = browser
+		return p
+	}
+	withRecord := func(cc claudeProc, procs ...claudeProc) claudeSnapshot {
+		return snap(map[int32]claudeRecord{cc.Pid: recordOf(cc, "S1")}, append([]claudeProc{cc}, procs...)...)
+	}
+	editor := hidden(200, 102, 200)
+	editor.Path = "/Applications/Sample Editor.app/Contents/MacOS/Sample Editor"
+	throughDock := withRecord(ccProc(100, 200), editor, inBrowser(hidden(101, 100, 101)), inBrowser(hidden(102, 101, 101)))
+	throughDock.Apps = []workspaceApp{{Pid: 200, Path: "/Applications/Sample Editor.app", Name: "Sample Editor", Regular: true}}
+	unreadable := hidden(110, 100, 110)
+	unreadable.Args = nil
+	for _, c := range []struct {
+		odd  string
+		s    claudeSnapshot
+		want string
+	}{
+		{"a loop through a Claude Code process", withRecord(ccProc(100, 101), inBrowser(hidden(101, 100, 101))), "uncertain 0"},
+		{"a Claude Code process that is its own parent", withRecord(ccProc(100, 100), inBrowser(hidden(101, 100, 101))), "uncertain 0"},
+		{"a loop through an app on the Dock", throughDock, "uncertain 0"},
+		{"a process that is its own parent", ccSnap(marked(120, 120, 120, "S9")), "100:S1 members[] commands[]; uncertain 0"},
+		{"a pid listed twice", ccSnap(marked(120, 1, 120, "S9"), marked(120, 1, 120, "S9")), "100:S1 members[] commands[]; uncertain 0"},
+		{"a Claude Code process listed twice", ccSnap(ccProc(100, 1)), "uncertain 0"},
+		{"pid 0 named claude", ccSnap(ccProc(0, 0)), "100:S1 members[] commands[]; uncertain 0"},
+		{"arguments that cannot be read", ccSnap(unreadable, marked(111, 110, 110, "S1")), "100:S1 members[] commands[110 111]; uncertain 0"},
+	} {
+		t.Run(c.odd, func(t *testing.T) {
+			wantShape(t, attributeClaude(c.s), c.want)
+		})
+	}
+}
+
 // ---- records and one session id --------------------------------------------
 
 func TestClaudeRecordMustMatchProcStart(t *testing.T) {

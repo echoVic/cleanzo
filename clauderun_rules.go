@@ -161,7 +161,7 @@ type claudePlace struct {
 type claudeTable struct {
 	procs    map[int32]claudeProc
 	children map[int32][]int32
-	claude   map[int32]int32        // each Claude Code process to the one heading its session
+	claude   map[int32]int32        // each Claude Code process to the one heading its session; 0 for none
 	records  map[int32]claudeRecord // the valid records of Claude Code processes
 	cand     map[int32]bool         // the processes that may be listed
 	id       map[int32]string       // the session id each candidate carries; never ""
@@ -172,7 +172,7 @@ type claudeTable struct {
 // newClaudeTable indexes s and finds its Claude Code processes: those with a
 // valid record, and the account's whose argv[0] is claude. One with another
 // above it is part of the topmost one's session, unless a Dock app stands
-// between them.
+// between them. A pid s lists more than once is left out, every time.
 func newClaudeTable(s claudeSnapshot) *claudeTable {
 	t := &claudeTable{
 		procs:    make(map[int32]claudeProc, len(s.Procs)),
@@ -183,8 +183,12 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		id:       map[int32]string{},
 		dock:     map[int32]bool{},
 	}
+	listed := make(map[int32]int, len(s.Procs))
 	for _, p := range s.Procs {
-		if _, dup := t.procs[p.Pid]; !dup {
+		listed[p.Pid]++
+	}
+	for _, p := range s.Procs {
+		if listed[p.Pid] == 1 {
 			t.procs[p.Pid] = p
 			t.children[p.Ppid] = append(t.children[p.Ppid], p.Pid)
 		}
@@ -196,10 +200,12 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		}
 	}
 	for pid, p := range t.procs {
-		if r := s.Records[pid]; claudeRecordValid(p, r, s.UID) {
+		switch r := s.Records[pid]; {
+		case pid <= 1:
+		case claudeRecordValid(p, r, s.UID):
 			t.records[pid] = r
 			t.claude[pid] = pid
-		} else if p.UID == s.UID && len(p.Args) > 0 && filepath.Base(p.Args[0]) == "claude" {
+		case p.UID == s.UID && len(p.Args) > 0 && filepath.Base(p.Args[0]) == "claude":
 			t.claude[pid] = pid
 		}
 	}
@@ -211,8 +217,12 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 
 // head is the Claude Code process heading the session of the Claude Code
 // process pid: the topmost one above it that no process of a Dock app
-// separates from it, or else pid itself.
+// separates from it, or else pid itself. It is 0, no session at all, when
+// the parents of pid loop.
 func (t *claudeTable) head(pid int32) int32 {
+	if t.loops(pid) {
+		return 0
+	}
 	head := pid
 	for q := range t.ancestors(pid) {
 		if t.inDock(q) {
@@ -223,6 +233,20 @@ func (t *claudeTable) head(pid int32) int32 {
 		}
 	}
 	return head
+}
+
+// loops reports whether the parents of pid come back around to a process
+// already passed, pid included, before they reach launchd or a process the
+// snapshot does not have.
+func (t *claudeTable) loops(pid int32) bool {
+	seen := map[int32]bool{}
+	for p, ok := t.procs[pid]; ok && p.Pid != 1; p, ok = t.procs[p.Ppid] {
+		if seen[p.Pid] {
+			return true
+		}
+		seen[p.Pid] = true
+	}
+	return false
 }
 
 // inDock reports whether p is an app on the Dock or runs from inside the
@@ -423,7 +447,8 @@ func (t *claudeTable) startedBefore(pid int32, start int64) bool {
 // rows merges the processes listed in one place into rows: an app's helpers,
 // inside the same outermost bundle, join the topmost of them they descend
 // from; then the shell Claude Code runs a command in joins the oldest other
-// row of its process group.
+// row of its process group. The parents of a listed process never loop, so
+// every fold ends at the lead of a row.
 func (t *claudeTable) rows(procs []claudeProc) []claudeRow {
 	procs = slices.SortedFunc(slices.Values(procs), claudeByStart)
 	here := make(map[int32]bool, len(procs))
