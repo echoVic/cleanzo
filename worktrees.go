@@ -354,7 +354,7 @@ func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) a
 	switch {
 	case users.holds(path) || worktreeLocked(admin):
 		w.State = wtInUse
-	case worktreeHoldsOthers(path):
+	case worktreeHoldsOthers(path) || worktreeRecordsInside(path, admin, common):
 		w.State = wtHolds
 	case worktreeHas(admin, "modules"):
 		w.State = wtSubmodule
@@ -371,7 +371,8 @@ func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) a
 // worktreeHoldsOthers reports whether other worktrees may live inside the
 // worktree at path: the .claude/worktrees folder in it, where Claude Code
 // keeps them, holds a folder or cannot be read. A file there holds nothing,
-// and a link moves without what it points to.
+// and a link is not followed: git's records tell what was made through one
+// (worktreeRecordsInside).
 func worktreeHoldsOthers(path string) bool {
 	dir := path
 	for _, name := range []string{".claude", "worktrees"} {
@@ -388,6 +389,35 @@ func worktreeHoldsOthers(path string) bool {
 	}
 	entries, err := os.ReadDir(dir)
 	return err != nil || slices.ContainsFunc(entries, fs.DirEntry.IsDir)
+}
+
+// worktreeRecordsInside reports whether git keeps a record of another
+// worktree inside the worktree at path, whose own record is admin: one of
+// the other records in the repository's git folder common names a .git
+// inside path, or cannot be read. Both are compared resolved, so a worktree
+// made through a link inside path, which no folder walk finds, counts too.
+func worktreeRecordsInside(path, admin, common string) bool {
+	own, err := os.Lstat(admin)
+	if err != nil {
+		return true
+	}
+	dir := filepath.Join(common, "worktrees")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	inside := strings.ToLower(resolvePath(path))
+	for _, e := range entries {
+		record := filepath.Join(dir, e.Name())
+		if info, err := os.Lstat(record); err == nil && os.SameFile(info, own) {
+			continue
+		}
+		gitdir := worktreePath(record, worktreeLine(filepath.Join(record, "gitdir")))
+		if gitdir == "" || within(strings.ToLower(resolvePath(gitdir)), inside) {
+			return true
+		}
+	}
+	return false
 }
 
 // worktreeAskGit judges a worktree by what git says: whether a detached

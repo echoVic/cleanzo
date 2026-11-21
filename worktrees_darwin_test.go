@@ -205,6 +205,9 @@ func TestWorktreeStates(t *testing.T) {
 				t.Skip("this user reads any folder")
 			}
 		}, wtHolds, 0},
+		{"another record of the repository whose gitdir cannot be read", func(t *testing.T, git, repo, wt string) {
+			mustMkdir(t, filepath.Join(filepath.Dir(wtAdmin(t, wt)), "agent-9"))
+		}, wtHolds, 0},
 		{"a process works in a folder inside it", func(t *testing.T, git, repo, wt string) {
 			mustMkdir(t, filepath.Join(wt, "src"))
 			stubWorktreeUse(t, []string{filepath.Join(wt, "src")}, nil)
@@ -499,6 +502,47 @@ func TestRemoveWorktreeThatHoldsWorktrees(t *testing.T) {
 	}
 	if w := wtFound(t, "claude", outer); w.State != wtClean {
 		t.Fatalf("outer, once the inner one has gone = %+v", w)
+	}
+}
+
+// TestRemoveWorktreeThatHoldsWorktreesThroughALink: a branch can track
+// .claude as a link to a folder in the worktree, so the worktrees Claude
+// Code makes there are in no .claude/worktrees folder and never listed.
+// git's record of such a worktree still names a .git inside the outer one,
+// which then stays. Other worktrees of the repository, beside it or
+// elsewhere, do not make it hold.
+func TestRemoveWorktreeThatHoldsWorktreesThroughALink(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	outer := addWorktree(t, git, repo, "agent-1", "agent-1")
+	beside := addWorktree(t, git, repo, "agent-10", "agent-10") // its path starts as the outer one's does
+	elsewhere := filepath.Join(homeDir(), ".codex", "worktrees", "ab12", "app")
+	gitIn(t, git, repo, "worktree", "add", "-q", "-b", "codex-1", elsewhere, "main")
+	writeText(t, filepath.Join(outer, ".ai", ".gitignore"), "worktrees/\n")
+	if err := os.Symlink(".ai", filepath.Join(outer, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, git, outer, "add", filepath.Join(".ai", ".gitignore"), ".claude")
+	gitCommit(t, git, outer)
+	seen := wtFound(t, "claude", outer)
+	if seen.State != wtClean {
+		t.Fatalf("seen %+v", seen)
+	}
+	inner := filepath.Join(outer, ".claude", "worktrees", "agent-2")
+	gitIn(t, git, outer, "worktree", "add", "-q", "-b", "agent-2", inner, "main")
+	if w := wtFound(t, "claude", outer); w.State != wtHolds {
+		t.Errorf("outer = %+v", w)
+	}
+	if _, code := removeWorktree(context.Background(), seen, wtClean, wtNothingOpen); code != wtFailChanged {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(inner, "README.md")) || exists(outer+worktreeTemp) || !exists(wtAdmin(t, outer)) || !exists(wtAdmin(t, inner)) || wtTrashed("agent-1", "") {
+		t.Fatal("a worktree was touched")
+	}
+	for _, other := range []struct{ kind, path string }{{"claude", beside}, {"codex", elsewhere}} {
+		if w := wtFound(t, other.kind, other.path); w.State != wtClean {
+			t.Errorf("%s = %+v", other.path, w)
+		}
 	}
 }
 
