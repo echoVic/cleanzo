@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -480,5 +481,118 @@ func TestRemoveWorktreeWithAnOpenFile(t *testing.T) {
 	}
 	if !exists(filepath.Join(wt, "README.md")) || !exists(wtAdmin(t, wt)) || exists(wt+worktreeTemp) {
 		t.Fatal("the worktree was touched")
+	}
+}
+
+// TestWorktreeGitUnavailable: a worktree cannot be judged without a git that
+// answers: none is found, /usr/bin/git is the placeholder that stands in
+// for missing developer tools, or git runs out of time.
+func TestWorktreeGitUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T)
+	}{
+		{"no git", func(t *testing.T) {
+			empty := t.TempDir()
+			toolDirs = func() []string { return []string{empty} }
+		}},
+		{"/usr/bin/git without developer tools", func(t *testing.T) {
+			toolDirs = func() []string { return []string{"/usr/bin"} }
+			if findTool("git") != "/usr/bin/git" {
+				t.Skip("no /usr/bin/git")
+			}
+			developerToolsInstalled = func(context.Context) bool { return false }
+		}},
+		{"git runs out of time", func(t *testing.T) {
+			saved := worktreeGit
+			worktreeGit = func(context.Context, string, []string, time.Duration) (string, error) {
+				return "", context.DeadlineExceeded
+			}
+			t.Cleanup(func() { worktreeGit = saved })
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			git, repo := wtRepo(t)
+			stubWorktreeUse(t, nil, nil)
+			wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+			tc.stage(t)
+			if w := wtFound(t, "claude", wt); w.State != wtNoGit {
+				t.Fatalf("state = %s", w.State)
+			}
+		})
+	}
+}
+
+// TestWorktreeStatusIgnoresUserConfig: a repository set to hide untracked
+// files from git status does not hide them from the worktree rules.
+func TestWorktreeStatusIgnoresUserConfig(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	gitIn(t, git, repo, "config", "status.showUntrackedFiles", "no")
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
+	if w := wtFound(t, "claude", wt); w.State != wtDirty || w.Changes != 1 {
+		t.Fatalf("state = %s with %d changes", w.State, w.Changes)
+	}
+}
+
+// TestWorktreeGitHardening: every git command of a scan and a removal runs
+// without the caller's GIT_ variables, optional locks, prompts or a file
+// system monitor, and git run in a worktree never looks above it. Only
+// status, for-each-ref and worktree unlock and remove run, never forced,
+// and nothing prunes.
+func TestWorktreeGitHardening(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	stubPidStart(t, map[int32]time.Time{})
+	locked := addWorktree(t, git, repo, "agent-1", "agent-1")
+	wtLock(t, git, repo, locked, "claude agent (pid 4242)")
+	addWorktree(t, git, repo, "agent-2", "")
+	tools := t.TempDir()
+	logged := filepath.Join(tools, "git.log")
+	fakeTool(t, tools, "git", `printf '%s\n' "git_dir=${GIT_DIR-unset} optional_locks=${GIT_OPTIONAL_LOCKS-unset} terminal_prompt=${GIT_TERMINAL_PROMPT-unset} ceiling=${GIT_CEILING_DIRECTORIES-unset} args=$*" >> `+shellPath(logged)+`
+GIT_CONFIG_NOSYSTEM=1 exec `+shellPath(git)+` "$@"
+`)
+	toolDirs = func() []string { return []string{tools} }
+	other := filepath.Join(t.TempDir(), "other")
+	wtCommitted(t, git, other)
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", locked), wtClean, wtNothingOpen); code != "" {
+		t.Fatalf("code %q", code)
+	}
+	log, err := os.ReadFile(logged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		env, args, _ := strings.Cut(line, " args=")
+		fields := strings.Fields(args)
+		ceiling := "unset"
+		if len(fields) > 1 && fields[0] == "-C" {
+			ceiling = filepath.Dir(fields[1])
+		}
+		command := ""
+		for i := 0; i < len(fields) && command == ""; i++ {
+			switch {
+			case fields[i] == "-C" || fields[i] == "-c":
+				i++
+			case strings.HasPrefix(fields[i], "--git-dir="):
+			case fields[i] == "worktree" && i+1 < len(fields):
+				command = "worktree " + fields[i+1]
+			default:
+				command = fields[i]
+			}
+		}
+		ran[command] = true
+		forced := slices.ContainsFunc(fields, func(f string) bool { return f == "--force" || f == "-f" || f == "prune" })
+		if env != "git_dir=unset optional_locks=0 terminal_prompt=0 ceiling="+ceiling || !strings.Contains(args, "-c core.fsmonitor=false") || forced {
+			t.Errorf("git ran as: %s", line)
+		}
+	}
+	if want := []string{"for-each-ref", "status", "worktree remove", "worktree unlock"}; !slices.Equal(slices.Sorted(maps.Keys(ran)), want) {
+		t.Fatalf("git ran %v, want %v", slices.Sorted(maps.Keys(ran)), want)
 	}
 }
