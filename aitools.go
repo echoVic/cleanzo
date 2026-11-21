@@ -479,10 +479,15 @@ type AIToolInfo struct {
 func (Cleaner) ListAITools() []AIToolInfo {
 	out := []AIToolInfo{}
 	for _, tool := range aiTools {
-		installed := slices.ContainsFunc(aiRootKeys(tool), func(k string) bool { return aiRootDir(tool, k) != "" })
-		out = append(out, AIToolInfo{ID: tool.ID, Name: tool.Name, Installed: installed})
+		out = append(out, AIToolInfo{ID: tool.ID, Name: tool.Name, Installed: aiToolInstalled(tool)})
 	}
 	return out
+}
+
+// aiToolInstalled reports whether tool keeps a folder here under any of its
+// roots.
+func aiToolInstalled(tool aiTool) bool {
+	return slices.ContainsFunc(aiRootKeys(tool), func(k string) bool { return aiRootDir(tool, k) != "" })
 }
 
 // errAIUnknownTool is a tool id the table does not have.

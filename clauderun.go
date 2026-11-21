@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"slices"
 	"syscall"
 	"time"
 )
@@ -137,7 +136,7 @@ func (Cleaner) ClaudeRunning(ctx context.Context) (ClaudeRunning, error) {
 func (Cleaner) ClaudeRunSummary() ClaudeRunSummary {
 	if claudeRunSupported() {
 		for _, tool := range aiTools {
-			if tool.ID == "claude" && slices.ContainsFunc(aiRootKeys(tool), func(k string) bool { return aiRootDir(tool, k) != "" }) {
+			if tool.ID == "claude" && aiToolInstalled(tool) {
 				return claudeSummaryWith(claudeSourceFn())
 			}
 		}
