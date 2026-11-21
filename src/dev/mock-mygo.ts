@@ -416,6 +416,43 @@ function createRuntime(): Runtime {
   const mkPart = (p: Partial<AIPart> & Pick<AIPart, "id" | "path" | "level" | "size">): AIPart => ({
     name: "", files: 0, last: now - 10 * DAY, groups: [], top: [], more: 0, keep: "", runSafe: false, running: false, ...p,
   });
+  // Agent worktree 的一组：key 和 path 是它的文件夹，名字是文件夹名；认不出的不知道仓库和分支。
+  const mkWorktree = (path: string, w: { repo: string; branch: string; state: string; size: number; ageDays: number; changes?: number }): AIGroup => {
+    const { repo, branch, ...rest } = w;
+    return mkGroup({ key: home(path), label: path.slice(path.lastIndexOf("/") + 1), path: home(path), count: 1, ...rest, ...(repo ? { repo: home(repo) } : {}), ...(branch ? { branch } : {}) });
+  };
+  // 工具的 Agent worktree 那一项：一个 worktree 一组，大的在前；Claude Code 的分散在各个仓库里，没有自己的文件夹，边跑边清。
+  const mkWorktreePart = (tool: "claude" | "codex", groups: AIGroup[]): AIPart => mkPart({
+    id: `${tool}.worktrees`, path: tool === "codex" ? home("~/.codex/worktrees") : "", level: "sensitive", worktrees: true, runSafe: tool === "claude",
+    size: sum(groups), files: groups.length, last: Math.max(...groups.map((g) => g.last)), groups: [...groups].sort((a, b) => b.size - a.size),
+  });
+  // 每种状态各一个。移走 web-shop 的 search-filters 时演示 git 没能清掉记录；hero-copy 里有「运行中」那个占着 8000 端口的命令。
+  const wtGitFails = "~/Documents/Projects/web-shop/.claude/worktrees/search-filters";
+  const claudeWorktrees = [
+    mkWorktree(wtGitFails, { repo: "~/Documents/Projects/web-shop", branch: "feat/search-filters", state: "clean", size: 640 * MB, ageDays: 12 }),
+    mkWorktree("~/Documents/Projects/landing-page/.claude/worktrees/pricing-table", { repo: "~/Documents/Projects/landing-page", branch: "feat/pricing-table", state: "dirty", changes: 7, size: 410 * MB, ageDays: 5 }),
+    mkWorktree("~/Documents/Projects/landing-page/.claude/worktrees/hero-copy", { repo: "~/Documents/Projects/landing-page", branch: "copy/hero", state: "in-use", size: 380 * MB, ageDays: 0 }),
+    mkWorktree("~/Documents/Projects/api-gateway/.claude/worktrees/rate-limit", { repo: "~/Documents/Projects/api-gateway", branch: "feat/rate-limit", state: "holds-worktrees", size: 520 * MB, ageDays: 9 }),
+    mkWorktree("~/Documents/Projects/mobile-app/.claude/worktrees/push-setup", { repo: "~/Documents/Projects/mobile-app", branch: "feat/push-setup", state: "submodules", size: 1.1 * GB, ageDays: 21 }),
+    mkWorktree("~/Documents/Projects/web-shop/.claude/worktrees/router-upgrade", { repo: "~/Documents/Projects/web-shop", branch: "chore/router-upgrade", state: "mid-operation", size: 590 * MB, ageDays: 3 }),
+    mkWorktree("~/Documents/Projects/api-gateway/.claude/worktrees/grpc-spike", { repo: "~/Documents/Projects/api-gateway", branch: "", state: "unbranched-commits", size: 260 * MB, ageDays: 40 }),
+    mkWorktree("~/Desktop/试验项目/.claude/worktrees/新首页", { repo: "~/Desktop/试验项目", branch: "试验/首页", state: "git-unavailable", size: 96 * MB, ageDays: 18 }),
+    mkWorktree("~/Documents/Projects/mobile-app/.claude/worktrees/dark-mode", { repo: "~/Documents/Projects/mobile-app", branch: "feat/dark-mode", state: "index-only", size: 700 * MB, ageDays: 2 }),
+    mkWorktree("~/Documents/Projects/web-shop/.claude/worktrees/old-notes", { repo: "", branch: "", state: "unrecognized", size: 12 * MB, ageDays: 90 }),
+  ];
+  // Codex 的在 ~/.codex/worktrees/<id>/<仓库名>；Codex 在运行，这一项整个显示「先退出」。
+  const codexWorktrees = [
+    mkWorktree("~/.codex/worktrees/1a2b/web-shop", { repo: "~/Documents/Projects/web-shop", branch: "codex/cart-badge", state: "clean", size: 610 * MB, ageDays: 6 }),
+    mkWorktree("~/.codex/worktrees/3c4d/landing-page", { repo: "~/Documents/Projects/landing-page", branch: "codex/footer-links", state: "dirty", changes: 4, size: 350 * MB, ageDays: 2 }),
+    mkWorktree("~/.codex/worktrees/5e6f/api-gateway", { repo: "~/Documents/Projects/api-gateway", branch: "codex/retry-budget", state: "in-use", size: 300 * MB, ageDays: 0 }),
+    mkWorktree("~/.codex/worktrees/7a8b/mobile-app", { repo: "~/Documents/Projects/mobile-app", branch: "codex/onboarding", state: "holds-worktrees", size: 880 * MB, ageDays: 8 }),
+    mkWorktree("~/.codex/worktrees/9c0d/mobile-app", { repo: "~/Documents/Projects/mobile-app", branch: "codex/widgets", state: "submodules", size: 920 * MB, ageDays: 15 }),
+    mkWorktree("~/.codex/worktrees/b1c2/web-shop", { repo: "~/Documents/Projects/web-shop", branch: "codex/checkout-copy", state: "mid-operation", size: 600 * MB, ageDays: 4 }),
+    mkWorktree("~/.codex/worktrees/d3e4/api-gateway", { repo: "~/Documents/Projects/api-gateway", branch: "", state: "unbranched-commits", size: 280 * MB, ageDays: 33 }),
+    mkWorktree("~/.codex/worktrees/f5a6/试验项目", { repo: "~/Desktop/试验项目", branch: "codex/草稿", state: "git-unavailable", size: 90 * MB, ageDays: 11 }),
+    mkWorktree("~/.codex/worktrees/0b1c/landing-page", { repo: "~/Documents/Projects/landing-page", branch: "codex/form-validation", state: "index-only", size: 330 * MB, ageDays: 1 }),
+    mkWorktree("~/.codex/worktrees/2d3e/scratch", { repo: "", branch: "", state: "unrecognized", size: 8 * MB, ageDays: 60 }),
+  ];
   // 一个工具的「运行中」落到它的每一项上（后端按应用分别判断，TRAE 的 IDE 和 CLI 各算各的）。
   const mkTool = (t: Omit<AITool, "runningApps"> & { runningApps?: string[] }): AITool => ({
     ...t,
@@ -454,6 +491,7 @@ function createRuntime(): Runtime {
           more: 6,
         }),
         mkPart({ id: "claude.fileHistory", path: home("~/.claude/file-history"), level: "optional", size: 520 * MB, files: 870 }),
+        mkWorktreePart("claude", claudeWorktrees),
         mkPart({ id: "claude.plugins", path: home("~/.claude/plugins"), level: "protected", size: 1.2 * GB, files: 210 }),
         mkPart({ id: "claude.credentials", path: home("~/.claude/credentials"), level: "protected", size: 2 * MB, files: 4 }),
         mkPart({ id: "unknown:legacy-cache", name: "legacy-cache", path: home("~/.claude/legacy"), level: "unknown", size: 70 * MB, files: 12 }),
@@ -483,6 +521,7 @@ function createRuntime(): Runtime {
         mkPart({ id: "codex.tmp", path: home("~/.codex/tmp"), level: "safe", size: 96 * MB, files: 23, runSafe: true }),
         mkPart({ id: "codex.logs", path: home("~/.codex/log"), level: "safe", size: 55 * MB, files: 18 }),
         mkPart({ id: "codex.computerUse", path: home("~/.codex/computer-use"), level: "optional", size: 320 * MB, files: 260 }),
+        mkWorktreePart("codex", codexWorktrees),
         mkPart({ id: "codex.packages", path: home("~/.codex/packages"), level: "protected", size: 880 * MB, files: 90 }),
       ],
     }),
@@ -815,8 +854,11 @@ function createRuntime(): Runtime {
         const tool = aiTools.find((t) => t.id === sel.tool);
         const p = tool?.parts.find((x) => x.id === sel.part);
         let bytes = 0, moved = 0, kept = 0;
+        const failed: string[] = [];
         if (tool && p) {
           const keys = new Set(sel.groups);
+          // 这一个 worktree 演示 git 没能清掉记录：留在列表里，结果写 wt-git。
+          if (p.worktrees && keys.delete(home(wtGitFails))) failed.push(`${wtGitFails}: wt-git`);
           const done = p.groups.filter((g) => keys.has(g.key));
           for (const g of done) { bytes += g.size; moved += 1; p.size = Math.max(0, p.size - g.size); }
           p.groups = p.groups.filter((g) => !keys.has(g.key));
@@ -828,7 +870,7 @@ function createRuntime(): Runtime {
         freed += bytes;
         return {
           tool: sel.tool, part: sel.part, moved, freed: bytes, kept,
-          skipped: tool?.running && p && !p.runSafe ? "running" : "", failed: [] as string[],
+          skipped: tool?.running && p && !p.runSafe ? "running" : "", failed,
         };
       });
       freedDisk(freed);
