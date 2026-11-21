@@ -1,4 +1,4 @@
-// React AI 页与原生导航的桥接：main.ts 调这两个函数即可，不直接接触 React。
+// React AI 页与原生导航的桥接：main.ts 调这里的函数即可，不直接接触 React。
 import { mountAITool } from "./mount";
 import { aiApi } from "./api";
 
@@ -37,3 +37,6 @@ export function showReactAITool(toolId: string, toolName: string) {
 
 /** 下次显示这个工具的页面时开在哪个标签；调用方随后切到这个工具的视图。 */
 export function requestAITab(toolId: string, tab: AITab) {}
+
+/** main.ts 切到 AI 工具之外的视图时调用：告诉正显示的工具页它已不在屏幕上。 */
+export function leaveReactAITools() {}
