@@ -3,10 +3,15 @@ import type { GrowthHandlers } from "../growth/GrowthPage";
 import type { ProcessTab } from "./format";
 import { mountProcess, requestProcess } from "./mount";
 
-const handlers: GrowthHandlers = { goLeftovers: () => {}, goUninstall: () => {} };
+/** 进程页的跳转：磁盘占用标签里的两个，加上行上的 Claude Code 小标签跳到 Claude Code 页的「运行中」。 */
+export interface ProcessHandlers extends GrowthHandlers {
+  goRunning: () => void;
+}
 
-/** main.ts 注入：磁盘占用标签里跳到应用卸载的残留页签 / 打开某个 App 的卸载对话框。 */
-export function setProcessHandlers(h: GrowthHandlers) {
+const handlers: ProcessHandlers = { goLeftovers: () => {}, goUninstall: () => {}, goRunning: () => {} };
+
+/** main.ts 注入：磁盘占用标签里跳到应用卸载的残留页签 / 打开某个 App 的卸载对话框；Claude Code 小标签跳到「运行中」。 */
+export function setProcessHandlers(h: ProcessHandlers) {
   Object.assign(handlers, h);
 }
 

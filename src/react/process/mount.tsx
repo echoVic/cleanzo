@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { GrowthHandlers } from "../growth/GrowthPage";
+import type { ProcessHandlers } from "./entry";
 import { ProcessPage } from "./ProcessPage";
 import type { ProcessRequest, ProcessTab } from "./format";
 import "../../ui/index.css";
@@ -15,7 +15,7 @@ export function requestProcess(tab: ProcessTab, focusKey: string | null) {
 }
 
 /** 在原生视图的容器里挂载进程页；第一次进入才建根，之后复用。每次进入 visit 加一，隐藏时只传 active=false。 */
-export function mountProcess(el: HTMLElement, handlers: GrowthHandlers, active: boolean) {
+export function mountProcess(el: HTMLElement, handlers: ProcessHandlers, active: boolean) {
   if (!root) {
     if (!active) return;
     root = createRoot(el);

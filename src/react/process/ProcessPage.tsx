@@ -15,8 +15,9 @@ import { isWindows } from "../../platform";
 import { errText, focusNextAfter, human, toast } from "../../shared";
 import { emptyQuit, fmtMem, fmtPct, iconColor, iconFg, quitErrCode, syncQuitRows, type QuitState } from "../status/format";
 import { growthApi } from "../growth/api";
-import { GrowthPanel, type GrowthHandlers } from "../growth/GrowthPage";
+import { GrowthPanel } from "../growth/GrowthPage";
 import { processApi } from "./api";
+import type { ProcessHandlers } from "./entry";
 import {
   claudeTags, diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
   type GrowthTag, type ProcessRequest, type ProcessTab,
@@ -133,8 +134,8 @@ export function ProcessRowView({ row, sortBy, open, tag, claude, busy, stuck, do
   );
 }
 
-/** 进程页的显示状态、访问次数、打开请求和磁盘占用标签的导航回调。 */
-export interface ProcessPageProps extends GrowthHandlers {
+/** 进程页的显示状态、访问次数、打开请求和跳转（磁盘占用标签里的，和 Claude Code 小标签的）。 */
+export interface ProcessPageProps extends ProcessHandlers {
   /** 是否正显示本视图：离开就关采样通道。 */
   active: boolean;
   /** 每次进入视图递增：标签回到 CPU（或请求的标签），开关回到「在走」。 */
@@ -144,7 +145,7 @@ export interface ProcessPageProps extends GrowthHandlers {
 }
 
 /** 进程页：CPU、内存两个实时标签，加上磁盘占用（占用增长的列表）。spec 2026-10-26。 */
-export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }: ProcessPageProps) {
+export function ProcessPage({ active, visit, request, goLeftovers, goUninstall, goRunning }: ProcessPageProps) {
   const t = useT();
   const [tab, setTab] = React.useState<ProcessTab>("cpu");
   const [running, setRunning] = React.useState(true);
@@ -495,7 +496,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   onQuit={() => setQuitTarget(r)}
                   onForce={() => setForceTarget(r)}
                   onTag={goDisk}
-                  onClaude={() => {}}
+                  onClaude={goRunning}
                 />
               ))}
             </div>

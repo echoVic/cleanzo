@@ -1,4 +1,4 @@
-import { initReactAITools, showReactAITool } from "./react/ai/entry";
+import { initReactAITools, leaveReactAITools, requestAITab, showReactAITool } from "./react/ai/entry";
 import { showReactAISpace } from "./react/aispace/entry";
 import { initReactSkills, showReactSkills } from "./react/skills/entry";
 import { requestSettingsSection, setSettingsLangHandler, showReactSettings } from "./react/settings/entry";
@@ -108,6 +108,8 @@ function switchView(v: View, tool?: string) {
     const names: Record<string, string> = { claude: "Claude Code", codex: "Codex", trae: "TRAE", orca: "Orca" };
     showReactAITool(tool, names[tool] ?? tool);
   }
+  // 切到别的视图：告诉 AI 工具页它已不在屏幕上，「运行中」停止读取。
+  if (v !== "aitools") leaveReactAITools();
   if (v === "aispace") showReactAISpace();
   if (v === "skills") showReactSkills();
   if (v === "fullscan") showReactFullScan();
@@ -131,6 +133,7 @@ setCrashGoClean(() => switchView("clean"));
 setProcessHandlers({
   goLeftovers: () => { requestAppsFilter("leftovers"); switchView("apps"); },
   goUninstall: (appPath) => { requestAppsUninstall(appPath); switchView("apps"); },
+  goRunning: () => { requestAITab("claude", "running"); switchView("aitools", "claude"); },
 });
 // 通知 / 菜单栏点进来：打开进程页的磁盘占用标签并定位那一行。
 if (window.mygo) events.growthFocus.on((key) => { openReactProcess("disk", key); switchView("process"); });

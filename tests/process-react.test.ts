@@ -1,5 +1,5 @@
 import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
-import { expect, spyOn, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import type { ClaudeRunSummary, GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
 import { fmtMem, fmtPct } from "../src/react/status/format";
 import type { Changes } from "./page-harness";
@@ -406,13 +406,14 @@ async function processPage(env: Changes, claude: () => Promise<ClaudeRunSummary>
   const claudeRead = env.spy(processApi, "claudeSummary").mockImplementation(claude);
   env.spy(growthApi, "summary").mockImplementation(async () => summary());
   env.spy(growthApi, "onUpdated").mockImplementation(() => () => {});
+  const goRunning = mock(() => {});
   const page = env.page(ProcessPage, {
-    active: true, visit: 1, request: { tab: null, focusKey: null, nonce: 0 }, goLeftovers() {}, goUninstall() {},
+    active: true, visit: 1, request: { tab: null, focusKey: null, nonce: 0 }, goLeftovers() {}, goUninstall() {}, goRunning,
   });
   await page.settle();
   const rows = () => page.all().filter((el) => "onToggle" in el.props && el.props.row);
   return {
-    page, claudeRead,
+    page, claudeRead, goRunning,
     get ch() { return chans.at(-1)!; },
     rows,
     /** 每一行收到的 Claude Code 小标签，按行的 key。 */
@@ -529,4 +530,23 @@ test("读取的时机：再进来时不留上一次的标签；离开以后才�
     await pp.page.settle();
     expect(pp.rowClaude()).toEqual({ [claudeCode.key]: null, [node.key]: third });
   } finally { env.restore(); }
+});
+
+test("跳转：ProcessPage 把 goRunning 接到行的 onClaude 上", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const pp = await processPage(env, async () => claudeSummary);
+    pp.ch.push(sample({ rows: [claudeCode, node, chrome] }));
+    await pp.page.settle();
+    expect(pp.goRunning).not.toHaveBeenCalled();
+    for (const r of pp.rows()) r.props.onClaude();
+    expect(pp.goRunning).toHaveBeenCalledTimes(3);
+  } finally { env.restore(); }
+});
+
+test("跳转：main.ts 先请求 Claude Code 页开在「运行中」再切过去；切到 AI 工具之外的视图时告诉工具页它已离开", async () => {
+  const { readFileSync } = await import("node:fs");
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  expect(main).toContain('goRunning: () => { requestAITab("claude", "running"); switchView("aitools", "claude"); }');
+  expect(main).toContain('if (v !== "aitools") leaveReactAITools();');
 });
