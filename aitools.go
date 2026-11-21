@@ -1220,6 +1220,8 @@ func cleanAIWorktrees(ctx context.Context, sel AISelection, tool aiTool, running
 			r.Freed += freed
 		case "in-use":
 			r.Kept++
+		case wtCancelled:
+			// Nothing changed, and the clean stops before the next one.
 		default:
 			r.Failed = append(r.Failed, displayHome(key)+": "+code)
 		}

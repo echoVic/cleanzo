@@ -1205,6 +1205,40 @@ func TestCleanAIToolsWorktreesJudgeOnlyTheSelected(t *testing.T) {
 	}
 }
 
+// TestCleanAIToolsWorktreesCancelled: a clean cancelled before a worktree
+// moves leaves it and the ones after it as they are, none of them failed.
+func TestCleanAIToolsWorktreesCancelled(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	first := addWorktree(t, git, repo, "agent-a", "agent-a")
+	second := addWorktree(t, git, repo, "agent-b", "agent-b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	saved := worktreeGit
+	var mu sync.Mutex
+	var judged []string
+	// The clean is cancelled while it judges the first worktree again.
+	worktreeGit = func(gitCtx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if len(args) > 1 && args[0] == "-C" {
+			mu.Lock()
+			judged = append(judged, args[1])
+			mu.Unlock()
+			cancel()
+		}
+		return saved(gitCtx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	res, _ := (Cleaner{}).CleanAITools(ctx, []AISelection{{Tool: "claude", Part: "claude.worktrees", Groups: []string{first, second}, Seen: []string{wtClean, wtClean}}})
+	if len(res.Parts) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if r := res.Parts[0]; r.Moved != 0 || r.Kept != 0 || len(r.Failed) != 0 || !exists(filepath.Join(first, "README.md")) || !exists(filepath.Join(second, "README.md")) || !slices.Equal(judged, []string{first}) {
+		t.Fatalf("result = %+v, judged %v", r, judged)
+	}
+}
+
 // TestCleanAIToolsWorktreeInUse: a worktree holding a file a process has
 // open is kept; the rest of the selection goes.
 func TestCleanAIToolsWorktreeInUse(t *testing.T) {

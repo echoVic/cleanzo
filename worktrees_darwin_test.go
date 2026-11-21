@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -592,6 +594,92 @@ func TestRemoveWorktreeWithAnOpenFile(t *testing.T) {
 	if !exists(filepath.Join(wt, "README.md")) || !exists(wtAdmin(t, wt)) || exists(wt+worktreeTemp) {
 		t.Fatal("the worktree was touched")
 	}
+}
+
+// wtCountdown is a context that is cancelled once the code under test has
+// asked it n times whether it is: it stops that code while at work.
+type wtCountdown struct {
+	context.Context
+	cancel context.CancelFunc
+	asked  atomic.Int64
+	n      int64
+}
+
+// wtCancelledAfter is a wtCountdown that lets n questions pass.
+func wtCancelledAfter(t *testing.T, n int64) *wtCountdown {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return &wtCountdown{Context: ctx, cancel: cancel, n: n}
+}
+
+// Err cancels the context once it has been asked more than n times.
+func (c *wtCountdown) Err() error {
+	if c.asked.Add(1) > c.n {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+// TestRemoveWorktreeCancelledWhileMeasuring: a clean cancelled while the
+// worktree is measured stops before anything changes.
+func TestRemoveWorktreeCancelledWhileMeasuring(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	for i := range 20 {
+		writeText(t, filepath.Join(wt, "notes", fmt.Sprintf("%02d.txt", i)), "draft\n")
+	}
+	gitIn(t, git, wt, "add", "notes")
+	gitCommit(t, git, wt)
+	admin := wtAdmin(t, wt)
+	w := wtFound(t, "claude", wt)
+	// The walk asks before each of the worktree's 20 and more entries.
+	ctx := wtCancelledAfter(t, 5)
+	if _, code := removeWorktree(ctx, w, wtClean, wtNothingOpen); code != wtCancelled {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(admin) || wtTrashed("agent-1", "") {
+		t.Fatalf("folder in place %v, record there %v, trashed %v", exists(wt), exists(admin), wtTrashed("agent-1", ""))
+	}
+	gitIn(t, git, wt, "status")
+}
+
+// TestRemoveWorktreeCancelledWhileGitRuns: once the folder is away from its
+// path, a cancelled clean still runs to the end: git forgets the worktree
+// and the folder goes to the Trash, though the Trash would turn down a
+// cancelled move.
+func TestRemoveWorktreeCancelledWhileGitRuns(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	w := wtFound(t, "claude", wt)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	saved, savedTrash := worktreeGit, trashWithContext
+	var stopped error // what git's context said once the clean was cancelled
+	worktreeGit = func(gitCtx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if slices.Contains(args, "remove") {
+			cancel()
+			stopped = gitCtx.Err()
+		}
+		return saved(gitCtx, git, args, limit)
+	}
+	trashWithContext = func(trashCtx context.Context, p string) error {
+		if err := trashCtx.Err(); err != nil {
+			return err
+		}
+		return savedTrash(trashCtx, p)
+	}
+	t.Cleanup(func() { worktreeGit, trashWithContext = saved, savedTrash })
+	if _, code := removeWorktree(ctx, w, wtClean, wtNothingOpen); code != "" || stopped != nil || ctx.Err() == nil {
+		t.Fatalf("code %q, git's context %v, the clean's %v", code, stopped, ctx.Err())
+	}
+	if !wtTrashed("agent-1", "README.md") || exists(wt) || exists(wt+worktreeTemp) || exists(admin) {
+		t.Fatalf("trashed %v, folder there %v, record there %v", wtTrashed("agent-1", "README.md"), exists(wt), exists(admin))
+	}
+	gitIn(t, git, repo, "switch", "-q", "agent-1")
 }
 
 // TestWorktreeGitUnavailable: a worktree cannot be judged without a git that
