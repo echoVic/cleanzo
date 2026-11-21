@@ -119,14 +119,14 @@ func findWorktrees(ctx context.Context, kind string) []agentWorktree {
 	use := worktreeUse()
 	var paths []string
 	dirs, folders := map[string]bool{}, map[string]bool{}
-	for _, dir := range worktreeDirs(ctx, kind) {
+	for _, dir := range worktreeDirs(ctx, kind, use.Sessions) {
 		key := strings.ToLower(resolvePath(dir))
-		if dirs[key] || !safeToClean(dir) {
+		if dirs[key] || !worktreeListable(dir) {
 			continue
 		}
 		dirs[key] = true
-		for _, p := range subfolders(dir) {
-			if key := strings.ToLower(resolvePath(p)); !folders[key] && safeToClean(p) {
+		for _, p := range worktreeFolders(dir) {
+			if key := strings.ToLower(resolvePath(p)); !folders[key] && worktreeListable(p) {
 				folders[key] = true
 				paths = append(paths, homeSpelled(p))
 			}
@@ -159,14 +159,95 @@ func findWorktrees(ctx context.Context, kind string) []agentWorktree {
 }
 
 // worktreeDirs lists the folders the agents of kind keep worktrees in.
-func worktreeDirs(ctx context.Context, kind string) []string {
-	if kind != "claude" {
-		return nil
+// Claude Code keeps them in <repository>/.claude/worktrees: the
+// repositories its transcripts and open sessions work in, and wherever the
+// home walk passes one. Codex keeps them in ~/.codex/worktrees/<id>.
+func worktreeDirs(ctx context.Context, kind string, sessions []string) []string {
+	switch kind {
+	case "codex":
+		return subfolders(filepath.Join(homeDir(), ".codex", "worktrees"))
+	case "claude":
+		var dirs []string
+		for _, cwd := range slices.Concat(claudeProjectFolders(ctx), sessions) {
+			if repo := worktreeRepoOf(cwd); repo != "" {
+				dirs = append(dirs, filepath.Join(repo, ".claude", "worktrees"))
+			}
+		}
+		env := pathJunkEnv(homeDir())
+		env.ctx = ctx
+		_, walked := env.walkHome(claimSet{})
+		return append(dirs, walked...)
 	}
-	env := pathJunkEnv(homeDir())
-	env.ctx = ctx
-	_, walked := env.walkHome(claimSet{})
-	return walked
+	return nil
+}
+
+// claudeProjectFolders lists the working folder of each of Claude Code's
+// projects: the cwd its first transcript naming one names.
+func claudeProjectFolders(ctx context.Context) []string {
+	var cwds []string
+	for _, project := range subfolders(filepath.Join(homeDir(), ".claude", "projects")) {
+		if ctx.Err() != nil {
+			break
+		}
+		entries, _ := os.ReadDir(project)
+		for _, e := range entries {
+			if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".jsonl") {
+				continue
+			}
+			if cwd := jsonlField(filepath.Join(project, e.Name()), "cwd"); cwd != "" {
+				cwds = append(cwds, cwd)
+				break
+			}
+		}
+	}
+	return cwds
+}
+
+// worktreeRepoOf is the repository a working folder is in: the nearest
+// folder at or above it holding a .git, or, when that .git is a linked
+// worktree's file, the repository git's record of the worktree names. It is
+// "" when there is none.
+func worktreeRepoOf(dir string) string {
+	if !filepath.IsAbs(dir) {
+		return ""
+	}
+	for p := filepath.Clean(dir); ; p = filepath.Dir(p) {
+		if worktreeHas(p, ".git") {
+			if _, common, ok := worktreeRecord(p, p); ok {
+				return worktreeRepo(common)
+			}
+			return p
+		}
+		if filepath.Dir(p) == p {
+			return ""
+		}
+	}
+}
+
+// worktreeFolders lists the folders in dir, where an agent keeps worktrees.
+// A worktree an interrupted removal left under its temporary name is put
+// back first: when its own name is free, and git's record of it still
+// names that.
+func worktreeFolders(dir string) []string {
+	folders := subfolders(dir)
+	for i, p := range folders {
+		name, waiting := strings.CutSuffix(filepath.Base(p), worktreeTemp)
+		if !waiting || name == "" || !worktreeListable(p) {
+			continue
+		}
+		original := filepath.Join(dir, name)
+		if _, _, ok := worktreeRecord(p, original); ok && !worktreeHas(dir, name) && os.Rename(p, original) == nil {
+			folders[i] = original
+		}
+	}
+	return folders
+}
+
+// worktreeListable reports whether a folder may be listed: it is inside the
+// home folder once links are resolved, and cleaning may reach it. Cleaning
+// may also reach the temporary folder, which holds no agent's worktrees.
+func worktreeListable(p string) bool {
+	return within(strings.ToLower(resolvePath(p)), strings.ToLower(resolvePath(homeDir()))) && safeToClean(p)
 }
 
 // homeSpelled spells p from the home folder when it is inside it once links
@@ -402,7 +483,7 @@ func worktreeHas(dir, name string) bool {
 // not forget it, the folder comes back and nothing has changed.
 func removeWorktree(ctx context.Context, w agentWorktree, seen string, guard *usageGuard) (freed int64, code string) {
 	path := w.Path
-	if info, err := os.Lstat(path); err != nil || !info.IsDir() || !safeToClean(path) {
+	if info, err := os.Lstat(path); err != nil || !info.IsDir() || !worktreeListable(path) {
 		return 0, wtFailChanged
 	}
 	git := worktreeGitTool()
@@ -428,8 +509,8 @@ func removeWorktree(ctx context.Context, w agentWorktree, seen string, guard *us
 	if err := os.Rename(path, temp); err != nil {
 		return 0, wtFailGit
 	}
-	// The folder is away now: cancelling must neither stop git halfway nor
-	// keep the folder from coming back.
+	// The folder is away now: cancelling must not stop git halfway through
+	// forgetting it.
 	steady := context.WithoutCancel(ctx)
 	cleared := false
 	if !worktreeHas(filepath.Dir(path), filepath.Base(path)) {

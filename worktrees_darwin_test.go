@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"os"
@@ -594,5 +595,157 @@ GIT_CONFIG_NOSYSTEM=1 exec `+shellPath(git)+` "$@"
 	}
 	if want := []string{"for-each-ref", "status", "worktree remove", "worktree unlock"}; !slices.Equal(slices.Sorted(maps.Keys(ran)), want) {
 		t.Fatalf("git ran %v, want %v", slices.Sorted(maps.Keys(ran)), want)
+	}
+}
+
+// wtTranscript writes a Claude Code transcript of project that works in cwd.
+func wtTranscript(t *testing.T, project, cwd string) {
+	t.Helper()
+	line, err := json.Marshal(map[string]string{"type": "user", "cwd": cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeText(t, filepath.Join(homeDir(), ".claude", "projects", project, "a1b2.jsonl"), string(line)+"\n")
+}
+
+// TestWorktreeDiscoveryClaude: Claude Code's worktrees are found in the
+// repositories its transcripts and open sessions work in, and wherever the
+// home walk passes a .claude/worktrees folder. Each is listed once, and the
+// walk finds the same build folders as before.
+func TestWorktreeDiscoveryClaude(t *testing.T) {
+	git, near := wtRepo(t)
+	home := homeDir()
+	// Eight levels down: the walk does not get there.
+	deep := filepath.Join(home, "l1", "l2", "l3", "l4", "l5", "l6", "l7", "transcribed")
+	wtCommitted(t, git, deep)
+	open := filepath.Join(home, "m1", "m2", "m3", "m4", "m5", "m6", "m7", "opened")
+	wtCommitted(t, git, open)
+	walked := addWorktree(t, git, near, "walked", "walked")
+	transcribed := addWorktree(t, git, deep, "transcribed", "transcribed")
+	opened := addWorktree(t, git, open, "opened", "opened")
+	// One transcript works inside the repository, another in the worktree
+	// itself, spelled as resolved: both lead to the same folder.
+	wtTranscript(t, "-l1-transcribed", filepath.Join(deep, "src"))
+	wtTranscript(t, "-l1-transcribed-worktree", resolvePath(transcribed))
+	stubWorktreeUse(t, nil, []string{open})
+	for _, dir := range []string{filepath.Join(near, "web"), walked} {
+		writeText(t, filepath.Join(dir, "package.json"), "{}")
+		writeFile(t, filepath.Join(dir, "node_modules", "dep", "index.js"), 100)
+	}
+	var paths []string
+	for _, w := range findWorktrees(context.Background(), "claude") {
+		paths = append(paths, w.Path)
+	}
+	if want := []string{walked, transcribed, opened}; !slices.Equal(paths, slices.Sorted(slices.Values(want))) {
+		t.Fatalf("found %v, want %v", paths, want)
+	}
+	builds := pathJunkEnv(home).findBuildFolders(claimSet{})
+	if want := []string{filepath.Join(walked, "node_modules"), filepath.Join(near, "web", "node_modules")}; !slices.Equal(slices.Sorted(slices.Values(builds)), slices.Sorted(slices.Values(want))) {
+		t.Fatalf("build folders %v, want %v", builds, want)
+	}
+}
+
+// TestWorktreeDiscoveryCodex: Codex keeps its worktrees in
+// ~/.codex/worktrees/<id>/<name>, and only Codex lists them.
+func TestWorktreeDiscoveryCodex(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := filepath.Join(homeDir(), ".codex", "worktrees", "ab12", "app")
+	gitIn(t, git, repo, "worktree", "add", "-q", "-b", "codex-1", wt, "main")
+	if w := wtFound(t, "codex", wt); w.State != wtClean || w.Repo != repo || w.Branch != "codex-1" {
+		t.Fatalf("worktree = %+v", w)
+	}
+	if found := findWorktrees(context.Background(), "claude"); len(found) != 0 {
+		t.Fatalf("Claude Code lists %+v", found)
+	}
+}
+
+// TestWorktreeOutsideHomeIsNotListed: a repository outside the home folder
+// is neither listed nor touched, even with a transcript and a session
+// working in it.
+func TestWorktreeOutsideHomeIsNotListed(t *testing.T) {
+	git, _ := wtRepo(t)
+	outside := filepath.Join(t.TempDir(), "app")
+	wtCommitted(t, git, outside)
+	wt := addWorktree(t, git, outside, "agent-1", "agent-1")
+	waiting := addWorktree(t, git, outside, "agent-2", "agent-2")
+	if err := os.Rename(waiting, waiting+worktreeTemp); err != nil {
+		t.Fatal(err)
+	}
+	wtTranscript(t, "-outside-app", outside)
+	stubWorktreeUse(t, nil, []string{wt})
+	if found := findWorktrees(context.Background(), "claude"); len(found) != 0 {
+		t.Fatalf("found %+v", found)
+	}
+	if !exists(wt) || !exists(waiting+worktreeTemp) || exists(waiting) {
+		t.Fatal("a folder outside the home folder was touched")
+	}
+}
+
+// TestWorktreeFolderThatIsNotOne: a folder among the worktrees that is not
+// one is listed, as unrecognized.
+func TestWorktreeFolderThatIsNotOne(t *testing.T) {
+	_, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	plain := filepath.Join(repo, ".claude", "worktrees", "plain")
+	writeText(t, filepath.Join(plain, "notes.txt"), "draft\n")
+	if w := wtFound(t, "claude", plain); w.State != wtUnknown || w.Size == 0 {
+		t.Fatalf("worktree = %+v", w)
+	}
+}
+
+// TestWorktreePathsWithSpacesAndUnicode: spaces, Chinese and # in the names
+// of the repository and the worktree change nothing, though git names its
+// record differently from the folder.
+func TestWorktreePathsWithSpacesAndUnicode(t *testing.T) {
+	git, _ := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	repo := filepath.Join(homeDir(), "code", "my repo 仓库")
+	wtCommitted(t, git, repo)
+	wt := addWorktree(t, git, repo, "修复 bug #1", "fix/修复-bug-1")
+	admin := wtAdmin(t, wt)
+	w := wtFound(t, "claude", wt)
+	if w.State != wtClean || w.Branch != "fix/修复-bug-1" || w.Repo != repo || filepath.Base(admin) == w.Name {
+		t.Fatalf("worktree = %+v, record %s", w, admin)
+	}
+	stubWorktreeUse(t, []string{strings.ToUpper(resolvePath(filepath.Join(wt, "src")))}, nil)
+	if w := wtFound(t, "claude", wt); w.State != wtInUse {
+		t.Fatalf("state with a process inside = %s", w.State)
+	}
+	stubWorktreeUse(t, nil, nil)
+	if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != "" {
+		t.Fatalf("code %q", code)
+	}
+	if !wtTrashed("修复 bug #1", "README.md") || exists(wt) || exists(admin) {
+		t.Fatalf("trashed %v, folder there %v, record there %v", wtTrashed("修复 bug #1", "README.md"), exists(wt), exists(admin))
+	}
+	gitIn(t, git, repo, "switch", "-q", "fix/修复-bug-1")
+}
+
+// TestWorktreeInterruptedRemovalIsRestored: a worktree an interrupted
+// removal left under its temporary name, git's record untouched, is put
+// back before it is judged. A folder that only shares the suffix stays.
+func TestWorktreeInterruptedRemovalIsRestored(t *testing.T) {
+	for _, kind := range []string{"claude", "codex"} {
+		t.Run(kind, func(t *testing.T) {
+			git, repo := wtRepo(t)
+			stubWorktreeUse(t, nil, nil)
+			wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+			if kind == "codex" {
+				wt = filepath.Join(homeDir(), ".codex", "worktrees", "ab12", "app")
+				gitIn(t, git, repo, "worktree", "add", "-q", "-b", "codex-1", wt, "main")
+			}
+			other := filepath.Join(filepath.Dir(wt), "notes"+worktreeTemp)
+			writeText(t, filepath.Join(other, "draft.txt"), "draft\n")
+			if err := os.Rename(wt, wt+worktreeTemp); err != nil {
+				t.Fatal(err)
+			}
+			if w := wtFound(t, kind, wt); w.State != wtClean {
+				t.Fatalf("state = %s", w.State)
+			}
+			if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(filepath.Join(other, "draft.txt")) {
+				t.Fatalf("back in place %v, the other folder in place %v", exists(wt), exists(other))
+			}
+		})
 	}
 }
