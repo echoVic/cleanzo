@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -158,5 +160,35 @@ func TestClaudeOutputSession(t *testing.T) {
 		if got := claudeOutputSession(c.path); got != c.want {
 			t.Errorf("claudeOutputSession(%q) = %q, want %q", c.path, got, c.want)
 		}
+	}
+}
+
+func TestReadClaudeRecords(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	dir := filepath.Join(home, ".claude", "sessions")
+	writeText(t, filepath.Join(dir, "100.json"), `{"pid":100,"sessionId":"S1","cwd":"/Users/me/sample-app","name":"Rename the widgets",`+
+		`"status":"idle","statusUpdatedAt":1700000000000,"procStart":"Sat Nov 14 09:01:40 2026","entrypoint":"cli","kind":"interactive"}`)
+	writeText(t, filepath.Join(dir, "abc.json"), `{"sessionId":"S3"}`)
+	writeText(t, filepath.Join(dir, "101.json"), `{"sessionId":"S2","cwd":"/Users/`)
+	writeText(t, filepath.Join(dir, "102.json"), `{"sessionId":"S4","statusUpdatedAt":"1700000000000","name":42,"status":["idle"],"cwd":null}`)
+	writeText(t, filepath.Join(dir, "103.json"), `{"sessionId":"S5","name":"`+strings.Repeat("x", 70<<10)+`"}`)
+	writeText(t, filepath.Join(dir, "104.json"), `{"sessionId":"S6","statusUpdatedAt":"soon"}`)
+	writeText(t, filepath.Join(dir, "0.json"), `{"sessionId":"S7"}`)
+	writeText(t, filepath.Join(dir, "105.txt"), `{"sessionId":"S8"}`)
+	mustMkdir(t, filepath.Join(dir, "106.json"))
+
+	got := readClaudeRecords(dir)
+	want := map[int32]claudeRecord{
+		100: {SessionID: "S1", Cwd: "/Users/me/sample-app", Name: "Rename the widgets", Status: "idle",
+			ProcStart: "Sat Nov 14 09:01:40 2026", Entrypoint: "cli", StatusUpdatedAt: 1700000000000},
+		102: {SessionID: "S4", StatusUpdatedAt: 1700000000000},
+		104: {SessionID: "S6"},
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("records = %+v\n   want %+v", got, want)
+	}
+	if got := readClaudeRecords(filepath.Join(home, "missing")); len(got) != 0 {
+		t.Errorf("a missing folder gave %+v", got)
 	}
 }

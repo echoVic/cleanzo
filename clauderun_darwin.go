@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -136,4 +140,65 @@ func claudeSessionUUID(s string) bool {
 		}
 	}
 	return true
+}
+
+// claudeRecordMax is how much of a session record is read.
+const claudeRecordMax = 64 << 10
+
+// readClaudeRecords reads the session records in dir, ~/.claude/sessions,
+// by the pid each file is named after. A record that is not one JSON object
+// within claudeRecordMax bytes is left out; a field of another type than
+// expected is left empty.
+func readClaudeRecords(dir string) map[int32]claudeRecord {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	records := make(map[int32]claudeRecord, len(entries))
+	for _, e := range entries {
+		name, isJSON := strings.CutSuffix(e.Name(), ".json")
+		pid, err := strconv.ParseInt(name, 10, 32)
+		if !isJSON || err != nil || pid <= 0 || !e.Type().IsRegular() {
+			continue
+		}
+		if r, ok := readClaudeRecord(filepath.Join(dir, e.Name())); ok {
+			records[int32(pid)] = r
+		}
+	}
+	return records
+}
+
+// readClaudeRecord reads one session record; ok is false when it cannot be
+// read or parsed.
+func readClaudeRecord(path string) (r claudeRecord, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return claudeRecord{}, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, claudeRecordMax))
+	var fields map[string]any
+	if err != nil || json.Unmarshal(data, &fields) != nil {
+		return claudeRecord{}, false
+	}
+	text := func(key string) string {
+		s, _ := fields[key].(string)
+		return s
+	}
+	r = claudeRecord{
+		SessionID: text("sessionId"), Cwd: text("cwd"), Name: text("name"),
+		Status: text("status"), ProcStart: text("procStart"), Entrypoint: text("entrypoint"),
+	}
+	// Milliseconds, written as a number or as a string of digits.
+	switch v := fields["statusUpdatedAt"].(type) {
+	case float64:
+		if v > 0 && v < 1<<53 {
+			r.StatusUpdatedAt = int64(v)
+		}
+	case string:
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			r.StatusUpdatedAt = n
+		}
+	}
+	return r, true
 }
