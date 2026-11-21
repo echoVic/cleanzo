@@ -1,6 +1,6 @@
 import "./setup-dom";
 import { expect, test } from "bun:test";
-import type { AIGroup, AIPart, AIScanResult, AITool, ClaudeRunSummary, CrashDumpSummary } from "../src/mygo";
+import type { AICleanResult, AIGroup, AIPart, AIScanResult, AISelection, AITool, ClaudeRunSummary, CrashDumpSummary } from "../src/mygo";
 import { t } from "../src/i18n";
 import { offered, isSessions, groupSelectable, canPick, worktreeSeen, type WindowDays } from "../src/react/ai/types";
 import { human, displayPath } from "../src/react/ai/format";
@@ -716,4 +716,126 @@ test("while Codex runs, its worktree part says Quit It First and every worktree 
     expect(r.describedBy(r.checkbox("clean")!)).toBe(t("ai.quitFirst"));
     expect(r.describedBy(r.checkbox("in-use")!)).toBe(`${t("ai.quitFirst")} ${t("ai.wt.state.in-use")}`);
   } finally { env.restore(); }
+});
+
+// ---- worktree 的选择、确认框和失败提示：页面 ----
+
+/** Claude Code：缓存（扫描时勾上），和三个 worktree：干净的 a、带改动的 b、在用的 c。 */
+function claudeWithWorktrees(): AITool {
+  return claudeTool({ parts: [
+    fullPart("claude.cache", "safe"),
+    worktreePart("claude", [worktree("a", "clean"), worktree("b", "dirty", { size: 20 * MB }), worktree("c", "in-use", { size: 5 * MB })]),
+  ] });
+}
+const wtKey = (name: string) => `/Users/a/code/app/.claude/worktrees/${name}`;
+
+/** Claude Code 页扫描出 tool；清理回答 answer，之后的重扫依次是 rescans。记下发给后端的选择。 */
+async function worktreePage(env: Changes, tool: AITool, o: { answer?: AICleanResult; rescans?: AITool[] } = {}) {
+  const { aiApi } = await import("../src/react/ai/api");
+  const cleaned: AISelection[][] = [];
+  env.spy(aiApi, "clean").mockImplementation(async (sel) => { cleaned.push(sel); return o.answer ?? { freed: 0, parts: [] }; });
+  const c = await toolPage(env, { scans: [tool, ...(o.rescans ?? [])].map((x) => scanned(x)) });
+  await c.scan();
+  const part = (id: string) => c.page.find((el) => el.props.part?.id === id && "onTogglePart" in el.props)!;
+  const cleanButton = () => c.page.find((el) => el.props.size === "lg")!;
+  const dialog = () => c.page.find((el) => typeof el.props.onConfirm === "function")!;
+  return {
+    page: c.page, cleaned, part,
+    async tick(id: string, key: string) { part(id).props.onToggleGroup(key, true); await c.page.settle(); },
+    cleanLabel: () => textOf(cleanButton().props.children),
+    /** 确认框的文字：ConfirmDialog 是子组件，照它收到的 props 调一遍。 */
+    dialogText() { const d = dialog(); return textOf(d.type(d.props)); },
+    async clean() {
+      cleanButton().props.onClick();
+      await c.page.settle();
+      dialog().props.onConfirm();
+      await c.page.settle();
+    },
+  };
+}
+
+test("a scan ticks no worktree and counts none as cleanable; a ticked one counts on the Clean button", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const w = await worktreePage(env, claudeWithWorktrees());
+    const wt = () => w.part("claude.worktrees");
+    expect(wt().props.picked).toBe(false);
+    expect([...wt().props.groups]).toEqual([]);
+    // 可清理的只算缓存；扫描时勾上的也只有它
+    expect(w.page.text()).toContain(t("ai.sub.scanned", { size: human(100) }));
+    expect(w.cleanLabel()).toBe(t("ai.clean", { size: human(100) }));
+    // 整项勾不上，只能一个一个勾
+    wt().props.onTogglePart(true);
+    await w.page.settle();
+    expect([...wt().props.groups]).toEqual([]);
+    await w.tick("claude.worktrees", wtKey("a"));
+    expect(wt().props.picked).toBe(true);
+    expect(w.cleanLabel()).toBe(t("ai.clean", { size: human(100 + 10 * MB) }));
+    expect(w.page.text()).toContain(t("ai.sub.scanned", { size: human(100) }));
+  } finally { env.restore(); }
+});
+
+test("the selection carries the state each ticked worktree showed, in order; the other parts carry none", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const w = await worktreePage(env, claudeWithWorktrees());
+    await w.tick("claude.worktrees", wtKey("a"));
+    await w.tick("claude.worktrees", wtKey("b"));
+    // 不能勾的那个，有人叫它勾也不进选择
+    await w.tick("claude.worktrees", wtKey("c"));
+    await w.clean();
+    expect(w.cleaned).toEqual([[
+      { tool: "claude", part: "claude.cache", groups: [] },
+      { tool: "claude", part: "claude.worktrees", groups: [wtKey("a"), wtKey("b")], seen: ["clean", "dirty"] },
+    ]]);
+    expect(w.cleaned[0]![0]).not.toHaveProperty("seen");
+  } finally { env.restore(); }
+});
+
+test("the confirmation counts the worktrees, says what becomes of them, and how many hold uncommitted changes", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    env.lang("zh");
+    const w = await worktreePage(env, claudeWithWorktrees());
+    await w.tick("claude.worktrees", wtKey("a"));
+    await w.tick("claude.worktrees", wtKey("b"));
+    expect(w.dialogText()).toContain("2 个 worktree");
+    expect(w.dialogText()).toContain(t("ai.part.claude.worktrees.lose"));
+    expect(w.dialogText()).toContain("其中 1 个带着没提交的改动。");
+    // 只勾着干净的：不多那一句
+    w.part("claude.worktrees").props.onToggleGroup(wtKey("b"), false);
+    await w.page.settle();
+    expect(w.dialogText()).toContain("1 个 worktree");
+    expect(w.dialogText()).not.toContain("没提交的改动");
+  } finally { env.restore(); }
+});
+
+test("a worktree that could not be removed is told in an error toast: its path, then why", async () => {
+  const failure = `~/code/app/.claude/worktrees/x: ${t("ai.wt.fail.wt-git")}`;
+  const answer: AICleanResult = {
+    freed: 0,
+    parts: [{ tool: "claude", part: "claude.worktrees", moved: 0, freed: 0, kept: 0, skipped: "", failed: ["~/code/app/.claude/worktrees/x: wt-git"] }],
+  };
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const tool = claudeWithWorktrees();
+    const w = await worktreePage(env, tool, { answer, rescans: [tool] });
+    await w.tick("claude.worktrees", wtKey("a"));
+    await w.clean();
+    expect(w.page.toasts.at(-1)).toEqual({ text: failure, kind: "err" });
+  } finally { env.restore(); }
+  // 重扫也失败：清理的结果和这一条一起说
+  env = changes();
+  try {
+    const w = await worktreePage(env, claudeWithWorktrees(), { answer });
+    await w.tick("claude.worktrees", wtKey("a"));
+    await w.clean();
+    expect(w.page.toasts.at(-1)).toEqual({ text: [t("ai.done", { size: human(0) }), t("ai.done.skipped", { n: 1 }), failure].join(" · "), kind: "err" });
+  } finally { env.restore(); }
+});
+
+test("errText says each worktree failure code in words", async () => {
+  const { errText } = await import("../src/shared");
+  for (const code of ["wt-changed", "wt-git", "wt-trash"] as const) expect(errText(code)).toBe(t(`ai.wt.fail.${code}`));
 });

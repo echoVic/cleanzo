@@ -20,6 +20,10 @@ function errText(e: unknown): string {
     unsupported: "fs.unsupported",
     "not-app": "fs.notApp",
     "launch-failed": "apps.launchFailed",
+    // 一个 worktree 没能移走：变了、git 的记录没清掉、没进废纸篓
+    "wt-changed": "ai.wt.fail.wt-changed",
+    "wt-git": "ai.wt.fail.wt-git",
+    "wt-trash": "ai.wt.fail.wt-trash",
   };
   if (plain[raw]) return t(plain[raw] as never);
   try {

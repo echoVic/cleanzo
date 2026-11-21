@@ -15,12 +15,13 @@ import { useIndicator } from "../../ui/motion/indicator";
 import { isWindows } from "../../platform";
 import { errText, toast } from "../../shared";
 import { human } from "./format";
-import { offered, isSessions, groupSelectable, blockedByRun, canPick, type WindowDays } from "./types";
+import { offered, isSessions, groupSelectable, blockedByRun, canPick, worktreeSeen, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
 import { aiApi, runningApi } from "./api";
 import type { AITab, AITabRequest } from "./entry";
 import { RunningPanel } from "./RunningPanel";
 import { codexSize, crashDumps, goCleanForCrashDumps } from "../list/crash-dumps";
+import { failureText } from "../aispace/selection";
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaned";
 
@@ -42,6 +43,8 @@ interface ConfirmedSelection {
   tool: string;
   part: string;
   groups: string[];
+  /** worktree 那一项：各组在页面上显示的状态，和 groups 一一对应 */
+  seen?: string[];
   size: number;
 }
 
@@ -113,8 +116,9 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
   const lockedSize = lockedParts.reduce((n, p) => n + p.size, 0);
   const cleanable = React.useMemo(() => {
     if (!tool) return 0;
+    // worktree 要一个一个看过再勾，不算进「可清理」。
     return visible
-      .filter((p) => !blockedByRun(p))
+      .filter((p) => !blockedByRun(p) && !p.worktrees)
       .reduce((n, p) => {
         if (p.groups.length === 0) return n + p.size;
         return n + p.groups.filter((g) => groupSelectable(p, g, windowDays, scannedAt)).reduce((m, g) => m + g.size, 0);
@@ -138,12 +142,12 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
       const s = res.tools[0];
       if (!s) throw new Error("empty");
       setTool(s); setScannedAt(res.scannedAt);
-      // 默认勾选安全项。
+      // 默认勾选安全项；worktree 从不替用户勾。
       const np = new Set<string>();
       const ng = new Map<string, Set<string>>();
       const now = res.scannedAt;
       for (const p of s.parts) {
-        if (p.level !== "safe" || blockedByRun(p)) continue;
+        if (p.level !== "safe" || p.worktrees || blockedByRun(p)) continue;
         if (p.groups.length > 0) {
           // 分组部件（如旧版本）：没有可选分组时不勾，避免勾上一个 0 B 的空壳。
           const keys = p.groups.filter((g) => groupSelectable(p, g, 30, now)).map((g) => g.key);
@@ -170,7 +174,8 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
   const selectable = (p: AIPart) => canPick(p, windowDays, scannedAt);
 
   const togglePart = (p: AIPart, on: boolean) => {
-    if (!selectable(p)) return;
+    // worktree 只能一个一个勾：这一项整个勾不上。
+    if (p.worktrees || !selectable(p)) return;
     setPicked((prev) => {
       const next = new Set(prev);
       if (on) next.add(p.id); else next.delete(p.id);
@@ -189,6 +194,9 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
     }
   };
   const toggleGroup = (p: AIPart, key: string, on: boolean) => {
+    // 勾不上的组（窗口里的对话、不能移走的 worktree、被运行中的应用锁住的）不进选择。
+    const g = p.groups.find((x) => x.key === key);
+    if (on && (!g || !selectable(p) || !groupSelectable(p, g, windowDays, scannedAt))) return;
     setPickedGroups((prev) => {
       const next = new Map(prev);
       const keys = new Set(next.get(p.id) ?? []);
@@ -232,7 +240,9 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
   const selections: ConfirmedSelection[] = parts.flatMap((p) => {
     const size = chosenSize(p);
     if (size === 0) return [];
-    return [{ tool: toolId, part: p.id, size, groups: p.groups.length > 0 ? [...(pickedGroups.get(p.id) ?? [])] : [] }];
+    const groups = p.groups.length > 0 ? [...(pickedGroups.get(p.id) ?? [])] : [];
+    // worktree 带上用户看到的状态：后端移走前重新判，对不上就不动它。
+    return [{ tool: toolId, part: p.id, size, groups, ...(p.worktrees ? { seen: worktreeSeen(p, groups) } : {}) }];
   });
 
   const doClean = async () => {
@@ -240,19 +250,22 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
     setConfirmOpen(false);
     setBusy(true);
     try {
-      const res = await aiApi.clean(selections.map(({ tool, part, groups }) => ({ tool, part, groups })));
+      const res = await aiApi.clean(selections.map(({ tool, part, groups, seen }) => (seen ? { tool, part, groups, seen } : { tool, part, groups })));
       const done = {
         freed: res.freed,
         kept: res.parts.reduce((n, r) => n + r.kept, 0),
         skipped: res.parts.filter((r) => r.skipped || r.failed.length).length,
       };
+      const failure = res.parts.find((r) => r.failed.length > 0)?.failed[0];
       // 重扫成功才把结果写在新列表上；重扫失败页面显示失败，清理结果用提示告诉用户。
-      if (await scan()) {
+      const rescanned = await scan();
+      if (rescanned) {
         setPhase("cleaned");
         setLastClean(done);
-      } else {
-        toast(doneText(done, t));
       }
+      // 没能移走的，用错误提示说出第一条：哪一个、为什么。
+      const notes = [rescanned ? "" : doneText(done, t), failure ? failureText(failure) : ""].filter(Boolean);
+      if (notes.length > 0) toast(notes.join(" · "), failure ? "err" : "ok");
     } catch (e) {
       toast(errText(e), "err");
     } finally {
@@ -482,11 +495,16 @@ function ConfirmDialog({
     if (!p) return null;
     const k = `ai.part.${p.id}.lose` as DictKey;
     const lose = t(k);
-    const count = p.groups.length > 0
-      ? t(isSessions(p) ? "ai.confirm.groups" : "ai.confirm.releases", { n: s.groups.length })
-      : "";
-    return { name: partName(p, t), size: human(s.size), count, lose: lose.startsWith("ai.part.") ? t("ai.lose.default") : lose };
-  }).filter(Boolean) as { name: string; size: string; count: string; lose: string }[];
+    const countKey: DictKey = p.worktrees ? "ai.confirm.worktrees" : isSessions(p) ? "ai.confirm.groups" : "ai.confirm.releases";
+    const count = p.groups.length > 0 ? t(countKey, { n: s.groups.length }) : "";
+    // 带改动的 worktree 连改动一起进废纸篓：另说一句有几个。
+    const dirty = (s.seen ?? []).filter((state) => state === "dirty").length;
+    return {
+      name: partName(p, t), size: human(s.size), count,
+      lose: lose.startsWith("ai.part.") ? t("ai.lose.default") : lose,
+      dirty: dirty > 0 ? t("ai.confirm.worktreesDirty", { n: dirty }) : "",
+    };
+  }).filter(Boolean) as { name: string; size: string; count: string; lose: string; dirty: string }[];
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -500,6 +518,7 @@ function ConfirmDialog({
             <li key={i} className="text-sm">
               <b>{l.name}</b> {l.size} {l.count && <span className="text-muted">· {l.count}</span>}
               <div className="text-xs text-muted">{l.lose}</div>
+              {l.dirty && <div className="text-xs text-warning-text">{l.dirty}</div>}
             </li>
           ))}
         </ul>

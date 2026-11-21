@@ -149,7 +149,7 @@ type DoneKey = "aispace.done" | "aispace.done.kept" | "aispace.done.skipped";
  * 一条失败「路径: 代码」：路径照原样，代码按当前语言说出来。代码取最后一个「: 」之后的部分，
  * 路径里带「: 」也不受影响；不认识的代码和系统的错误原文照原样显示。
  */
-function failureText(entry: string): string {
+export function failureText(entry: string): string {
   const at = entry.lastIndexOf(": ");
   if (at < 0) return errText(entry);
   return `${entry.slice(0, at)}: ${errText(entry.slice(at + 2))}`;
