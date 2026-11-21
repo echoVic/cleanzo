@@ -395,6 +395,59 @@ func worktreeHas(dir, name string) bool {
 // removeWorktree clears git's record of w and moves its folder to the Trash,
 // when its state is still seen. code is "" when it is gone, otherwise
 // "in-use" or one of the wtFail outcomes; freed is measured before it moves.
+//
+// Everything is read again from w.Path. git forgets the worktree while its
+// folder waits under a temporary name beside it, so git finds no folder to
+// delete; the folder then comes back and goes to the Trash. When git does
+// not forget it, the folder comes back and nothing has changed.
 func removeWorktree(ctx context.Context, w agentWorktree, seen string, guard *usageGuard) (freed int64, code string) {
-	return 0, wtFailChanged
+	path := w.Path
+	if info, err := os.Lstat(path); err != nil || !info.IsDir() || !safeToClean(path) {
+		return 0, wtFailChanged
+	}
+	git := worktreeGitTool()
+	now := judgeWorktree(ctx, path, git, worktreeUsersOf(worktreeUse()))
+	if now.State != seen || now.State != wtClean && now.State != wtDirty {
+		return 0, wtFailChanged
+	}
+	if guard.inUse(resolvePath(path)) {
+		return 0, "in-use"
+	}
+	temp := path + worktreeTemp
+	if worktreeHas(filepath.Dir(temp), filepath.Base(temp)) {
+		return 0, wtFailGit
+	}
+	repo := "--git-dir=" + now.Common
+	// The state is clean or dirty, so a lock still there is stale.
+	if worktreeHas(now.Admin, "locked") {
+		if _, err := worktreeGit(ctx, git, []string{repo, "-c", "core.fsmonitor=false", "worktree", "unlock", path}, worktreeGitLimit); err != nil {
+			return 0, wtFailGit
+		}
+	}
+	size, _, _ := measureAI(ctx, path, nil)
+	if err := os.Rename(path, temp); err != nil {
+		return 0, wtFailGit
+	}
+	// The folder is away now: cancelling must neither stop git halfway nor
+	// keep the folder from coming back.
+	steady := context.WithoutCancel(ctx)
+	cleared := false
+	if !worktreeHas(filepath.Dir(path), filepath.Base(path)) {
+		_, err := worktreeGit(steady, git, []string{repo, "-c", "core.fsmonitor=false", "worktree", "remove", path}, worktreeGitLimit)
+		// git's word is checked: its record of this worktree must be gone.
+		_, lstat := os.Lstat(now.Admin)
+		cleared = err == nil && errors.Is(lstat, fs.ErrNotExist)
+	}
+	if !cleared {
+		_ = os.Rename(temp, path)
+		return 0, wtFailGit
+	}
+	target := path
+	if os.Rename(temp, path) != nil {
+		target = temp
+	}
+	if err := trashWithContext(ctx, target); err != nil {
+		return 0, wtFailTrash
+	}
+	return size, ""
 }

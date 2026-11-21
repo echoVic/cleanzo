@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -271,4 +272,213 @@ func firstLineOf(t *testing.T, p string) string {
 	}
 	line, _, _ := strings.Cut(string(data), "\n")
 	return line
+}
+
+// wtNothingOpen is a guard that sees nothing in use.
+var wtNothingOpen = &usageGuard{running: map[string]bool{}}
+
+// wtTrashed reports whether the Trash holds rel inside the folder named name.
+func wtTrashed(name, rel string) bool {
+	return exists(filepath.Join(homeDir(), ".Trash", name, rel))
+}
+
+// TestRemoveWorktree: git forgets the worktree, its branch stays where it
+// was and can be checked out, and the folder with what it holds is in the
+// Trash.
+func TestRemoveWorktree(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	sha := wtGitOut(t, git, repo, "rev-parse", "refs/heads/agent-1")
+	size, _, _ := measureAI(context.Background(), wt, nil)
+	freed, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, wtNothingOpen)
+	if code != "" || freed != size || size == 0 {
+		t.Fatalf("freed %d (measured %d), code %q", freed, size, code)
+	}
+	if !wtTrashed("agent-1", "README.md") || exists(wt) || exists(wt+worktreeTemp) || exists(admin) {
+		t.Fatalf("trashed %v, folder there %v, record there %v", wtTrashed("agent-1", "README.md"), exists(wt), exists(admin))
+	}
+	if got := wtGitOut(t, git, repo, "rev-parse", "refs/heads/agent-1"); got != sha {
+		t.Fatalf("branch moved from %s to %s", sha, got)
+	}
+	gitIn(t, git, repo, "switch", "-q", "agent-1")
+}
+
+// TestRemoveWorktreeKeepsEveryFile: what git does not track and what it
+// ignores go to the Trash with the folder.
+func TestRemoveWorktreeKeepsEveryFile(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	writeText(t, filepath.Join(wt, ".gitignore"), ".env\nnode_modules/\n")
+	writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
+	writeText(t, filepath.Join(wt, ".env"), "API_KEY=example\n")
+	writeText(t, filepath.Join(wt, "node_modules", "x", "index.js"), "module.exports = 1\n")
+	w := wtFound(t, "claude", wt)
+	if w.State != wtDirty || w.Changes != 2 {
+		t.Fatalf("worktree = %+v", w)
+	}
+	if _, code := removeWorktree(context.Background(), w, wtDirty, wtNothingOpen); code != "" {
+		t.Fatalf("code %q", code)
+	}
+	for _, rel := range []string{"notes.txt", ".env", filepath.Join("node_modules", "x", "index.js")} {
+		if !wtTrashed("agent-1", rel) {
+			t.Errorf("%s is not in the Trash", rel)
+		}
+	}
+}
+
+// TestRemoveWorktreeNeverLetsGitDelete: git is asked to forget the worktree
+// only while its folder is away from the path git knows, so git never
+// deletes a file of it.
+func TestRemoveWorktreeNeverLetsGitDelete(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	saved := worktreeGit
+	var asked, there bool
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if slices.Contains(args, "remove") {
+			asked, there = true, exists(wt)
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, wtNothingOpen); code != "" || !asked || there {
+		t.Fatalf("code %q, git asked %v, folder in place then %v", code, asked, there)
+	}
+}
+
+// TestRemoveWorktreeChangedSinceSeen: a worktree that is not in the state
+// the user saw any more is left as it is.
+func TestRemoveWorktreeChangedSinceSeen(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		before, then func(t *testing.T, git, wt string)
+		seen         string
+	}{
+		{"clean, then a new file", nil, func(t *testing.T, git, wt string) {
+			writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
+		}, wtClean},
+		{"dirty, then content only the index has", func(t *testing.T, git, wt string) {
+			writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
+		}, func(t *testing.T, git, wt string) {
+			gitIn(t, git, wt, "add", "notes.txt")
+			writeText(t, filepath.Join(wt, "notes.txt"), "draft, changed\n")
+		}, wtDirty},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			git, repo := wtRepo(t)
+			stubWorktreeUse(t, nil, nil)
+			wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+			if tc.before != nil {
+				tc.before(t, git, wt)
+			}
+			w := wtFound(t, "claude", wt)
+			if w.State != tc.seen {
+				t.Fatalf("seen %s, want %s", w.State, tc.seen)
+			}
+			tc.then(t, git, wt)
+			if _, code := removeWorktree(context.Background(), w, tc.seen, wtNothingOpen); code != wtFailChanged {
+				t.Fatalf("code %q", code)
+			}
+			if !exists(filepath.Join(wt, "notes.txt")) || !exists(wtAdmin(t, wt)) || wtTrashed("agent-1", "") {
+				t.Fatal("the worktree was touched")
+			}
+		})
+	}
+}
+
+// TestRemoveWorktreeWhenGitFails: when git does not forget the worktree,
+// the folder is back in place and still a worktree.
+func TestRemoveWorktreeWhenGitFails(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	saved := worktreeGit
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if slices.Contains(args, "remove") {
+			return "fatal: made up\n", errors.New("exit status 128")
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, wtNothingOpen); code != wtFailGit {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(admin) {
+		t.Fatalf("folder in place %v, record there %v", exists(wt), exists(admin))
+	}
+	gitIn(t, git, wt, "status")
+}
+
+// TestRemoveWorktreeWhenTheTempNameIsTaken: nothing moves when the name the
+// folder would wait under is taken, even by an empty folder a rename would
+// replace.
+func TestRemoveWorktreeWhenTheTempNameIsTaken(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	mustMkdir(t, wt+worktreeTemp)
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, wtNothingOpen); code != wtFailGit {
+		t.Fatalf("code %q", code)
+	}
+	entries, err := os.ReadDir(wt + worktreeTemp)
+	if !exists(filepath.Join(wt, "README.md")) || !exists(wtAdmin(t, wt)) || err != nil || len(entries) != 0 {
+		t.Fatalf("folder in place %v, the other folder holds %v (%v)", exists(wt), entries, err)
+	}
+}
+
+// TestRemoveWorktreeWhenTrashFails: git has forgotten the worktree, the
+// folder stays in place with every file, and its branch can be checked out.
+func TestRemoveWorktreeWhenTrashFails(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
+	admin := wtAdmin(t, wt)
+	saved := trashWithContext
+	trashWithContext = func(context.Context, string) error { return errors.New("the Trash refused") }
+	t.Cleanup(func() { trashWithContext = saved })
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtDirty, wtNothingOpen); code != wtFailTrash {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || !exists(filepath.Join(wt, "notes.txt")) || exists(wt+worktreeTemp) || exists(admin) {
+		t.Fatalf("files in place %v, record there %v", exists(filepath.Join(wt, "notes.txt")), exists(admin))
+	}
+	gitIn(t, git, repo, "switch", "-q", "agent-1")
+}
+
+// TestRemoveWorktreeWithAStaleLock: a lock whose process is gone is lifted,
+// and the worktree goes.
+func TestRemoveWorktreeWithAStaleLock(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	stubPidStart(t, map[int32]time.Time{})
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	wtLock(t, git, repo, wt, "claude agent (pid 4242)")
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, wtNothingOpen); code != "" {
+		t.Fatalf("code %q", code)
+	}
+	if exists(wt) || exists(admin) || !wtTrashed("agent-1", "README.md") {
+		t.Fatalf("folder there %v, record there %v", exists(wt), exists(admin))
+	}
+}
+
+// TestRemoveWorktreeWithAnOpenFile: a worktree holding a file a process has
+// open is kept, untouched.
+func TestRemoveWorktreeWithAnOpenFile(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	guard := &usageGuard{open: []string{strings.ToLower(resolvePath(filepath.Join(wt, "README.md")))}}
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", wt), wtClean, guard); code != "in-use" {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || !exists(wtAdmin(t, wt)) || exists(wt+worktreeTemp) {
+		t.Fatal("the worktree was touched")
+	}
 }
