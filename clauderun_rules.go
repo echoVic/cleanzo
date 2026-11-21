@@ -222,19 +222,20 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 
 // head is the Claude Code process heading the session of the Claude Code
 // process pid: the topmost one above it that no process of a Dock app
-// separates from it, or else pid itself. It is 0, no session at all, when
-// the parents of pid loop.
+// separates from it, or else pid itself. Only the processes between two
+// Claude Code processes can separate them: a Claude Code process that runs
+// from inside a Dock app's bundle still heads its sub-agents. It is 0, no
+// session at all, when the parents of pid loop.
 func (t *claudeTable) head(pid int32) int32 {
 	if t.loops(pid) {
 		return 0
 	}
 	head := pid
 	for q := range t.ancestors(pid) {
-		if t.inDock(q) {
-			break
-		}
 		if _, claude := t.claude[q.Pid]; claude {
 			head = q.Pid
+		} else if t.inDock(q) {
+			break
 		}
 	}
 	return head

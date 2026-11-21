@@ -194,6 +194,20 @@ func TestClaudeSessionInsideADockApp(t *testing.T) {
 	}
 }
 
+func TestClaudeBundledClaudeCodeKeepsItsSubAgents(t *testing.T) {
+	// An app on the Dock runs Claude Code from inside its own bundle, and
+	// that session runs another Claude Code through a shell: a sub-agent.
+	const app = "/Applications/Sample Studio.app"
+	studio := hidden(200, 1, 200)
+	studio.Path = app + "/Contents/MacOS/Sample Studio"
+	session := ccProc(300, 200)
+	session.Path = app + "/Contents/Resources/bin/claude"
+	agent := ccProc(320, 310)
+	s := snap(map[int32]claudeRecord{300: recordOf(session, "S3"), 320: recordOf(agent, "S4")}, studio, session, marked(310, 300, 310, "S3"), agent)
+	s.Apps = []workspaceApp{{Pid: 200, Path: app, Name: "Sample Studio", Regular: true}}
+	wantShape(t, attributeClaude(s), "300:S3 members[320] commands[310]; uncertain 0")
+}
+
 func TestClaudeUnmarkedIsNeverListed(t *testing.T) {
 	// 161 and 162 share the session's process group but hang off launchd:
 	// a process group is no clue.
