@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -46,3 +49,53 @@ func realClaudeSource() claudeSource {
 // claudeWorkingFolders is the working folders of this user's processes and
 // of the open Claude Code sessions; OK is false when they cannot be read.
 func claudeWorkingFolders() worktreeUsage { return worktreeUsage{} }
+
+// parseProcargs2 reads a kern.procargs2 buffer: argc as a little-endian
+// int32, the executable's path, NUL padding, then argc arguments and the
+// environment, each NUL-terminated, the environment ending at an empty
+// string. Of the environment it keeps Claude Code's three variables, the
+// first of each name as getenv finds it, and whether any variable could be
+// read; no other variable is copied out of buf. A buffer that does not hold
+// argc arguments gives no arguments and no environment.
+func parseProcargs2(buf []byte) (args []string, env claudeEnv) {
+	if len(buf) < 4 {
+		return nil, claudeEnv{}
+	}
+	argc := int32(binary.LittleEndian.Uint32(buf))
+	rest := buf[4:]
+	path := bytes.IndexByte(rest, 0)
+	if argc < 0 || int(argc) > len(rest) || path < 0 {
+		return nil, claudeEnv{}
+	}
+	rest = bytes.TrimLeft(rest[path:], "\x00")
+	args = make([]string, 0, argc)
+	for range argc {
+		end := bytes.IndexByte(rest, 0)
+		if end < 0 {
+			return nil, claudeEnv{}
+		}
+		args = append(args, string(rest[:end]))
+		rest = rest[end+1:]
+	}
+	var marker, session, pid bool // the name was met
+	for {
+		end := bytes.IndexByte(rest, 0)
+		if end <= 0 {
+			return args, env
+		}
+		env.Seen = true
+		name, value, _ := bytes.Cut(rest[:end], []byte("="))
+		rest = rest[end+1:]
+		switch {
+		case string(name) == "CLAUDECODE" && !marker:
+			marker, env.Marked = true, string(value) == "1"
+		case string(name) == "CLAUDE_CODE_SESSION_ID" && !session:
+			session, env.Session = true, string(value)
+		case string(name) == "CLAUDE_PID" && !pid:
+			pid = true
+			if n, err := strconv.ParseUint(string(value), 10, 31); err == nil {
+				env.Pid = int32(n)
+			}
+		}
+	}
+}
