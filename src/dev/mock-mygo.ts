@@ -252,6 +252,7 @@ function createRuntime(): Runtime {
       procRow({ key: "app:/applications/doubaowork.app", name: "DoubaoWork", path: "/Applications/DoubaoWork.app", cpu: jitter(40.9), memory: 6.96 * GB, procs: 38, quit: true }),
       procRow({ key: "sys:WindowServer", name: "WindowServer", kind: "system", cpu: jitter(40.2), memory: 135 * MB, estimated: true }),
       procRow({ key: "app:/applications/todesk.app", name: "ToDesk", path: "/Applications/ToDesk.app", bundleId: "com.youqu.todesk.mac", cpu: jitter(3.1), memory: 180 * MB, procs: 4, quit: true }),
+      procRow({ key: "cli:claude", name: "claude", kind: "cli", cpu: jitter(4.3), memory: 1.4 * GB, procs: 7 }),
       procRow({ key: "cli:node", name: "node", kind: "cli", cpu: jitter(12.6), memory: 2.9 * GB, procs: 8 }),
       procRow({ key: "sys:mdworker_shared", name: "mdworker_shared", kind: "system", cpu: jitter(1.2), memory: 60 * MB, procs: 6 }),
     ].filter((r) => !quitted.has(r.path)),
@@ -656,7 +657,10 @@ function createRuntime(): Runtime {
       await wait(1000);
       for (;;) { await emit(processSample()); await wait(200); }
     }),
-    "Cleaner.ClaudeRunSummary": async () => ({ idle: 0, left: 0, rows: [] }),
+    // 进程样例里 claude 那一行挂「3 个空闲会话」，node 那一行挂「2 个是已关闭会话留下的」。
+    "Cleaner.ClaudeRunSummary": async () => ({
+      idle: 3, left: 2, rows: [{ key: "cli:claude", idle: 3, left: 0 }, { key: "cli:node", idle: 0, left: 2 }],
+    }),
     "Cleaner.CrashDumps": async () => ({ total: 0, threshold: GB, dirs: [] }),
     "Cleaner.ScanJunk": async (ch) => stream(ch, async (emit) => {
       const items = junkItems.filter((it) => !settings.disabledGroups.includes(it.group) && !settings.ignored.includes(it.id));
