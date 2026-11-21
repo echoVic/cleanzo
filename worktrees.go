@@ -28,7 +28,8 @@ const (
 	wtNoGit      = "git-unavailable"
 	wtIndexOnly  = "index-only"
 	wtUnknown    = "unrecognized"
-	wtHolds      = "holds-worktrees" // other worktrees live inside it; they go first
+	wtHolds      = "holds-worktrees"         // other worktrees live inside it; they go first
+	wtOutside    = "repository-outside-home" // git would clear its record outside the home folder
 )
 
 // Outcomes of removing one worktree, besides success.
@@ -352,6 +353,10 @@ func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) a
 		w.Branch = branch
 	}
 	switch {
+	case !worktreeListable(admin) || !worktreeListable(common):
+		// git clears the record in the repository's git folder: nothing is
+		// changed where cleaning may not reach.
+		w.State = wtOutside
 	case users.holds(path) || worktreeLocked(admin):
 		w.State = wtInUse
 	case worktreeHoldsOthers(path) || worktreeRecordsInside(path, admin, common):

@@ -523,8 +523,8 @@ test("the header button follows the tab: Rescan on Space after a scan, Refresh o
 
 const MB = 2 ** 20;
 
-/** worktree 的十种状态；只有前两种能移走。 */
-const WT_STATES = ["clean", "dirty", "in-use", "holds-worktrees", "submodules", "mid-operation", "unbranched-commits", "git-unavailable", "index-only", "unrecognized"] as const;
+/** worktree 的各种状态；只有前两种能移走。 */
+const WT_STATES = ["clean", "dirty", "in-use", "holds-worktrees", "repository-outside-home", "submodules", "mid-operation", "unbranched-commits", "git-unavailable", "index-only", "unrecognized"] as const;
 
 /** 仓库 /Users/a/code/app 里的一个 worktree：key 和 path 是它的文件夹，名字是文件夹名，8 天没动。 */
 function worktree(name: string, state: string, over: Partial<AIGroup> = {}): AIGroup {
@@ -645,7 +645,7 @@ test("a worktree part has no checkbox of its own, no window selector when expand
   } finally { env.restore(); }
 });
 
-test("each worktree state: clean and dirty can be ticked; the other eight are disabled and say why", async () => {
+test("each worktree state: clean and dirty can be ticked; every other one is disabled and says why", async () => {
   const env = (await import("./page-harness")).changes();
   try {
     env.lang("zh");

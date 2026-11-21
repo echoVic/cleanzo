@@ -446,6 +446,7 @@ function createRuntime(): Runtime {
     mkWorktree("~/.codex/worktrees/3c4d/landing-page", { repo: "~/Documents/Projects/landing-page", branch: "codex/footer-links", state: "dirty", changes: 4, size: 350 * MB, ageDays: 2 }),
     mkWorktree("~/.codex/worktrees/5e6f/api-gateway", { repo: "~/Documents/Projects/api-gateway", branch: "codex/retry-budget", state: "in-use", size: 300 * MB, ageDays: 0 }),
     mkWorktree("~/.codex/worktrees/7a8b/mobile-app", { repo: "~/Documents/Projects/mobile-app", branch: "codex/onboarding", state: "holds-worktrees", size: 880 * MB, ageDays: 8 }),
+    mkWorktree("~/.codex/worktrees/9c0d/firmware", { repo: "/Volumes/Work/firmware", branch: "codex/boot-log", state: "repository-outside-home", size: 300 * MB, ageDays: 6 }),
     mkWorktree("~/.codex/worktrees/9c0d/mobile-app", { repo: "~/Documents/Projects/mobile-app", branch: "codex/widgets", state: "submodules", size: 920 * MB, ageDays: 15 }),
     mkWorktree("~/.codex/worktrees/b1c2/web-shop", { repo: "~/Documents/Projects/web-shop", branch: "codex/checkout-copy", state: "mid-operation", size: 600 * MB, ageDays: 4 }),
     mkWorktree("~/.codex/worktrees/d3e4/api-gateway", { repo: "~/Documents/Projects/api-gateway", branch: "", state: "unbranched-commits", size: 280 * MB, ageDays: 33 }),

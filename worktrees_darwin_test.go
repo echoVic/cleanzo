@@ -1077,6 +1077,44 @@ func TestWorktreeDiscoveryCodex(t *testing.T) {
 // TestWorktreeOutsideHomeIsNotListed: a repository outside the home folder
 // is neither listed nor touched, even with a transcript and a session
 // working in it.
+// TestWorktreeWithItsRepositoryOutsideHome: git clears a worktree's record
+// in its repository's git folder. When that folder is outside the home
+// folder the worktree is listed, cannot be removed, and nothing changes
+// there.
+func TestWorktreeWithItsRepositoryOutsideHome(t *testing.T) {
+	git, _ := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	// A Codex worktree in the home folder, of a repository outside it.
+	outside := filepath.Join(t.TempDir(), "app")
+	wtCommitted(t, git, outside)
+	codex := filepath.Join(homeDir(), ".codex", "worktrees", "ab12", "app")
+	gitIn(t, git, outside, "worktree", "add", "-q", "-b", "codex-1", codex, "main")
+	// A repository in the home folder that keeps its git folder outside it.
+	split := filepath.Join(homeDir(), "code", "split")
+	writeText(t, filepath.Join(split, "README.md"), "split\n")
+	gitIn(t, git, split, "init", "-q", "-b", "main", "--separate-git-dir", filepath.Join(t.TempDir(), "split.git"))
+	gitIn(t, git, split, "add", "README.md")
+	gitCommit(t, git, split)
+	claude := addWorktree(t, git, split, "agent-1", "agent-1")
+
+	for _, c := range []struct{ kind, path string }{{"codex", codex}, {"claude", claude}} {
+		w := wtFound(t, c.kind, c.path)
+		if w.State != wtOutside {
+			t.Errorf("%s worktree = %+v, want %s", c.kind, w, wtOutside)
+		}
+		admin := wtAdmin(t, c.path)
+		if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != wtFailChanged {
+			t.Errorf("%s worktree: removing it gave %q, want %q", c.kind, code, wtFailChanged)
+		}
+		if !exists(filepath.Join(c.path, "README.md")) || exists(c.path+worktreeTemp) || !exists(admin) {
+			t.Errorf("%s worktree: folder in place %v, record there %v", c.kind, exists(c.path), exists(admin))
+		}
+	}
+	if exists(filepath.Join(homeDir(), ".Trash")) {
+		t.Error("something went to the Trash")
+	}
+}
+
 func TestWorktreeOutsideHomeIsNotListed(t *testing.T) {
 	git, _ := wtRepo(t)
 	outside := filepath.Join(t.TempDir(), "app")
