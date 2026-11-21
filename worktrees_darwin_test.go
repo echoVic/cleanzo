@@ -183,6 +183,24 @@ func TestWorktreeStates(t *testing.T) {
 		{"modules in the record", func(t *testing.T, git, repo, wt string) {
 			mustMkdir(t, filepath.Join(wtAdmin(t, wt), "modules"))
 		}, wtSubmodule, 0},
+		{"a folder in its .claude/worktrees", func(t *testing.T, git, repo, wt string) {
+			mustMkdir(t, filepath.Join(wt, ".claude", "worktrees", "agent-2"))
+		}, wtHolds, 0},
+		{"a folder in its .claude/worktrees, and modules in the record", func(t *testing.T, git, repo, wt string) {
+			mustMkdir(t, filepath.Join(wt, ".claude", "worktrees", "agent-2"))
+			mustMkdir(t, filepath.Join(wtAdmin(t, wt), "modules"))
+		}, wtHolds, 0},
+		{"its .claude/worktrees cannot be read", func(t *testing.T, git, repo, wt string) {
+			dir := filepath.Join(wt, ".claude", "worktrees")
+			mustMkdir(t, dir)
+			if err := os.Chmod(dir, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+			if _, err := os.ReadDir(dir); err == nil {
+				t.Skip("this user reads any folder")
+			}
+		}, wtHolds, 0},
 		{"a process works in a folder inside it", func(t *testing.T, git, repo, wt string) {
 			mustMkdir(t, filepath.Join(wt, "src"))
 			stubWorktreeUse(t, []string{filepath.Join(wt, "src")}, nil)
@@ -389,6 +407,44 @@ func TestRemoveWorktreeChangedSinceSeen(t *testing.T) {
 				t.Fatal("the worktree was touched")
 			}
 		})
+	}
+}
+
+// TestRemoveWorktreeThatHoldsWorktrees: a worktree another worktree was
+// made in stays until that one has gone, so no record is left for a folder
+// in the Trash. The inner one goes on its own; then the outer one is judged
+// by its status again.
+func TestRemoveWorktreeThatHoldsWorktrees(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	outer := addWorktree(t, git, repo, "agent-1", "agent-1")
+	seen := wtFound(t, "claude", outer)
+	if seen.State != wtClean {
+		t.Fatalf("seen %+v", seen)
+	}
+	inner := filepath.Join(outer, ".claude", "worktrees", "agent-2")
+	gitIn(t, git, outer, "worktree", "add", "-q", "-b", "agent-2", inner, "main")
+	outerAdmin, innerAdmin := wtAdmin(t, outer), wtAdmin(t, inner)
+	// Clean as the user saw it, or dirty as git status now reads it.
+	for _, state := range []string{wtClean, wtDirty} {
+		if _, code := removeWorktree(context.Background(), seen, state, wtNothingOpen); code != wtFailChanged {
+			t.Fatalf("seen %s: code %q", state, code)
+		}
+	}
+	if !exists(filepath.Join(inner, "README.md")) || exists(outer+worktreeTemp) || !exists(outerAdmin) || !exists(innerAdmin) || wtTrashed("agent-1", "") {
+		t.Fatal("a worktree was touched")
+	}
+	if w := wtFound(t, "claude", outer); w.State != wtHolds {
+		t.Fatalf("outer = %+v", w)
+	}
+	if _, code := removeWorktree(context.Background(), wtFound(t, "claude", inner), wtClean, wtNothingOpen); code != "" {
+		t.Fatalf("inner: code %q", code)
+	}
+	if exists(inner) || exists(innerAdmin) || !wtTrashed("agent-2", "README.md") {
+		t.Fatalf("inner there %v, its record there %v", exists(inner), exists(innerAdmin))
+	}
+	if w := wtFound(t, "claude", outer); w.State != wtClean {
+		t.Fatalf("outer, once the inner one has gone = %+v", w)
 	}
 }
 

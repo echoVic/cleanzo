@@ -29,6 +29,7 @@ const (
 	wtNoGit      = "git-unavailable"
 	wtIndexOnly  = "index-only"
 	wtUnknown    = "unrecognized"
+	wtHolds      = "holds-worktrees" // other worktrees live inside it; they go first
 )
 
 // Outcomes of removing one worktree, besides success.
@@ -317,6 +318,8 @@ func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) a
 	switch {
 	case users.holds(path) || worktreeLocked(admin):
 		w.State = wtInUse
+	case worktreeHoldsOthers(path):
+		w.State = wtHolds
 	case worktreeHas(admin, "modules"):
 		w.State = wtSubmodule
 	case slices.ContainsFunc(worktreeOperations, func(name string) bool { return worktreeHas(admin, name) }):
@@ -327,6 +330,28 @@ func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) a
 		w.State, w.Changes = worktreeAskGit(ctx, git, path, common, head, attached)
 	}
 	return w
+}
+
+// worktreeHoldsOthers reports whether other worktrees may live inside the
+// worktree at path: the .claude/worktrees folder in it, where Claude Code
+// keeps them, holds a folder or cannot be read. A file there holds nothing,
+// and a link moves without what it points to.
+func worktreeHoldsOthers(path string) bool {
+	dir := path
+	for _, name := range []string{".claude", "worktrees"} {
+		dir = filepath.Join(dir, name)
+		info, err := os.Lstat(dir)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return false
+		case err != nil:
+			return true
+		case !info.IsDir():
+			return false
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	return err != nil || slices.ContainsFunc(entries, fs.DirEntry.IsDir)
 }
 
 // worktreeAskGit judges a worktree by what git says: whether a detached
