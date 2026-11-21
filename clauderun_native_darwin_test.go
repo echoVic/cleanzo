@@ -66,14 +66,8 @@ func TestNativeFootprintAndProcName(t *testing.T) {
 	if got := nativeFootprint(self); got == 0 {
 		t.Error("nativeFootprint(self) = 0, want this process's footprint")
 	}
-	var want string
-	for _, p := range nativeProcs() {
-		if p.Pid == self {
-			want = p.Name
-		}
-	}
-	if got := nativeProcName(self); want == "" || got != want {
-		t.Errorf("nativeProcName(self) = %q, want %q as nativeProcs reads it", got, want)
+	if got, want := nativeProcName(self), filepath.Base(os.Args[0]); got != want {
+		t.Errorf("nativeProcName(self) = %q, want the test binary's name %q", got, want)
 	}
 	if nativeFootprint(-1) != 0 || nativeProcName(-1) != "" {
 		t.Error("an invalid pid gave a footprint or a name")
@@ -364,5 +358,73 @@ func TestClaudeListenPorts(t *testing.T) {
 	command := viewFakeLsof(t, "ports")
 	if got := claudeListenPorts(context.Background(), nil); got == nil || len(got) != 0 || *command != nil {
 		t.Errorf("no pids gave %v and ran %q; want an empty map and no lsof", got, *command)
+	}
+}
+
+func TestClosedSessionProjectAndTitle(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	projects := filepath.Join(home, ".claude", "projects")
+	const (
+		titled  = "11111111-2222-3333-4444-555555555555"
+		early   = "22222222-3333-4444-5555-666666666666"
+		missing = "33333333-4444-5555-6666-777777777777"
+	)
+	line := func(fields string) string { return "{" + fields + "}\n" }
+	writeText(t, filepath.Join(projects, "-Users-me-sample-app", titled+".jsonl"),
+		line(`"type":"user","cwd":"/Users/me/sample-app","sessionId":"`+titled+`"`)+
+			line(`"type":"ai-title","aiTitle":"First title"`)+
+			line(`"type":"assistant","message":{"content":"an ai-title is"}`)+
+			line(`"type":"ai-title","aiTitle":"Second title"`)+
+			line(`"type": "ai-title", "aiTitle": "Rename the widgets"`)+
+			line(`"type":"user","message":{"content":"thanks"}`))
+	// The title is more than 2 MB before the end of this one.
+	var long strings.Builder
+	long.WriteString(line(`"type":"user","cwd":"/Users/me/other-app"`))
+	long.WriteString(line(`"type":"ai-title","aiTitle":"Too early"`))
+	filler := line(`"type":"assistant","message":{"content":"` + strings.Repeat("x", 1000) + `"}`)
+	for long.Len() < 2<<20+len(filler) {
+		long.WriteString(filler)
+	}
+	writeText(t, filepath.Join(projects, "-Users-me-other-app", early+".jsonl"), long.String())
+	// What the session id "../x" would reach from a project folder.
+	writeText(t, filepath.Join(home, ".claude", "x.jsonl"), line(`"type":"user","cwd":"/Users/me/elsewhere"`)+line(`"type":"ai-title","aiTitle":"Elsewhere"`))
+
+	for _, c := range []struct{ session, project, title string }{
+		{titled, "sample-app", "Rename the widgets"},
+		{early, "other-app", ""},
+		{missing, "", ""},
+		{"../x", "", ""},
+		{"S1", "", ""},
+	} {
+		if project, title := claudeClosedSession(c.session); project != c.project || title != c.title {
+			t.Errorf("claudeClosedSession(%q) = %q, %q; want %q, %q", c.session, project, title, c.project, c.title)
+		}
+	}
+}
+
+func TestRealClaudeSourceReadsThisProcess(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	src := realClaudeSource()
+	self := int32(os.Getpid())
+	if src.footprint(self) == 0 {
+		t.Error("footprint(self) = 0")
+	}
+	if got := src.cwd(self); got == "" || got != nativeCwd(self) {
+		t.Errorf("cwd(self) = %q, want %q", got, nativeCwd(self))
+	}
+	if path, name := src.identity(self); path == "" || path != nativePidPath(self) || name != nativeProcName(self) {
+		t.Errorf("identity(self) = %q, %q; want %q, %q", path, name, nativePidPath(self), nativeProcName(self))
+	}
+	viewFakeLsof(t, "ports")
+	if got, want := src.ports(context.Background(), []int32{120, 121}), (map[int32][]int{120: {5173}, 121: {3000}}); !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("ports = %v, want %v", got, want)
+	}
+	const id = "11111111-2222-3333-4444-555555555555"
+	writeText(t, filepath.Join(home, ".claude", "projects", "-Users-me-sample-app", id+".jsonl"),
+		`{"type":"user","cwd":"/Users/me/sample-app"}`+"\n"+`{"type":"ai-title","aiTitle":"Rename the widgets"}`+"\n")
+	if project, title := src.closed(id); project != "sample-app" || title != "Rename the widgets" {
+		t.Errorf("closed = %q, %q; want the transcript's project and title", project, title)
 	}
 }

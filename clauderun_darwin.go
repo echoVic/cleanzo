@@ -33,13 +33,15 @@ func realClaudeSource() claudeSource {
 			}
 			return kinfoStart(kp), true
 		},
-		footprint:   func(int32) uint64 { return 0 },
-		cwd:         func(int32) string { return "" },
-		identity:    func(int32) (string, string) { return "", "" },
+		footprint: nativeFootprint,
+		cwd:       nativeCwd,
+		identity: func(pid int32) (string, string) {
+			return nativePidPath(pid), nativeProcName(pid)
+		},
 		responsible: nativeResponsiblePid,
 		system:      systemExecutable,
-		ports:       func(context.Context, []int32) map[int32][]int { return nil },
-		closed:      func(string) (string, string) { return "", "" },
+		ports:       claudeListenPorts,
+		closed:      claudeClosedSession,
 		// One process at a time: a pid of 0 or below would reach a process
 		// group or every process, and pid 1 is launchd.
 		signal: func(pid int32, sig syscall.Signal) error {
@@ -325,4 +327,72 @@ func parseLsofListen(out []byte) map[int32][]int {
 		slices.Sort(list)
 	}
 	return ports
+}
+
+// claudeTitleTail is how much of the end of a closed session's transcript
+// is read for its title.
+const claudeTitleTail = 2 << 20
+
+// claudeClosedSession reads the project and title of a closed session from
+// its transcript, ~/.claude/projects/*/<session>.jsonl: the folder name of
+// the cwd it records, and the last title Claude Code gave the session
+// within the transcript's last claudeTitleTail bytes. Nothing is read for a
+// session id that is not a UUID.
+func claudeClosedSession(session string) (project, title string) {
+	if !claudeSessionUUID(session) {
+		return "", ""
+	}
+	dir := filepath.Join(homeDir(), ".claude", "projects")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, e.Name(), session+".jsonl")
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if cwd := jsonlField(path, "cwd"); cwd != "" {
+			project = filepath.Base(cwd)
+		}
+		return project, claudeLastTitle(path)
+	}
+	return "", ""
+}
+
+// claudeLastTitle is the aiTitle of the last line of type ai-title within
+// the last claudeTitleTail bytes of the transcript at path, or "".
+func claudeLastTitle(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	from := max(0, info.Size()-claudeTitleTail)
+	tail, err := io.ReadAll(io.NewSectionReader(f, from, claudeTitleTail))
+	if err != nil {
+		return ""
+	}
+	if from > 0 { // the first line is cut short
+		_, tail, _ = bytes.Cut(tail, []byte("\n"))
+	}
+	for end := len(tail); end > 0; {
+		start := bytes.LastIndexByte(tail[:end], '\n') + 1
+		if line := tail[start:end]; bytes.Contains(line, []byte("ai-title")) {
+			var fields map[string]any
+			if json.Unmarshal(line, &fields) == nil && fields["type"] == "ai-title" {
+				title, _ := fields["aiTitle"].(string)
+				return title
+			}
+		}
+		end = start - 1
+	}
+	return ""
 }
