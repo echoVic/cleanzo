@@ -127,7 +127,7 @@ func spawnOutput(ctx context.Context, path string, argv, env []string) ([]byte, 
 		return nil, pid, readErr
 	}
 	if !status.Exited() || status.ExitStatus() != 0 {
-		return out, pid, &spawnExitError{path: path, status: status}
+		return out, pid, &spawnExitError{error: fmt.Errorf("%s: %s", path, waitText(status)), status: status}
 	}
 	return out, pid, nil
 }
@@ -187,13 +187,11 @@ func cStrings(ss []string) ([]*byte, error) {
 }
 
 // spawnExitError is a child that exited with a status other than 0, or was
-// killed by a signal.
+// killed by a signal. It reads as "<path>: exit status <n>".
 type spawnExitError struct {
-	path   string
+	error
 	status syscall.WaitStatus
 }
-
-func (e *spawnExitError) Error() string { return fmt.Sprintf("%s: %s", e.path, waitText(e.status)) }
 
 func waitText(s syscall.WaitStatus) string {
 	if s.Signaled() {
