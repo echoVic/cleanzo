@@ -254,6 +254,25 @@ func TestClaudeClaudePidsIntoTwoSessions(t *testing.T) {
 	wantShape(t, a, "100:S1 members[] commands[120]; 101:S2 members[] commands[130]; uncertain 1")
 }
 
+func TestClaudeClaudePidUnderTheSessionOpensTheID(t *testing.T) {
+	// Session 100 was S0 before it became S1. Its command 111 still carries
+	// S0 and names 100, so 130, detached and carrying S0 by its output file,
+	// belongs to the open session 100 too.
+	command := marked(111, 100, 111, "S0")
+	command.Env.Pid = 100
+	out := hidden(130, 1, 130)
+	out.Out = "S0"
+	wantShape(t, attributeClaude(ccSnap(command, out)), "100:S1 members[] commands[111 130]; uncertain 0")
+	// When a detached carrier of S0 names another session, 130 may belong
+	// to either.
+	other := ccProc(101, 1)
+	toOther := marked(120, 1, 120, "S0")
+	toOther.Env.Pid = 101
+	s := ccSnap(command, out, other, toOther)
+	s.Records[101] = recordOf(other, "S2")
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[111]; 101:S2 members[] commands[120]; uncertain 1")
+}
+
 func TestClaudeDetachedClosed(t *testing.T) {
 	a := attributeClaude(ccSnap(marked(120, 1, 120, "S9")))
 	wantShape(t, a, "100:S1 members[] commands[]; left S9[120]; uncertain 0")

@@ -100,17 +100,22 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		}
 	}
 	places := map[int32]claudePlace{}
-	detached := map[string][]int32{} // the detached candidates carrying each session id
+	carriers := map[string][]int32{} // the candidates carrying each session id, attached or detached
+	detached := map[string][]int32{} // the detached ones
 	for pid, id := range t.id {
-		switch cc, ok := t.climb(pid); {
-		case ok && cc != 0:
+		cc, ok := t.climb(pid)
+		if !ok {
+			continue
+		}
+		carriers[id] = append(carriers[id], pid)
+		if cc != 0 {
 			places[pid] = claudePlace{open: t.claude[cc]}
-		case ok:
+		} else {
 			detached[id] = append(detached[id], pid)
 		}
 	}
 	for id, pids := range detached {
-		a.Uncertain += t.placeDetached(id, pids, a.NoRecords, places)
+		a.Uncertain += t.placeDetached(id, pids, carriers[id], a.NoRecords, places)
 	}
 
 	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
@@ -383,19 +388,24 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 
 // placeDetached decides once, for all the detached candidates pids that
 // carry id, whether the session id is open, closed or uncertain, and puts
-// each candidate it lists into places. id is open when a Claude Code process
-// has it now or a CLAUDE_PID among pids names a Claude Code process; it is
-// uncertain when noRecords says a Claude Code process shows no session id,
-// or when a CLAUDE_PID among pids is held by a process older than the
-// candidate carrying it. It returns how many candidates it leaves uncertain.
-func (t *claudeTable) placeDetached(id string, pids []int32, noRecords bool, places map[int32]claudePlace) (uncertain int) {
-	named := map[int32]bool{} // the sessions the CLAUDE_PIDs among pids point into
+// each candidate it lists into places. carriers are the candidates carrying
+// id that are attached to a session or detached, pids among them. id is open
+// when a Claude Code process has it now or a CLAUDE_PID among carriers names
+// a Claude Code process; it is uncertain when noRecords says a Claude Code
+// process shows no session id, or when a CLAUDE_PID among pids is held by a
+// process older than the candidate carrying it. It returns how many
+// candidates it leaves uncertain.
+func (t *claudeTable) placeDetached(id string, pids, carriers []int32, noRecords bool, places map[int32]claudePlace) (uncertain int) {
+	named := map[int32]bool{} // the sessions the CLAUDE_PIDs among carriers point into
+	for _, pid := range carriers {
+		if head, isClaude := t.claude[t.procs[pid].Env.Pid]; isClaude {
+			named[head] = true
+		}
+	}
 	older := false
 	for _, pid := range pids {
 		p := t.procs[pid]
-		if head, isClaude := t.claude[p.Env.Pid]; isClaude {
-			named[head] = true
-		} else if t.startedBefore(p.Env.Pid, p.Start) {
+		if _, isClaude := t.claude[p.Env.Pid]; !isClaude && t.startedBefore(p.Env.Pid, p.Start) {
 			older = true
 		}
 	}
