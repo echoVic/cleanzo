@@ -50,17 +50,19 @@
   sessions left running (dev servers, watchers) with their ports and folders.
   Each can be ended by hand after a confirmation; ending a session leaves what
   it started running. Only processes that certainly belong to a Claude Code
-  session are listed, apps on the Dock never are, and secrets in command lines
-  are masked. Nothing is ended automatically. The attribution idea comes from
-  seshka (https://github.com/jigjoy-ai/seshka, MIT).
+  session are listed and apps on the Dock never are. A command line is shown
+  with the value of every NAME=value, of flags named like a key, token, secret
+  or password, and the credentials in URLs hidden; secrets written another way
+  are not recognized. Nothing is ended automatically. The attribution idea
+  comes from seshka (https://github.com/jigjoy-ai/seshka, MIT).
 - **Agent worktrees (macOS)**: the git worktrees Claude Code and Codex made are
   listed one by one on those tools' pages with repository, branch, age and
   state, and can be moved to the Trash whole. git drops only that worktree's
   record first, so the branch and everything committed stay in the repository.
   Worktrees that are in use, hold submodules or other worktrees, are in the
   middle of a rebase or merge, hold commits on no branch or content only the
-  staging area has cannot be picked; uncommitted changes are called out. Never
-  preselected.
+  staging area has, or belong to a repository outside the home folder cannot be
+  picked; uncommitted changes are called out. Never preselected.
 - **Skills**: one view of the skill folders used by ~/.agents, Claude Code,
   Codex, Gemini CLI, OpenCode, Grok, Hermes and Pi, with call counts and last-used
   dates read from the tools' own logs, plus broken symlinks, missing SKILL.md,

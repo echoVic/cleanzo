@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -265,6 +266,29 @@ func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 		_ = bare.Process.Kill()
 		_ = bare.Wait()
 	})
+	// A process that shows no environment is placed by where its output
+	// goes: Claude Code writes a command's output under
+	// claude-<uid>/<project>/<session>/tasks. This one leads its own
+	// process group.
+	const outSession = "11111111-2222-3333-4444-555555555555"
+	outPath := filepath.Join(t.TempDir(), "claude-501", "-Users-me-sample-app", outSession, "tasks", "b1.output")
+	mustMkdir(t, filepath.Dir(outPath))
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = outFile.Close() })
+	quiet := exec.Command("/bin/sleep", "60")
+	quiet.Env = []string{}
+	quiet.Stdout = outFile
+	quiet.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := quiet.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = quiet.Process.Kill()
+		_ = quiet.Wait()
+	})
 	// A child that exited and is not reaped yet is a zombie.
 	zombie := exec.Command("/usr/bin/true")
 	if err := zombie.Start(); err != nil {
@@ -315,6 +339,17 @@ func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 	}
 	if want := []string{"", "-test.run=^TestClaudeSnapshotHelper$"}; !slices.Equal(odd.Args, want) || odd.Env != (claudeEnv{Seen: true}) {
 		t.Errorf("child with an empty first argument: args %q (want %q), env %+v", odd.Args, want, odd.Env)
+	}
+	if kid.Pgid != int32(syscall.Getpgrp()) {
+		t.Errorf("child: process group %d, want this process's, %d", kid.Pgid, syscall.Getpgrp())
+	}
+	hushed, ok := byPid[int32(quiet.Process.Pid)]
+	if !ok {
+		t.Fatal("the snapshot misses the child without an environment")
+	}
+	if hushed.Env != (claudeEnv{}) || hushed.Out != outSession || hushed.Pgid != hushed.Pid {
+		t.Errorf("child without an environment: env %+v, output file's session %q (want %q), process group %d (want its own, %d)",
+			hushed.Env, hushed.Out, outSession, hushed.Pgid, hushed.Pid)
 	}
 	if _, listed := byPid[int32(zombie.Process.Pid)]; listed {
 		t.Error("the snapshot lists a zombie")
