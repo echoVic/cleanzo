@@ -235,8 +235,7 @@ func worktreeRepoOf(dir string) string {
 
 // worktreeFolders lists the folders in dir, where an agent keeps worktrees.
 // A worktree an interrupted removal left under its temporary name is put
-// back first: when its own name is free, and git's record of it still
-// names that.
+// back first, when its own name is free.
 func worktreeFolders(dir string) []string {
 	folders := subfolders(dir)
 	for i, p := range folders {
@@ -245,11 +244,27 @@ func worktreeFolders(dir string) []string {
 			continue
 		}
 		original := filepath.Join(dir, name)
-		if _, _, ok := worktreeRecord(p, original); ok && !worktreeHas(dir, name) && os.Rename(p, original) == nil {
+		if !worktreeHas(dir, name) && worktreeLeftAway(p, original) && os.Rename(p, original) == nil {
 			folders[i] = original
 		}
 	}
 	return folders
+}
+
+// worktreeLeftAway reports whether the folder at p is a worktree a removal
+// left away from its path, original: git's record of it still names
+// original, or git has forgotten it, and nothing is where its .git file
+// names the record.
+func worktreeLeftAway(p, original string) bool {
+	if _, _, ok := worktreeRecord(p, original); ok {
+		return true
+	}
+	admin, ok := worktreeGitdir(p)
+	if !ok {
+		return false
+	}
+	_, err := os.Lstat(admin)
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 // worktreeListable reports whether a folder may be listed: it is inside the
@@ -435,9 +450,8 @@ func worktreeLocked(admin string) bool {
 // resolved. Relative paths count from the file's folder. It returns the
 // record's folder and the repository's git folder its commondir names.
 func worktreeRecord(dir, points string) (admin, common string, ok bool) {
-	line, isGitDir := strings.CutPrefix(worktreeLine(filepath.Join(dir, ".git")), "gitdir:")
-	admin = worktreePath(dir, strings.TrimSpace(line))
-	if !isGitDir || admin == "" || filepath.Base(filepath.Dir(admin)) != "worktrees" {
+	admin, ok = worktreeGitdir(dir)
+	if !ok {
 		return "", "", false
 	}
 	if info, err := os.Lstat(admin); err != nil || !info.IsDir() {
@@ -452,6 +466,18 @@ func worktreeRecord(dir, points string) (admin, common string, ok bool) {
 		return "", "", false
 	}
 	return admin, common, true
+}
+
+// worktreeGitdir is where dir/.git names git's record of the worktree in
+// dir: the file's gitdir line, a path in a folder called worktrees. A
+// relative path counts from dir.
+func worktreeGitdir(dir string) (string, bool) {
+	line, isGitDir := strings.CutPrefix(worktreeLine(filepath.Join(dir, ".git")), "gitdir:")
+	admin := worktreePath(dir, strings.TrimSpace(line))
+	if !isGitDir || admin == "" || filepath.Base(filepath.Dir(admin)) != "worktrees" {
+		return "", false
+	}
+	return admin, true
 }
 
 // worktreeRepo is the repository's folder for its git folder: the folder

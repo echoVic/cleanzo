@@ -879,3 +879,50 @@ func TestWorktreeInterruptedRemovalIsRestored(t *testing.T) {
 		})
 	}
 }
+
+// TestWorktreeForgottenWhileAwayIsRestored: a removal interrupted after git
+// forgot the worktree leaves its folder under the temporary name, with no
+// record. The folder is put back under its name and listed as unrecognized.
+// A folder whose .git names no record in a worktrees folder stays.
+func TestWorktreeForgottenWhileAwayIsRestored(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	if err := os.Rename(wt, wt+worktreeTemp); err != nil {
+		t.Fatal(err)
+	}
+	// The folder is away from its path, so git only clears its record.
+	gitIn(t, git, repo, "worktree", "remove", wt)
+	if exists(admin) || !exists(filepath.Join(wt+worktreeTemp, "README.md")) {
+		t.Fatalf("record there %v, folder away %v", exists(admin), exists(wt+worktreeTemp))
+	}
+	other := filepath.Join(filepath.Dir(wt), "notes"+worktreeTemp)
+	writeText(t, filepath.Join(other, ".git"), "gitdir: "+filepath.Join(homeDir(), "elsewhere", "notes")+"\n")
+	if w := wtFound(t, "claude", wt); w.State != wtUnknown {
+		t.Fatalf("state = %s", w.State)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(filepath.Join(other, ".git")) {
+		t.Fatalf("back in place %v, the other folder in place %v", exists(wt), exists(other))
+	}
+}
+
+// TestWorktreeInterruptedRemovalWithItsNameTaken: a worktree an interrupted
+// removal left under its temporary name stays there while its own name is
+// taken, even by an empty folder. Both folders stay as they are.
+func TestWorktreeInterruptedRemovalWithItsNameTaken(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	if err := os.Rename(wt, wt+worktreeTemp); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, wt)
+	if w := wtFound(t, "claude", wt+worktreeTemp); w.State != wtUnknown {
+		t.Fatalf("under the temporary name: state = %s", w.State)
+	}
+	entries, err := os.ReadDir(wt)
+	if !exists(filepath.Join(wt+worktreeTemp, "README.md")) || err != nil || len(entries) != 0 {
+		t.Fatalf("folder away %v, the folder with its name holds %v (%v)", exists(wt+worktreeTemp), entries, err)
+	}
+}
