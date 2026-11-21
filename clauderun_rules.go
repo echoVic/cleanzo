@@ -290,9 +290,9 @@ func (t *claudeTable) childrenID(pid int32) string {
 
 // fromParent gives the candidate pid, when it shows no environment and
 // carries no session id, the one of its parent: a candidate carrying one,
-// or a Claude Code process, whose session it joins. The parents on the way
-// that show no environment either get the same id; settled holds the
-// processes already done.
+// or a Claude Code process, whose session it joins. Parents on the way up
+// that show no environment and carry no id get the same one; settled holds
+// the processes already done.
 func (t *claudeTable) fromParent(pid int32, settled map[int32]bool) {
 	var path []int32
 	id := ""
@@ -347,8 +347,8 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 // of the oldest Claude Code process whose session id is id. It returns the
 // Claude Code process heading that session; ok is false when there is none.
 func (t *claudeTable) openSession(p claudeProc, id string) (head int32, ok bool) {
-	if head, ok := t.claude[p.Env.Pid]; ok {
-		return head, true
+	if h, isClaude := t.claude[p.Env.Pid]; isClaude {
+		return h, true
 	}
 	var oldest claudeProc
 	for pid := range t.claude {
