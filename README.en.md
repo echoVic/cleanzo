@@ -30,6 +30,7 @@ Or download from [Releases](https://github.com/echoVic/cleanzo/releases):
 
 - **Junk cleanup**: grouped into system junk, app caches, browser caches, update leftovers, developer tools, items that need confirmation, and custom folders. Expand each item and stop at any time. Regenerable caches are deleted; your own files only go to the Trash.
 - **AI and developer tools**: sessions and caches from Claude Code, Codex and TRAE, local models for Ollama, HuggingFace and LM Studio, and caches from npm, pnpm, Bun, uv, pip, Cargo, Go and Xcode. Models are unchecked by default.
+- **Claude Code's Running tab and agent worktrees** (macOS): lists open sessions and the processes closed sessions left running (dev servers and the like, with their ports), each ended by hand after a confirmation; worktrees that Claude Code and Codex made in your repositories can be moved to the Trash whole, with the branch left in the repository, uncommitted changes called out, and worktrees in use left unselectable.
 - **Space and files**: disk usage and the largest folders, which can be expanded and moved to the Trash; large-file scans by size and groups of similar photos.
 - **Apps**: one list with version, size, last opened and seven-day growth; update checks through the App Store, Homebrew, Sparkle and electron-updater, plus uninstalling and finding leftovers.
 - **System status and processes** (macOS): chip, memory, disk, network, battery and thermal readings; processes are merged by app so you can see what is using CPU and memory; the menu bar can show CPU, memory, network and more.
@@ -66,6 +67,10 @@ bun run build:web
 - [CHANGELOG](CHANGELOG.md): the changes in each version
 - [Release steps](docs/RELEASING.md): signing, notarization and publishing
 - [Windows test material](docs/qa/README.md): reports and screenshots from real machines
+
+## Credits
+
+- The idea of attributing processes to Claude Code sessions comes from [seshka](https://github.com/jigjoy-ai/seshka) (MIT).
 
 ## License
 

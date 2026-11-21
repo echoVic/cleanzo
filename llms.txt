@@ -30,7 +30,8 @@
   battery. No admin rights required.
 - **Processes (macOS)**: CPU and memory grouped by app, quit and force-quit, and
   a per-app disk growth tab built from daily snapshots (today / 7 days /
-  30 days).
+  30 days). Claude Code's processes are one row, tagged with how many sessions
+  have idled for hours and how many processes closed sessions left running.
 - **Menu bar readings (macOS)**: CPU and memory by default, opt-in GPU, network,
   disk free, chip temperature and battery; each reading is its own menu bar item
   that can be dragged with ⌘. Clicking one opens a native detail panel.
@@ -44,6 +45,22 @@
   generated images, and protected settings/skills/credentials. Safe items are
   preselected; sensitive sessions are never preselected and anything written in
   the last 24 hours is skipped.
+- **Claude Code's Running tab (macOS)**: open Claude Code sessions with how long
+  each has idled, where it runs and its memory, and the processes that closed
+  sessions left running (dev servers, watchers) with their ports and folders.
+  Each can be ended by hand after a confirmation; ending a session leaves what
+  it started running. Only processes that certainly belong to a Claude Code
+  session are listed, apps on the Dock never are, and secrets in command lines
+  are masked. Nothing is ended automatically. The attribution idea comes from
+  seshka (https://github.com/jigjoy-ai/seshka, MIT).
+- **Agent worktrees (macOS)**: the git worktrees Claude Code and Codex made are
+  listed one by one on those tools' pages with repository, branch, age and
+  state, and can be moved to the Trash whole. git drops only that worktree's
+  record first, so the branch and everything committed stay in the repository.
+  Worktrees that are in use, hold submodules or other worktrees, are in the
+  middle of a rebase or merge, hold commits on no branch or content only the
+  staging area has cannot be picked; uncommitted changes are called out. Never
+  preselected.
 - **Skills**: one view of the skill folders used by ~/.agents, Claude Code,
   Codex, Gemini CLI, OpenCode, Grok, Hermes and Pi, with call counts and last-used
   dates read from the tools' own logs, plus broken symlinks, missing SKILL.md,
@@ -88,7 +105,8 @@
 - Windows lacks app leftovers, Store/MSIX uninstall, the menu bar readings, the
   Processes page and HEIC support.
 - Update checking for apps happens only while the Apps page is open.
-- Menu bar, Processes and disk growth monitoring are macOS only.
+- Menu bar, Processes, disk growth monitoring, Claude Code's Running tab and
+  agent worktree removal are macOS only.
 
 ## How to install
 
@@ -109,6 +127,9 @@
   anything.
 - A developer wants to see how much Claude Code, Codex or TRAE sessions and
   caches take, or which skill folders are duplicated or broken.
+- A developer wants to see which Claude Code sessions sit idle and which dev
+  servers closed sessions left running, and end them one by one; or wants to
+  remove old agent worktrees without losing branches or uncommitted work.
 - Someone wants to uninstall Mac apps without leaving Library leftovers.
 - Someone wants CPU/memory/disk-growth readings in the menu bar without a
   subscription.
@@ -158,7 +179,9 @@ Cleanzo 是一个免费、开源（MIT）的 macOS / Windows 磁盘清理工具�
   应用崩溃转储、需要确认的备份/归档/安装包）、空间分析、大文件、相似照片、
   应用更新检查与卸载及残留（macOS）、系统状态与菜单栏读数、进程与占用增长
   （macOS）、AI 空间（本地模型、agent 会话、缓存分开算，模型默认不勾选、只进
-  废纸篓）、AI 工具（Claude Code / Codex / TRAE）体积与安全分级、技能目录体检、
+  废纸篓）、AI 工具（Claude Code / Codex / TRAE）体积与安全分级、Claude Code
+  「运行中」（开着的会话和已关闭会话留下的进程，逐个确认后手动结束，macOS）、
+  agent worktree 整个移入废纸篓且保留分支（macOS）、技能目录体检、
   废纸篓超过阈值提醒（macOS）。
 - 不做：注册表清理、系统级（需管理员）清理、杀毒、一键加速、定时自动删除、
   风扇控制、AI 聊天式清理。

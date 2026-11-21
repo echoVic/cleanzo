@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Claude Code 页新增「运行中」标签（macOS）：列出开着的会话（空闲了多久、在哪个 App 里运行、占多少内存）和已关闭的会话留下的进程（开发服务器、文件监视这类，带端口和所在文件夹）。每一项都可以手动结束，结束前逐个确认；结束会话不动它启动的命令。只列能确定属于 Claude Code 会话的进程，说不准的只计数、不列出，Dock 上的 App 不会被列出；命令里的 `NAME=值`、密钥参数和 URL 里的账号密码显示前会遮掉
+- 进程页把 Claude Code 的进程合成一行 `claude`（之前按版本号分成几行），行上的小标签写着有几个空闲会话、几个是已关闭会话留下的，点了跳到「运行中」
+- Claude Code 页和 Codex 页新增「Agent worktree」（macOS）：agent 在仓库里建的 worktree 一个一行，写明仓库、分支、几天没动和状态，可以把整个 worktree 移进废纸篓。Cleanzo 先让 git 清掉这一条记录再移走文件夹，分支和已提交的内容留在仓库里。在用的、含子模块的、rebase 或 merge 做到一半的、有不在任何分支上的提交的、暂存区里有独有内容的、里面还有别的 worktree 的都不能勾选；带着没提交改动的会写明有几处。从不预先勾选
+- 把进程归到 Claude Code 会话的思路来自 [seshka](https://github.com/jigjoy-ai/seshka)（MIT），规则在 Cleanzo 里用 Go 重写
+
 ## 0.6.0 - 2026-11-17
 
 - 新增「开发项目」分组（macOS）：主目录里 14 天没有改动的项目，按项目列出 `node_modules`、`.next`、`target`、`build`、`dist` 这些构建产物，一行一个项目，展开能看到每个文件夹。默认不勾选，只移进废纸篓；运行中的开发服务器会跳过，设置里可以关掉这一组
