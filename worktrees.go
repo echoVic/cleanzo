@@ -393,8 +393,8 @@ func worktreeHoldsOthers(path string) bool {
 
 // worktreeRecordsInside reports whether git keeps a record of another
 // worktree inside the worktree at path, whose own record is admin: one of
-// the other records in the repository's git folder common names a .git
-// inside path, or cannot be read. Both are compared resolved, so a worktree
+// the other record folders in the repository's git folder common names a
+// .git inside path, or cannot be read. Both are compared resolved, so a worktree
 // made through a link inside path, which no folder walk finds, counts too.
 func worktreeRecordsInside(path, admin, common string) bool {
 	own, err := os.Lstat(admin)
@@ -408,6 +408,9 @@ func worktreeRecordsInside(path, admin, common string) bool {
 	}
 	inside := strings.ToLower(resolvePath(path))
 	for _, e := range entries {
+		if !e.IsDir() {
+			continue // a record is a folder: a file beside the records is none
+		}
 		record := filepath.Join(dir, e.Name())
 		if info, err := os.Lstat(record); err == nil && os.SameFile(info, own) {
 			continue

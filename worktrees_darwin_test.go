@@ -546,6 +546,24 @@ func TestRemoveWorktreeThatHoldsWorktreesThroughALink(t *testing.T) {
 	}
 }
 
+// TestWorktreeStrayFileAmongRecords: a record is a folder. A file beside
+// the records, as Finder leaves one, is no worktree inside another; a record
+// folder that does not say where its worktree is may be one.
+func TestWorktreeStrayFileAmongRecords(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	records := filepath.Dir(wtAdmin(t, wt))
+	writeText(t, filepath.Join(records, ".DS_Store"), "made up")
+	if w := wtFound(t, "claude", wt); w.State != wtClean {
+		t.Errorf("with a stray file among the records: %+v", w)
+	}
+	mustMkdir(t, filepath.Join(records, "half-made"))
+	if w := wtFound(t, "claude", wt); w.State != wtHolds {
+		t.Errorf("with a record that names no worktree: %+v", w)
+	}
+}
+
 // TestRemoveWorktreeWhenGitFails: when git does not forget the worktree,
 // the folder is back in place and still a worktree.
 func TestRemoveWorktreeWhenGitFails(t *testing.T) {
