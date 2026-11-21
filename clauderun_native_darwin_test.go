@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests of the Running tab's native reads. Only TestNativeCwdAndFdPath and
@@ -190,5 +192,85 @@ func TestReadClaudeRecords(t *testing.T) {
 	}
 	if got := readClaudeRecords(filepath.Join(home, "missing")); len(got) != 0 {
 		t.Errorf("a missing folder gave %+v", got)
+	}
+}
+
+// viewNoApps makes the snapshot's app list empty: NSWorkspace needs the
+// main thread, which a test binary never serves.
+func viewNoApps(t *testing.T) {
+	prev := runOnMain
+	runOnMain = func(func()) {}
+	t.Cleanup(func() { runOnMain = prev })
+}
+
+// TestClaudeSnapshotHelper is the child TestClaudeSnapshotSeesThisProcess
+// starts: it sleeps until it is killed. Run as a test it returns at once.
+func TestClaudeSnapshotHelper(t *testing.T) {
+	if os.Getenv("CLEANZO_CLAUDE_SNAPSHOT_HELPER") == "" {
+		return
+	}
+	time.Sleep(time.Minute)
+	os.Exit(0)
+}
+
+func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
+	setHome(t, t.TempDir())
+	viewNoApps(t)
+	// The child gets only these variables, none of this process's.
+	child := exec.Command(os.Args[0], "-test.run=^TestClaudeSnapshotHelper$")
+	child.Env = []string{"CLEANZO_CLAUDE_SNAPSHOT_HELPER=1", "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=S-test"}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	})
+	// A child that exited and is not reaped yet is a zombie.
+	zombie := exec.Command("/usr/bin/true")
+	if err := zombie.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = zombie.Wait() })
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, running := realClaudeSource().started(int32(zombie.Process.Pid)); !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the child that exits at once is still running")
+		}
+	}
+
+	s, err := realClaudeSource().snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Self != int32(os.Getpid()) || s.UID != uint32(os.Getuid()) {
+		t.Errorf("snapshot taken by %d as %d, want %d as %d", s.Self, s.UID, os.Getpid(), os.Getuid())
+	}
+	byPid := map[int32]claudeProc{}
+	for _, p := range s.Procs {
+		byPid[p.Pid] = p
+	}
+	// Only what the test itself controls is printed: never the test
+	// process's environment or another process's details.
+	self, ok := byPid[int32(os.Getpid())]
+	if !ok {
+		t.Fatal("the snapshot misses the test process")
+	}
+	isTestBinary := len(self.Args) > 0 && self.Args[0] == os.Args[0]
+	if self.Ppid != int32(os.Getppid()) || !isTestBinary || self.Path == "" || self.UID != uint32(os.Getuid()) || self.Start <= 0 {
+		t.Errorf("test process: ppid %d (want %d), argv[0] is the test binary %v, path read %v, uid %d, start %d",
+			self.Ppid, os.Getppid(), isTestBinary, self.Path != "", self.UID, self.Start)
+	}
+	kid, ok := byPid[int32(child.Process.Pid)]
+	if !ok {
+		t.Fatal("the snapshot misses the child")
+	}
+	if want := (claudeEnv{true, true, "S-test", 0}); kid.Ppid != int32(os.Getpid()) || kid.Env != want || len(kid.Args) == 0 || kid.Args[0] != os.Args[0] {
+		t.Errorf("child: ppid %d (want %d), env %+v (want %+v), args %q", kid.Ppid, os.Getpid(), kid.Env, want, kid.Args)
+	}
+	if _, listed := byPid[int32(zombie.Process.Pid)]; listed {
+		t.Error("the snapshot lists a zombie")
 	}
 }

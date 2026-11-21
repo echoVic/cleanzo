@@ -23,13 +23,13 @@ func claudeRunSupported() bool { return true }
 // realClaudeSource wires the Running tab to the native reads and signals.
 func realClaudeSource() claudeSource {
 	return claudeSource{
-		snapshot: func() (claudeSnapshot, error) { return claudeSnapshot{}, nil },
+		snapshot: readClaudeSnapshot,
 		started: func(pid int32) (int64, bool) {
 			kp, err := unix.SysctlKinfoProc("kern.proc.pid", int(pid))
-			if err != nil || kp.Proc.P_stat == 5 { // SZOMB: a zombie is not running
+			if err != nil || kp.Proc.P_stat == procZombie {
 				return 0, false
 			}
-			return kp.Proc.P_starttime.Sec*1_000_000 + int64(kp.Proc.P_starttime.Usec), true
+			return kinfoStart(kp), true
 		},
 		footprint:   func(int32) uint64 { return 0 },
 		cwd:         func(int32) string { return "" },
@@ -54,6 +54,72 @@ func realClaudeSource() claudeSource {
 // claudeWorkingFolders is the working folders of this user's processes and
 // of the open Claude Code sessions; OK is false when they cannot be read.
 func claudeWorkingFolders() worktreeUsage { return worktreeUsage{} }
+
+// procZombie is p_stat of a process that exited and is not reaped yet: it
+// runs nothing.
+const procZombie = 5 // SZOMB
+
+// readClaudeSnapshot reads the process table natively, with the arguments,
+// marker, executable and output file of each of this account's processes,
+// then the session records and the running apps.
+func readClaudeSnapshot() (claudeSnapshot, error) {
+	procs, err := claudeProcTable()
+	if err != nil {
+		return claudeSnapshot{}, err
+	}
+	uid := uint32(os.Getuid())
+	for i := range procs {
+		p := &procs[i]
+		if p.UID != uid {
+			continue
+		}
+		// The buffer holds the whole environment: only what
+		// parseProcargs2 returns of it is kept.
+		if buf, err := unix.SysctlRaw("kern.procargs2", int(p.Pid)); err == nil {
+			p.Args, p.Env = parseProcargs2(buf)
+		}
+		p.Path = nativePidPath(p.Pid)
+		if !p.Env.Seen {
+			if p.Out = claudeOutputSession(nativeFdPath(p.Pid, 1)); p.Out == "" {
+				p.Out = claudeOutputSession(nativeFdPath(p.Pid, 2))
+			}
+		}
+	}
+	return claudeSnapshot{
+		Procs:   procs,
+		Records: readClaudeRecords(filepath.Join(homeDir(), ".claude", "sessions")),
+		Apps:    workspaceList(),
+		Self:    int32(os.Getpid()),
+		UID:     uid,
+	}, nil
+}
+
+// claudeProcTable lists every account's processes, zombies left out, with
+// their parent, process group, account and start.
+func claudeProcTable() ([]claudeProc, error) {
+	all, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	if err != nil {
+		return nil, err
+	}
+	procs := make([]claudeProc, 0, len(all))
+	for i := range all {
+		kp := &all[i]
+		if kp.Proc.P_stat == procZombie {
+			continue
+		}
+		procs = append(procs, claudeProc{
+			Pid: kp.Proc.P_pid, Ppid: kp.Eproc.Ppid, Pgid: kp.Eproc.Pgid,
+			UID: kp.Eproc.Ucred.Uid, Start: kinfoStart(kp),
+		})
+	}
+	return procs, nil
+}
+
+// kinfoStart is when the process kp describes started, in unix
+// microseconds.
+func kinfoStart(kp *unix.KinfoProc) int64 {
+	return kp.Proc.P_starttime.Sec*1_000_000 + int64(kp.Proc.P_starttime.Usec)
+}
 
 // parseProcargs2 reads a kern.procargs2 buffer: argc as a little-endian
 // int32, the executable's path, NUL padding, then argc arguments and the
