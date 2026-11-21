@@ -2169,3 +2169,37 @@ div.pr-toggle { cursor: default; }
   .pr-cols .pr-sort { width: auto; min-width: 72px; }
   .pr-cols .pr-sort:first-of-type { margin-left: auto; }
 }
+
+/* Claude Code 页「运行中」标签：沿用 st-* 列表卡；会话下的命令、已关闭会话的进程缩进一级 */
+.cz-run { display: flex; flex-direction: column; gap: 16px; }
+.cz-run-sum { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cz-run-item { border-top: 1px solid var(--bg-subtle); }
+.cz-run-row { border-bottom: none; }
+/* 「全部结束」「正在结束…」比「退出」长：操作列放宽到 96px */
+.cz-run-row > .st-act { width: 96px; }
+.cz-run-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; }
+button.cz-run-main { cursor: pointer; }
+.cz-run-chev { width: 10px; flex: none; color: var(--muted); font-size: 11px; }
+.cz-run-state, .cz-run-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.cz-run-state.busy { color: var(--accent-strong); }
+.cz-run-sub { padding-bottom: 4px; }
+.cz-run-sub > .cz-run-row { height: 40px; padding-left: 40px; }
+.cz-run-cmd { font-weight: 400; }
+.cz-run-ghead .st-name { font-weight: 600; }
+.cz-run-error { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--danger-soft); color: var(--danger-text); font-size: 13px; }
+.cz-run-error > span { flex: 1; min-width: 0; }
+.cz-run-foot { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.cz-run-ask p + p { margin-top: 4px; }
+.cz-run-ask ul { margin: 8px 0 0; padding-left: 18px; list-style: disc; color: var(--fg); overflow-wrap: anywhere; }
+/* 扫描后「正在运行」提示末尾的「看运行中」：行内链接；纵向负边距补偿 padding，点击目标 ≥24px（WCAG 2.5.8） */
+.cz-run-see { margin: -4px 0 -4px 6px; padding: 4px 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--accent-strong); cursor: pointer; }
+.cz-run-see:hover { text-decoration: underline; }
+.cz-run-see:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+
+/* 窄窗口：名字和状态折行，行高跟着内容 */
+@container content (max-width: 560px) {
+  .cz-run-row { height: auto; min-height: 52px; padding-top: 6px; padding-bottom: 6px; }
+  .cz-run-sub > .cz-run-row { min-height: 40px; padding-left: 28px; }
+  .cz-run-main { flex-wrap: wrap; row-gap: 2px; }
+  .cz-run-row > .st-act { width: auto; }
+}
