@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -276,6 +277,18 @@ func endWantCode(t *testing.T, err error, code string) {
 	}
 }
 
+// endWantNothing fails t unless res names no process and frees nothing, and
+// f got no signal.
+func endWantNothing(t *testing.T, f *endFake, res ClaudeEndResult) {
+	t.Helper()
+	if len(res.Procs) != 0 || res.Freed != 0 {
+		t.Errorf("results = %s, want none", endText(res))
+	}
+	if len(f.sent) != 0 {
+		t.Errorf("signals = %s, want none", f.sentText())
+	}
+}
+
 // ---- ending processes ------------------------------------------------------
 
 func TestEndClaudeProcsEndsWhatIsListed(t *testing.T) {
@@ -425,12 +438,7 @@ func TestEndClaudeProcsUnreadableSnapshot(t *testing.T) {
 	f.err = errors.New("no process table")
 	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
 	endWantCode(t, err, "unreadable")
-	if res.Procs == nil || len(res.Procs) != 0 || res.Freed != 0 {
-		t.Errorf("result = %+v, want no processes and nothing freed", res)
-	}
-	if len(f.sent) != 0 {
-		t.Errorf("signals = %s, want none", f.sentText())
-	}
+	endWantNothing(t, f, res)
 }
 
 func TestEndClaudeChecksPidAndAccountItself(t *testing.T) {
@@ -446,6 +454,131 @@ func TestEndClaudeChecksPidAndAccountItself(t *testing.T) {
 	claudeEnd(context.Background(), f.source(), []claudeEnding{{pid: 1, start: testStart(1)}, {pid: 0}, {pid: -4242}})
 	if len(f.sent) != 0 {
 		t.Errorf("signals = %s, want none", f.sentText())
+	}
+}
+
+// ---- ending a session ------------------------------------------------------
+
+func TestEndClaudeSessionLeavesItsCommands(t *testing.T) {
+	agent := ccProc(102, 100) // a sub-agent
+	s := ccSnap(marked(101, 100, 100, "S1"), agent, marked(111, 100, 111, "S1"))
+	s.Records[102] = recordOf(agent, "S5")
+	wantShape(t, attributeClaude(s), "100:S1 members[101 102] commands[111]; uncertain 0")
+	f := endFakeOf(t, s)
+	res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), "S1", "idle")
+	endWant(t, f, res, err, "100:ended 101:ended 102:ended; freed 303", "100 TERM@0s 101 TERM@0s 102 TERM@0s")
+}
+
+func TestEndClaudeSessionRefusesItsOwn(t *testing.T) {
+	cleanzo := marked(900, 100, 900, "S1")
+	cleanzo.Args = []string{"cleanzo"}
+	s := ccSnap(cleanzo)
+	wantShape(t, attributeClaude(s), "100:S1 own members[] commands[]; uncertain 0")
+	f := endFakeOf(t, s)
+	res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), "S1", "idle")
+	endWantCode(t, err, "blocked")
+	endWantNothing(t, f, res)
+}
+
+func TestEndClaudeSessionThatChanged(t *testing.T) {
+	// An ended session got SIGTERM; one that changed got nothing.
+	const ended, changed = "100:ended; freed 100", "100:changed; freed 0"
+	for _, c := range []struct {
+		name               string
+		id, status         string // its record's now; no record when id is ""
+		seenID, seenStatus string // what the page saw
+		want               string
+	}{
+		{"its session id is another now", "S2", "idle", "S1", "idle", changed},
+		{"it was idle and is busy now", "S1", "busy", "S1", "idle", changed},
+		{"it was idle and shows no status now", "S1", "", "S1", "idle", changed},
+		{"it was busy and is idle now", "S1", "idle", "S1", "busy", ended},
+		{"its status was unknown", "S1", "busy", "S1", "", ended},
+		{"its session id was unknown and still is", "", "", "", "", ended},
+		{"its session id was unknown and is known now", "S1", "idle", "", "", changed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cc := ccProc(100, 1)
+			records := map[int32]claudeRecord{}
+			if c.id != "" {
+				r := recordOf(cc, c.id)
+				r.Status = c.status
+				records[100] = r
+			}
+			f := endFakeOf(t, snap(records, cc))
+			res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), c.seenID, c.seenStatus)
+			sent := ""
+			if c.want == ended {
+				sent = "100 TERM@0s"
+			}
+			endWant(t, f, res, err, c.want, sent)
+		})
+	}
+	t.Run("another process has its pid now", func(t *testing.T) {
+		f := endFakeOf(t, ccSnap())
+		seen := endTarget(100)
+		seen.Start -= time.Second.Microseconds()
+		res, err := endClaudeSessionWith(context.Background(), f.source(), seen, "S1", "idle")
+		endWant(t, f, res, err, changed, "")
+	})
+}
+
+func TestEndClaudeSessionSharingAnID(t *testing.T) {
+	first, second := ccProc(100, 1), ccProc(101, 1)
+	records := map[int32]claudeRecord{100: recordOf(first, "S1"), 101: recordOf(second, "S1")}
+	s := snap(records, first, second, marked(110, 100, 100, "S1"), marked(111, 101, 101, "S1"))
+	wantShape(t, attributeClaude(s), "100:S1 members[110] commands[]; 101:S1 members[111] commands[]; uncertain 0")
+	f := endFakeOf(t, s)
+	res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), "S1", "idle")
+	endWant(t, f, res, err, "100:ended 110:ended; freed 210", "100 TERM@0s 110 TERM@0s")
+}
+
+func TestEndClaudeSessionNotASession(t *testing.T) {
+	agent := ccProc(105, 100)
+	s := ccSnap(agent, marked(110, 100, 110, "S1"))
+	s.Records[105] = recordOf(agent, "S5")
+	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[110]; uncertain 0")
+	for _, c := range []struct {
+		name    string
+		pid     int32
+		session string // the session id it carries
+	}{
+		{"a sub-agent", 105, "S5"},
+		{"a command", 110, "S1"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := endFakeOf(t, s)
+			res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(c.pid), c.session, "idle")
+			endWant(t, f, res, err, fmt.Sprintf("%d:changed; freed 0", c.pid), "")
+		})
+	}
+}
+
+func TestEndClaudeSessionUnreadableSnapshot(t *testing.T) {
+	f := endFakeOf(t, ccSnap())
+	f.err = errors.New("no process table")
+	res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), "S1", "idle")
+	endWantCode(t, err, "unreadable")
+	endWantNothing(t, f, res)
+}
+
+func TestEndClaudeResultsHoldNoNull(t *testing.T) {
+	ctx := context.Background()
+	results := map[string]ClaudeEndResult{}
+	f := endFakeOf(t, ccSnap())
+	results["no targets"], _ = endClaudeProcsWith(ctx, f.source(), "S1", nil)
+	results["a session that changed"], _ = endClaudeSessionWith(ctx, f.source(), endTarget(100), "S2", "idle")
+	cleanzo := marked(900, 100, 900, "S1")
+	cleanzo.Args = []string{"cleanzo"}
+	results["Cleanzo's own session"], _ = endClaudeSessionWith(ctx, endFakeOf(t, ccSnap(cleanzo)).source(), endTarget(100), "S1", "idle")
+	broken := endFakeOf(t, ccSnap())
+	broken.err = errors.New("no process table")
+	results["processes, unreadable"], _ = endClaudeProcsWith(ctx, broken.source(), "S1", []ClaudeTarget{endTarget(110)})
+	results["a session, unreadable"], _ = endClaudeSessionWith(ctx, broken.source(), endTarget(100), "S1", "idle")
+	for name, res := range results {
+		if data, err := json.Marshal(res); err != nil || strings.Contains(string(data), "null") {
+			t.Errorf("%s: %s, %v; want no null", name, data, err)
+		}
 	}
 }
 

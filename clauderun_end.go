@@ -61,9 +61,33 @@ func endClaudeProcsWith(ctx context.Context, src claudeSource, session string, t
 
 // endClaudeSessionWith ends the open session whose Claude Code process is
 // target, with its sub-agents and helpers, while it is still session in the
-// status the user saw.
+// status the user saw: seen idle, it must still be idle. What it started is
+// left alone. The session Cleanzo runs under is refused with "blocked"; a
+// target that is not such a session any more is "changed" and gets no
+// signal.
 func endClaudeSessionWith(ctx context.Context, src claudeSource, target ClaudeTarget, session, status string) (ClaudeEndResult, error) {
-	return ClaudeEndResult{Procs: []ClaudeEnded{}}, nil
+	s, err := src.snapshot()
+	if err != nil {
+		return ClaudeEndResult{Procs: []ClaudeEnded{}}, codeError{Code: "unreadable"}
+	}
+	a := attributeClaude(s)
+	var open *claudeOpen
+	for i := range a.Sessions {
+		if p := a.Sessions[i].Proc; p.Pid == target.Pid && p.Start == target.Start && claudeEndable(p, s.UID) {
+			open = &a.Sessions[i]
+		}
+	}
+	if open != nil && open.Own {
+		return ClaudeEndResult{Procs: []ClaudeEnded{}}, codeError{Code: "blocked"}
+	}
+	if open == nil || open.ID != session || (status == "idle" && open.Record.Status != "idle") {
+		return ClaudeEndResult{Procs: []ClaudeEnded{{Pid: target.Pid, Result: claudeResultChanged}}}, nil
+	}
+	ends := []claudeEnding{newClaudeEnding(open.Proc, s.UID)}
+	for _, m := range open.Members {
+		ends = append(ends, newClaudeEnding(m, s.UID))
+	}
+	return claudeEnd(ctx, src, ends), nil
 }
 
 // claudeEnding is one process to end: its pid and start in the fresh
