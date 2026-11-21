@@ -175,3 +175,85 @@ func TestClaudeCleanzoFamilyIsLeftOut(t *testing.T) {
 	a := attributeClaude(ccSnap(hidden(890, 100, 890), marked(900, 890, 900, "S1"), marked(901, 900, 901, "S1")))
 	wantShape(t, a, "100:S1 own members[] commands[]; uncertain 0")
 }
+
+// ---- detached processes ----------------------------------------------------
+
+func TestClaudeDetachedOpenByID(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(120, 1, 120, "S1")))
+	wantShape(t, a, "100:S1 members[] commands[120]; uncertain 0")
+}
+
+func TestClaudeDetachedOpenByClaudePid(t *testing.T) {
+	p := marked(120, 1, 120, "S0")
+	p.Env.Pid = 100
+	wantShape(t, attributeClaude(ccSnap(p)), "100:S1 members[] commands[120]; uncertain 0")
+}
+
+func TestClaudeDetachedClosed(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(120, 1, 120, "S9")))
+	wantShape(t, a, "100:S1 members[] commands[]; left S9[120]; uncertain 0")
+}
+
+func TestClaudeOutputFileClue(t *testing.T) {
+	p := hidden(130, 1, 130)
+	p.Out = "S9"
+	wantShape(t, attributeClaude(ccSnap(p)), "100:S1 members[] commands[]; left S9[130]; uncertain 0")
+}
+
+func TestClaudeHiddenParentFollowsChild(t *testing.T) {
+	a := attributeClaude(ccSnap(hidden(140, 1, 140), marked(141, 140, 141, "S9")))
+	wantShape(t, a, "100:S1 members[] commands[]; left S9[140 141]; uncertain 0")
+}
+
+func TestClaudeHiddenChildFollowsParent(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(150, 1, 150, "S9"), hidden(151, 150, 151)))
+	wantShape(t, a, "100:S1 members[] commands[]; left S9[150 151]; uncertain 0")
+}
+
+func TestClaudeFollowsChildrenFiveRoundsOnly(t *testing.T) {
+	for _, c := range []struct {
+		above int32 // hidden processes in a row above 149, the topmost under launchd
+		want  string
+	}{
+		{5, "100:S1 members[] commands[]; left S9[144 145 146 147 148 149]; uncertain 0"},
+		{6, "100:S1 members[] commands[]; uncertain 0"},
+	} {
+		t.Run(fmt.Sprint(c.above, " above"), func(t *testing.T) {
+			procs := []claudeProc{marked(149, 148, 149, "S9")}
+			for pid := int32(148); pid >= 149-c.above; pid-- {
+				parent := pid - 1
+				if pid == 149-c.above {
+					parent = 1
+				}
+				procs = append(procs, hidden(pid, parent, pid))
+			}
+			wantShape(t, attributeClaude(ccSnap(procs...)), c.want)
+		})
+	}
+}
+
+func TestClaudeWrapperAloneIsARow(t *testing.T) {
+	w := wrapper(170, 1, "npm run dev")
+	w.Out = "S9"
+	wantShape(t, attributeClaude(ccSnap(w)), "100:S1 members[] commands[]; left S9[170]; uncertain 0")
+}
+
+func TestClaudeAppHelpersFoldIntoTheApp(t *testing.T) {
+	const app = "/Applications/Sample Browser.app" // not on the Dock
+	browser := marked(180, 1, 180, "S9")
+	browser.Path = app + "/Contents/MacOS/Sample Browser"
+	helper := marked(181, 180, 180, "S9")
+	helper.Path = app + "/Contents/Frameworks/Sample Browser Helper.app/Contents/MacOS/Sample Browser Helper"
+	wantShape(t, attributeClaude(ccSnap(browser, helper)), "100:S1 members[] commands[]; left S9[180+181]; uncertain 0")
+}
+
+func TestClaudeHiddenParentOfTwoSessions(t *testing.T) {
+	// The children of 140 carry different ids, so it takes neither.
+	children := []claudeProc{marked(141, 140, 141, "S8"), marked(142, 140, 142, "S9")}
+	detached := attributeClaude(ccSnap(append([]claudeProc{hidden(140, 1, 140)}, children...)...))
+	wantShape(t, detached, "100:S1 members[] commands[]; uncertain 0")
+	// Under the session it still follows its parent, and its children,
+	// carrying other ids, are not listed.
+	attached := attributeClaude(ccSnap(append([]claudeProc{hidden(140, 100, 140)}, children...)...))
+	wantShape(t, attached, "100:S1 members[] commands[140]; uncertain 0")
+}

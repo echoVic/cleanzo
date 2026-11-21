@@ -91,10 +91,23 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 	t.findCandidates(s, above)
 	t.carryIDs()
 
-	open := map[int32]int32{} // each listed candidate to the Claude Code process heading its session
-	for pid := range t.id {
-		if cc, ok := t.climb(pid); ok && cc != 0 {
-			open[pid] = t.claude[cc]
+	type place struct {
+		open   int32  // the Claude Code process heading the open session it belongs to
+		closed string // or the closed session that left it
+	}
+	places := map[int32]place{}
+	for pid, id := range t.id {
+		cc, ok := t.climb(pid)
+		switch {
+		case !ok:
+		case cc != 0:
+			places[pid] = place{open: t.claude[cc]}
+		default:
+			if head, open := t.openSession(t.procs[pid], id); open {
+				places[pid] = place{open: head}
+			} else {
+				places[pid] = place{closed: id}
+			}
 		}
 	}
 
@@ -110,11 +123,15 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		}
 	}
 	commands := map[int32][]claudeProc{}
-	for pid, head := range open {
-		if p := t.procs[pid]; slices.Contains(groups[head], p.Pgid) {
-			members[head] = append(members[head], p)
-		} else {
-			commands[head] = append(commands[head], p)
+	left := map[string][]claudeProc{}
+	for pid, at := range places {
+		switch p := t.procs[pid]; {
+		case at.closed != "":
+			left[at.closed] = append(left[at.closed], p)
+		case slices.Contains(groups[at.open], p.Pgid):
+			members[at.open] = append(members[at.open], p)
+		default:
+			commands[at.open] = append(commands[at.open], p)
 		}
 	}
 	slices.SortFunc(a.Sessions, func(x, y claudeOpen) int { return claudeByStart(x.Proc, y.Proc) })
@@ -124,6 +141,12 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		a.Sessions[i].Members = members[head]
 		a.Sessions[i].Commands = t.rows(commands[head])
 	}
+	for id, procs := range left {
+		a.Left = append(a.Left, claudeLeftBehind{ID: id, Rows: t.rows(procs)})
+	}
+	slices.SortFunc(a.Left, func(x, y claudeLeftBehind) int {
+		return cmp.Or(cmp.Compare(x.Rows[0].Lead.Start, y.Rows[0].Lead.Start), strings.Compare(x.ID, y.ID))
+	})
 	return a
 }
 
@@ -195,12 +218,18 @@ func (t *claudeTable) findCandidates(s claudeSnapshot, above map[int32]bool) {
 }
 
 // carryIDs gives the candidates the session ids they carry: a marked one its
-// marker's; one that shows no environment the id its children agree on,
-// passed up claudeIDRounds generations, else its parent's.
+// marker's; one that shows no environment the one of its output file, else
+// the one its children agree on, passed up claudeIDRounds generations, else
+// its parent's.
 func (t *claudeTable) carryIDs() {
 	for pid := range t.cand {
-		if env := t.procs[pid].Env; env.Seen && env.Marked && env.Session != "" {
-			t.id[pid] = env.Session
+		switch p := t.procs[pid]; {
+		case p.Env.Seen:
+			if p.Env.Marked && p.Env.Session != "" {
+				t.id[pid] = p.Env.Session
+			}
+		case p.Out != "":
+			t.id[pid] = p.Out
 		}
 	}
 	for range claudeIDRounds {
@@ -292,21 +321,66 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 	return 0, false
 }
 
-// rows merges the processes listed in one place into rows: the shell Claude
-// Code runs a command in joins the oldest other row of its process group.
+// openSession finds the open session of the detached candidate p carrying
+// id: the one of the Claude Code process its CLAUDE_PID names, else the one
+// of the oldest Claude Code process whose session id is id. It returns the
+// Claude Code process heading that session; ok is false when there is none.
+func (t *claudeTable) openSession(p claudeProc, id string) (head int32, ok bool) {
+	if head, ok := t.claude[p.Env.Pid]; ok {
+		return head, true
+	}
+	var oldest claudeProc
+	for pid := range t.claude {
+		if q := t.procs[pid]; t.records[pid].SessionID == id && (!ok || claudeByStart(q, oldest) < 0) {
+			oldest, ok = q, true
+		}
+	}
+	return t.claude[oldest.Pid], ok
+}
+
+// rows merges the processes listed in one place into rows: an app's helpers,
+// inside the same outermost bundle, join the topmost of them they descend
+// from; then the shell Claude Code runs a command in joins the oldest other
+// row of its process group.
 func (t *claudeTable) rows(procs []claudeProc) []claudeRow {
 	procs = slices.SortedFunc(slices.Values(procs), claudeByStart)
-	into := map[int32]int32{} // a folded process to the lead of its row
+	here := make(map[int32]bool, len(procs))
+	for _, p := range procs {
+		here[p.Pid] = true
+	}
+	into := map[int32]int32{} // a folded process to the process it joins
+	for _, p := range procs {
+		if bundle := outermostBundle(p.Path); bundle != "" {
+			for q := range t.ancestors(p.Pid) {
+				if here[q.Pid] && strings.EqualFold(outermostBundle(q.Path), bundle) {
+					into[p.Pid] = q.Pid
+				}
+			}
+		}
+	}
 	for _, w := range procs {
-		if _, ok := claudeWrapperCommand(w.Args); !ok || w.Pid != w.Pgid {
+		if _, folded := into[w.Pid]; folded || w.Pid != w.Pgid {
+			continue
+		}
+		if _, ok := claudeWrapperCommand(w.Args); !ok {
 			continue
 		}
 		for _, r := range procs {
-			if r.Pid != w.Pid && r.Pgid == w.Pgid {
+			if _, folded := into[r.Pid]; !folded && r.Pid != w.Pid && r.Pgid == w.Pgid {
 				into[w.Pid] = r.Pid
 				break
 			}
 		}
+	}
+	lead := func(pid int32) int32 {
+		for range len(procs) {
+			next, folded := into[pid]
+			if !folded {
+				break
+			}
+			pid = next
+		}
+		return pid
 	}
 	var rows []claudeRow
 	at := map[int32]int{} // a lead to its row's index
@@ -317,8 +391,9 @@ func (t *claudeTable) rows(procs []claudeProc) []claudeRow {
 		}
 	}
 	for _, p := range procs {
-		if lead, folded := into[p.Pid]; folded {
-			rows[at[lead]].Folded = append(rows[at[lead]].Folded, p)
+		if _, folded := into[p.Pid]; folded {
+			i := at[lead(p.Pid)]
+			rows[i].Folded = append(rows[i].Folded, p)
 		}
 	}
 	return rows
