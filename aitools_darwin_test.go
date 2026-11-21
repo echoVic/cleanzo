@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1058,5 +1059,134 @@ func TestMeasureAICountsHardLinksOnce(t *testing.T) {
 	size, files, _ := measureAI(context.Background(), dir, nil)
 	if files != 3 || size > 64*1024 {
 		t.Fatalf("size = %d, files = %d", size, files)
+	}
+}
+
+// aiHasPart reports whether tool lists the part id.
+func aiHasPart(tool AITool, id string) bool {
+	return slices.ContainsFunc(tool.Parts, func(p AIPart) bool { return p.ID == id })
+}
+
+// TestScanAIToolListsWorktrees: Claude Code's page lists the worktrees its
+// agents made as one sensitive part, a group each, largest first. They live
+// in the repositories, so the tool's size leaves them out.
+func TestScanAIToolListsWorktrees(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	small := addWorktree(t, git, repo, "agent-a", "agent-a")
+	large := addWorktree(t, git, repo, "agent-b", "agent-b")
+	writeFile(t, filepath.Join(large, "big.bin"), 64*1024)
+	ctx := context.Background()
+	all, err := (Cleaner{}).ScanAITools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := (Cleaner{}).ScanAITool(ctx, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude := res.Tools[0]
+	p := aiPart_(t, claude, "claude.worktrees")
+	if p.Level != aiSensitive || !p.Worktrees || !p.RunSafe || p.Running || p.Path != "" || p.Files != 2 || len(p.Groups) != 2 {
+		t.Fatalf("part = %+v", p)
+	}
+	b, a := p.Groups[0], p.Groups[1]
+	if b.Key != large || b.Path != large || b.Label != "agent-b" || b.Count != 1 || b.Repo != repo || b.Branch != "agent-b" || b.State != wtDirty || b.Changes != 1 || a.Key != small || a.State != wtClean {
+		t.Fatalf("groups = %+v", p.Groups)
+	}
+	if b.Size <= a.Size || p.Size != a.Size+b.Size || p.Last != max(a.Last, b.Last) || p.Last == 0 {
+		t.Fatalf("part = %+v", p)
+	}
+	without := aiTool_(t, all, "claude")
+	if aiHasPart(without, "claude.worktrees") || claude.Size != without.Size {
+		t.Fatalf("size %d, %d without worktrees", claude.Size, without.Size)
+	}
+}
+
+// TestScanAIToolsLeavesWorktreesOut: the AI space page keeps Codex's
+// worktrees folder as an unknown part; Codex's own page lists the worktrees
+// in it instead.
+func TestScanAIToolsLeavesWorktreesOut(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	wt := filepath.Join(home, ".codex", "worktrees", "ab12", "app")
+	gitIn(t, git, repo, "worktree", "add", "-q", "-b", "codex-1", wt, "main")
+	ctx := context.Background()
+	all, err := (Cleaner{}).ScanAITools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codex := aiTool_(t, all, "codex"); !aiHasPart(codex, "unknown:worktrees") || aiHasPart(codex, "codex.worktrees") {
+		t.Fatalf("AI space parts = %+v", codex.Parts)
+	}
+	one, err := (Cleaner{}).ScanAITool(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex := one.Tools[0]
+	p := aiPart_(t, codex, "codex.worktrees")
+	if aiHasPart(codex, "unknown:worktrees") || p.Path != filepath.Join(home, ".codex", "worktrees") || p.RunSafe || len(p.Groups) != 1 || p.Groups[0].Key != wt || p.Groups[0].Branch != "codex-1" {
+		t.Fatalf("part = %+v", p)
+	}
+}
+
+// TestCleanAIToolsWorktrees: a selection names each worktree by the path a
+// scan found and the state the user saw. Codex's worktrees go only while
+// Codex is not running; Claude Code's go while it runs too.
+func TestCleanAIToolsWorktrees(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	first := addWorktree(t, git, repo, "agent-a", "agent-a")
+	second := addWorktree(t, git, repo, "agent-b", "agent-b")
+	codex := filepath.Join(home, ".codex", "worktrees", "ab12", "app")
+	gitIn(t, git, repo, "worktree", "add", "-q", "-b", "codex-1", codex, "main")
+	clean := func(sel AISelection) AIPartResult {
+		t.Helper()
+		res, err := (Cleaner{}).CleanAITools(context.Background(), []AISelection{sel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Parts[0]
+	}
+	if r := clean(AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{first}, Seen: []string{wtClean}}); r.Skipped != "" || r.Moved != 1 || r.Freed == 0 || len(r.Failed) != 0 || exists(first) || !trashed(home, "agent-a") {
+		t.Fatalf("result = %+v", r)
+	}
+	if r := clean(AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{second}}); r.Skipped != "blocked" || !exists(second) {
+		t.Fatalf("without what the user saw: %+v", r)
+	}
+	// A folder the scan did not find as a worktree is not taken on the page's word.
+	other := filepath.Join(home, "work", "app")
+	if r := clean(AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{other}, Seen: []string{wtClean}}); r.Moved != 0 || len(r.Failed) != 1 || !strings.HasSuffix(r.Failed[0], ": "+wtFailChanged) || !exists(other) {
+		t.Fatalf("a folder that is not a worktree: %+v", r)
+	}
+	aiProcesses = func() (string, error) { return "/opt/homebrew/bin/codex exec hi\n", nil }
+	if r := clean(AISelection{Tool: "codex", Part: "codex.worktrees", Groups: []string{codex}, Seen: []string{wtClean}}); r.Skipped != "running" || !exists(codex) {
+		t.Fatalf("while Codex runs: %+v", r)
+	}
+	aiProcesses = func() (string, error) { return "/Users/me/.local/bin/claude --resume\n", nil }
+	if r := clean(AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{second}, Seen: []string{wtClean}}); r.Skipped != "" || r.Moved != 1 || exists(second) {
+		t.Fatalf("while Claude Code runs: %+v", r)
+	}
+}
+
+// TestCleanAIToolsWorktreeInUse: a worktree holding a file a process has
+// open is kept; the rest of the selection goes.
+func TestCleanAIToolsWorktreeInUse(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	busy := addWorktree(t, git, repo, "agent-a", "agent-a")
+	idle := addWorktree(t, git, repo, "agent-b", "agent-b")
+	stubUsage(t, &usageGuard{open: []string{strings.ToLower(resolvePath(filepath.Join(busy, "README.md")))}})
+	res, err := (Cleaner{}).CleanAITools(context.Background(), []AISelection{{Tool: "claude", Part: "claude.worktrees", Groups: []string{busy, idle}, Seen: []string{wtClean, wtClean}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Parts[0]; r.Moved != 1 || r.Kept != 1 || r.Skipped != "" || len(r.Failed) != 0 || r.Freed == 0 || res.Freed != r.Freed || !exists(busy) || exists(idle) || !trashed(home, "agent-b") {
+		t.Fatalf("result = %+v", res)
 	}
 }

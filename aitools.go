@@ -28,8 +28,9 @@ import (
 //
 //   protected  settings, sign-in, skills, plugins, the version in use;
 //              never offered
-//   sensitive  conversation history; offered per project or month, never
-//              preselected, and the last 24 hours are left alone
+//   sensitive  conversation history, offered per project or month with the
+//              last 24 hours left alone, and the agents' worktrees, offered
+//              one by one; never preselected
 //   optional   regrows or loses little (prompt history, file snapshots,
 //              generated images); offered, not preselected
 //   safe       logs, caches, leftovers, old releases; preselected
@@ -128,6 +129,7 @@ var aiTools = []aiTool{
 			{ID: "claude.memory", Path: "CLAUDE.md", Level: aiProtected},
 			{ID: "claude.credentials", Path: ".credentials.json", Level: aiProtected},
 		},
+		Worktrees: "claude",
 	},
 	{
 		ID: "codex", Name: "Codex", Home: ".codex",
@@ -153,6 +155,7 @@ var aiTools = []aiTool{
 			{ID: "codex.auth", Path: "auth.json", Level: aiProtected},
 			{ID: "codex.memory", Path: "AGENTS.md", Level: aiProtected},
 		},
+		Worktrees: "codex",
 	},
 	{
 		// One page for TRAE: the CLI keeps ~/.trae, the IDE (an Electron app,
@@ -458,7 +461,7 @@ func (Cleaner) ScanAITools(ctx context.Context) (AIScanResult, error) {
 	running := aiRunning()
 	res := AIScanResult{ScannedAt: aiNow().Unix()}
 	for _, tool := range aiTools {
-		t, err := scanAITool(ctx, tool, running)
+		t, err := scanAITool(ctx, tool, running, false)
 		if err != nil {
 			return AIScanResult{}, err
 		}
@@ -493,13 +496,14 @@ func aiToolInstalled(tool aiTool) bool {
 // errAIUnknownTool is a tool id the table does not have.
 var errAIUnknownTool = errors.New("unknown-tool")
 
-// ScanAITool measures one tool's folder; each tool has its own page.
+// ScanAITool measures one tool's folder; each tool has its own page, which
+// also lists the worktrees the tool's agents made, on macOS.
 func (Cleaner) ScanAITool(ctx context.Context, id string) (AIScanResult, error) {
 	for _, tool := range aiTools {
 		if tool.ID != id {
 			continue
 		}
-		t, err := scanAITool(ctx, tool, aiRunning())
+		t, err := scanAITool(ctx, tool, aiRunning(), runtime.GOOS == "darwin")
 		if err != nil {
 			return AIScanResult{}, err
 		}
@@ -508,8 +512,9 @@ func (Cleaner) ScanAITool(ctx context.Context, id string) (AIScanResult, error) 
 	return AIScanResult{}, errAIUnknownTool
 }
 
-// scanAITool measures one tool's folders part by part.
-func scanAITool(ctx context.Context, tool aiTool, running map[string]bool) (AITool, error) {
+// scanAITool measures one tool's folders part by part, and with worktrees
+// lists the worktrees its agents made as one more part.
+func scanAITool(ctx context.Context, tool aiTool, running map[string]bool, worktrees bool) (AITool, error) {
 	home := filepath.Join(homeDir(), tool.Home)
 	out := AITool{ID: tool.ID, Name: tool.Name, Path: home, Running: aiToolRunning(running, tool), RunningApps: aiRunningApps(running, tool), Parts: []AIPart{}}
 	for _, key := range aiRootKeys(tool) {
@@ -518,7 +523,11 @@ func scanAITool(ctx context.Context, tool aiTool, running map[string]bool) (AITo
 			continue
 		}
 		out.Installed = true
-		if err := scanAIRoot(ctx, tool, key, root, running[aiRootRunKey(tool, key)], &out); err != nil {
+		var found *AIPart
+		if key == "" && worktrees && tool.Worktrees != "" {
+			found = aiWorktreePart(ctx, tool, running)
+		}
+		if err := scanAIRoot(ctx, tool, key, root, running[aiRootRunKey(tool, key)], &out, found); err != nil {
 			return AITool{}, err
 		}
 	}
@@ -548,8 +557,9 @@ func aiRunningApps(running map[string]bool, tool aiTool) []string {
 // out. What the table does not know is listed as unknown, never offered:
 // per top-level entry in the tool's own folder (what cli/ holds beside its
 // known parts counts as "cli"), as one item in another app's folder (an
-// Electron app keeps dozens of its own).
-func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool, out *AITool) error {
+// Electron app keeps dozens of its own). worktrees, when not nil, is added
+// too, and accounts for the folder it lists.
+func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool, out *AITool, worktrees *AIPart) error {
 	var covered []string // paths a known part accounts for
 	for _, part := range tool.Parts {
 		if part.Root != key {
@@ -600,6 +610,12 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 		}
 		out.Parts = append(out.Parts, p)
 	}
+	if worktrees != nil {
+		if worktrees.Path != "" {
+			covered = append(covered, worktrees.Path)
+		}
+		out.Parts = append(out.Parts, *worktrees)
+	}
 	rest := aiUncovered(root, covered)
 	add := func(id, name, path string, paths []string) {
 		var size, files, last int64
@@ -645,6 +661,29 @@ func scanAIRoot(ctx context.Context, tool aiTool, key, root string, running bool
 		}
 	}
 	return nil
+}
+
+// aiWorktreePart lists the worktrees the tool's agents made as one part, a
+// group each, largest first; nil when there are none. Claude Code's are in
+// the repositories, so the part has no folder of its own and may be cleaned
+// while it runs, worktree by worktree; Codex's are in ~/.codex/worktrees.
+func aiWorktreePart(ctx context.Context, tool aiTool, running map[string]bool) *AIPart {
+	found := findWorktrees(ctx, tool.Worktrees)
+	if len(found) == 0 {
+		return nil
+	}
+	p := AIPart{ID: tool.ID + ".worktrees", Level: aiSensitive, Groups: []AIGroup{}, Worktrees: true, RunSafe: tool.Worktrees == "claude", Running: running[tool.ID]}
+	if tool.Worktrees == "codex" {
+		p.Path = filepath.Join(homeDir(), tool.Home, "worktrees")
+	}
+	for _, w := range found {
+		p.Size += w.Size
+		p.Files++
+		p.Last = max(p.Last, w.Last)
+		p.Groups = append(p.Groups, AIGroup{Key: w.Path, Label: w.Name, Size: w.Size, Count: 1, Last: w.Last, Path: w.Path, Repo: w.Repo, Branch: w.Branch, State: w.State, Changes: w.Changes})
+	}
+	sort.SliceStable(p.Groups, func(i, j int) bool { return p.Groups[i].Size > p.Groups[j].Size })
+	return &p
 }
 
 // aiUncovered lists the entries in dir that no covered path is or holds,
@@ -1087,6 +1126,9 @@ func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard, co
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx = contexts[0]
 	}
+	if tool, ok := aiWorktreeTool(sel); ok {
+		return cleanAIWorktrees(ctx, sel, tool, running, guard)
+	}
 	r := AIPartResult{Tool: sel.Tool, Part: sel.Part, Failed: []string{}}
 	tool, part, ok := findAIPart(sel.Tool, sel.Part)
 	switch {
@@ -1126,6 +1168,61 @@ func cleanAIPart(sel AISelection, running map[string]bool, guard *usageGuard, co
 		}
 		r.Moved++
 		r.Freed += size
+	}
+	if r.Moved == 0 && len(r.Failed) == 0 && r.Kept > 0 {
+		r.Skipped = "in-use"
+	}
+	return r
+}
+
+// aiWorktreeTool is the tool whose worktrees sel picks from: its part is
+// <tool>.worktrees.
+func aiWorktreeTool(sel AISelection) (aiTool, bool) {
+	for _, tool := range aiTools {
+		if tool.ID == sel.Tool && tool.Worktrees != "" && sel.Part == tool.ID+".worktrees" {
+			return tool, true
+		}
+	}
+	return aiTool{}, false
+}
+
+// cleanAIWorktrees moves the selected worktrees of tool's agents to the
+// Trash, each while it is still in the state the user saw. A worktree is
+// named by its path, which must be one a search now finds: what the page
+// sends is not taken on its word. Off macOS nothing is looked at.
+func cleanAIWorktrees(ctx context.Context, sel AISelection, tool aiTool, running map[string]bool, guard *usageGuard) AIPartResult {
+	r := AIPartResult{Tool: sel.Tool, Part: sel.Part, Failed: []string{}}
+	switch {
+	case runtime.GOOS != "darwin":
+		r.Skipped = "blocked"
+		return r
+	case running[tool.ID] && tool.Worktrees != "claude":
+		r.Skipped = "running"
+		return r
+	case len(sel.Groups) == 0 || len(sel.Seen) != len(sel.Groups):
+		r.Skipped = "blocked"
+		return r
+	}
+	found := findWorktrees(ctx, tool.Worktrees)
+	for i, key := range sel.Groups {
+		if ctx.Err() != nil {
+			break
+		}
+		at := slices.IndexFunc(found, func(w agentWorktree) bool { return w.Path == key })
+		if at < 0 {
+			r.Failed = append(r.Failed, displayHome(key)+": "+wtFailChanged)
+			continue
+		}
+		freed, code := removeWorktree(ctx, found[at], sel.Seen[i], guard)
+		switch code {
+		case "":
+			r.Moved++
+			r.Freed += freed
+		case "in-use":
+			r.Kept++
+		default:
+			r.Failed = append(r.Failed, displayHome(key)+": "+code)
+		}
 	}
 	if r.Moved == 0 && len(r.Failed) == 0 && r.Kept > 0 {
 		r.Skipped = "in-use"

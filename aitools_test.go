@@ -183,3 +183,24 @@ func TestAIGroupKeysUseSlashes(t *testing.T) {
 		}
 	}
 }
+
+// TestAIWorktreesOnlyOnMacOS: off macOS no page lists agent worktrees, and
+// a selection of them is refused without anything being looked at.
+func TestAIWorktreesOnlyOnMacOS(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("worktrees are looked for on macOS")
+	}
+	setHome(t, t.TempDir())
+	mustMkdir(t, filepath.Join(homeDir(), ".claude"))
+	res, err := (Cleaner{}).ScanAITool(context.Background(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(res.Tools[0].Parts, func(p AIPart) bool { return p.Worktrees }) {
+		t.Fatalf("parts = %+v", res.Tools[0].Parts)
+	}
+	sel := AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{filepath.Join(homeDir(), "code")}, Seen: []string{wtClean}}
+	if r := cleanAIPart(sel, map[string]bool{}, &usageGuard{running: map[string]bool{}}); r.Skipped != "blocked" || r.Moved != 0 || len(r.Failed) != 0 {
+		t.Fatalf("result = %+v", r)
+	}
+}
