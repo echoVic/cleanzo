@@ -449,7 +449,14 @@ func claudeByStart(a, b claudeProc) int {
 // claudeRecordValid reports whether r is the session record of p, a process
 // of the account uid.
 func claudeRecordValid(p claudeProc, r claudeRecord, uid uint32) bool {
-	return p.UID == uid && r.ProcStart == time.UnixMicro(p.Start).UTC().Format(claudeProcStartLayout)
+	started := time.UnixMicro(p.Start).UTC().Format(claudeProcStartLayout)
+	return p.UID == uid && squeezeSpaces(r.ProcStart) == squeezeSpaces(started)
+}
+
+// squeezeSpaces is s with each run of white space made one space and none at
+// either end.
+func squeezeSpaces(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // claudeWrapperCommand returns the command inside the shell Claude Code runs

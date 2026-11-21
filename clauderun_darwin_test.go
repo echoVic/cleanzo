@@ -317,3 +317,65 @@ func TestClaudeMarkedWithoutSessionID(t *testing.T) {
 	a = attributeClaude(snap(nil, ccProc(100, 1), marked(120, 1, 120, "")))
 	wantShape(t, a, "100: members[] commands[]; uncertain 0 norecords")
 }
+
+// ---- records and one session id --------------------------------------------
+
+func TestClaudeRecordMustMatchProcStart(t *testing.T) {
+	p := ccProc(100, 1)
+	if !claudeRecordValid(p, recordOf(p, "S1"), testUID) {
+		t.Fatal("a record of the process's start is not valid")
+	}
+	r := recordOf(p, "S1")
+	r.ProcStart = time.UnixMicro(p.Start).Add(time.Second).UTC().Format("Mon Jan _2 15:04:05 2006")
+	if claudeRecordValid(p, r, testUID) {
+		t.Error("a record of a start one second later is valid")
+	}
+	// The process is still Claude Code's, by its argv, with no session id.
+	a := attributeClaude(snap(map[int32]claudeRecord{100: r}, p))
+	wantShape(t, a, "100: members[] commands[]; uncertain 0 norecords")
+	if len(a.Sessions) == 1 && a.Sessions[0].Record != (claudeRecord{}) {
+		t.Errorf("record = %+v, want none", a.Sessions[0].Record)
+	}
+}
+
+func TestClaudeRecordSqueezesSpaces(t *testing.T) {
+	p := ccProc(100, 1)
+	p.Start = time.Date(2026, time.November, 4, 9, 12, 33, 0, time.UTC).UnixMicro()
+	for _, procStart := range []string{"Wed Nov  4 09:12:33 2026", "Wed Nov 4 09:12:33 2026"} {
+		if !claudeRecordValid(p, claudeRecord{SessionID: "S1", ProcStart: procStart}, testUID) {
+			t.Errorf("procStart %q is not valid", procStart)
+		}
+	}
+}
+
+func TestClaudeRecordWithoutClaudeArgv(t *testing.T) {
+	p := ccProc(100, 1)
+	p.Args = []string{"2.1.321"}
+	wantShape(t, attributeClaude(snap(map[int32]claudeRecord{100: recordOf(p, "S1")}, p)), "100:S1 members[] commands[]; uncertain 0")
+	wantShape(t, attributeClaude(snap(nil, p)), "uncertain 0")
+}
+
+func TestClaudeRecordFieldsAreOptional(t *testing.T) {
+	p := ccProc(100, 1)
+	r := claudeRecord{SessionID: "S1", ProcStart: recordOf(p, "").ProcStart}
+	a := attributeClaude(snap(map[int32]claudeRecord{100: r}, p))
+	wantShape(t, a, "100:S1 members[] commands[]; uncertain 0")
+	if len(a.Sessions) == 1 && a.Sessions[0].Record != r {
+		t.Errorf("record = %+v, want %+v", a.Sessions[0].Record, r)
+	}
+}
+
+func TestClaudeOtherAccountIsNotASession(t *testing.T) {
+	p := ccProc(100, 1)
+	p.UID = 0
+	wantShape(t, attributeClaude(snap(map[int32]claudeRecord{100: recordOf(p, "S1")}, p)), "uncertain 0")
+}
+
+func TestClaudeTwoProcessesOneSession(t *testing.T) {
+	first, second := ccProc(100, 1), ccProc(101, 1)
+	records := map[int32]claudeRecord{100: recordOf(first, "S1"), 101: recordOf(second, "S1")}
+	p := marked(120, 1, 120, "S1")
+	wantShape(t, attributeClaude(snap(records, first, second, p)), "100:S1 members[] commands[120]; 101:S1 members[] commands[]; uncertain 0")
+	p.Env.Pid = 101
+	wantShape(t, attributeClaude(snap(records, first, second, p)), "100:S1 members[] commands[]; 101:S1 members[] commands[120]; uncertain 0")
+}
