@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -98,4 +99,41 @@ func parseProcargs2(buf []byte) (args []string, env claudeEnv) {
 			}
 		}
 	}
+}
+
+// claudeOutputSession is the session whose command output the file at path
+// is: Claude Code writes it to /claude-<uid>/<project>/<session>/tasks/<name>
+// in the temporary folder. It is "" for any other path.
+func claudeOutputSession(path string) string {
+	parts := strings.Split(path, "/")
+	n := len(parts)
+	if n < 6 || parts[n-1] == "" || parts[n-2] != "tasks" || parts[n-4] == "" || !claudeSessionUUID(parts[n-3]) {
+		return ""
+	}
+	uid, ok := strings.CutPrefix(parts[n-5], "claude-")
+	if !ok || uid == "" || strings.Trim(uid, "0123456789") != "" {
+		return ""
+	}
+	return parts[n-3]
+}
+
+// claudeSessionUUID reports whether s is written as Claude Code writes a
+// session id: a UUID in lower-case hexadecimal.
+func claudeSessionUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range []byte(s) {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
 }

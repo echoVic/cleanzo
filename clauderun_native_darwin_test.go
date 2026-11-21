@@ -135,3 +135,28 @@ func TestParseProcargs2(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeOutputSession(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, c := range []struct{ path, want string }{
+		{"/private/tmp/claude-501/-Users-me-app/" + id + "/tasks/b1.output", id},
+		{"/claude-0/p/" + id + "/tasks/x", id},
+		{"/private/tmp/claude-501/" + id + "/tasks/b1.output", ""}, // no project
+		{"/private/tmp/claude-501/-Users-me-app/" + id + "/tasks/", ""},
+		{"/private/tmp/claude-501/-Users-me-app/" + id + "/logs/b1.output", ""},
+		{"/private/tmp/claude-501/-Users-me-app/" + id + "/tasks/sub/b1.output", ""},
+		{"/private/tmp/claude-me/-Users-me-app/" + id + "/tasks/b1.output", ""},
+		{"/private/tmp/claude-/-Users-me-app/" + id + "/tasks/b1.output", ""},
+		{"claude-501/-Users-me-app/" + id + "/tasks/b1.output", ""},
+		{"/private/tmp/claude-501/-Users-me-app/11111111-2222-3333-4444-55555555555A/tasks/b1.output", ""},
+		{"/private/tmp/claude-501/-Users-me-app/11111111-2222-3333-4444-5555555555555/tasks/b1.output", ""},
+		{"/private/tmp/claude-501/-Users-me-app/11111111_2222-3333-4444-555555555555/tasks/b1.output", ""},
+		{"/private/tmp/claude-501/-Users-me-app/S1/tasks/b1.output", ""},
+		{"/dev/ttys003", ""},
+		{"", ""},
+	} {
+		if got := claudeOutputSession(c.path); got != c.want {
+			t.Errorf("claudeOutputSession(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
