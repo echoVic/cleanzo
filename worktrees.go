@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -73,7 +74,8 @@ const (
 	worktreeGitLimit    = 5 * time.Second
 )
 
-// worktreeGit runs one git command for the worktree rules. Tests replace it.
+// worktreeGit runs one git command for the worktree rules and returns its
+// answer, what it printed on standard output. Tests replace it.
 var worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
 	return runToolWith(ctx, git, args, limit, func(cmd *exec.Cmd) ([]byte, error) {
 		// An inherited GIT_DIR or GIT_WORK_TREE would point git at another
@@ -84,7 +86,14 @@ var worktreeGit = func(ctx context.Context, git string, args []string, limit tim
 		if len(args) > 1 && args[0] == "-C" {
 			cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(args[1]))
 		}
-		return runToolCmd(cmd)
+		// A warning or a hint git prints on standard error would read as a
+		// line of its answer, so standard error goes nowhere. A child of git
+		// that keeps standard output open is not waited for.
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.WaitDelay = 100 * time.Millisecond
+		err := cmd.Run()
+		return out.Bytes(), err
 	})
 }
 
@@ -102,8 +111,7 @@ var worktreeLockPid = regexp.MustCompile(`\(pid (\d+)\)`)
 // worktreeObjectName matches a full SHA-1 or SHA-256 object name.
 var worktreeObjectName = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
-// worktreeRefLine matches a ref as for-each-ref prints it by default;
-// warnings git prints in the same stream do not.
+// worktreeRefLine matches a ref as for-each-ref prints it by default.
 var worktreeRefLine = regexp.MustCompile(`(?m)^(?:[0-9a-f]{40}|[0-9a-f]{64}) [a-z]+\trefs/(?:heads|tags|remotes)/`)
 
 // worktreeOperations are what git keeps in a worktree's record while an
@@ -514,10 +522,12 @@ func removeWorktree(ctx context.Context, w agentWorktree, seen string, guard *us
 	steady := context.WithoutCancel(ctx)
 	cleared := false
 	if !worktreeHas(filepath.Dir(path), filepath.Base(path)) {
-		_, err := worktreeGit(steady, git, []string{repo, "-c", "core.fsmonitor=false", "worktree", "remove", path}, worktreeGitLimit)
-		// git's word is checked: its record of this worktree must be gone.
-		_, lstat := os.Lstat(now.Admin)
-		cleared = err == nil && errors.Is(lstat, fs.ErrNotExist)
+		// The record says whether git forgot the worktree, not git's answer:
+		// a git its time limit stops may have cleared the record already,
+		// and one that answers success may have left it.
+		_, _ = worktreeGit(steady, git, []string{repo, "-c", "core.fsmonitor=false", "worktree", "remove", path}, worktreeGitLimit)
+		_, err := os.Lstat(now.Admin)
+		cleared = errors.Is(err, fs.ErrNotExist)
 	}
 	if !cleared {
 		_ = os.Rename(temp, path)

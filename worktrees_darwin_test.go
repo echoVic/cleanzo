@@ -416,6 +416,59 @@ func TestRemoveWorktreeWhenGitFails(t *testing.T) {
 	gitIn(t, git, wt, "status")
 }
 
+// TestRemoveWorktreeWhenGitFailsAfterForgetting: git that ends in an error,
+// as when its time limit stops it, after it has cleared its record of the
+// worktree has forgotten it all the same: the folder goes to the Trash.
+func TestRemoveWorktreeWhenGitFailsAfterForgetting(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	w := wtFound(t, "claude", wt)
+	saved := worktreeGit
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		out, err := saved(ctx, git, args, limit)
+		if slices.Contains(args, "remove") && err == nil {
+			return out, errors.New("signal: killed")
+		}
+		return out, err
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != "" {
+		t.Fatalf("code %q", code)
+	}
+	if !wtTrashed("agent-1", "README.md") || exists(wt) || exists(wt+worktreeTemp) || exists(admin) {
+		t.Fatalf("trashed %v, folder there %v, record there %v", wtTrashed("agent-1", "README.md"), exists(wt), exists(admin))
+	}
+	gitIn(t, git, repo, "switch", "-q", "agent-1")
+}
+
+// TestRemoveWorktreeWhenGitOnlySaysItForgot: git that answers success while
+// its record of the worktree is still there has not forgotten it: the
+// folder is back in place and still a worktree.
+func TestRemoveWorktreeWhenGitOnlySaysItForgot(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	admin := wtAdmin(t, wt)
+	w := wtFound(t, "claude", wt)
+	saved := worktreeGit
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if slices.Contains(args, "remove") {
+			return "", nil
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	if _, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen); code != wtFailGit {
+		t.Fatalf("code %q", code)
+	}
+	if !exists(filepath.Join(wt, "README.md")) || exists(wt+worktreeTemp) || !exists(admin) || wtTrashed("agent-1", "") {
+		t.Fatalf("folder in place %v, record there %v, trashed %v", exists(wt), exists(admin), wtTrashed("agent-1", ""))
+	}
+	gitIn(t, git, wt, "status")
+}
+
 // TestRemoveWorktreeWhenTheTempNameIsTaken: nothing moves when the name the
 // folder would wait under is taken, even by an empty folder a rename would
 // replace.
@@ -533,6 +586,27 @@ func TestWorktreeStatusIgnoresUserConfig(t *testing.T) {
 	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
 	writeText(t, filepath.Join(wt, "notes.txt"), "draft\n")
 	if w := wtFound(t, "claude", wt); w.State != wtDirty || w.Changes != 1 {
+		t.Fatalf("state = %s with %d changes", w.State, w.Changes)
+	}
+}
+
+// TestWorktreeGitAnswersOnStandardOutput: a warning or a hint git prints on
+// standard error is not part of its answer.
+func TestWorktreeGitAnswersOnStandardOutput(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	tools := t.TempDir()
+	fakeTool(t, tools, "git", `for arg in "$@"; do
+	if [ "$arg" = status ]; then
+		echo 'warning: made up' >&2
+		exit 0
+	fi
+done
+GIT_CONFIG_NOSYSTEM=1 exec `+shellPath(git)+` "$@"
+`)
+	toolDirs = func() []string { return []string{tools} }
+	if w := wtFound(t, "claude", wt); w.State != wtClean || w.Changes != 0 {
 		t.Fatalf("state = %s with %d changes", w.State, w.Changes)
 	}
 }
