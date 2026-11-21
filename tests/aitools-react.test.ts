@@ -523,7 +523,7 @@ test("the header button follows the tab: Rescan on Space after a scan, Refresh o
 
 const MB = 2 ** 20;
 
-/** worktree 的十种状态，后端判定的顺序；只有前两种能移走。 */
+/** worktree 的十种状态；只有前两种能移走。 */
 const WT_STATES = ["clean", "dirty", "in-use", "holds-worktrees", "submodules", "mid-operation", "unbranched-commits", "git-unavailable", "index-only", "unrecognized"] as const;
 
 /** 仓库 /Users/a/code/app 里的一个 worktree：key 和 path 是它的文件夹，名字是文件夹名，8 天没动。 */
@@ -557,7 +557,7 @@ test("groupSelectable: of the worktree states only clean and dirty can be ticked
   expect(groupSelectable(p, stateless, 30, NOW)).toBe(false);
 });
 
-test("isSessions: the worktree part is no conversation history; the history parts still are", () => {
+test("isSessions: the worktree part is not conversation history; the history parts still are", () => {
   expect(isSessions(worktreePart("claude", [worktree("a", "clean")]))).toBe(false);
   expect(isSessions(worktreePart("codex", [worktree("a", "clean")]))).toBe(false);
   expect(isSessions(fullPart("claude.sessions", "sensitive"))).toBe(true);
@@ -587,22 +587,24 @@ test("worktreeSeen gives the state of each picked worktree in the order of the k
 
 type PartRowProps = Parameters<typeof import("../src/react/ai/PartRow").PartRow>[0];
 
-/** 画一项（默认展开）：记下点了哪些「在访达中显示」。 */
+/** 画一项（默认展开）：记下点了哪些「在访达中显示」、勾了哪些组。 */
 async function partRow(env: Changes, part: AIPart, over: Partial<PartRowProps> = {}) {
   const { PartRow } = await import("../src/react/ai/PartRow");
   const { Checkbox } = await import("../src/ui/components/checkbox");
   const { Badge } = await import("../src/ui/components/badge");
   const reveals: string[] = [];
+  const toggles: [string, boolean][] = [];
   const page = env.page(PartRow, {
     part, windowDays: 30, scannedAt: NOW, picked: false, groups: new Set<string>(), expanded: true,
     canSelect: canPick(part, 30, NOW), chosenSize: 0,
-    onTogglePart() {}, onToggleGroup() {}, onExpand() {}, onReveal: (path) => { reveals.push(path); }, onPickOld() {}, onWindowChange() {},
+    onTogglePart() {}, onToggleGroup: (key, on) => { toggles.push([key, on]); }, onExpand() {},
+    onReveal: (path) => { reveals.push(path); }, onPickOld() {}, onWindowChange() {},
     ...over,
   });
   await page.settle();
   const checkboxes = () => page.ofType(Checkbox);
   return {
-    page, reveals, checkboxes,
+    page, reveals, toggles, checkboxes,
     /** 名字是 label 的勾选框。 */
     checkbox: (label: string) => checkboxes().find((el) => el.props["aria-label"] === label),
     /** 勾选框的 aria-describedby 指着的文字，按顺序用空格连起来。 */
@@ -634,6 +636,12 @@ test("a worktree part has no checkbox of its own, no window selector when expand
     expect(r.page.find((el) => el.props.role === "radiogroup" || "onWindowChange" in el.props || "onPickOld" in el.props)).toBeUndefined();
     expect(r.page.text()).not.toContain(t("ai.sessionHint"));
     expect(r.page.text()).not.toContain(t("ai.pickOld"));
+    // 一个一个勾：勾的是哪一个就交给页面哪一个，勾上的才显示勾
+    r.checkbox("a")!.props.onCheckedChange(true);
+    expect(r.toggles).toEqual([[wtKey("a"), true]]);
+    r.page.setProps({ picked: true, groups: new Set([wtKey("a")]) });
+    await r.page.settle();
+    expect(r.checkboxes().map((el) => el.props.checked)).toEqual([true, false]);
   } finally { env.restore(); }
 });
 

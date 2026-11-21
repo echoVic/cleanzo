@@ -122,7 +122,7 @@ export function PartRow(p: Props) {
             <span>{name}</span>
             {/* 运行中被锁住时只显示「先退出」，避免「可安全清理 · 先退出」两个矛盾徽标。 */}
             {blockedByRun
-              ? <Badge id={quitId} variant="warn">{t("ai.quitFirst")}</Badge>
+              ? <Badge id={part.worktrees ? quitId : undefined} variant="warn">{t("ai.quitFirst")}</Badge>
               : <Badge variant={badge.variant}>{t(badge.label)}</Badge>}
           </div>
           {desc && <div className="mt-px truncate text-[12px] text-muted" title={desc}>{desc}</div>}
