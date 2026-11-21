@@ -257,3 +257,63 @@ func TestClaudeHiddenParentOfTwoSessions(t *testing.T) {
 	attached := attributeClaude(ccSnap(append([]claudeProc{hidden(140, 100, 140)}, children...)...))
 	wantShape(t, attached, "100:S1 members[] commands[140]; uncertain 0")
 }
+
+// ---- what is never listed, and what is uncertain ---------------------------
+
+func TestClaudeDockAppIsNeverListed(t *testing.T) {
+	const app = "/Applications/Sample Editor.app"
+	editor := marked(200, 1, 200, "S1") // opened from the session, so it carries the marker
+	editor.Path = app + "/Contents/MacOS/Sample Editor"
+	helper := hidden(201, 200, 200)
+	helper.Path = app + "/Contents/Frameworks/Sample Editor Helper.app/Contents/MacOS/Sample Editor Helper"
+	terminal := marked(202, 201, 202, "S1") // a shell in the editor's terminal
+	job := hidden(203, 202, 203)
+	apps := []workspaceApp{{Pid: 200, Path: app, Name: "Sample Editor", Regular: true}}
+
+	open := ccSnap(editor, helper, terminal, job)
+	open.Apps = apps
+	wantShape(t, attributeClaude(open), "100:S1 members[] commands[]; uncertain 0")
+	closed := snap(nil, editor, helper, terminal, job)
+	closed.Apps = apps
+	wantShape(t, attributeClaude(closed), "uncertain 0")
+}
+
+func TestClaudeChainThroughAnotherSession(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(181, 1, 181, "S2"), marked(180, 181, 180, "S1")))
+	wantShape(t, a, "100:S1 members[] commands[]; left S2[181]; uncertain 0")
+}
+
+func TestClaudeMissingParent(t *testing.T) {
+	a := attributeClaude(ccSnap(marked(190, 999, 190, "S9")))
+	wantShape(t, a, "100:S1 members[] commands[]; uncertain 0")
+}
+
+func TestClaudeNoRecordMeansNothingIsLeftBehind(t *testing.T) {
+	a := attributeClaude(snap(nil, ccProc(100, 1), marked(120, 1, 120, "S9")))
+	wantShape(t, a, "100: members[] commands[]; uncertain 1 norecords")
+}
+
+func TestClaudePidTakenByAnOlderProcess(t *testing.T) {
+	p := marked(120, 1, 120, "S9")
+	p.Env.Pid = 300
+	other := plain(300, 1, 300)
+	other.Start = p.Start - time.Second.Microseconds()
+	wantShape(t, attributeClaude(ccSnap(p, other)), "100:S1 members[] commands[]; uncertain 1")
+	// A process that started after 120 cannot be the Claude Code that
+	// started it.
+	other.Start = p.Start + time.Second.Microseconds()
+	wantShape(t, attributeClaude(ccSnap(p, other)), "100:S1 members[] commands[]; left S9[120]; uncertain 0")
+}
+
+func TestClaudeMarkedWithoutSessionID(t *testing.T) {
+	// A marker without a session id carries no id: neither 110 under the
+	// session nor 120 under launchd is listed, and no chain passes them.
+	a := attributeClaude(ccSnap(
+		marked(110, 100, 110, ""), marked(111, 110, 110, "S1"),
+		marked(120, 1, 120, ""), marked(121, 120, 121, "S9"),
+	))
+	wantShape(t, a, "100:S1 members[] commands[]; uncertain 0")
+	// Nor is such a process uncertain while a session id is unknown.
+	a = attributeClaude(snap(nil, ccProc(100, 1), marked(120, 1, 120, "")))
+	wantShape(t, a, "100: members[] commands[]; uncertain 0 norecords")
+}

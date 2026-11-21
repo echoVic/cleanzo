@@ -91,6 +91,12 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 	t.findCandidates(s, above)
 	t.carryIDs()
 
+	var a claudeAttribution
+	for pid, head := range t.claude {
+		if pid == head && t.records[pid].SessionID == "" {
+			a.NoRecords = true
+		}
+	}
 	type place struct {
 		open   int32  // the Claude Code process heading the open session it belongs to
 		closed string // or the closed session that left it
@@ -98,20 +104,21 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 	places := map[int32]place{}
 	for pid, id := range t.id {
 		cc, ok := t.climb(pid)
-		switch {
+		switch p := t.procs[pid]; {
 		case !ok:
 		case cc != 0:
 			places[pid] = place{open: t.claude[cc]}
 		default:
-			if head, open := t.openSession(t.procs[pid], id); open {
+			if head, open := t.openSession(p, id); open {
 				places[pid] = place{open: head}
-			} else {
+			} else if !a.NoRecords && !t.startedBefore(p.Env.Pid, p.Start) {
 				places[pid] = place{closed: id}
+			} else {
+				a.Uncertain++
 			}
 		}
 	}
 
-	var a claudeAttribution
 	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
 	members := map[int32][]claudeProc{}
 	for pid, head := range t.claude {
@@ -197,8 +204,8 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 }
 
 // findCandidates marks the processes that may be listed: the account's,
-// except its Claude Code processes and Cleanzo with its ancestors (above)
-// and descendants.
+// except its Claude Code processes, Cleanzo with its ancestors (above) and
+// descendants, and the Dock's apps with the processes inside their bundles.
 func (t *claudeTable) findCandidates(s claudeSnapshot, above map[int32]bool) {
 	family := maps.Clone(above)
 	family[s.Self] = true
@@ -210,8 +217,20 @@ func (t *claudeTable) findCandidates(s claudeSnapshot, above map[int32]bool) {
 			}
 		}
 	}
+	dock := map[int32]bool{}
+	var bundles []string
+	for _, app := range s.Apps {
+		if app.Regular && app.Path != "" {
+			dock[app.Pid] = true
+			bundles = append(bundles, strings.ToLower(app.Path))
+		}
+	}
+	inBundle := func(path string) bool {
+		path = strings.ToLower(path)
+		return path != "" && slices.ContainsFunc(bundles, func(b string) bool { return within(path, b) })
+	}
 	for pid, p := range t.procs {
-		if _, claude := t.claude[pid]; pid > 1 && p.UID == s.UID && !claude && !family[pid] {
+		if _, claude := t.claude[pid]; pid > 1 && p.UID == s.UID && !claude && !family[pid] && !dock[pid] && !inBundle(p.Path) {
 			t.cand[pid] = true
 		}
 	}
@@ -336,6 +355,13 @@ func (t *claudeTable) openSession(p claudeProc, id string) (head int32, ok bool)
 		}
 	}
 	return t.claude[oldest.Pid], ok
+}
+
+// startedBefore reports whether pid is a live process that started before
+// start; pid 0 is no process.
+func (t *claudeTable) startedBefore(pid int32, start int64) bool {
+	p, ok := t.procs[pid]
+	return pid > 0 && ok && p.Start < start
 }
 
 // rows merges the processes listed in one place into rows: an app's helpers,
