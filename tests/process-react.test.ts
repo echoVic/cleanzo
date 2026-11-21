@@ -11,7 +11,7 @@ Object.assign(globalThis, {
 });
 
 const {
-  PROCESS_DIAG, diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
+  PROCESS_DIAG, claudeTags, diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
 } = await import("../src/react/process/format");
 
 const GB = 2 ** 30;
@@ -141,6 +141,16 @@ test("rowTag: Apple apps can use macos owner tags, with app tags taking priority
   const both = growthTags(summary({ alerts: [alert("macos:com.apple.safari", 5 * GB), alert("app:com.apple.safari", GB)] }));
   expect(rowTag(safari, both)).toBe(both.get("app:com.apple.safari")!);
   expect(rowTag(safari, new Map())).toBeNull();
+});
+
+test("claudeTags：两条都进表；全 0 的不进；null 得到空表", () => {
+  const idle = { key: "cli:claude", idle: 6, left: 0 };
+  const left = { key: "cli:node", idle: 0, left: 2 };
+  const tags = claudeTags({ idle: 6, left: 2, rows: [idle, { key: lark.key, idle: 0, left: 0 }, left] });
+  expect([...tags.keys()]).toEqual(["cli:claude", "cli:node"]);
+  expect(tags.get("cli:claude")).toEqual(idle);
+  expect(tags.get("cli:node")).toEqual(left);
+  expect(claudeTags(null).size).toBe(0);
 });
 
 test("pruneStuck drops apps that are gone and returns the same set when nothing changed", () => {

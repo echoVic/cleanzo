@@ -1,5 +1,5 @@
-// 进程页的纯逻辑：排序、冻结、诊断、开不开采样、增长小标签、「强制退出」的对账。不依赖 DOM / React，可单测。
-import type { GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
+// 进程页的纯逻辑：排序、冻结、诊断、开不开采样、增长和 Claude Code 小标签、「强制退出」的对账。不依赖 DOM / React，可单测。
+import type { ClaudeRowTag, ClaudeRunSummary, GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
 import { GiB, MiB } from "../status/format";
 
 /** 三个标签：CPU、内存是实时的进程表，磁盘占用是占用增长的列表。 */
@@ -104,6 +104,16 @@ export function growthTags(s: GrowthSummary | null): Map<string, GrowthTag> {
 /** 进程行上的增长小标签：只给 App 行，按 bundle ID 优先对上 app:<bundle id>，再查 macos:<bundle id>。 */
 export function rowTag(row: ProcessRow, tags: ReadonlyMap<string, GrowthTag>): GrowthTag | null {
   return row.kind === "app" && row.bundleId ? tags.get(`app:${row.bundleId}`) ?? tags.get(`macos:${row.bundleId}`) ?? null : null;
+}
+
+/** 进程行上的 Claude Code 小标签，按行的 key 查；空闲会话和留下的进程都是 0 的行不进表。 */
+export function claudeTags(s: ClaudeRunSummary | null): Map<string, ClaudeRowTag> {
+  const out = new Map<string, ClaudeRowTag>();
+  if (!s) return out;
+  for (const r of s.rows) {
+    if (r.idle > 0 || r.left > 0) out.set(r.key, r);
+  }
+  return out;
 }
 
 /** 「强制退出」只留给还在跑的 App：这一轮已经没有这个 .app 的行就去掉；没变时返回原集合。 */
