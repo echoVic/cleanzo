@@ -67,7 +67,9 @@ func claudeWorkingFolders() worktreeUsage {
 // record.
 func claudeWorkingFoldersWith(table func() ([]claudeProc, error), cwd func(pid int32) string) worktreeUsage {
 	procs, err := table()
-	if err != nil {
+	// A reading that cannot tell this process's own current folder cannot
+	// tell the others'.
+	if err != nil || cwd(int32(os.Getpid())) == "" {
 		return worktreeUsage{}
 	}
 	uid := uint32(os.Getuid())
@@ -166,8 +168,11 @@ func kinfoStart(kp *unix.KinfoProc) int64 {
 // int32, the executable's path with its NUL padded to a multiple of 8
 // bytes, then argc arguments and the environment, each NUL-terminated, the
 // environment ending at an empty string. The arguments are read from where
-// the padding ends, so an empty argument stays an argument and no
-// environment string is taken for one. Of the environment it keeps Claude
+// the padding ends, so an empty argument stays an argument. A process that
+// rewrote its argument area into fewer strings than argc, as a long process
+// title does, cannot be told apart: its first environment strings are then
+// read as arguments, which is why maskCommand hides the value of every
+// name=value it shows. Of the environment it keeps Claude
 // Code's three variables, the first of each name as getenv finds it, and
 // whether any variable could be read; no other variable is copied out of
 // buf. A buffer that is not laid out so, or does not hold argc arguments,

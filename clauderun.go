@@ -254,7 +254,7 @@ func (v claudeView) session(open claudeOpen, commands []claudeRow) ClaudeSession
 		Own:      open.Own,
 		Commands: make([]ClaudeProc, 0, len(commands)),
 	}
-	s.Status, s.Since = claudeStatus(open.Record, v.now)
+	s.Status, s.Since = claudeStatus(open.Record, open.Proc.Start, v.now)
 	for _, m := range open.Members {
 		s.Memory += v.src.footprint(m.Pid)
 	}
@@ -314,12 +314,15 @@ func (v claudeView) host(pid int32) string {
 
 // claudeStatus is the status a session record gives, idle or busy, with
 // when it began in unix seconds, no later than now. A status counts only
-// with the time it was set: otherwise both are empty.
-func claudeStatus(r claudeRecord, now time.Time) (status string, since int64) {
-	if r.Status != "idle" && r.Status != "busy" || r.StatusUpdatedAt <= 0 {
+// with the time it was set, and that time cannot lie before start, when the
+// session's process started in unix microseconds: a record that counts in
+// another unit tells no time. Otherwise both are empty.
+func claudeStatus(r claudeRecord, start int64, now time.Time) (status string, since int64) {
+	since = r.StatusUpdatedAt / 1000
+	if r.Status != "idle" && r.Status != "busy" || r.StatusUpdatedAt <= 0 || since < start/1_000_000 {
 		return "", 0
 	}
-	return r.Status, min(r.StatusUpdatedAt/1000, now.Unix())
+	return r.Status, min(since, now.Unix())
 }
 
 // claudeSessionOrder orders the open sessions for the page: idle ones
@@ -447,7 +450,7 @@ func claudeSummaryWith(src claudeSource) ClaudeRunSummary {
 	var tagged []int32
 	idle := map[int32]bool{} // the tagged Claude Code processes of long-idle sessions
 	for _, open := range a.Sessions {
-		if status, since := claudeStatus(open.Record, now); status == "idle" && now.Sub(time.Unix(since, 0)) >= claudeIdleNote {
+		if status, since := claudeStatus(open.Record, open.Proc.Start, now); status == "idle" && now.Sub(time.Unix(since, 0)) >= claudeIdleNote {
 			sum.Idle++
 			tagged = append(tagged, open.Proc.Pid)
 			idle[open.Proc.Pid] = true

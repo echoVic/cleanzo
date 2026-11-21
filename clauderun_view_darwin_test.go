@@ -142,8 +142,8 @@ func viewPids(r ClaudeRunning) []int32 {
 func TestClaudeRunningOrdersSessions(t *testing.T) {
 	busy, unknown, week, hour, hourToo := ccProc(101, 1), ccProc(102, 1), ccProc(103, 1), ccProc(104, 1), ccProc(105, 1)
 	records := map[int32]claudeRecord{
-		101: viewRecord(busy, "S1", "busy", viewNow.Add(-10*24*time.Hour)),
-		102: viewRecord(unknown, "S2", "waiting", viewNow.Add(-10*24*time.Hour)),
+		101: viewRecord(busy, "S1", "busy", viewNow.Add(-7*24*time.Hour-time.Hour)),
+		102: viewRecord(unknown, "S2", "waiting", viewNow.Add(-7*24*time.Hour-time.Hour)),
 		103: viewRecord(week, "S3", "idle", viewNow.Add(-7*24*time.Hour)),
 		104: viewRecord(hour, "S4", "idle", viewNow.Add(-time.Hour)),
 		105: viewRecord(hourToo, "S5", "idle", viewNow.Add(-time.Hour)),
@@ -159,7 +159,7 @@ func TestClaudeRunningOrdersSessions(t *testing.T) {
 	}
 	wantStatus := map[int32]string{101: "busy", 102: "", 103: "idle", 104: "idle", 105: "idle"}
 	wantSince := map[int32]int64{
-		101: viewNow.Add(-10 * 24 * time.Hour).Unix(), 102: 0,
+		101: viewNow.Add(-7*24*time.Hour - time.Hour).Unix(), 102: 0,
 		103: viewNow.Add(-7 * 24 * time.Hour).Unix(), 104: viewNow.Add(-time.Hour).Unix(), 105: viewNow.Add(-time.Hour).Unix(),
 	}
 	if !reflect.DeepEqual(status, wantStatus) || !reflect.DeepEqual(since, wantSince) {
@@ -358,6 +358,21 @@ func TestClaudeRunningClampsFutureStatusTime(t *testing.T) {
 	r := viewFakeOf(t, snap(map[int32]claudeRecord{100: viewRecord(cc, "S1", "idle", viewNow.Add(time.Hour))}, cc)).read()
 	if s := viewOnly(t, r); s.Status != "idle" || s.Since != viewNow.Unix() {
 		t.Errorf("status %q since %d, want idle since now, %d", s.Status, s.Since, viewNow.Unix())
+	}
+}
+
+// A status set before its process started tells no time: a record that
+// counted in another unit, say seconds, would read as idle for decades.
+func TestClaudeRunningStatusBeforeTheProcessStartedIsUnknown(t *testing.T) {
+	cc := ccProc(100, 1)
+	record := viewRecord(cc, "S1", "idle", viewNow)
+	record.StatusUpdatedAt = viewNow.Unix() // seconds where milliseconds belong
+	f := viewFakeOf(t, snap(map[int32]claudeRecord{100: record}, cc))
+	if s := viewOnly(t, f.read()); s.Status != "" || s.Since != 0 {
+		t.Errorf("status %q since %d, want unknown", s.Status, s.Since)
+	}
+	if sum := claudeSummaryWith(f.source()); sum.Idle != 0 {
+		t.Errorf("the summary counts %d idle sessions, want 0", sum.Idle)
 	}
 }
 

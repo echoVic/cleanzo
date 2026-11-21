@@ -520,7 +520,7 @@ func TestClaudeWorkingFolders(t *testing.T) {
 	record(101, testStart(101), "/Users/me/their-app")                      // another account's process
 	record(102, testStart(102)+time.Second.Microseconds(), "/Users/me/old") // pid 102 is another process now
 	record(104, testStart(104), "/Users/me/gone-app")                       // no process 104
-	cwds := map[int32]string{100: "/Users/me/sample-app/web", 101: "/Users/me/their-app", 102: "/Users/me/old"}
+	cwds := map[int32]string{100: "/Users/me/sample-app/web", 101: "/Users/me/their-app", 102: "/Users/me/old", int32(os.Getpid()): "/Users/me/cleanzo"}
 	cwd := func(pid int32) string { return cwds[pid] }
 
 	got := claudeWorkingFoldersWith(func() ([]claudeProc, error) { return procs, nil }, cwd)
@@ -530,6 +530,12 @@ func TestClaudeWorkingFolders(t *testing.T) {
 	}
 	if got := claudeWorkingFoldersWith(func() ([]claudeProc, error) { return nil, errors.New("no process table") }, cwd); got.OK {
 		t.Errorf("working folders %+v from no process table, want OK false", got)
+	}
+	// A reading that cannot tell this process's own current folder cannot
+	// tell anyone's.
+	blind := func(int32) string { return "" }
+	if got := claudeWorkingFoldersWith(func() ([]claudeProc, error) { return procs, nil }, blind); got.OK {
+		t.Errorf("working folders %+v when no current folder can be read, want OK false", got)
 	}
 }
 
