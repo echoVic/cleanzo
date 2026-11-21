@@ -2,7 +2,7 @@ import * as React from "react";
 import { Pause, Play } from "lucide-react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
+import type { ClaudeRowTag, GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -42,6 +42,8 @@ export interface ProcessRowViewProps {
   sortBy: "cpu" | "mem";
   open: boolean;
   tag: GrowthTag | null;
+  /** Claude Code 的小标签：这一行里空闲的会话、已关闭会话留下的进程。 */
+  claude: ClaudeRowTag | null;
   /** 正在退出或强制退出。 */
   busy: boolean;
   /** 正常退出后还在跑：显示「还没退出」和「强制退出」。 */
@@ -55,6 +57,8 @@ export interface ProcessRowViewProps {
   onQuit: () => void;
   onForce: () => void;
   onTag: (key: string) => void;
+  /** 点 Claude Code 的小标签。 */
+  onClaude: () => void;
 }
 
 /** 数字列：估算值另加一个类。 */
@@ -77,7 +81,7 @@ function ProcessChildren({ items, sortBy }: { items: readonly ProcessChild[]; so
 }
 
 /** 一行：App、命令行程序或系统程序；有不止一个进程时能展开，同名的合成一条。 */
-export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, t, onToggle, onQuit, onForce, onTag }: ProcessRowViewProps) {
+export function ProcessRowView({ row, sortBy, open, tag, claude, busy, stuck, done, hl, t, onToggle, onQuit, onForce, onTag, onClaude }: ProcessRowViewProps) {
   const expandable = row.children.length > 1 || (row.children[0]?.count ?? 0) > 1;
   const label = (
     <>
@@ -102,6 +106,8 @@ export function ProcessRowView({ row, sortBy, open, tag, busy, stuck, done, hl, 
             <div className="pr-toggle">{label}</div>
           )}
           {tag && <button type="button" className="pr-tag" onClick={() => onTag(tag.key)}>{tagText(tag, t)}</button>}
+          {claude && claude.idle > 0 && <button type="button" className="pr-tag" onClick={onClaude}>{t("process.tag.idleSessions", { n: claude.idle })}</button>}
+          {claude && claude.left > 0 && <button type="button" className="pr-tag" onClick={onClaude}>{t("process.tag.left", { n: claude.left })}</button>}
         </div>
         <span className={numClass(row.estimated)}>{est(fmtPct(row.cpu), row.estimated)}</span>
         <span className={numClass(row.estimated)}>{est(fmtMem(row.memory), row.estimated)}</span>
@@ -467,6 +473,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   sortBy={sortBy}
                   open={open === r.key}
                   tag={rowTag(r, tags)}
+                  claude={null}
                   busy={quit.busy.has(r.path)}
                   stuck={stuck.has(r.path)}
                   done={quit.done.has(r.key)}
@@ -476,6 +483,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   onQuit={() => setQuitTarget(r)}
                   onForce={() => setForceTarget(r)}
                   onTag={goDisk}
+                  onClaude={() => {}}
                 />
               ))}
             </div>

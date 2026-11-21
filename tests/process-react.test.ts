@@ -28,6 +28,7 @@ const chrome = row({ key: "app:/applications/google chrome.app", name: "Google C
 const ws = row({ key: "sys:WindowServer", name: "WindowServer", kind: "system", cpu: 40.2, memory: 0.13 * GB, estimated: true });
 const node = row({ key: "cli:node", name: "node", kind: "cli", cpu: 12.6, memory: 2.9 * GB });
 const lark = row({ key: "app:/applications/lark.app", name: "Lark", path: "/Applications/Lark.app", bundleId: "com.electron.lark", cpu: 21.4, memory: 4.28 * GB, quit: true });
+const claudeCode = row({ key: "cli:claude", name: "claude", kind: "cli", cpu: 3.2, memory: 1.6 * GB, procs: 9 });
 
 test("sortRows: CPU or memory high to low, ties by name, without touching the sample", () => {
   const rows = [node, ws, chrome, lark];
@@ -159,6 +160,14 @@ test("pruneStuck drops apps that are gone and returns the same set when nothing 
   expect(pruneStuck(same, [chrome])).toBe(same);
 });
 
+/** 一行的 props：没给的取默认（收着、没有标签、不忙、回调什么都不做）。 */
+function rowProps(p: Partial<ProcessRowViewProps> & { row: ProcessRow }, t: ProcessRowViewProps["t"]): ProcessRowViewProps {
+  return {
+    sortBy: "cpu", open: false, tag: null, claude: null, busy: false, stuck: false, done: false, t,
+    onToggle() {}, onQuit() {}, onForce() {}, onTag() {}, onClaude() {}, ...p,
+  };
+}
+
 /** 渲染一行的静态 HTML；setup-dom 要先于 shared.ts 装好。 */
 async function rowHtml(p: Partial<ProcessRowViewProps> & { row: ProcessRow }): Promise<string> {
   await import("./setup-dom");
@@ -166,10 +175,17 @@ async function rowHtml(p: Partial<ProcessRowViewProps> & { row: ProcessRow }): P
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { ProcessRowView } = await import("../src/react/process/ProcessPage");
   const { t } = await import("../src/i18n");
-  return renderToStaticMarkup(createElement(ProcessRowView, {
-    sortBy: "cpu", open: false, tag: null, busy: false, stuck: false, done: false, t,
-    onToggle() {}, onQuit() {}, onForce() {}, onTag() {}, ...p,
-  }));
+  return renderToStaticMarkup(createElement(ProcessRowView, rowProps(p, t)));
+}
+
+/** 一行上的小标签按钮（pr-tag），按显示的顺序。ProcessRowView 不用 hook，直接调用拿到元素树。 */
+async function rowTagButtons(p: Partial<ProcessRowViewProps> & { row: ProcessRow }) {
+  const { nodes, textOf } = await import("./page-harness");
+  const { ProcessRowView } = await import("../src/react/process/ProcessPage");
+  const { t } = await import("../src/i18n");
+  return nodes(ProcessRowView(rowProps(p, t)))
+    .filter((el) => el.type === "button" && el.props.className === "pr-tag")
+    .map((el) => ({ text: textOf(el.props.children), click: () => el.props.onClick() }));
 }
 
 test("rows: a system process is marked, its numbers are estimates, and it has no buttons", async () => {
@@ -217,6 +233,32 @@ test("rows: a growth tag shows its window and size; command-line rows have no qu
   const tag = { key: "app:com.electron.lark", window: "week" as const, bytes: 11.2 * GB, atLeast: false };
   expect(await rowHtml({ row: lark, tag })).toContain(t("process.tag.week", { size: `+${human(tag.bytes)}` }));
   expect(await rowHtml({ row: node })).not.toContain("st-quit");
+});
+
+test("行上的标签：空闲会话、留下的进程各一个 pr-tag 按钮，排在增长标签后面；点新标签调 onClaude，点增长标签仍调 onTag", async () => {
+  const { t } = await import("../src/i18n");
+  const { human } = await import("../src/shared");
+  const idleOnly = await rowTagButtons({ row: claudeCode, claude: { key: claudeCode.key, idle: 6, left: 0 } });
+  expect(idleOnly.map((b) => b.text)).toEqual(["6 个空闲会话"]);
+  const leftOnly = await rowTagButtons({ row: claudeCode, claude: { key: claudeCode.key, idle: 0, left: 2 } });
+  expect(leftOnly.map((b) => b.text)).toEqual(["2 个是已关闭会话留下的"]);
+  expect(await rowTagButtons({ row: claudeCode })).toEqual([]);
+
+  const growth = { key: "app:com.electron.lark", window: "week" as const, bytes: 11.2 * GB, atLeast: false };
+  let claudeClicks = 0;
+  const tagged: string[] = [];
+  const all = await rowTagButtons({
+    row: lark, tag: growth, claude: { key: lark.key, idle: 6, left: 2 },
+    onClaude: () => { claudeClicks++; }, onTag: (key) => { tagged.push(key); },
+  });
+  expect(all.map((b) => b.text)).toEqual([t("process.tag.week", { size: `+${human(growth.bytes)}` }), "6 个空闲会话", "2 个是已关闭会话留下的"]);
+  all[1]!.click();
+  all[2]!.click();
+  expect(claudeClicks).toBe(2);
+  expect(tagged).toEqual([]);
+  all[0]!.click();
+  expect(tagged).toEqual([growth.key]);
+  expect(claudeClicks).toBe(2);
 });
 
 test("rows: an app row shows its icon once known; other rows keep the letter", async () => {
