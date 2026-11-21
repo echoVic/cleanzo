@@ -46,6 +46,14 @@ const wtCancelled = "cancelled"
 // worktreeTemp is appended to a worktree's folder name while git clears its record.
 const worktreeTemp = ".cleanzo-removing"
 
+// worktreeMoving is held while a worktree's folder may be away from its
+// path: by a removal from its last look at the worktree until the folder is
+// in the Trash or back, and by a listing while it reads a folder of
+// worktrees and puts back what an interrupted removal left. A listing then
+// never puts a folder back while git is asked to forget it, and never lists
+// one a removal has moved aside.
+var worktreeMoving sync.Mutex
+
 // agentWorktree is one worktree an agent made.
 type agentWorktree struct {
 	Path, Name    string
@@ -254,6 +262,8 @@ func worktreeRepoOf(dir string) string {
 // A worktree an interrupted removal left under its temporary name is put
 // back first, when its own name is free.
 func worktreeFolders(dir string) []string {
+	worktreeMoving.Lock()
+	defer worktreeMoving.Unlock()
 	folders := subfolders(dir)
 	for i, p := range folders {
 		name, waiting := strings.CutSuffix(filepath.Base(p), worktreeTemp)
@@ -570,6 +580,8 @@ func removeWorktree(ctx context.Context, w agentWorktree, seen string, guard *us
 	if ctx.Err() != nil {
 		return 0, wtCancelled
 	}
+	worktreeMoving.Lock()
+	defer worktreeMoving.Unlock()
 	git := worktreeGitTool()
 	now := judgeWorktree(ctx, path, git, worktreeUsersOf(worktreeUse()))
 	switch {

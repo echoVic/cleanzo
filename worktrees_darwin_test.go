@@ -372,6 +372,56 @@ func TestRemoveWorktreeNeverLetsGitDelete(t *testing.T) {
 	}
 }
 
+// TestRemoveWorktreeWhileAScanRuns: a scan that starts while git forgets a
+// worktree waits until the removal has ended, and never puts the folder
+// back where git would delete it.
+func TestRemoveWorktreeWhileAScanRuns(t *testing.T) {
+	git, repo := wtRepo(t)
+	stubWorktreeUse(t, nil, nil)
+	wt := addWorktree(t, git, repo, "agent-1", "agent-1")
+	w := wtFound(t, "claude", wt)
+	saved := worktreeGit
+	started, scanned := make(chan struct{}), make(chan []agentWorktree, 1)
+	var back, early bool
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if !slices.Contains(args, "remove") {
+			return saved(ctx, git, args, limit)
+		}
+		go func() {
+			close(started)
+			scanned <- findWorktrees(context.Background(), "claude")
+		}()
+		<-started
+		for until := time.Now().Add(time.Second); time.Now().Before(until) && !back; time.Sleep(10 * time.Millisecond) {
+			back = exists(wt)
+		}
+		select {
+		case <-scanned:
+			early = true
+		default:
+		}
+		if back {
+			// git would delete the folder now: it is not asked.
+			return "", errors.New("the folder is back in place")
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	_, code := removeWorktree(context.Background(), w, wtClean, wtNothingOpen)
+	var found []agentWorktree
+	select {
+	case found = <-scanned:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the scan has not returned")
+	}
+	if back || early || code != "" || len(found) != 0 {
+		t.Fatalf("back in place while git ran %v, scan returned first %v, code %q, the scan found %+v", back, early, code, found)
+	}
+	if !wtTrashed("agent-1", "README.md") || exists(wt) || exists(wt+worktreeTemp) {
+		t.Fatalf("trashed %v, folder there %v", wtTrashed("agent-1", "README.md"), exists(wt))
+	}
+}
+
 // TestRemoveWorktreeChangedSinceSeen: a worktree that is not in the state
 // the user saw any more is left as it is.
 func TestRemoveWorktreeChangedSinceSeen(t *testing.T) {
