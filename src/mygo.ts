@@ -1546,7 +1546,10 @@ export const Cleaner = {
   scanAIModels(): Promise<AIModelsResult> {
     return call("Cleaner.ScanAIModels");
   },
-  /** ScanAITool measures one tool's folder; each tool has its own page. */
+  /**
+   * ScanAITool measures one tool's folder; each tool has its own page, which
+   * also lists the worktrees the tool's agents made, on macOS.
+   */
   scanAITool(id: string): Promise<AIScanResult> {
     return call("Cleaner.ScanAITool", id);
   },
