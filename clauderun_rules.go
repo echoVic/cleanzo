@@ -100,16 +100,16 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		}
 	}
 	places := map[int32]claudePlace{}
-	carriers := map[string][]int32{} // the candidates carrying each session id, attached or detached
+	carriers := map[string][]int32{} // the candidates carrying each session id, listed or not
 	detached := map[string][]int32{} // the detached ones
 	for pid, id := range t.id {
+		carriers[id] = append(carriers[id], pid)
 		cc, ok := t.climb(pid)
 		if !ok {
 			continue
 		}
-		carriers[id] = append(carriers[id], pid)
 		if cc != 0 {
-			places[pid] = claudePlace{open: t.claude[cc]}
+			places[pid] = claudePlace{open: t.claude[cc], near: cc}
 		} else {
 			detached[id] = append(detached[id], pid)
 		}
@@ -122,10 +122,8 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		a.Uncertain += t.placeDetached(id, pids, carriers[id], closable, places)
 	}
 
-	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
 	members := map[int32][]claudeProc{}
 	for pid, head := range t.claude {
-		groups[head] = append(groups[head], t.procs[pid].Pgid)
 		if pid == head {
 			a.Sessions = append(a.Sessions, claudeOpen{Proc: t.procs[pid], Record: t.records[pid], ID: t.records[pid].SessionID, Own: above[pid]})
 		} else {
@@ -138,7 +136,11 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 		switch p := t.procs[pid]; {
 		case at.closed != "":
 			left[at.closed] = append(left[at.closed], p)
-		case slices.Contains(groups[at.open], p.Pgid):
+		case p.Pgid == t.procs[cmp.Or(at.near, at.open)].Pgid:
+			// A helper runs in the group of the nearest Claude Code process
+			// above it, or detached, in that of the session's own. What a
+			// session started stays a command when it runs a Claude Code
+			// of its own in its group.
 			members[at.open] = append(members[at.open], p)
 		default:
 			commands[at.open] = append(commands[at.open], p)
@@ -163,6 +165,7 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 // claudePlace is where a listed candidate goes.
 type claudePlace struct {
 	open   int32  // the Claude Code process heading the open session it belongs to
+	near   int32  // the nearest Claude Code process above it, a sub-agent maybe; 0 when it is detached
 	closed string // or the closed session that left it
 }
 
@@ -199,8 +202,11 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		}
 	}
 	for _, app := range s.Apps {
-		if app.Regular && app.Path != "" {
-			t.dock[app.Pid] = true
+		if !app.Regular {
+			continue
+		}
+		t.dock[app.Pid] = true
+		if app.Path != "" {
 			t.bundles = append(t.bundles, strings.ToLower(app.Path))
 		}
 	}
@@ -389,8 +395,9 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 
 // placeDetached decides once, for all the detached candidates pids that
 // carry id, whether the session id is open, closed or uncertain, and puts
-// each candidate it lists into places. carriers are the candidates carrying
-// id that are attached to a session or detached, pids among them. id is open
+// each candidate it lists into places. carriers are all the candidates
+// carrying id, pids among them, also those that are not listed: what one
+// carries tells whose session id it was. id is open
 // when a Claude Code process has it now or a CLAUDE_PID among carriers names
 // a Claude Code process; it is uncertain when closable says no session id
 // may be called closed, or when a CLAUDE_PID among pids is held by a process
@@ -582,7 +589,8 @@ func claudeWrapperCommand(args []string) (inner string, ok bool) {
 // hidden.
 func maskCommand(args []string) string {
 	var words []string
-	if inner, ok := claudeWrapperCommand(args); ok {
+	inner, wrapped := claudeWrapperCommand(args)
+	if wrapped {
 		words = shellWords(inner)
 	} else if len(args) > 0 {
 		words = slices.Clone(args)
@@ -593,7 +601,7 @@ func maskCommand(args []string) string {
 	for len(words) > 0 && isAssignment(words[0]) {
 		words = words[1:]
 	}
-	maskWords(words, false)
+	maskWords(words, false, !wrapped)
 	return oneLine(strings.Join(words, " "), claudeCommandWidth)
 }
 
@@ -606,10 +614,16 @@ func maskCommand(args []string) string {
 // white space is a script, masked word by word; and every URL hides its
 // credentials. Every test reads a word as written, with its quotes taken
 // out, never what masking made of it; only a quoted script is read once the
-// values glued to its operators are hidden. secret says the word before
+// values glued to its operators are hidden. A name=value hides its value
+// whatever the name is made of: a process that rewrote its arguments, as a
+// long process title does, shows its first environment strings as
+// arguments, and a variable's name need not be an identifier. argv says
+// words are a process's own arguments, where such a name may hold anything
+// but white space; in a script a name holding a shell operator is left to
+// the rule for what is glued to operators. secret says the word before
 // words is a secret flag waiting for its value; maskWords reports whether
 // the last of words is one.
-func maskWords(words []string, secret bool) bool {
+func maskWords(words []string, secret, argv bool) bool {
 	for i, word := range words {
 		text := shellValue(word)
 		name, value, inline := strings.Cut(text, "=")
@@ -619,6 +633,8 @@ func maskWords(words []string, secret bool) bool {
 		case secret:
 			words[i] = "…"
 		case isAssignment(text):
+			words[i] = name + "=…"
+		case !flag && inline && name != "" && !strings.ContainsAny(name, shellBlanks) && (argv || !strings.ContainsAny(name, shellOperators)):
 			words[i] = name + "=…"
 		case flag && inline && secretFlag(name):
 			words[i] = name + "=…"
@@ -635,7 +651,7 @@ func maskWords(words []string, secret bool) bool {
 				parts = shellWords(shellValue(script))
 			}
 			masked := slices.Clone(parts)
-			next = maskWords(masked, false) || next
+			next = maskWords(masked, false, false) || next
 			if script != word || !slices.Equal(masked, parts) {
 				words[i] = strings.Join(masked, " ")
 			}

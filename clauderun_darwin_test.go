@@ -166,6 +166,30 @@ func TestClaudeSubAgentIsNotASession(t *testing.T) {
 	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[]; uncertain 0")
 }
 
+// A command that runs a Claude Code of its own stays a command: a helper is
+// what runs in the process group of the nearest Claude Code process above
+// it, so ending the session leaves the command and its shell alone.
+func TestClaudeCommandRunningClaudeCodeStaysACommand(t *testing.T) {
+	inner := ccProc(112, 111)
+	inner.Pgid = 110 // started by the command, in the command's group
+	s := ccSnap(
+		wrapper(110, 100, "node server.js"), marked(111, 110, 110, "S1"), inner,
+		marked(113, 112, 110, "S7"), // the inner Claude Code's helper, in its group
+		marked(114, 112, 114, "S7"), // what the inner Claude Code started
+	)
+	s.Records[112] = recordOf(inner, "S7")
+	wantShape(t, attributeClaude(s), "100:S1 members[112 113] commands[111+110 114]; uncertain 0")
+}
+
+// A detached process is a helper only in the group of the session's own
+// Claude Code process, not in a sub-agent's.
+func TestClaudeDetachedInASubAgentsGroupIsACommand(t *testing.T) {
+	agent := ccProc(105, 100)
+	s := ccSnap(agent, marked(120, 1, 105, "S1"), marked(121, 1, 100, "S1"))
+	s.Records[105] = recordOf(agent, "S5")
+	wantShape(t, attributeClaude(s), "100:S1 members[105 121] commands[120]; uncertain 0")
+}
+
 func TestClaudeSessionInsideADockApp(t *testing.T) {
 	// Session 100 runs a development build of an app on the Dock, and the
 	// app runs a Claude Code session of its own through a shell.
@@ -285,6 +309,23 @@ func TestClaudeClaudePidUnderTheSessionOpensTheID(t *testing.T) {
 	s := ccSnap(command, out, other, toOther)
 	s.Records[101] = recordOf(other, "S2")
 	wantShape(t, attributeClaude(s), "100:S1 members[] commands[111]; 101:S2 members[] commands[120]; uncertain 1")
+}
+
+// A process that is not listed still tells whose session id it carries: 140
+// runs under an unmarked process, carries S0 and names 100, so 130, detached
+// and carrying S0, belongs to the open session 100 and 140 stays unlisted.
+func TestClaudeUnlistedCarrierOpensTheID(t *testing.T) {
+	carrier := marked(140, 139, 140, "S0")
+	carrier.Env.Pid = 100
+	a := attributeClaude(ccSnap(plain(139, 1, 139), carrier, marked(130, 1, 130, "S0")))
+	wantShape(t, a, "100:S1 members[] commands[130]; uncertain 0")
+}
+
+// An app on the Dock is never listed, also when its bundle path is unknown.
+func TestClaudeDockAppWithoutAPathIsNeverListed(t *testing.T) {
+	s := ccSnap(marked(200, 1, 200, "S9"))
+	s.Apps = []workspaceApp{{Pid: 200, Name: "Sample App", Regular: true}}
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; uncertain 0")
 }
 
 func TestClaudeDetachedClosed(t *testing.T) {
@@ -626,6 +667,29 @@ func TestMaskCommandHidesSecretsAnywhere(t *testing.T) {
 		{[]string{"psql", "postgres://app:hunter2@db.example.invalid/x"}, "psql postgres://…@db.example.invalid/x"},
 		{[]string{"git", "clone", "https://app:hun@ter2@example.invalid/r.git"}, "git clone https://…@example.invalid/r.git"},
 		{[]string{"node", "x.js", "--db=postgres://app:hunter2@db.example.invalid"}, "node x.js --db=postgres://…@db.example.invalid"},
+	} {
+		if got := maskCommand(c.args); got != c.want || strings.Contains(got, "hunter2") {
+			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+// A process that rewrote its arguments, as a long process title does, shows
+// its first environment strings as arguments: every name=value hides its
+// value, whatever the name is made of.
+func TestMaskCommandHidesAnyNamedValue(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"sample-server", "made-up.odd-name=hunter2", "MADE_UP_TOKEN=hunter2"}, "sample-server made-up.odd-name=… MADE_UP_TOKEN=…"},
+		{[]string{"sample-server", "PS1=hunter2 and more"}, "sample-server PS1=…"},
+		{[]string{"sample-server", "odd.name=hunter2 and more"}, "sample-server odd.name=…"},
+		{wrapper(170, 1, "PATH+=:/hunter2 ARR[0]=hunter2 node x.js").Args, "PATH+=… ARR[0]=… node x.js"},
+		// A flag whose name tells no secret keeps its value.
+		{[]string{"node", "x.js", "--port=5173", "--max-old-space-size=4096"}, "node x.js --port=5173 --max-old-space-size=4096"},
+		// A word with "=" and nothing before it names nothing.
+		{[]string{"test", "a", "=", "b"}, "test a = b"},
 	} {
 		if got := maskCommand(c.args); got != c.want || strings.Contains(got, "hunter2") {
 			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
