@@ -81,8 +81,9 @@ type aiTool struct {
 	Parts   []aiPart
 	// Roots are more folders of the same tool, kept by another app of it
 	// (TRAE's IDE next to its CLI).
-	Roots []aiRoot
-	Apps  []aiApp
+	Roots     []aiRoot
+	Apps      []aiApp
+	Worktrees string // where its agents keep worktrees: "claude" (<repo>/.claude/worktrees/*), "codex" (<Home>/worktrees/*/*); "" for none
 }
 
 // aiRoot is one more folder of a tool.
@@ -341,14 +342,18 @@ func aiToolRunning(running map[string]bool, tool aiTool) bool {
 // AIGroup is a pickable slice of a sensitive part (a project's or a month's
 // sessions) or of old releases (one release folder).
 type AIGroup struct {
-	Key    string `json:"key"`    // project folder or yyyy/mm; release name
-	Label  string `json:"label"`  // project path or yyyy-mm; release version
-	Size   int64  `json:"size"`   // bytes on disk, recent sessions included
-	Count  int    `json:"count"`  // sessions, or 1 for a release
-	Last   int64  `json:"last"`   // newest write, unix seconds
-	Recent int    `json:"recent"` // sessions written in the last 24 hours, left alone
-	Gone   bool   `json:"gone"`   // the project folder no longer exists
-	Path   string `json:"path"`   // the group's folder, for Show in Finder
+	Key     string `json:"key"`               // project folder or yyyy/mm; release name
+	Label   string `json:"label"`             // project path or yyyy-mm; release version
+	Size    int64  `json:"size"`              // bytes on disk, recent sessions included
+	Count   int    `json:"count"`             // sessions, or 1 for a release
+	Last    int64  `json:"last"`              // newest write, unix seconds
+	Recent  int    `json:"recent"`            // sessions written in the last 24 hours, left alone
+	Gone    bool   `json:"gone"`              // the project folder no longer exists
+	Path    string `json:"path"`              // the group's folder, for Show in Finder
+	Repo    string `json:"repo,omitempty"`    // worktree rows: the repository's folder
+	Branch  string `json:"branch,omitempty"`  // worktree rows: the branch checked out; "" when detached
+	State   string `json:"state,omitempty"`   // worktree rows: one of the worktree states
+	Changes int    `json:"changes,omitempty"` // worktree rows in state "dirty": uncommitted entries
 }
 
 // AIEntry is one of the largest things inside a part, shown when it expands.
@@ -379,7 +384,8 @@ type AIPart struct {
 	RunSafe bool      `json:"runSafe"` // can be cleaned while the tool runs
 	// Running: the app that uses this part runs (TRAE's IDE or CLI); only
 	// run-safe parts are cleaned then.
-	Running bool `json:"running"`
+	Running   bool `json:"running"`
+	Worktrees bool `json:"worktrees,omitempty"` // the part lists agent worktrees, one group each
 }
 
 // AITool is one tool's folder as the page lists it.
@@ -1027,7 +1033,8 @@ func jsonlField(path, field string) string {
 type AISelection struct {
 	Tool   string   `json:"tool"`
 	Part   string   `json:"part"`
-	Groups []string `json:"groups"` // group keys; required for parts with groups
+	Groups []string `json:"groups"`         // group keys; required for parts with groups
+	Seen   []string `json:"seen,omitempty"` // worktree parts: each group's State as the user saw it, in the order of Groups
 }
 
 // AIPartResult reports one selection's outcome.
