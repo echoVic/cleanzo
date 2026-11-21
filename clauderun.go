@@ -7,7 +7,13 @@ package main
 // rules are tested against made-up processes.
 
 import (
+	"cmp"
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -167,7 +173,263 @@ func (Cleaner) EndClaudeSession(ctx context.Context, target ClaudeTarget, sessio
 
 // claudeRunningWith reads the Running tab from src.
 func claudeRunningWith(ctx context.Context, src claudeSource) (ClaudeRunning, error) {
-	return ClaudeRunning{Sessions: []ClaudeSession{}, Left: []ClaudeLeft{}}, nil
+	s, err := src.snapshot()
+	if err != nil {
+		return ClaudeRunning{Sessions: []ClaudeSession{}, Left: []ClaudeLeft{}}, codeError{Code: "unreadable"}
+	}
+	a := attributeClaude(s)
+	now := src.now()
+	commands := make([][]claudeRow, len(a.Sessions)) // what each open session lists
+	var listed []int32
+	for i, open := range a.Sessions {
+		for _, r := range open.Commands {
+			if now.Sub(time.UnixMicro(r.Lead.Start)) >= claudeCommandAge {
+				commands[i] = append(commands[i], r)
+				listed = append(listed, claudeRowPids(r)...)
+			}
+		}
+	}
+	for _, l := range a.Left {
+		for _, r := range l.Rows {
+			listed = append(listed, claudeRowPids(r)...)
+		}
+	}
+	v := claudeView{src: src, ports: claudeListedPorts(ctx, src.ports, listed, now), apps: s.Apps, paths: map[int32]string{}, now: now}
+	for _, p := range s.Procs {
+		if p.Path != "" {
+			v.paths[p.Pid] = p.Path
+		}
+	}
+	out := ClaudeRunning{
+		Sessions:  make([]ClaudeSession, 0, len(a.Sessions)),
+		Left:      make([]ClaudeLeft, 0, len(a.Left)),
+		Uncertain: a.Uncertain,
+		NoRecords: a.NoRecords,
+		At:        now.Unix(),
+	}
+	for i, open := range a.Sessions {
+		out.Sessions = append(out.Sessions, v.session(open, commands[i]))
+	}
+	slices.SortFunc(out.Sessions, claudeSessionOrder)
+	for _, l := range a.Left {
+		left := ClaudeLeft{ID: l.ID, Procs: make([]ClaudeProc, 0, len(l.Rows))}
+		left.Project, left.Title = src.closed(l.ID)
+		for _, r := range l.Rows {
+			left.Procs = append(left.Procs, v.row(r))
+		}
+		out.Left = append(out.Left, left)
+	}
+	slices.SortFunc(out.Left, func(x, y ClaudeLeft) int {
+		return cmp.Or(cmp.Compare(claudeOldest(x), claudeOldest(y)), strings.Compare(x.ID, y.ID))
+	})
+	return out, nil
+}
+
+// claudeView turns what the attribution found into what the page shows.
+type claudeView struct {
+	src   claudeSource
+	ports map[int32][]int // nil when they cannot be read
+	apps  []workspaceApp
+	paths map[int32]string // the executables of the snapshot's processes
+	now   time.Time
+}
+
+// session is the open session open as the page lists it, with the command
+// rows it lists.
+func (v claudeView) session(open claudeOpen, commands []claudeRow) ClaudeSession {
+	cwd := open.Record.Cwd
+	if cwd == "" {
+		cwd = v.src.cwd(open.Proc.Pid)
+	}
+	s := ClaudeSession{
+		ID:       open.ID,
+		Pid:      open.Proc.Pid,
+		Start:    open.Proc.Start,
+		Project:  claudeFolderName(cwd),
+		Cwd:      cwd,
+		Title:    open.Record.Name,
+		Host:     v.host(open.Proc.Pid),
+		Entry:    open.Record.Entrypoint,
+		Memory:   v.src.footprint(open.Proc.Pid),
+		Own:      open.Own,
+		Commands: make([]ClaudeProc, 0, len(commands)),
+	}
+	s.Status, s.Since = claudeStatus(open.Record, v.now)
+	for _, m := range open.Members {
+		s.Memory += v.src.footprint(m.Pid)
+	}
+	for _, r := range commands {
+		s.Commands = append(s.Commands, v.row(r))
+	}
+	return s
+}
+
+// row is r as the page lists it: its lead's identity, command and folder,
+// and the memory and ports of every process in it.
+func (v claudeView) row(r claudeRow) ClaudeProc {
+	p := ClaudeProc{
+		Pid:     r.Lead.Pid,
+		Start:   r.Lead.Start,
+		Command: maskCommand(r.Lead.Args),
+		Cwd:     v.src.cwd(r.Lead.Pid),
+		Ports:   append([]int{}, v.ports[r.Lead.Pid]...),
+		Memory:  v.src.footprint(r.Lead.Pid),
+		Folded:  make([]ClaudeTarget, 0, len(r.Folded)),
+	}
+	p.Worktree = claudeWorktree(p.Cwd)
+	for _, f := range r.Folded {
+		p.Ports = append(p.Ports, v.ports[f.Pid]...)
+		p.Memory += v.src.footprint(f.Pid)
+		p.Folded = append(p.Folded, ClaudeTarget{Pid: f.Pid, Start: f.Start})
+	}
+	slices.Sort(p.Ports)
+	p.Ports = slices.Compact(p.Ports)
+	return p
+}
+
+// host is the name of the app the Claude Code process pid runs in: the app
+// its responsible process is, else the app whose bundle holds that
+// process's executable, the outermost when bundles nest. It is "" when
+// there is none.
+func (v claudeView) host(pid int32) string {
+	owner := v.src.responsible(pid)
+	if owner <= 0 {
+		return ""
+	}
+	for _, app := range v.apps {
+		if app.Pid == owner {
+			return app.Name
+		}
+	}
+	path := strings.ToLower(v.paths[owner])
+	host, bundle := "", ""
+	for _, app := range v.apps {
+		b := strings.ToLower(app.Path)
+		if path != "" && b != "" && within(path, b) && (bundle == "" || len(b) < len(bundle)) {
+			host, bundle = app.Name, b
+		}
+	}
+	return host
+}
+
+// claudeStatus is the status a session record gives, idle or busy, with
+// when it began in unix seconds, no later than now. A status counts only
+// with the time it was set: otherwise both are empty.
+func claudeStatus(r claudeRecord, now time.Time) (status string, since int64) {
+	if r.Status != "idle" && r.Status != "busy" || r.StatusUpdatedAt <= 0 {
+		return "", 0
+	}
+	return r.Status, min(r.StatusUpdatedAt/1000, now.Unix())
+}
+
+// claudeSessionOrder orders the open sessions for the page: idle ones
+// first, longest idle first, then those whose status is unknown, then busy
+// ones; within each by pid.
+func claudeSessionOrder(a, b ClaudeSession) int {
+	rank := func(s ClaudeSession) int {
+		switch s.Status {
+		case "idle":
+			return 0
+		case "busy":
+			return 2
+		}
+		return 1
+	}
+	idleSince := func(s ClaudeSession) int64 {
+		if s.Status == "idle" {
+			return s.Since
+		}
+		return 0
+	}
+	return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(idleSince(a), idleSince(b)), cmp.Compare(a.Pid, b.Pid))
+}
+
+// claudeOldest is the start of the oldest process a closed session left.
+func claudeOldest(l ClaudeLeft) int64 {
+	var oldest int64
+	for i, p := range l.Procs {
+		if i == 0 || p.Start < oldest {
+			oldest = p.Start
+		}
+		for _, f := range p.Folded {
+			oldest = min(oldest, f.Start)
+		}
+	}
+	return oldest
+}
+
+// claudeRowPids is the pid of every process in r, its lead first.
+func claudeRowPids(r claudeRow) []int32 {
+	pids := []int32{r.Lead.Pid}
+	for _, f := range r.Folded {
+		pids = append(pids, f.Pid)
+	}
+	return pids
+}
+
+// claudeFolderName is the name of the folder at path, or "" for none.
+func claudeFolderName(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
+}
+
+// claudeWorktreeDepth is how many folders above a working folder are
+// looked at for the linked worktree it is in.
+const claudeWorktreeDepth = 8
+
+// claudeWorktree is the name of the linked git worktree folder cwd is in:
+// cwd itself or one of the claudeWorktreeDepth folders above it, the
+// nearest whose .git is a file pointing into a worktrees folder. It is ""
+// when there is none.
+func claudeWorktree(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	dir := filepath.Clean(cwd)
+	for range claudeWorktreeDepth + 1 {
+		if info, err := os.Lstat(filepath.Join(dir, ".git")); err == nil && info.Mode().IsRegular() {
+			if gitDir, found := gitDirOf(dir); found && gitDir != "" && filepath.Base(filepath.Dir(filepath.Clean(gitDir))) == "worktrees" {
+				return filepath.Base(dir)
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// claudePorts is the last read of listening ports: the pids it was for,
+// sorted, and when it was taken.
+var claudePorts struct {
+	sync.Mutex
+	pids  []int32
+	at    time.Time
+	ports map[int32][]int
+}
+
+// claudeListedPorts returns the ports pids listen on. It reads them with
+// read only when the set of pids differs from the last read's, or when
+// claudePortsEvery has passed since it; otherwise the last read stands.
+func claudeListedPorts(ctx context.Context, read func(context.Context, []int32) map[int32][]int, pids []int32, now time.Time) map[int32][]int {
+	pids = slices.Compact(slices.Sorted(slices.Values(pids)))
+	if len(pids) == 0 {
+		return nil
+	}
+	claudePorts.Lock()
+	defer claudePorts.Unlock()
+	if slices.Equal(pids, claudePorts.pids) && !now.Before(claudePorts.at) && now.Sub(claudePorts.at) < claudePortsEvery {
+		return claudePorts.ports
+	}
+	ports := read(ctx, pids)
+	if ctx.Err() == nil { // a read cut short is not remembered
+		claudePorts.pids, claudePorts.at, claudePorts.ports = pids, now, ports
+	}
+	return ports
 }
 
 // claudeSummaryWith reads the Running tab's summary from src, without ports
