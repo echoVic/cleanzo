@@ -167,10 +167,10 @@ func claudeEnd(ctx context.Context, src claudeSource, ends []claudeEnding) Claud
 
 // claudeWait looks every claudePoll, for at most limit, at the processes
 // whose last signal was sig, until each is gone. It returns false when ctx
-// ends the wait.
+// ends the wait, or had ended before it.
 func claudeWait(ctx context.Context, src claudeSource, ends []claudeEnding, sig syscall.Signal, limit time.Duration) bool {
 	waiting := func(e claudeEnding) bool { return e.result == "" && e.sent == sig }
-	for waited := time.Duration(0); waited < limit && slices.ContainsFunc(ends, waiting); {
+	for waited := time.Duration(0); ctx.Err() == nil && waited < limit && slices.ContainsFunc(ends, waiting); {
 		step := min(claudePoll, limit-waited)
 		if src.sleep(ctx, step) != nil {
 			return false

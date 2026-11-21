@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,8 +18,9 @@ import (
 // Ending is tested against endFake, a made-up process table: its snapshot
 // is built from the attribution fixtures, each process answers signals as
 // its endHow says, and sleeping only moves a fake clock. No real process
-// gets a signal: the one test of the real signal function sends the null
-// signal, which delivers nothing.
+// gets a signal, with two exceptions: the test of the real signal function
+// sends the null signal, which delivers nothing, and one test ends a child
+// it starts itself through the real source.
 
 // endMiB is the fake footprint unit: the process with pid p uses p MiB.
 const endMiB = 1 << 20
@@ -302,11 +307,14 @@ func TestEndClaudeProcsEndsWhatIsListed(t *testing.T) {
 }
 
 func TestEndClaudeProcsEndsACommandOfAnOpenSession(t *testing.T) {
-	s := ccSnap(marked(110, 100, 110, "S1"))
+	// Ten seconds old by any clock: too young for the page to list it.
+	young := marked(110, 100, 110, "S1")
+	young.Start = time.Now().Add(-10 * time.Second).UnixMicro()
+	s := ccSnap(young)
 	wantShape(t, attributeClaude(s), "100:S1 members[] commands[110]; uncertain 0")
 	f := endFakeOf(t, s)
-	f.now = time.UnixMicro(testStart(110)).Add(10 * time.Second) // too young for the page to list it
-	res, err := endClaudeProcsWith(context.Background(), f.source(), "S1", []ClaudeTarget{endTarget(110)})
+	f.now = time.Now()
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S1", []ClaudeTarget{{Pid: 110, Start: young.Start}})
 	endWant(t, f, res, err, "110:ended; freed 110", "110 TERM@0s")
 }
 
@@ -398,6 +406,8 @@ func TestEndClaudeProcsStopsWaitingWhenCanceled(t *testing.T) {
 	}{
 		{"waiting after SIGTERM", 500 * time.Millisecond, endQuitsOnKill, "120 TERM@0s 121 TERM@0s"},
 		{"waiting after SIGKILL", 2500 * time.Millisecond, endNeverQuits, "120 TERM@0s 121 TERM@0s 121 KILL@2s"},
+		// The page went away before ending began: SIGTERM still goes out, and nothing waits or escalates.
+		{"before the call", 0, endQuitsOnKill, "120 TERM@0s 121 TERM@0s"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9"), marked(121, 1, 121, "S9")))
@@ -405,6 +415,9 @@ func TestEndClaudeProcsStopsWaitingWhenCanceled(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			f.cancelAt, f.cancel = c.cancelAt, cancel
+			if c.cancelAt == 0 {
+				cancel()
+			}
 			res, err := endClaudeProcsWith(ctx, f.source(), "S9", []ClaudeTarget{endTarget(120), endTarget(121)})
 			endWant(t, f, res, err, "120:ended 121:running; freed 120", c.sent)
 			if f.clock != c.cancelAt {
@@ -532,6 +545,10 @@ func TestEndClaudeSessionSharingAnID(t *testing.T) {
 	f := endFakeOf(t, s)
 	res, err := endClaudeSessionWith(context.Background(), f.source(), endTarget(100), "S1", "idle")
 	endWant(t, f, res, err, "100:ended 110:ended; freed 210", "100 TERM@0s 110 TERM@0s")
+	// The younger one: a session is found by its process, not as the first with that id.
+	f = endFakeOf(t, s)
+	res, err = endClaudeSessionWith(context.Background(), f.source(), endTarget(101), "S1", "idle")
+	endWant(t, f, res, err, "101:ended 111:ended; freed 212", "101 TERM@0s 111 TERM@0s")
 }
 
 func TestEndClaudeSessionNotASession(t *testing.T) {
@@ -592,5 +609,78 @@ func TestRealSignalRefusesLowPids(t *testing.T) {
 		if err := signal(pid, 0); !errors.Is(err, syscall.EINVAL) {
 			t.Errorf("signal(%d, 0) = %v, want EINVAL", pid, err)
 		}
+	}
+}
+
+// TestEndClaudeHelper is the child TestEndClaudeEndsARealChild starts: it
+// ignores SIGTERM, says so, and sleeps until it is killed. Run as a test it
+// returns at once.
+func TestEndClaudeHelper(t *testing.T) {
+	if os.Getenv("CLEANZO_END_CLAUDE_HELPER") == "" {
+		return
+	}
+	signal.Ignore(syscall.SIGTERM)
+	fmt.Println("ready")
+	time.Sleep(time.Minute)
+	os.Exit(0)
+}
+
+// TestEndClaudeEndsARealChild ends a child of this test through the real
+// source: the start the real snapshot gives the child is the start the looks
+// compare, SIGTERM leaves the child running, and SIGKILL ends it once
+// claudeTermWait has passed.
+func TestEndClaudeEndsARealChild(t *testing.T) {
+	setHome(t, t.TempDir())
+	viewNoApps(t)
+	child := exec.Command(os.Args[0], "-test.run=^TestEndClaudeHelper$")
+	child.Env = []string{"CLEANZO_END_CLAUDE_HELPER=1"}
+	out, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	})
+	if line, err := bufio.NewReader(out).ReadString('\n'); err != nil || strings.TrimSpace(line) != "ready" {
+		t.Fatalf("the child said %q, %v, want ready", line, err)
+	}
+	pid := int32(child.Process.Pid)
+
+	src := realClaudeSource()
+	s, err := src.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kid *claudeProc
+	for i := range s.Procs {
+		if s.Procs[i].Pid == pid {
+			kid = &s.Procs[i]
+		}
+	}
+	if kid == nil {
+		t.Fatal("the snapshot does not hold the child")
+	}
+	if start, ok := src.started(pid); !ok || start != kid.Start {
+		t.Fatalf("the snapshot starts the child at %d, a look says %d, %v", kid.Start, start, ok)
+	}
+
+	began := time.Now()
+	res := claudeEnd(context.Background(), src, []claudeEnding{newClaudeEnding(*kid, s.UID)})
+	if len(res.Procs) != 1 || res.Procs[0] != (ClaudeEnded{Pid: pid, Result: claudeResultForced}) || res.Freed == 0 {
+		t.Fatalf("ending the child gave %+v, want it forced with its footprint freed", res)
+	}
+	if waited := time.Since(began); waited < claudeTermWait {
+		t.Errorf("SIGKILL came after %v, want it no sooner than %v", waited, claudeTermWait)
+	}
+	var exit *exec.ExitError
+	if err := child.Wait(); !errors.As(err, &exit) {
+		t.Fatalf("the child ended with %v, want it killed", err)
+	}
+	if ws, ok := exit.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+		t.Errorf("the child ended with %v, want SIGKILL", exit)
 	}
 }
