@@ -4,7 +4,7 @@ import type { AIGroup, AIPart, AIScanResult, AITool, ClaudeRunSummary, CrashDump
 import { t } from "../src/i18n";
 import { offered, isSessions, groupSelectable, canPick, worktreeSeen, type WindowDays } from "../src/react/ai/types";
 import { human, displayPath } from "../src/react/ai/format";
-import { textOf, type Changes } from "./page-harness";
+import { nodes, textOf, type Changes } from "./page-harness";
 
 const DAY = 86400;
 const NOW = 1_700_000_000;
@@ -581,4 +581,139 @@ test("worktreeSeen gives the state of each picked worktree in the order of the k
   expect(worktreeSeen(p, [])).toEqual([]);
   // 列表里已经没有的：占着位置、和什么状态都对不上，后端照样一个一个回答
   expect(worktreeSeen(p, ["/Users/a/code/app/.claude/worktrees/gone", a!])).toEqual(["", "clean"]);
+});
+
+// ---- worktree 的行：PartRow 当根来画 ----
+
+type PartRowProps = Parameters<typeof import("../src/react/ai/PartRow").PartRow>[0];
+
+/** 画一项（默认展开）：记下点了哪些「在访达中显示」。 */
+async function partRow(env: Changes, part: AIPart, over: Partial<PartRowProps> = {}) {
+  const { PartRow } = await import("../src/react/ai/PartRow");
+  const { Checkbox } = await import("../src/ui/components/checkbox");
+  const { Badge } = await import("../src/ui/components/badge");
+  const reveals: string[] = [];
+  const page = env.page(PartRow, {
+    part, windowDays: 30, scannedAt: NOW, picked: false, groups: new Set<string>(), expanded: true,
+    canSelect: canPick(part, 30, NOW), chosenSize: 0,
+    onTogglePart() {}, onToggleGroup() {}, onExpand() {}, onReveal: (path) => { reveals.push(path); }, onPickOld() {}, onWindowChange() {},
+    ...over,
+  });
+  await page.settle();
+  const checkboxes = () => page.ofType(Checkbox);
+  return {
+    page, reveals, checkboxes,
+    /** 名字是 label 的勾选框。 */
+    checkbox: (label: string) => checkboxes().find((el) => el.props["aria-label"] === label),
+    /** 勾选框的 aria-describedby 指着的文字，按顺序用空格连起来。 */
+    describedBy(box: { props: Record<string, unknown> }) {
+      const ids = String(box.props["aria-describedby"] ?? "").split(" ").filter(Boolean);
+      return ids.map((id) => textOf(page.find((el) => el.props.id === id))).join(" ");
+    },
+    badges: () => page.ofType(Badge).map((el) => textOf(el.props.children)),
+    /** 名字是 name 的那个 worktree 的一行。 */
+    row: (name: string) => page.find((el) => el.key === part.groups.find((g) => g.label === name)?.key),
+    /** 这一项自己的「在访达中显示」。 */
+    revealButton: () => page.find((el) => el.props["aria-label"] === t("fs.reveal")),
+  };
+}
+
+test("a worktree part has no checkbox of its own, no window selector when expanded, and the Sensitive badge", async () => {
+  const { Lock } = await import("lucide-react");
+  const env = (await import("./page-harness")).changes();
+  try {
+    const r = await partRow(env, worktreePart("claude", [worktree("a", "clean"), worktree("b", "dirty")]), { expanded: false });
+    // 位置空着：没有勾选框，也不是锁着的那种
+    expect(r.checkboxes()).toEqual([]);
+    expect(r.page.ofType(Lock)).toEqual([]);
+    expect(r.badges()).toEqual([t("ai.level.sensitive")]);
+    r.page.setProps({ expanded: true });
+    await r.page.settle();
+    // 展开：只有每个 worktree 自己的勾选框；没有保留窗口那一排，也没有对话记录的提示
+    expect(r.checkboxes().map((el) => el.props["aria-label"])).toEqual(["a", "b"]);
+    expect(r.page.find((el) => el.props.role === "radiogroup" || "onWindowChange" in el.props || "onPickOld" in el.props)).toBeUndefined();
+    expect(r.page.text()).not.toContain(t("ai.sessionHint"));
+    expect(r.page.text()).not.toContain(t("ai.pickOld"));
+  } finally { env.restore(); }
+});
+
+test("each worktree state: clean and dirty can be ticked; the other eight are disabled and say why", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    env.lang("zh");
+    const r = await partRow(env, worktreePart("claude", [...WT_STATES, "a-state-from-later"].map((s) => worktree(s, s))));
+    for (const state of WT_STATES) {
+      const box = r.checkbox(state)!;
+      expect(box.props.disabled).toBe(state !== "clean" && state !== "dirty");
+      if (state === "clean" || state === "dirty") continue;
+      // 说明写在行上，也连着勾选框
+      expect(r.describedBy(box)).toBe(t(`ai.wt.state.${state}` as never));
+      expect(textOf(r.row(state))).toContain(t(`ai.wt.state.${state}` as never));
+    }
+    // 干净的不写；带改动的写着有几处
+    expect(r.describedBy(r.checkbox("clean")!)).toBe("");
+    expect(r.describedBy(r.checkbox("dirty")!)).toBe("3 处没提交的改动，会一起进废纸篓");
+    expect(textOf(r.row("dirty"))).toContain("3 处没提交的改动，会一起进废纸篓");
+    // 认不出的新状态：不能勾，说认不出
+    const later = r.checkbox("a-state-from-later")!;
+    expect(later.props.disabled).toBe(true);
+    expect(r.describedBy(later)).toBe(t("ai.wt.state.unrecognized"));
+  } finally { env.restore(); }
+});
+
+test("a worktree row's second line: the repository's folder, the branch or a detached HEAD, and the days untouched", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    env.lang("zh");
+    const r = await partRow(env, worktreePart("claude", [
+      worktree("x", "clean", { branch: "feat/x" }),
+      worktree("y", "clean", { branch: "" }),
+      worktree("z", "dirty", { last: 0 }),
+      worktree("w", "unrecognized", { repo: "", branch: "" }),
+    ]));
+    const line = (name: string) => textOf(r.row(name));
+    expect(line("x")).toContain("app · feat/x · 8 天没动");
+    expect(line("y")).toContain("app · 游离的 HEAD · 8 天没动");
+    // 读不到最后改动的时间：不写天数
+    expect(line("z")).toContain("app · feat/z");
+    expect(line("z")).not.toContain("天没动");
+    // 认不出的文件夹不知道仓库和分支：没有第二行
+    expect(line("w")).not.toContain(" · ");
+    expect(line("w")).not.toContain(t("ai.wt.detached"));
+    env.lang("en");
+    r.page.setProps({});
+    await r.page.settle();
+    expect(line("x")).toContain("app · feat/x · untouched for 8 days");
+    expect(line("y")).toContain("app · detached HEAD · untouched for 8 days");
+  } finally { env.restore(); }
+});
+
+test("a worktree part without a folder of its own has no Reveal button, Codex's has one, and each row reveals its worktree", async () => {
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const r = await partRow(env, worktreePart("claude", [worktree("a", "clean")]));
+    expect(r.revealButton()).toBeUndefined();
+    nodes(r.row("a")).find((el) => el.type === "button")!.props.onClick();
+    expect(r.reveals).toEqual(["/Users/a/code/app/.claude/worktrees/a"]);
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const r = await partRow(env, worktreePart("codex", [worktree("a", "clean")]));
+    r.revealButton()!.props.onClick();
+    expect(r.reveals).toEqual(["/Users/a/.codex/worktrees"]);
+  } finally { env.restore(); }
+});
+
+test("while Codex runs, its worktree part says Quit It First and every worktree is disabled", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const r = await partRow(env, worktreePart("codex", WT_STATES.map((s) => worktree(s, s)), { running: true }));
+    expect(r.badges()).toEqual([t("ai.quitFirst")]);
+    expect(r.checkboxes()).toHaveLength(WT_STATES.length);
+    for (const box of r.checkboxes()) expect(box.props.disabled).toBe(true);
+    // 读屏也读得到为什么：「先退出」连着每一组，在它自己的说明前面
+    expect(r.describedBy(r.checkbox("clean")!)).toBe(t("ai.quitFirst"));
+    expect(r.describedBy(r.checkbox("in-use")!)).toBe(`${t("ai.quitFirst")} ${t("ai.wt.state.in-use")}`);
+  } finally { env.restore(); }
 });
