@@ -144,7 +144,7 @@ test("rowTag: Apple apps can use macos owner tags, with app tags taking priority
   expect(rowTag(safari, new Map())).toBeNull();
 });
 
-test("claudeTags：两条都进表；全 0 的不进；null 得到空表", () => {
+test("claudeTags: both rows enter the table, an all-zero row does not, null gives an empty table", () => {
   const idle = { key: "cli:claude", idle: 6, left: 0 };
   const left = { key: "cli:node", idle: 0, left: 2 };
   const tags = claudeTags({ idle: 6, left: 2, rows: [idle, { key: lark.key, idle: 0, left: 0 }, left] });
@@ -235,7 +235,7 @@ test("rows: a growth tag shows its window and size; command-line rows have no qu
   expect(await rowHtml({ row: node })).not.toContain("st-quit");
 });
 
-test("行上的标签：空闲会话、留下的进程各一个 pr-tag 按钮，排在增长标签后面；点新标签调 onClaude，点增长标签仍调 onTag", async () => {
+test("row tags: idle sessions and left processes are pr-tag buttons after the growth tag; a new tag calls onClaude, the growth tag still calls onTag", async () => {
   const { t } = await import("../src/i18n");
   const { human } = await import("../src/shared");
   const idleOnly = await rowTagButtons({ row: claudeCode, claude: { key: claudeCode.key, idle: 6, left: 0 } });
@@ -465,7 +465,7 @@ const claudeSummary: ClaudeRunSummary = {
   idle: 6, left: 2, rows: [{ key: "cli:claude", idle: 6, left: 0 }, { key: "cli:node", idle: 0, left: 2 }],
 };
 
-test("读取的时机：进页面读一次；来三条采样不再读；visit 加一再读一次；读取出错时页面照常、没有标签", async () => {
+test("Claude Code summary: read once on entering, not on three more samples, again when visit changes; a failed read leaves the page as it is, without tags", async () => {
   const env = (await import("./page-harness")).changes();
   try {
     const pp = await processPage(env, async () => claudeSummary);
@@ -496,7 +496,7 @@ test("读取的时机：进页面读一次；来三条采样不再读；visit �
   } finally { env.restore(); }
 });
 
-test("读取的时机：再进来时不留上一次的标签；离开以后才到的摘要丢掉", async () => {
+test("Claude Code summary: coming back shows none of the last visit's tags; a summary that arrives after leaving is dropped", async () => {
   const env = (await import("./page-harness")).changes();
   try {
     const answers: ((s: ClaudeRunSummary) => void)[] = [];
@@ -532,7 +532,7 @@ test("读取的时机：再进来时不留上一次的标签；离开以后才�
   } finally { env.restore(); }
 });
 
-test("跳转：ProcessPage 把 goRunning 接到行的 onClaude 上", async () => {
+test("jump: ProcessPage wires goRunning to the row's onClaude", async () => {
   const env = (await import("./page-harness")).changes();
   try {
     const pp = await processPage(env, async () => claudeSummary);
@@ -544,7 +544,7 @@ test("跳转：ProcessPage 把 goRunning 接到行的 onClaude 上", async () =>
   } finally { env.restore(); }
 });
 
-test("跳转：main.ts 先请求 Claude Code 页开在「运行中」再切过去；切到 AI 工具之外的视图时告诉工具页它已离开", async () => {
+test("jump: main.ts asks for the Claude Code page's Running tab before switching to it, and tells the AI tool page when another view is shown", async () => {
   const { readFileSync } = await import("node:fs");
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   expect(main).toContain('goRunning: () => { requestAITab("claude", "running"); switchView("aitools", "claude"); }');
