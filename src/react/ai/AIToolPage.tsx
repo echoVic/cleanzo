@@ -96,11 +96,14 @@ export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolP
     setTab(fresh && request.tab ? request.tab : "space");
   }
   const onRunning = hasTabs && tab === "running";
-  // 标签上的数：每次进入读一次摘要；「运行中」每读完一次换成它数的，之后才回来的摘要不再盖掉它。
+  // 标签上的数：每次进入读一次摘要，读不到就不显示数字；「运行中」每读完一次换成它数的，之后才回来的摘要不再盖掉它。
   React.useEffect(() => {
     if (!hasTabs || !active) return;
     const seq = ++badgeSeq.current;
-    void runningApi.summary().then((s) => { if (seq === badgeSeq.current) setBadge(s.idle + s.left); }, () => {});
+    void runningApi.summary().then(
+      (s) => { if (seq === badgeSeq.current) setBadge(s.idle + s.left); },
+      () => { if (seq === badgeSeq.current) setBadge(0); },
+    );
   }, [hasTabs, active, visit]);
   const onCount = React.useCallback((n: number) => { badgeSeq.current++; setBadge(n); }, []);
 

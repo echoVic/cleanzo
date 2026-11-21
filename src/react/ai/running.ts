@@ -11,10 +11,10 @@ const MINUTE = 60;
 const HOUR = 3600;
 const DAY = 86400;
 
-/** 标签上的数：已关闭的会话留下的进程的行数，加上空闲满 2 小时的会话数。 */
+/** 标签上的数：已关闭的会话留下的进程的行数，加上空闲满 2 小时的会话数。空闲了多久读不到（since 是 0）的不算。 */
 export function badgeCount(r: ClaudeRunning, nowSec: number): number {
   const rows = r.left.reduce((n, g) => n + g.procs.length, 0);
-  const idle = r.sessions.filter((s) => s.status === "idle" && nowSec - s.since >= RUNNING.idleNoteSec).length;
+  const idle = r.sessions.filter((s) => s.status === "idle" && s.since > 0 && nowSec - s.since >= RUNNING.idleNoteSec).length;
   return rows + idle;
 }
 
@@ -42,7 +42,7 @@ export function sessionName(s: { project: string; title: string }, t: T): string
 
 /**
  * 确认框开着、正在结束时显示的读数：行和顺序照 shown，每一行按 pid 换成 next 里的那一行；
- * next 里没有的行照旧留着，next 里新出现的不加进来。
+ * next 里没有的行照旧留着，next 里新出现的不加进来。读不读得到会话记录也照 shown：列表不会在确认框后面整段消失。
  */
 export function freezeRunning(shown: ClaudeRunning, next: ClaudeRunning): ClaudeRunning {
   const sessions = new Map(next.sessions.map((s) => [s.pid, s]));
@@ -50,6 +50,7 @@ export function freezeRunning(shown: ClaudeRunning, next: ClaudeRunning): Claude
   const fresh = (p: ClaudeProc) => procs.get(p.pid) ?? p;
   return {
     ...next,
+    noRecords: shown.noRecords,
     sessions: shown.sessions.map((s) => ({ ...(sessions.get(s.pid) ?? s), commands: s.commands.map(fresh) })),
     left: shown.left.map((g) => ({ ...g, procs: g.procs.map(fresh) })),
   };

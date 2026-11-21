@@ -211,7 +211,8 @@ export function RunningPanel({ active, visit, refresh, onCount }: RunningPanelPr
     const nameId = `cz-run-s${s.pid}`;
     const expandable = s.commands.length > 0;
     const isOpen = open.has(s.pid);
-    const state = s.status === "idle" ? t("ai.run.idle", { time: durationText(at - s.since, t) })
+    // 空闲了多久读不到（since 是 0）时只写「空闲」，不写时长
+    const state = s.status === "idle" ? (s.since > 0 ? t("ai.run.idle", { time: durationText(at - s.since, t) }) : t("ai.run.idleNoTime"))
       : s.status === "busy" ? t("ai.run.busy") : "";
     const label = (
       <>

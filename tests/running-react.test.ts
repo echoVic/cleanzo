@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import type { ClaudeEndResult, ClaudeLeft, ClaudeProc, ClaudeRunSummary, ClaudeRunning, ClaudeSession } from "../src/mygo";
 import { dict, t } from "../src/i18n";
 import { human } from "../src/react/ai/format";
+import { Collapse } from "../src/ui/motion/Collapse";
 import {
   RUNNING, badgeCount, durationText, endToast, freezeRunning, leftTargets, procTargets, sessionName,
 } from "../src/react/ai/running";
@@ -69,6 +70,8 @@ test("badgeCount: the left rows plus the sessions idle for two hours or longer",
       session(3, { status: "", since: NOW - 5 * DAY }),
       session(4, { status: "busy", since: NOW - 5 * DAY }),
       session(5, { status: "idle", since: NOW - 7 * DAY }),
+      // 空闲了多久读不到：不算
+      session(6, { status: "idle", since: 0 }),
     ],
     left: [left("L1", [proc(20), proc(21)]), left("L2", [proc(22)])],
   });
@@ -132,9 +135,11 @@ test("freezeRunning keeps the shown rows in their order with the new numbers by 
   expect(out.left.map((g) => g.id)).toEqual(["L1"]);
   expect(out.left[0]!.procs.map((p) => [p.pid, p.memory])).toEqual([[21, 50], [22, 65]]);
   expect([out.uncertain, out.at]).toEqual([2, NOW + 5]);
-  const gone = freezeRunning(shown, reading({ at: NOW + 5 }));
+  const gone = freezeRunning(shown, reading({ at: NOW + 5, noRecords: true }));
   expect(gone.sessions.map((s) => [s.pid, s.memory])).toEqual([[1, 100], [2, 200]]);
   expect(gone.left[0]!.procs.map((p) => p.pid)).toEqual([21, 22]);
+  // 冻结期间读不到会话记录：留下的那一段照旧显示
+  expect(gone.noRecords).toBe(false);
 });
 
 test("endToast: all ended is an ok toast; what is still running or changed follows, and makes it an error", () => {
@@ -149,7 +154,7 @@ test("endToast: all ended is an ok toast; what is still running or changed follo
 
 test("the Running tab's strings read in Chinese and English with the same placeholders", () => {
   const keys = (Object.keys(dict.zh) as (keyof typeof dict.zh)[]).filter((k) => k === "ai.tabs" || k.startsWith("ai.tab.") || k.startsWith("ai.run."));
-  expect(keys.length).toBe(40);
+  expect(keys.length).toBe(41);
   const holes = (s: string) => [...s.matchAll(/\{(\w+)[|}]/g)].map((m) => m[1]).sort();
   const en: Readonly<Record<string, string>> = dict.en;
   for (const k of keys) {
@@ -309,6 +314,7 @@ test("panel: a session row shows its name, how long it has idled or that it work
       session(1, { since: NOW - 3 * HOUR, host: "Ghostty", memory: 240 * MB }),
       session(2, { status: "busy", project: "api", title: "" }),
       session(3, { status: "", since: 0, project: "", title: "" }),
+      session(4, { since: 0, project: "docs", title: "" }),
     ] }))]);
     const one = textOf(p.row(1));
     expect(one).toContain("shop · 修复登录");
@@ -324,6 +330,10 @@ test("panel: a session row shows its name, how long it has idled or that it work
     expect(three).toContain(t("ai.run.unknownSession"));
     expect(three).not.toContain("空闲");
     expect(three).not.toContain(t("ai.run.busy"));
+    // 空闲，但读不到空闲了多久：只写「空闲」，没有时长
+    const four = textOf(p.row(4));
+    expect(four).toContain(t("ai.run.idleNoTime"));
+    expect(four).not.toMatch(/空闲 |天|小时|分钟/);
   } finally { env.restore(); }
 });
 
@@ -357,10 +367,14 @@ test("panel: a session that started commands opens to show them", async () => {
   try {
     const p = await panel(env, [ok(reading({ sessions: [session(1, { commands: [proc(11), proc(12)] }), session(2)] }))]);
     const toggle = () => nodes(p.row(1)!).find((el) => "aria-expanded" in el.props)!;
+    // 命令行放在 Collapse 里：它的 open 跟着展开走
+    const fold = () => p.page.ofType(Collapse).find((el) => nodes(el).some((n) => n.props["data-pid"] === 11))!;
     expect(toggle().props["aria-expanded"]).toBe(false);
+    expect(fold().props.open).toBe(false);
     toggle().props.onClick();
     await p.page.settle();
     expect(toggle().props["aria-expanded"]).toBe(true);
+    expect(fold().props.open).toBe(true);
     expect([p.row(11), p.row(12)].every(Boolean)).toBe(true);
     expect(nodes(p.row(2)!).some((el) => "aria-expanded" in el.props)).toBe(false);
   } finally { env.restore(); }
