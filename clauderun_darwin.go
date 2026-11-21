@@ -57,7 +57,35 @@ func realClaudeSource() claudeSource {
 
 // claudeWorkingFolders is the working folders of this user's processes and
 // of the open Claude Code sessions; OK is false when they cannot be read.
-func claudeWorkingFolders() worktreeUsage { return worktreeUsage{} }
+func claudeWorkingFolders() worktreeUsage {
+	return claudeWorkingFoldersWith(claudeProcTable, nativeCwd)
+}
+
+// claudeWorkingFoldersWith is claudeWorkingFolders over the process table
+// and current folders it is given: the current folder of each of this
+// account's processes that has one, and the cwd of each valid session
+// record.
+func claudeWorkingFoldersWith(table func() ([]claudeProc, error), cwd func(pid int32) string) worktreeUsage {
+	procs, err := table()
+	if err != nil {
+		return worktreeUsage{}
+	}
+	uid := uint32(os.Getuid())
+	records := readClaudeRecords(filepath.Join(homeDir(), ".claude", "sessions"))
+	use := worktreeUsage{OK: true}
+	for _, p := range procs {
+		if p.UID != uid {
+			continue
+		}
+		if dir := cwd(p.Pid); dir != "" {
+			use.Cwds = append(use.Cwds, dir)
+		}
+		if r, ok := records[p.Pid]; ok && r.Cwd != "" && claudeRecordValid(p, r, uid) {
+			use.Sessions = append(use.Sessions, r.Cwd)
+		}
+	}
+	return use
+}
 
 // procZombie is p_stat of a process that exited and is not reaped yet: it
 // runs nothing.

@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -426,5 +429,37 @@ func TestRealClaudeSourceReadsThisProcess(t *testing.T) {
 		`{"type":"user","cwd":"/Users/me/sample-app"}`+"\n"+`{"type":"ai-title","aiTitle":"Rename the widgets"}`+"\n")
 	if project, title := src.closed(id); project != "sample-app" || title != "Rename the widgets" {
 		t.Errorf("closed = %q, %q; want the transcript's project and title", project, title)
+	}
+}
+
+func TestClaudeWorkingFolders(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	uid := uint32(os.Getuid())
+	proc := func(pid int32, uid uint32) claudeProc {
+		return claudeProc{Pid: pid, Ppid: 1, Pgid: pid, UID: uid, Start: testStart(pid)}
+	}
+	procs := []claudeProc{proc(100, uid), proc(101, uid+1), proc(102, uid), proc(103, uid)}
+	record := func(pid int32, start int64, cwd string) {
+		data, err := json.Marshal(map[string]any{"sessionId": "S1", "cwd": cwd, "procStart": time.UnixMicro(start).UTC().Format("Mon Jan _2 15:04:05 2006")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeText(t, filepath.Join(home, ".claude", "sessions", fmt.Sprintf("%d.json", pid)), string(data))
+	}
+	record(100, testStart(100), "/Users/me/sample-app")
+	record(101, testStart(101), "/Users/me/their-app")                      // another account's process
+	record(102, testStart(102)+time.Second.Microseconds(), "/Users/me/old") // pid 102 is another process now
+	record(104, testStart(104), "/Users/me/gone-app")                       // no process 104
+	cwds := map[int32]string{100: "/Users/me/sample-app/web", 101: "/Users/me/their-app", 102: "/Users/me/old"}
+	cwd := func(pid int32) string { return cwds[pid] }
+
+	got := claudeWorkingFoldersWith(func() ([]claudeProc, error) { return procs, nil }, cwd)
+	want := worktreeUsage{Cwds: []string{"/Users/me/sample-app/web", "/Users/me/old"}, Sessions: []string{"/Users/me/sample-app"}, OK: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("working folders %+v\n            want %+v", got, want)
+	}
+	if got := claudeWorkingFoldersWith(func() ([]claudeProc, error) { return nil, errors.New("no process table") }, cwd); got.OK {
+		t.Errorf("working folders %+v from no process table, want OK false", got)
 	}
 }
