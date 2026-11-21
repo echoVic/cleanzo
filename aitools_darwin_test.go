@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1170,6 +1171,37 @@ func TestCleanAIToolsWorktrees(t *testing.T) {
 	aiProcesses = func() (string, error) { return "/Users/me/.local/bin/claude --resume\n", nil }
 	if r := clean(AISelection{Tool: "claude", Part: "claude.worktrees", Groups: []string{second}, Seen: []string{wtClean}}); r.Skipped != "" || r.Moved != 1 || exists(second) {
 		t.Fatalf("while Claude Code runs: %+v", r)
+	}
+}
+
+// TestCleanAIToolsWorktreesJudgeOnlyTheSelected: a clean checks each key
+// against a listing of the worktrees, and judges only the selected ones,
+// each once.
+func TestCleanAIToolsWorktreesJudgeOnlyTheSelected(t *testing.T) {
+	home := aiFixture(t)
+	git, repo := wtRepoIn(t, home)
+	stubWorktreeUse(t, nil, nil)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	chosen := addWorktree(t, git, repo, "agent-a", "agent-a")
+	other := addWorktree(t, git, repo, "agent-b", "agent-b")
+	saved := worktreeGit
+	var mu sync.Mutex
+	statuses := map[string]int{} // git status runs, by worktree
+	worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+		if len(args) > 1 && args[0] == "-C" && slices.Contains(args, "status") {
+			mu.Lock()
+			statuses[args[1]]++
+			mu.Unlock()
+		}
+		return saved(ctx, git, args, limit)
+	}
+	t.Cleanup(func() { worktreeGit = saved })
+	res, err := (Cleaner{}).CleanAITools(context.Background(), []AISelection{{Tool: "claude", Part: "claude.worktrees", Groups: []string{chosen}, Seen: []string{wtClean}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Parts[0]; r.Moved != 1 || exists(chosen) || !exists(other) || statuses[chosen] != 1 || statuses[other] != 0 {
+		t.Fatalf("result = %+v, git status ran %v", r, statuses)
 	}
 }
 

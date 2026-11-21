@@ -126,21 +126,7 @@ func findWorktrees(ctx context.Context, kind string) []agentWorktree {
 		return nil
 	}
 	use := worktreeUse()
-	var paths []string
-	dirs, folders := map[string]bool{}, map[string]bool{}
-	for _, dir := range worktreeDirs(ctx, kind, use.Sessions) {
-		key := strings.ToLower(resolvePath(dir))
-		if dirs[key] || !worktreeListable(dir) {
-			continue
-		}
-		dirs[key] = true
-		for _, p := range worktreeFolders(dir) {
-			if key := strings.ToLower(resolvePath(p)); !folders[key] && worktreeListable(p) {
-				folders[key] = true
-				paths = append(paths, homeSpelled(p))
-			}
-		}
-	}
+	paths := worktreePaths(ctx, kind, use.Sessions)
 	if len(paths) == 0 {
 		return nil
 	}
@@ -165,6 +151,33 @@ func findWorktrees(ctx context.Context, kind string) []agentWorktree {
 	wg.Wait()
 	slices.SortFunc(found, func(a, b agentWorktree) int { return strings.Compare(a.Path, b.Path) })
 	return found
+}
+
+// worktreePaths lists the folders of the worktrees the agents of kind made,
+// spelled from the home folder, without judging or measuring them.
+// findWorktrees judges these, and a clean takes a key it is sent only when
+// it is one of them. sessions are the working folders of the open Claude
+// Code sessions. Only macOS has them.
+func worktreePaths(ctx context.Context, kind string, sessions []string) []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	var paths []string
+	dirs, folders := map[string]bool{}, map[string]bool{}
+	for _, dir := range worktreeDirs(ctx, kind, sessions) {
+		key := strings.ToLower(resolvePath(dir))
+		if dirs[key] || !worktreeListable(dir) {
+			continue
+		}
+		dirs[key] = true
+		for _, p := range worktreeFolders(dir) {
+			if key := strings.ToLower(resolvePath(p)); !folders[key] && worktreeListable(p) {
+				folders[key] = true
+				paths = append(paths, homeSpelled(p))
+			}
+		}
+	}
+	return paths
 }
 
 // worktreeDirs lists the folders the agents of kind keep worktrees in.

@@ -1188,8 +1188,9 @@ func aiWorktreeTool(sel AISelection) (aiTool, bool) {
 
 // cleanAIWorktrees moves the selected worktrees of tool's agents to the
 // Trash, each while it is still in the state the user saw. A worktree is
-// named by its path, which must be one a search now finds: what the page
-// sends is not taken on its word. Off macOS nothing is looked at.
+// named by its path, which must be one a listing finds now: what the page
+// sends is not taken on its word. Only the selected ones are judged again.
+// Off macOS nothing is looked at.
 func cleanAIWorktrees(ctx context.Context, sel AISelection, tool aiTool, running map[string]bool, guard *usageGuard) AIPartResult {
 	r := AIPartResult{Tool: sel.Tool, Part: sel.Part, Failed: []string{}}
 	switch {
@@ -1203,17 +1204,16 @@ func cleanAIWorktrees(ctx context.Context, sel AISelection, tool aiTool, running
 		r.Skipped = "blocked"
 		return r
 	}
-	found := findWorktrees(ctx, tool.Worktrees)
+	paths := worktreePaths(ctx, tool.Worktrees, worktreeUse().Sessions)
 	for i, key := range sel.Groups {
 		if ctx.Err() != nil {
 			break
 		}
-		at := slices.IndexFunc(found, func(w agentWorktree) bool { return w.Path == key })
-		if at < 0 {
+		if !slices.Contains(paths, key) {
 			r.Failed = append(r.Failed, displayHome(key)+": "+wtFailChanged)
 			continue
 		}
-		freed, code := removeWorktree(ctx, found[at], sel.Seen[i], guard)
+		freed, code := removeWorktree(ctx, agentWorktree{Path: key}, sel.Seen[i], guard)
 		switch code {
 		case "":
 			r.Moved++
