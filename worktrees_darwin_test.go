@@ -10,8 +10,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -833,6 +835,57 @@ GIT_CONFIG_NOSYSTEM=1 exec `+shellPath(git)+` "$@"
 	toolDirs = func() []string { return []string{tools} }
 	if w := wtFound(t, "claude", wt); w.State != wtClean || w.Changes != 0 {
 		t.Fatalf("state = %s with %d changes", w.State, w.Changes)
+	}
+}
+
+// TestWorktreeGitEndsItsChildren: git runs in a process group of its own,
+// killed whole when its time limit runs out and once git has ended, so a
+// child it starts that keeps standard output open does not outlive the call.
+func TestWorktreeGitEndsItsChildren(t *testing.T) {
+	const limit = 2 * time.Second
+	for _, tc := range []struct {
+		name, then string
+		want       error
+		inTime     func(took time.Duration) bool
+	}{
+		{"git hangs", "wait", context.DeadlineExceeded, func(took time.Duration) bool { return took >= limit && took < limit+2*time.Second }},
+		{"git ends at once", "exit 0", exec.ErrWaitDelay, func(took time.Duration) bool { return took < limit }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := t.TempDir()
+			child := filepath.Join(tools, "child.pid")
+			fakeTool(t, tools, "git", "/bin/sleep 6 &\necho $! > "+shellPath(child)+"\n"+tc.then+"\n")
+			start := time.Now()
+			out, err := worktreeGit(context.Background(), filepath.Join(tools, "git"), []string{"status"}, limit)
+			if took := time.Since(start); !errors.Is(err, tc.want) || !tc.inTime(took) {
+				t.Fatalf("answer %q, %v after %s", out, err, took)
+			}
+			data, _ := os.ReadFile(child)
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil || pid <= 1 {
+				t.Fatalf("child pid %q: %v", data, err)
+			}
+			// A killed child is gone once launchd has reaped it.
+			for until := time.Now().Add(2 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+				if time.Now().After(until) {
+					t.Fatalf("git's child %d outlived the call", pid)
+				}
+			}
+		})
+	}
+}
+
+// TestWorktreeGitDropsStandardError: git's answer is what it prints on
+// standard output, without what it prints on standard error in between.
+func TestWorktreeGitDropsStandardError(t *testing.T) {
+	tools := t.TempDir()
+	fakeTool(t, tools, "git", `echo 'on standard output'
+echo 'warning: on standard error' >&2
+echo 'on standard output, again'
+`)
+	out, err := worktreeGit(context.Background(), filepath.Join(tools, "git"), []string{"status"}, worktreeStatusLimit)
+	if err != nil || out != "on standard output\non standard output, again\n" {
+		t.Fatalf("answer %q, %v", out, err)
 	}
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -100,13 +99,8 @@ var worktreeGit = func(ctx context.Context, git string, args []string, limit tim
 			cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(args[1]))
 		}
 		// A warning or a hint git prints on standard error would read as a
-		// line of its answer, so standard error goes nowhere. A child of git
-		// that keeps standard output open is not waited for.
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		cmd.WaitDelay = 100 * time.Millisecond
-		err := cmd.Run()
-		return out.Bytes(), err
+		// line of its answer, so standard error goes nowhere.
+		return runToolStdout(cmd)
 	})
 }
 

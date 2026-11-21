@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -50,10 +51,29 @@ func findTool(name string) string {
 
 // runToolCmd runs a command and kills its process group on completion.
 func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
+	return runInGroup(cmd, cmd.CombinedOutput)
+}
+
+// runToolStdout is runToolCmd for a command whose answer is what it prints
+// on standard output: what it prints on standard error goes to the null
+// device.
+func runToolStdout(cmd *exec.Cmd) ([]byte, error) {
+	return runInGroup(cmd, func() ([]byte, error) {
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, nil
+		err := cmd.Run()
+		return out.Bytes(), err
+	})
+}
+
+// runInGroup runs a command in a process group of its own through run,
+// which starts it, waits for it and returns its output. A cancel kills the
+// whole group, and so does the command's end.
+func runInGroup(cmd *exec.Cmd, run func() ([]byte, error)) ([]byte, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 100 * time.Millisecond
-	out, err := cmd.CombinedOutput()
+	out, err := run()
 	// A leader can exit while a background child still owns the output pipes.
 	if cmd.Process != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)

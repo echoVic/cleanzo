@@ -102,7 +102,17 @@ func resumeTool(pid uint32) error {
 }
 
 // runToolCmd assigns a suspended process before any child can escape the kill-on-close job.
-func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
+func runToolCmd(cmd *exec.Cmd) ([]byte, error) { return runInJob(cmd, false) }
+
+// runToolStdout is runToolCmd for a command whose answer is what it prints
+// on standard output: what it prints on standard error goes to the null
+// device.
+func runToolStdout(cmd *exec.Cmd) ([]byte, error) { return runInJob(cmd, true) }
+
+// runInJob assigns a suspended process before any child can escape the
+// kill-on-close job. It returns what the command printed, on standard
+// output alone when stdoutOnly is true.
+func runInJob(cmd *exec.Cmd, stdoutOnly bool) ([]byte, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, err
@@ -139,6 +149,9 @@ func runToolCmd(cmd *exec.Cmd) ([]byte, error) {
 	cmd.WaitDelay = 100 * time.Millisecond
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
+	if stdoutOnly {
+		cmd.Stderr = nil
+	}
 	// CommandContext may cancel immediately after Start: do not terminate an empty job then resume it.
 	mu.Lock()
 	if err := cmd.Start(); err != nil {
