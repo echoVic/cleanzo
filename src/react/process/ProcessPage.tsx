@@ -2,7 +2,7 @@ import * as React from "react";
 import { Pause, Play } from "lucide-react";
 import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import { Channel } from "mygo-runtime";
-import type { ClaudeRowTag, GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
+import type { ClaudeRowTag, ClaudeRunSummary, GrowthSummary, ProcessChild, ProcessRow, ProcessSample } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
@@ -18,7 +18,7 @@ import { growthApi } from "../growth/api";
 import { GrowthPanel, type GrowthHandlers } from "../growth/GrowthPage";
 import { processApi } from "./api";
 import {
-  diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
+  claudeTags, diagnose, est, growthTags, pruneStuck, pushCpu, refreshFrozen, rowTag, shouldWatch, sortChildren, sortRows,
   type GrowthTag, type ProcessRequest, type ProcessTab,
 } from "./format";
 import { AppIcon } from "../icons/AppIcon";
@@ -159,6 +159,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   const [quitTarget, setQuitTarget] = React.useState<ProcessRow | null>(null);
   const [forceTarget, setForceTarget] = React.useState<ProcessRow | null>(null);
   const [growth, setGrowth] = React.useState<GrowthSummary | null>(null);
+  const [claude, setClaude] = React.useState<ClaudeRunSummary | null>(null);
   const [focus, setFocus] = React.useState<{ key: string | null; nonce: number }>({ key: null, nonce: 0 });
   /** CPU、内存标签里要定位的行（菜单栏面板点名字进来）；hl 是正在高亮的行。 */
   const [rowFocus, setRowFocus] = React.useState<string | null>(null);
@@ -176,6 +177,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     setTab(fresh && request.tab ? request.tab : "cpu");
     setRunning(true);
     setSample(null);
+    setClaude(null);
     setOpen(null);
     setQuit(emptyQuit());
     setStuck(new Set());
@@ -237,6 +239,15 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
   }, []);
   React.useEffect(() => { if (active) loadGrowth(); }, [active, visit, loadGrowth]);
   React.useEffect(() => (active ? growthApi.onUpdated(() => loadGrowth()) : undefined), [active, loadGrowth]);
+
+  // 行上的 Claude Code 小标签：和增长摘要同一个时机，每次进入读一次，不随采样读。
+  // 读取失败当没有；离开以后才到的结果丢掉，再进来只显示这一次读到的。
+  React.useEffect(() => {
+    if (!active) return;
+    let live = true;
+    processApi.claudeSummary().then((s) => { if (live) setClaude(s); }, () => { if (live) setClaude(null); });
+    return () => { live = false; };
+  }, [active, visit]);
 
   // 离开磁盘占用标签就放下定位请求，回来时不再高亮旧的那一行。
   React.useEffect(() => {
@@ -343,6 +354,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
     if (!freezing || frozenRef.current.length === 0) frozenRef.current = rows;
   }
   const tags = growthTags(growth);
+  const claudeRows = claudeTags(claude);
   const diag = React.useMemo(() => (tab === "disk" ? null : diagnose(sample, cpuHist)), [tab, sample, cpuHist]);
   // 读屏里程碑：播报监控状态 + 当前标签；退出/诊断等细节由 toast 和页面自身结构承担。
   const liveMsg = sample
@@ -473,7 +485,7 @@ export function ProcessPage({ active, visit, request, goLeftovers, goUninstall }
                   sortBy={sortBy}
                   open={open === r.key}
                   tag={rowTag(r, tags)}
-                  claude={null}
+                  claude={claudeRows.get(r.key) ?? null}
                   busy={quit.busy.has(r.path)}
                   stuck={stuck.has(r.path)}
                   done={quit.done.has(r.key)}

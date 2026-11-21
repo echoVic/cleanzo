@@ -1,6 +1,6 @@
 import type { ProcessRowViewProps } from "../src/react/process/ProcessPage";
 import { expect, spyOn, test } from "bun:test";
-import type { GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
+import type { ClaudeRunSummary, GrowthSummary, ProcessRow, ProcessSample } from "../src/mygo";
 import { fmtMem, fmtPct } from "../src/react/status/format";
 import type { Changes } from "./page-harness";
 
@@ -393,24 +393,30 @@ function fakeChannel() {
   };
 }
 
-/** 搭好进程页：改动都记在 env 里，由测试的 finally 还原。 */
-async function processPage(env: Changes) {
+/** 搭好进程页：改动都记在 env 里，由测试的 finally 还原。claude 是 Claude Code 摘要的读取，默认读到空的摘要。 */
+async function processPage(env: Changes, claude: () => Promise<ClaudeRunSummary> = async () => ({ idle: 0, left: 0, rows: [] })) {
   const { ProcessPage } = await import("../src/react/process/ProcessPage");
   const { GrowthPanel } = await import("../src/react/growth/GrowthPage");
   const { processApi } = await import("../src/react/process/api");
   const { growthApi } = await import("../src/react/growth/api");
-  const ch = fakeChannel();
-  env.assign(globalThis as { mygo?: unknown }, { mygo: { channel: () => ch } });
+  // 每次开采样都是一条新通道，像真的一样；ch 是页面正在读的那一条。
+  const chans: ReturnType<typeof fakeChannel>[] = [];
+  env.assign(globalThis as { mygo?: unknown }, { mygo: { channel: () => { const c = fakeChannel(); chans.push(c); return c; } } });
   env.spy(processApi, "watch").mockImplementation(() => new Promise<void>(() => {}));
+  const claudeRead = env.spy(processApi, "claudeSummary").mockImplementation(claude);
   env.spy(growthApi, "summary").mockImplementation(async () => summary());
   env.spy(growthApi, "onUpdated").mockImplementation(() => () => {});
   const page = env.page(ProcessPage, {
     active: true, visit: 1, request: { tab: null, focusKey: null, nonce: 0 }, goLeftovers() {}, goUninstall() {},
   });
   await page.settle();
+  const rows = () => page.all().filter((el) => "onToggle" in el.props && el.props.row);
   return {
-    page, ch,
-    rows() { return page.all().filter((el) => "onToggle" in el.props && el.props.row); },
+    page, claudeRead,
+    get ch() { return chans.at(-1)!; },
+    rows,
+    /** 每一行收到的 Claude Code 小标签，按行的 key。 */
+    rowClaude() { return Object.fromEntries(rows().map((r) => [r.props.row.key, r.props.claude])); },
     tab(v: string) { page.find((el) => typeof el.props.onValueChange === "function")!.props.onValueChange(v); },
     growth() { return page.ofType(GrowthPanel)[0]; },
   };
@@ -450,5 +456,77 @@ test("page: the disk tab keeps its panel while CPU or memory is shown", async ()
     pp.tab("disk");
     await pp.page.settle();
     expect(pp.growth()?.props.active).toBe(true);
+  } finally { env.restore(); }
+});
+
+/** Claude Code 的摘要：claude 那一行有空闲的会话，node 那一行有已关闭会话留下的进程。 */
+const claudeSummary: ClaudeRunSummary = {
+  idle: 6, left: 2, rows: [{ key: "cli:claude", idle: 6, left: 0 }, { key: "cli:node", idle: 0, left: 2 }],
+};
+
+test("读取的时机：进页面读一次；来三条采样不再读；visit 加一再读一次；读取出错时页面照常、没有标签", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const pp = await processPage(env, async () => claudeSummary);
+    expect(pp.claudeRead).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 3; i++) {
+      pp.ch.push(sample({ rows: [claudeCode, node, chrome] }));
+      await pp.page.settle();
+    }
+    expect(pp.claudeRead).toHaveBeenCalledTimes(1);
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: claudeSummary.rows[0], [node.key]: claudeSummary.rows[1], [chrome.key]: null });
+
+    pp.page.setProps({ visit: 2 });
+    await pp.page.settle();
+    expect(pp.claudeRead).toHaveBeenCalledTimes(2);
+    pp.ch.push(sample({ rows: [claudeCode, node, chrome] }));
+    await pp.page.settle();
+    expect(pp.rowClaude()[claudeCode.key]).toEqual(claudeSummary.rows[0]);
+
+    pp.claudeRead.mockImplementation(async () => { throw new Error("read failed"); });
+    pp.page.setProps({ visit: 3 });
+    await pp.page.settle();
+    expect(pp.claudeRead).toHaveBeenCalledTimes(3);
+    pp.ch.push(sample({ rows: [claudeCode, node, chrome] }));
+    await pp.page.settle();
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: null, [node.key]: null, [chrome.key]: null });
+    expect(pp.page.find((el) => el.props.role === "alert")).toBeUndefined();
+    expect(pp.page.toasts).toEqual([]);
+  } finally { env.restore(); }
+});
+
+test("读取的时机：再进来时不留上一次的标签；离开以后才到的摘要丢掉", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const answers: ((s: ClaudeRunSummary) => void)[] = [];
+    const pp = await processPage(env, () => new Promise<ClaudeRunSummary>((resolve) => { answers.push(resolve); }));
+    answers[0]!(claudeSummary);
+    pp.ch.push(sample({ rows: [claudeCode, node] }));
+    await pp.page.settle();
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: claudeSummary.rows[0], [node.key]: claudeSummary.rows[1] });
+
+    // 离开再进来，这一次的还没读到：不显示上一次的。
+    pp.page.setProps({ active: false });
+    await pp.page.settle();
+    pp.page.setProps({ active: true, visit: 2 });
+    await pp.page.settle();
+    pp.ch.push(sample({ rows: [claudeCode, node] }));
+    await pp.page.settle();
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: null, [node.key]: null });
+
+    // 第二次的读到时，页面已经离开又进来了一次：丢掉，等第三次的。
+    pp.page.setProps({ active: false });
+    await pp.page.settle();
+    pp.page.setProps({ active: true, visit: 3 });
+    await pp.page.settle();
+    answers[1]!(claudeSummary);
+    pp.ch.push(sample({ rows: [claudeCode, node] }));
+    await pp.page.settle();
+    expect(pp.claudeRead).toHaveBeenCalledTimes(3);
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: null, [node.key]: null });
+    const third = { key: "cli:node", idle: 0, left: 1 };
+    answers[2]!({ idle: 0, left: 1, rows: [third] });
+    await pp.page.settle();
+    expect(pp.rowClaude()).toEqual({ [claudeCode.key]: null, [node.key]: third });
   } finally { env.restore(); }
 });
