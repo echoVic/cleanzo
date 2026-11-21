@@ -660,6 +660,32 @@ func TestMaskCommandMasksAScriptWordByWord(t *testing.T) {
 	}
 }
 
+func TestMaskCommandHidesAssignmentsGluedToOperators(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{wrapper(170, 1, "(API_KEY=hunter2 node x.js)").Args, "(API_KEY=… node x.js)"},
+		{wrapper(170, 1, "cd web&&API_KEY=hunter2 node x.js").Args, "cd web&&API_KEY=… node x.js"},
+		{wrapper(170, 1, "cd web;API_KEY=hunter2 node x.js").Args, "cd web;API_KEY=… node x.js"},
+		// A quoted value runs on past white space and operators.
+		{wrapper(170, 1, `(API_KEY="hunter2;x y" node x.js)`).Args, "(API_KEY=… node x.js)"},
+		// Each value ends at the next operator, and each one after it is
+		// hidden too.
+		{wrapper(170, 1, "{A=hunter2;B=hunter2|C=hunter2&D=hunter2}").Args, "{A=…;B=…|C=…&D=…}"},
+		{wrapper(170, 1, "echo `API_KEY=hunter2 node x.js` $(TOKEN=hunter2 node y.js)").Args, "echo `API_KEY=… node x.js` $(TOKEN=… node y.js)"},
+		// What a quoted word quotes may be a script.
+		{wrapper(170, 1, `sh -c "cd;API_KEY=hunter2"`).Args, "sh -c cd;API_KEY=…"},
+		{[]string{"sh", "-c", "cd web&&API_KEY=hunter2 node x.js"}, "sh -c cd web&&API_KEY=… node x.js"},
+		// Operators with no assignment after them are shown as written.
+		{wrapper(170, 1, "cd web&&npm run dev|tee log").Args, "cd web&&npm run dev|tee log"},
+	} {
+		if got := maskCommand(c.args); got != c.want || strings.Contains(got, "hunter2") {
+			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
 func TestMaskCommandIsOneShortLine(t *testing.T) {
 	long := maskCommand([]string{"node", strings.Repeat("x", 5000)})
 	if n := utf8.RuneCountInString(long); n > 300 || !strings.HasSuffix(long, "…") {

@@ -601,11 +601,14 @@ func maskCommand(args []string) string {
 // argument as written: a NAME=value becomes NAME=…; a flag whose name says
 // its value is secret hides that value, after its "=" or as the whole next
 // word, whatever that looks like; a flag whose value is a NAME=value hides
-// the value of that; an argument holding white space is a script, masked
-// word by word; and every URL hides its credentials. Every test reads a
-// word as written, with its quotes taken out, never what masking made of
-// it. secret says the word before words is a secret flag waiting for its
-// value; maskWords reports whether the last of words is one.
+// the value of that; a NAME=value glued to a shell operator inside a word,
+// or inside what a quoted word quotes, hides its value; an argument holding
+// white space is a script, masked word by word; and every URL hides its
+// credentials. Every test reads a word as written, with its quotes taken
+// out, never what masking made of it; only a quoted script is read once the
+// values glued to its operators are hidden. secret says the word before
+// words is a secret flag waiting for its value; maskWords reports whether
+// the last of words is one.
 func maskWords(words []string, secret bool) bool {
 	for i, word := range words {
 		text := shellValue(word)
@@ -623,14 +626,25 @@ func maskWords(words []string, secret bool) bool {
 			variable, _, _ := strings.Cut(value, "=")
 			words[i] = name + "=" + variable + "=…"
 		case strings.ContainsAny(text, shellBlanks):
-			parts := shellWords(word)
+			script, parts := word, shellWords(word)
 			if len(parts) == 1 {
-				parts = shellWords(text) // one quoted word: what it quotes is the script
+				// One quoted word: what it quotes is the script. A quoted
+				// value glued to an operator outside the quotes is hidden
+				// first, so its white space splits nothing.
+				script = maskGlued(word)
+				parts = shellWords(shellValue(script))
 			}
 			masked := slices.Clone(parts)
 			next = maskWords(masked, false) || next
-			if !slices.Equal(masked, parts) {
+			if script != word || !slices.Equal(masked, parts) {
 				words[i] = strings.Join(masked, " ")
+			}
+		default:
+			words[i] = maskGlued(word)
+			if quoted := shellValue(words[i]); quoted != words[i] {
+				if masked := maskGlued(quoted); masked != quoted {
+					words[i] = masked // what a quoted word quotes may be a script
+				}
 			}
 		}
 		words[i] = hideCredentials(words[i])
@@ -641,6 +655,13 @@ func maskWords(words []string, secret bool) bool {
 
 // shellBlanks are the characters that end an unquoted shell word.
 const shellBlanks = " \t\n\r\v\f"
+
+// shellOperators are the shell operators an assignment inside a word can
+// directly follow, and shellValueEnds the characters that end its value.
+const (
+	shellOperators = ";&|({`"
+	shellValueEnds = shellBlanks + ";&|)}`"
+)
 
 // shellWords splits s into words where the shell would, at white space
 // outside quotes, keeping each word as written. A backslash ending a line
@@ -666,32 +687,62 @@ func shellWords(s string) []string {
 // first white space outside quotes and backslash escapes, or all of s when a
 // quote is left open.
 func shellWordLen(s string) int {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\':
-			i++
-		case '\'':
-			end := strings.IndexByte(s[i+1:], '\'')
-			if end < 0 {
-				return len(s)
+	i := 0
+	for i < len(s) && strings.IndexByte(shellBlanks, s[i]) < 0 {
+		i += shellUnitLen(s[i:])
+	}
+	return i
+}
+
+// shellUnitLen is the length of what the non-empty s starts with as the
+// shell reads it: a backslash with the byte it escapes, a quoted run with
+// both its quotes or, when the quote is left open, all of s, or else one
+// byte.
+func shellUnitLen(s string) int {
+	switch s[0] {
+	case '\\':
+		return min(2, len(s))
+	case '\'':
+		if end := strings.IndexByte(s[1:], '\''); end >= 0 {
+			return end + 2
+		}
+		return len(s)
+	case '"':
+		for i := 1; i < len(s); i++ {
+			switch s[i] {
+			case '\\':
+				i++
+			case '"':
+				return i + 1
 			}
-			i += end + 1
-		case '"':
-			for i++; i < len(s) && s[i] != '"'; i++ {
-				if s[i] == '\\' {
-					i++
-				}
-			}
-			if i >= len(s) {
-				return len(s)
-			}
-		default:
-			if strings.IndexByte(shellBlanks, s[i]) >= 0 {
-				return i
+		}
+		return len(s)
+	}
+	return 1
+}
+
+// maskGlued is word with the value of every NAME=value that directly follows
+// ;, &, |, (, { or a backtick made "…", as in cd web&&API_KEY=…: the value
+// runs to the next white space or ;, &, |, ), } or backtick. Only what stands
+// outside quotes and backslash escapes counts as either.
+func maskGlued(word string) string {
+	var b strings.Builder
+	for i := 0; i < len(word); {
+		n := shellUnitLen(word[i:])
+		b.WriteString(word[i : i+n])
+		operator := n == 1 && strings.IndexByte(shellOperators, word[i]) >= 0
+		i += n
+		if !operator {
+			continue
+		}
+		if name := assignedName(word[i:]); name != "" {
+			b.WriteString(name + "=…")
+			for i += len(name) + 1; i < len(word) && strings.IndexByte(shellValueEnds, word[i]) < 0; {
+				i += shellUnitLen(word[i:])
 			}
 		}
 	}
-	return len(s)
+	return b.String()
 }
 
 // shellValue is the shell word word with its quotes and backslash escapes
@@ -753,17 +804,23 @@ func hideCredentials(word string) string {
 
 // isAssignment reports whether word sets a shell variable: NAME=value.
 func isAssignment(word string) bool {
-	name, _, ok := strings.Cut(word, "=")
-	if !ok || name == "" {
-		return false
-	}
-	for i, c := range name {
-		letter := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-		if !letter && (i == 0 || c < '0' || c > '9') {
-			return false
+	return assignedName(word) != ""
+}
+
+// assignedName is the NAME of the NAME=value s starts with, letters, digits
+// and underscores not starting with a digit, or "" when s starts with none.
+func assignedName(s string) string {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '=':
+			return s[:i]
+		case c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9' && i > 0:
+		default:
+			return ""
 		}
 	}
-	return true
+	return ""
 }
 
 // secretFlag reports whether the name of flag says its value is a secret.
