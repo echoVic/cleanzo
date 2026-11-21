@@ -647,7 +647,8 @@ func TestNamedAfterBundle(t *testing.T) {
 }
 
 // TestMain swaps the system Trash, which needs the running app, for a
-// stand-in that moves items into $HOME/.Trash.
+// stand-in that moves items into $HOME/.Trash, and keeps the worktree rules
+// from reading this machine's processes and sessions.
 func TestMain(m *testing.M) {
 	cleanup, err := sandboxWindowsTests()
 	if err != nil {
@@ -669,6 +670,9 @@ func TestMain(m *testing.M) {
 		return os.Rename(p, dst)
 	}
 	trashWithContext = func(_ context.Context, path string) error { return trashItem(path) }
+	// Nothing is read, so every worktree is in use; a test that needs
+	// another state says which folders are in use with stubWorktreeUse.
+	worktreeUse = func() worktreeUsage { return worktreeUsage{} }
 	code := m.Run()
 	cleanup()
 	os.Exit(code)
