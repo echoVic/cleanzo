@@ -1,5 +1,6 @@
 import * as React from "react";
 import { ChevronRight, RefreshCw, ShieldCheck } from "lucide-react";
+import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger } from "@radix-ui/react-tabs";
 import type { AIPart, AITool } from "../../mygo";
 import { Button } from "../../ui/components/button";
 import { Card } from "../../ui/components/card";
@@ -7,13 +8,18 @@ import { IdleHero } from "../../ui/components/idle-hero";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
 } from "../../ui/components/dialog";
+import { segTrigger } from "../../ui/components/seg";
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
+import { useIndicator } from "../../ui/motion/indicator";
+import { isWindows } from "../../platform";
 import { errText, toast } from "../../shared";
 import { human } from "./format";
 import { offered, groupSelectable, blockedByRun, canPick, type WindowDays } from "./types";
 import { PartRow } from "./PartRow";
-import { aiApi } from "./api";
+import { aiApi, runningApi } from "./api";
+import type { AITab, AITabRequest } from "./entry";
+import { RunningPanel } from "./RunningPanel";
 import { codexSize, crashDumps, goCleanForCrashDumps } from "../list/crash-dumps";
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaned";
@@ -24,8 +30,12 @@ const CRASH_NOTE_BYTES = 100 * 1024 * 1024;
 interface AIToolPageProps {
   toolId: string;
   toolName: string;
-  /** 每次显示这一视图加一：根不重挂，靠它重新读崩溃转储。 */
+  /** 每次显示这一视图加一：根不重挂，靠它重新读崩溃转储，并回到「空间」或请求的标签。 */
   visit: number;
+  /** 是否正显示这一页：离开时「运行中」不再读。 */
+  active: boolean;
+  /** main.ts 的打开请求；nonce 变了才照它开标签。 */
+  request: AITabRequest;
 }
 
 interface ConfirmedSelection {
@@ -35,7 +45,7 @@ interface ConfirmedSelection {
   size: number;
 }
 
-export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
+export function AIToolPage({ toolId, toolName, visit, active, request }: AIToolPageProps) {
   const t = useT();
   const reveal = (path: string) => {
     void aiApi.reveal(path).catch((e: unknown) => toast(t("fs.revealFail", { msg: errText(e) }), "err"));
@@ -68,6 +78,31 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
     readCrash();
     return () => { crashSeq.current++; };
   }, [readCrash, visit]);
+
+  // Claude Code 页分「空间」「运行中」两个标签（Windows 上没有）；别的工具只有空间的内容。
+  const hasTabs = toolId === "claude" && !isWindows();
+  const [tab, setTab] = React.useState<AITab>("space");
+  const [seen, setSeen] = React.useState({ visit: -1, nonce: 0 });
+  const [refresh, setRefresh] = React.useState(0);
+  const [badge, setBadge] = React.useState(0);
+  const badgeSeq = React.useRef(0);
+  const segRef = React.useRef<HTMLDivElement>(null);
+  const segStyle = useIndicator(segRef, '[data-state="active"]');
+  // 每次进入：有新的打开请求就开在它要的标签，否则回到「空间」。
+  // 在渲染时调整而不是在 effect 里，「运行中」第一次渲染就按对的标签决定读不读。
+  if (active && seen.visit !== visit) {
+    const fresh = request.nonce !== seen.nonce;
+    setSeen({ visit, nonce: request.nonce });
+    setTab(fresh && request.tab ? request.tab : "space");
+  }
+  const onRunning = hasTabs && tab === "running";
+  // 标签上的数：每次进入读一次摘要；「运行中」每读完一次换成它数的，之后才回来的摘要不再盖掉它。
+  React.useEffect(() => {
+    if (!hasTabs || !active) return;
+    const seq = ++badgeSeq.current;
+    void runningApi.summary().then((s) => { if (seq === badgeSeq.current) setBadge(s.idle + s.left); }, () => {});
+  }, [hasTabs, active, visit]);
+  const onCount = React.useCallback((n: number) => { badgeSeq.current++; setBadge(n); }, []);
 
   const parts = tool?.parts ?? [];
   const visible = parts.filter(offered);
@@ -232,17 +267,45 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
           <h1 translate="no">{toolName}</h1>
           <p className="muted">{headText.startsWith("ai.head.") ? "" : headText}</p>
         </div>
-        <div className="head-actions">
-          {tool && (
+        <div className={hasTabs ? "head-actions pr-head-actions" : "head-actions"}>
+          {onRunning ? (
+            <Button variant="ghost" size="sm" onClick={() => setRefresh((n) => n + 1)}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t("ai.run.refresh")}
+            </Button>
+          ) : tool && (
             <Button variant="ghost" size="sm" onClick={scan} disabled={phase === "scanning" || busy}>
               <RefreshCw className={cn("h-3.5 w-3.5", phase === "scanning" && "animate-spin")} />
               {phase === "scanning" ? t("scan.busy") : t("fs.rescan")}
             </Button>
           )}
+          {hasTabs && (
+            <TabsRoot value={tab} onValueChange={(v) => setTab(v as AITab)}>
+              <TabsList
+                ref={segRef}
+                aria-label={t("ai.tabs")}
+                className="relative flex flex-none gap-[2px] rounded-[8px] bg-[var(--bg-subtle)] p-[2px]"
+              >
+                <span aria-hidden="true" className="cz-seg-thumb" style={segStyle} />
+                <TabsTrigger value="space" className={segTrigger}>{t("ai.tab.space")}</TabsTrigger>
+                <TabsTrigger value="running" className={segTrigger}>
+                  {t("ai.tab.running")}
+                  {badge > 0 && <i className="pr-badge">{badge}</i>}
+                </TabsTrigger>
+              </TabsList>
+            </TabsRoot>
+          )}
         </div>
       </header>
 
-      {crash.bytes >= CRASH_NOTE_BYTES && (
+      {/* 「运行中」一直挂着，在「空间」时只是藏起来、不读：切回来还是上次的列表。 */}
+      {hasTabs && (
+        <div hidden={!onRunning}>
+          <RunningPanel active={active && onRunning} visit={visit} refresh={refresh} onCount={onCount} />
+        </div>
+      )}
+
+      {!onRunning && crash.bytes >= CRASH_NOTE_BYTES && (
         <div
           className="mb-4 flex items-center justify-between gap-3 rounded-[10px] px-4 py-2.5 text-[12.5px] leading-relaxed text-warning-text"
           style={{ background: "var(--warning-soft)" }}
@@ -253,7 +316,7 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
         </div>
       )}
 
-      {phase === "idle" && error !== null && (
+      {!onRunning && phase === "idle" && error !== null && (
         <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
           <div>{t("scan.error", { msg: errText(error) })}</div>
@@ -262,7 +325,7 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
           </button>
         </div>
       )}
-      {phase === "idle" && error === null && (
+      {!onRunning && phase === "idle" && error === null && (
         <IdleHero
           label={t("hero.ready")}
           value="--"
@@ -278,14 +341,14 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
               : [t("ai.chip.sessions"), t("ai.chip.snapshots"), t("ai.chip.cache")]}
         />
       )}
-      {phase === "scanning" && (
+      {!onRunning && phase === "scanning" && (
         <div className="flex flex-col items-center py-20 text-center">
           <RefreshCw className="h-9 w-9 animate-spin text-primary" />
           <div className="mt-4 text-sm text-muted">{t("ai.sub.scanning")}</div>
         </div>
       )}
 
-      {(phase === "scanned" || phase === "cleaned") && tool && (
+      {!onRunning && (phase === "scanned" || phase === "cleaned") && tool && (
         <>
           <Card className="ai-hero mb-5 flex items-center justify-between gap-4 p-[18px] px-[22px]">
             <div className="min-w-0">
@@ -307,6 +370,7 @@ export function AIToolPage({ toolId, toolName, visit }: AIToolPageProps) {
                  style={{ background: "var(--warning-soft)" }}
                  role="status">
               {t("ai.running", { name: runningName(tool, toolName, t) })}
+              {hasTabs && <button type="button" className="cz-run-see" onClick={() => setTab("running")}>{t("ai.run.see")}</button>}
             </div>
           )}
 

@@ -1,12 +1,16 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AIToolPage } from "./AIToolPage";
+import type { AITabRequest } from "./entry";
 import "../../ui/index.css";
 
 const roots = new Map<string, Root>();
 
-/** 在原生视图的容器里挂载某个工具的 React 页面；根只建一次，之后每次显示用新的 visit 重新渲染。 */
-export function mountAITool(el: HTMLElement, toolId: string, toolName: string, visit: number) {
+/**
+ * 在原生视图的容器里挂载某个工具的 React 页面；根只建一次。
+ * 每次显示用新的 visit 重新渲染，离开时用同一个 visit、active=false 重新渲染。
+ */
+export function mountAITool(el: HTMLElement, toolId: string, toolName: string, visit: number, active: boolean, request: AITabRequest) {
   let root = roots.get(toolId);
   if (!root) {
     root = createRoot(el);
@@ -14,7 +18,7 @@ export function mountAITool(el: HTMLElement, toolId: string, toolName: string, v
   }
   root.render(
     <React.StrictMode>
-      <AIToolPage toolId={toolId} toolName={toolName} visit={visit} />
+      <AIToolPage toolId={toolId} toolName={toolName} visit={visit} active={active} request={request} />
     </React.StrictMode>,
   );
 }

@@ -1,10 +1,10 @@
 import "./setup-dom";
 import { expect, test } from "bun:test";
-import type { AIGroup, AIPart, AIScanResult, AITool, CrashDumpSummary } from "../src/mygo";
+import type { AIGroup, AIPart, AIScanResult, AITool, ClaudeRunSummary, CrashDumpSummary } from "../src/mygo";
 import { t } from "../src/i18n";
 import { offered, groupSelectable, canPick, type WindowDays } from "../src/react/ai/types";
 import { human, displayPath } from "../src/react/ai/format";
-import type { Changes } from "./page-harness";
+import { textOf, type Changes } from "./page-harness";
 
 const DAY = 86400;
 const NOW = 1_700_000_000;
@@ -117,7 +117,7 @@ async function aiPage(env: Changes, scans: (() => Promise<AIScanResult>)[], cras
   env.spy(aiApi, "scanTool").mockImplementation(() => (scans.shift() ?? (() => Promise.reject(new Error("no scan"))))());
   env.spy(aiApi, "clean").mockImplementation(async (sel) => { cleaned.push(sel); return { freed: 100, parts: [] }; });
   env.spy(Cleaner, "crashDumps").mockImplementation(async () => crash[Math.min(crashReads++, crash.length - 1)]!);
-  const page = env.page(AIToolPage, { toolId: "codex", toolName: "Codex", visit: 1 });
+  const page = env.page(AIToolPage, { toolId: "codex", toolName: "Codex", visit: 1, active: true, request: { tab: null, nonce: 0 } });
   return {
     page, cleaned, forgetCrashDumps,
     /** 空闲页的「扫描」或页头的「重新扫描」。 */
@@ -169,7 +169,7 @@ test("each time an AI tool view is shown, its page is rendered with a new visit"
     const mounted: [string, number][] = [];
     // 截获 mountAITool 收到的参数，不挂真的 React 根；entry 建容器用的 document 换成最小替身。
     const mount = await import("../src/react/ai/mount");
-    env.spy(mount, "mountAITool").mockImplementation((_el, toolId, _toolName, visit) => { mounted.push([toolId, visit]); });
+    env.spy(mount, "mountAITool").mockImplementation((_el, toolId, _toolName, visit, active) => { if (active) mounted.push([toolId, visit]); });
     env.assign(globalThis, { document: {
       createElement: () => ({ className: "", classList: { toggle() {} } }),
       querySelector: () => ({ appendChild() {} }),
@@ -280,11 +280,241 @@ test("Orca's idle page names what a scan looks for: conversations and caches, no
   const env = (await import("./page-harness")).changes();
   try {
     const { AIToolPage } = await import("../src/react/ai/AIToolPage");
-    const page = env.page(AIToolPage, { toolId: "orca", toolName: "Orca", visit: 1 });
+    const page = env.page(AIToolPage, { toolId: "orca", toolName: "Orca", visit: 1, active: true, request: { tab: null, nonce: 0 } });
     await page.settle();
     expect(page.text()).toContain(t("ai.head.orca" as never));
     const hero = page.find((el) => typeof el.props.onCta === "function")!;
     expect(hero.props.guide).toBe(t("ai.idle.guide.orca" as never));
     expect(hero.props.chips).toEqual([t("ai.chip.sessions"), t("ai.chip.cache")]);
+  } finally { env.restore(); }
+});
+
+// ---- 页内标签：Claude Code 页的「空间」和「运行中」 ----
+
+/** entry 建容器用的最小 document。 */
+const hostDocument = {
+  createElement: () => ({ className: "", classList: { toggle() {} } }),
+  querySelector: () => ({ appendChild() {} }),
+};
+
+test("a tool page is rendered active when shown, and inactive with the same visit when another tool or another view is shown", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const mounted: [string, number, boolean][] = [];
+    const mount = await import("../src/react/ai/mount");
+    env.spy(mount, "mountAITool").mockImplementation((_el, toolId, _toolName, visit, active) => { mounted.push([toolId, visit, active]); });
+    env.assign(globalThis, { document: hostDocument });
+    const { leaveReactAITools, showReactAITool } = await import("../src/react/ai/entry");
+    leaveReactAITools();
+    mounted.length = 0;
+    showReactAITool("codex", "Codex");
+    showReactAITool("claude", "Claude Code");
+    leaveReactAITools();
+    leaveReactAITools();
+    const codexVisit = mounted[0]![1];
+    const claudeVisit = mounted[2]![1];
+    expect(mounted).toEqual([["codex", codexVisit, true], ["codex", codexVisit, false], ["claude", claudeVisit, true], ["claude", claudeVisit, false]]);
+    expect(claudeVisit).not.toBe(codexVisit);
+  } finally { env.restore(); }
+});
+
+test("a tab request reaches the tool's page with a new nonce; showing the page again passes the same one", async () => {
+  const env = (await import("./page-harness")).changes();
+  try {
+    const requests: [string, unknown][] = [];
+    const mount = await import("../src/react/ai/mount");
+    env.spy(mount, "mountAITool").mockImplementation((_el, toolId, _toolName, _visit, active, request) => { if (active) requests.push([toolId, request]); });
+    env.assign(globalThis, { document: hostDocument });
+    const { requestAITab, showReactAITool } = await import("../src/react/ai/entry");
+    showReactAITool("trae", "TRAE");
+    requestAITab("claude", "running");
+    showReactAITool("claude", "Claude Code");
+    showReactAITool("claude", "Claude Code");
+    requestAITab("claude", "running");
+    showReactAITool("claude", "Claude Code");
+    const [trae, first, again, next] = requests;
+    expect(trae).toEqual(["trae", { tab: null, nonce: 0 }]);
+    const nonce = (first![1] as { nonce: number }).nonce;
+    expect(first).toEqual(["claude", { tab: "running", nonce }]);
+    expect(again).toEqual(["claude", { tab: "running", nonce }]);
+    expect(next).toEqual(["claude", { tab: "running", nonce: nonce + 1 }]);
+  } finally { env.restore(); }
+});
+
+function claudeTool(over: Partial<AITool> = {}): AITool {
+  return { id: "claude", name: "Claude Code", path: "/Users/a/.claude", installed: true, running: false, runningApps: [], size: 100, parts: [fullPart("claude.cache", "safe")], ...over };
+}
+
+/** 搭好 Claude Code 页（或 toolId 指的别的工具页）：扫描、摘要换成替身；改动都记在 env 里，由测试的 finally 还原。 */
+async function toolPage(env: Changes, o: {
+  toolId?: string; scans?: (() => Promise<AIScanResult>)[]; summary?: () => Promise<ClaudeRunSummary>;
+  request?: { tab: "space" | "running" | null; nonce: number };
+} = {}) {
+  const { AIToolPage } = await import("../src/react/ai/AIToolPage");
+  const { RunningPanel } = await import("../src/react/ai/RunningPanel");
+  const { Trigger } = await import("@radix-ui/react-tabs");
+  const { aiApi, runningApi } = await import("../src/react/ai/api");
+  const { Cleaner } = await import("../src/mygo");
+  const scans = o.scans ?? [];
+  let scanCalls = 0;
+  env.spy(aiApi, "scanTool").mockImplementation(() => { scanCalls++; return (scans.shift() ?? (() => Promise.reject(new Error("no scan"))))(); });
+  env.spy(Cleaner, "crashDumps").mockImplementation(async () => dumps(0));
+  const summary = env.spy(runningApi, "summary").mockImplementation(o.summary ?? (async () => ({ idle: 0, left: 0, rows: [] })));
+  const toolId = o.toolId ?? "claude";
+  const page = env.page(AIToolPage, { toolId, toolName: toolId === "claude" ? "Claude Code" : "Codex", visit: 1, active: true, request: o.request ?? { tab: null, nonce: 0 } });
+  await page.settle();
+  const tabs = () => page.find((el) => typeof el.props.onValueChange === "function");
+  return {
+    page, summary,
+    get scans() { return scanCalls; },
+    /** 当前标签；没有标签时为 undefined。 */
+    tab: () => tabs()?.props.value as string | undefined,
+    triggers: () => page.ofType(Trigger).map((el) => el.props.value as string),
+    async pick(value: string) { tabs()!.props.onValueChange(value); await page.settle(); },
+    panel: () => page.ofType(RunningPanel)[0],
+    badge: () => page.find((el) => el.props.className === "pr-badge")?.props.children,
+    async scan() { page.find((el) => typeof el.props.onCta === "function")!.props.onCta(); await page.settle(); },
+    hasButton: (label: string) => page.all().some((el) => typeof el.props.onClick === "function" && textOf(el.props.children).trim() === label),
+  };
+}
+
+test("the Claude Code page has the Space and Running tabs; the other tools and Windows do not", async () => {
+  const { setPlatformForTest } = await import("../src/platform");
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const claude = await toolPage(env);
+    expect(claude.triggers()).toEqual(["space", "running"]);
+    expect(claude.page.text()).toContain(t("ai.tab.space") + t("ai.tab.running"));
+    expect(claude.panel()).toBeDefined();
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const other = await toolPage(env, { toolId: "codex" });
+    expect(other.tab()).toBeUndefined();
+    expect(other.triggers()).toEqual([]);
+    expect(other.panel()).toBeUndefined();
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    env.add(() => setPlatformForTest(undefined));
+    setPlatformForTest("win32");
+    const windows = await toolPage(env);
+    expect(windows.tab()).toBeUndefined();
+    expect(windows.panel()).toBeUndefined();
+    expect(windows.summary).not.toHaveBeenCalled();
+  } finally { env.restore(); }
+});
+
+test("the page opens on Space, or on the tab a new request names; the same nonce again goes back to Space", async () => {
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const plain = await toolPage(env);
+    expect(plain.tab()).toBe("space");
+    expect(plain.panel()!.props.active).toBe(false);
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const c = await toolPage(env, { request: { tab: "running", nonce: 1 } });
+    expect(c.tab()).toBe("running");
+    expect(c.panel()!.props.active).toBe(true);
+    // 「运行中」标签下只有 RunningPanel：空间的内容不画
+    expect(c.page.find((el) => typeof el.props.onCta === "function")).toBeUndefined();
+    c.page.setProps({ visit: 2 });
+    await c.page.settle();
+    expect(c.tab()).toBe("space");
+    expect(c.panel()!.props.active).toBe(false);
+    expect(c.page.find((el) => typeof el.props.onCta === "function")).toBeDefined();
+    c.page.setProps({ visit: 3, request: { tab: "running", nonce: 2 } });
+    await c.page.settle();
+    expect(c.tab()).toBe("running");
+    // 页面离开屏幕：「运行中」不再读
+    c.page.setProps({ active: false });
+    await c.page.settle();
+    expect(c.panel()!.props.active).toBe(false);
+  } finally { env.restore(); }
+});
+
+test("the Running tab's number: the summary on entry, then whatever the panel counts; no number at 0; Codex reads none", async () => {
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const c = await toolPage(env, { summary: async () => ({ idle: 4, left: 2, rows: [] }) });
+    expect(c.summary).toHaveBeenCalledTimes(1);
+    expect(c.badge()).toBe(6);
+    c.panel()!.props.onCount(3);
+    await c.page.settle();
+    expect(c.badge()).toBe(3);
+    c.panel()!.props.onCount(0);
+    await c.page.settle();
+    expect(c.badge()).toBeUndefined();
+    c.page.setProps({ visit: 2 });
+    await c.page.settle();
+    expect(c.summary).toHaveBeenCalledTimes(2);
+    expect(c.badge()).toBe(6);
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const zero = await toolPage(env);
+    expect(zero.badge()).toBeUndefined();
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    // 摘要晚于面板回来：不盖掉面板报的数
+    let answer!: (s: ClaudeRunSummary) => void;
+    const late = await toolPage(env, { summary: () => new Promise((yes) => { answer = yes; }) });
+    late.panel()!.props.onCount(3);
+    await late.page.settle();
+    answer({ idle: 4, left: 2, rows: [] });
+    await late.page.settle();
+    expect(late.badge()).toBe(3);
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const other = await toolPage(env, { toolId: "codex" });
+    expect(other.summary).not.toHaveBeenCalled();
+  } finally { env.restore(); }
+});
+
+test("while Claude Code runs, the scan's note links to the Running tab", async () => {
+  const { changes } = await import("./page-harness");
+  let env = changes();
+  try {
+    const c = await toolPage(env, { scans: [scanned(claudeTool({ running: true }))] });
+    await c.scan();
+    expect(c.page.text()).toContain(t("ai.running", { name: "Claude Code" }) + t("ai.run.see"));
+    c.page.click(t("ai.run.see"));
+    await c.page.settle();
+    expect(c.tab()).toBe("running");
+  } finally { env.restore(); }
+  env = changes();
+  try {
+    const other = await toolPage(env, { toolId: "codex", scans: [scanned({ ...codex([fullPart("codex.cache", "safe")]), running: true })] });
+    await other.scan();
+    expect(other.page.text()).toContain(t("ai.running", { name: "Codex" }));
+    expect(other.page.text()).not.toContain(t("ai.run.see"));
+  } finally { env.restore(); }
+});
+
+test("the header button follows the tab: Rescan on Space after a scan, Refresh on Running; Space keeps its scan", async () => {
+  const { changes } = await import("./page-harness");
+  const env = changes();
+  try {
+    const c = await toolPage(env, { scans: [scanned(claudeTool())] });
+    await c.scan();
+    expect(c.hasButton(t("fs.rescan"))).toBe(true);
+    await c.pick("running");
+    expect(c.hasButton(t("fs.rescan"))).toBe(false);
+    expect(c.panel()!.props.refresh).toBe(0);
+    c.page.click(t("ai.run.refresh"));
+    await c.page.settle();
+    expect(c.panel()!.props.refresh).toBe(1);
+    expect(c.panel()!.props.active).toBe(true);
+    await c.pick("space");
+    expect(c.hasButton(t("ai.run.refresh"))).toBe(false);
+    expect(c.hasButton(t("fs.rescan"))).toBe(true);
+    expect(c.page.find((el) => el.props.part?.id === "claude.cache")).toBeDefined();
+    expect(c.scans).toBe(1);
   } finally { env.restore(); }
 });
