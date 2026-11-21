@@ -50,6 +50,17 @@ func TestSpawnOutputFailures(t *testing.T) {
 	}
 }
 
+func TestSpawnOutputKeepsWhatAFailedChildPrinted(t *testing.T) {
+	out, _, err := spawnOutput(context.Background(), "/bin/sh", []string{"sh", "-c", "printf partial; exit 1"}, nil)
+	var exit *spawnExitError
+	if !errors.As(err, &exit) || !exit.status.Exited() || exit.status.ExitStatus() != 1 || string(out) != "partial" {
+		t.Fatalf("got %q, %v; want the output and exit status 1", out, err)
+	}
+	if want := "/bin/sh: exit status 1"; err.Error() != want {
+		t.Errorf("error %q, want %q", err, want)
+	}
+}
+
 func TestSpawnOutputGivesTheChildNothingToRead(t *testing.T) {
 	done := make(chan struct{})
 	go func() {

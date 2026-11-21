@@ -66,7 +66,8 @@ func spawnInit() error {
 // starts it with posix_spawn. argv includes argv[0]; env is passed exactly
 // as given. Standard input and error are /dev/null. It returns the standard
 // output and the child's pid. Canceling ctx kills the child, and a non-zero
-// exit is an error. The child is always reaped before it returns.
+// exit is a *spawnExitError, returned with what the child printed. The
+// child is always reaped before it returns.
 func spawnOutput(ctx context.Context, path string, argv, env []string) ([]byte, int32, error) {
 	if err := spawnInit(); err != nil {
 		return nil, 0, err
@@ -126,7 +127,7 @@ func spawnOutput(ctx context.Context, path string, argv, env []string) ([]byte, 
 		return nil, pid, readErr
 	}
 	if !status.Exited() || status.ExitStatus() != 0 {
-		return nil, pid, fmt.Errorf("%s: %s", path, waitText(status))
+		return out, pid, &spawnExitError{path: path, status: status}
 	}
 	return out, pid, nil
 }
@@ -184,6 +185,15 @@ func cStrings(ss []string) ([]*byte, error) {
 	}
 	return append(out, nil), nil
 }
+
+// spawnExitError is a child that exited with a status other than 0, or was
+// killed by a signal.
+type spawnExitError struct {
+	path   string
+	status syscall.WaitStatus
+}
+
+func (e *spawnExitError) Error() string { return fmt.Sprintf("%s: %s", e.path, waitText(e.status)) }
 
 func waitText(s syscall.WaitStatus) string {
 	if s.Signaled() {

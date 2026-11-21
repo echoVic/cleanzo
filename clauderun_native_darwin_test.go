@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -272,5 +273,96 @@ func TestClaudeSnapshotSeesThisProcess(t *testing.T) {
 	}
 	if _, listed := byPid[int32(zombie.Process.Pid)]; listed {
 		t.Error("the snapshot lists a zombie")
+	}
+}
+
+func TestParseLsofListen(t *testing.T) {
+	got := parseLsofListen([]byte("p123\nn*:5173\nn127.0.0.1:3000\nn*:5173\np456\nn[::1]:8000\n"))
+	if want := map[int32][]int{123: {3000, 5173}, 456: {8000}}; !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("ports = %v, want %v", got, want)
+	}
+	if got := parseLsofListen(nil); got == nil || len(got) != 0 {
+		t.Errorf("no output gave %v (nil %v), want an empty map", got, got == nil)
+	}
+	// As lsof prints it: a descriptor line before each name. A name that is
+	// not a port, and the names of a pid that cannot be read, are skipped.
+	got = parseLsofListen([]byte("p77\nf3\nn*:8080\nf4\nn*:http\nnx\nq\npabc\nf5\nn*:9\n"))
+	if want := map[int32][]int{77: {8080}}; !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("ports = %v, want %v", got, want)
+	}
+}
+
+// TestClaudeLsofHelper stands in for lsof in TestClaudeListenPorts. Run as
+// a test it returns at once.
+func TestClaudeLsofHelper(t *testing.T) {
+	mode := os.Getenv("CLEANZO_CLAUDE_LSOF_HELPER")
+	if mode == "" {
+		return
+	}
+	if os.Getenv("LC_ALL") != "en_US.UTF-8" {
+		os.Exit(3)
+	}
+	switch mode {
+	case "ports":
+		fmt.Print("p120\nf3\nn*:5173\nf4\nn[::1]:5173\np121\nf4\nn127.0.0.1:3000\n")
+	case "one gone": // lsof exits with 1 when one of the pids is gone
+		fmt.Print("p120\nf3\nn*:5173\n")
+		os.Exit(1)
+	case "none": // and when none listens
+		os.Exit(1)
+	case "broken":
+		fmt.Print("p120\nf3\nn*:5173\n")
+		os.Exit(2)
+	case "slow":
+		time.Sleep(time.Minute)
+	}
+	os.Exit(0)
+}
+
+// viewFakeLsof points the port reads at TestClaudeLsofHelper in mode and
+// returns where the command it was given is written.
+func viewFakeLsof(t *testing.T, mode string) *[]string {
+	t.Helper()
+	prev := claudeLsofSpawn
+	t.Cleanup(func() { claudeLsofSpawn = prev })
+	t.Setenv("CLEANZO_CLAUDE_LSOF_HELPER", mode)
+	var command []string
+	claudeLsofSpawn = func(ctx context.Context, path string, argv, env []string) ([]byte, int32, error) {
+		command = append([]string{path}, argv...)
+		return spawnOutput(ctx, os.Args[0], []string{os.Args[0], "-test.run=^TestClaudeLsofHelper$"}, env)
+	}
+	return &command
+}
+
+func TestClaudeListenPorts(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		want map[int32][]int
+	}{
+		{"ports", map[int32][]int{120: {5173}, 121: {3000}}},
+		{"one gone", map[int32][]int{120: {5173}}},
+		{"none", map[int32][]int{}},
+		{"broken", nil},
+		{"slow", nil},
+	} {
+		t.Run(c.mode, func(t *testing.T) {
+			command := viewFakeLsof(t, c.mode)
+			if c.mode == "slow" {
+				prev := claudeLsofWait
+				claudeLsofWait = 200 * time.Millisecond
+				t.Cleanup(func() { claudeLsofWait = prev })
+			}
+			got := claudeListenPorts(context.Background(), []int32{120, 121})
+			if (got == nil) != (c.want == nil) || !maps.EqualFunc(got, c.want, slices.Equal) {
+				t.Errorf("ports = %v (nil %v), want %v (nil %v)", got, got == nil, c.want, c.want == nil)
+			}
+			if want := "/usr/sbin/lsof /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -a -p 120,121 -Fpn"; strings.Join(*command, " ") != want {
+				t.Errorf("ran %q, want %q", strings.Join(*command, " "), want)
+			}
+		})
+	}
+	command := viewFakeLsof(t, "ports")
+	if got := claudeListenPorts(context.Background(), nil); got == nil || len(got) != 0 || *command != nil {
+		t.Errorf("no pids gave %v and ran %q; want an empty map and no lsof", got, *command)
 	}
 }

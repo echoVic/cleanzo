@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -267,4 +269,60 @@ func readClaudeRecord(path string) (r claudeRecord, ok bool) {
 		}
 	}
 	return r, true
+}
+
+// claudeLsofSpawn runs lsof. Tests point it at a stand-in.
+var claudeLsofSpawn = spawnOutput
+
+// claudeLsofWait bounds one lsof run.
+var claudeLsofWait = 3 * time.Second
+
+// claudeListenPorts reads the TCP ports pids listen on with one lsof run;
+// nil when lsof cannot say, as when it fails or runs out of time.
+func claudeListenPorts(ctx context.Context, pids []int32) map[int32][]int {
+	if len(pids) == 0 {
+		return map[int32][]int{}
+	}
+	ctx, cancel := context.WithTimeout(ctx, claudeLsofWait)
+	defer cancel()
+	list := make([]string, len(pids))
+	for i, pid := range pids {
+		list[i] = strconv.Itoa(int(pid))
+	}
+	argv := []string{"/usr/sbin/lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", strings.Join(list, ","), "-Fpn"}
+	out, _, err := claudeLsofSpawn(ctx, argv[0], argv, withEnv(os.Environ(), "LC_ALL=en_US.UTF-8"))
+	// lsof exits with 1 when none of the pids listens, and when one of them
+	// is gone; what it printed for the others still holds.
+	var exit *spawnExitError
+	if ctx.Err() != nil || err != nil && !(errors.As(err, &exit) && exit.status.Exited() && exit.status.ExitStatus() == 1) {
+		return nil
+	}
+	return parseLsofListen(out)
+}
+
+// parseLsofListen reads lsof -Fpn output: a line "p<pid>" starts each
+// process, and each "n<address>:<port>" after it is one of its listening
+// sockets. The ports of each pid come without duplicates, ascending.
+func parseLsofListen(out []byte) map[int32][]int {
+	ports := map[int32][]int{}
+	pid := int32(0)
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "p"):
+			n, err := strconv.ParseInt(line[1:], 10, 32)
+			pid = int32(n)
+			if err != nil || n <= 0 {
+				pid = 0
+			}
+		case strings.HasPrefix(line, "n") && pid > 0:
+			port, err := strconv.Atoi(line[strings.LastIndexByte(line, ':')+1:])
+			if err == nil && port > 0 && port <= 65535 && !slices.Contains(ports[pid], port) {
+				ports[pid] = append(ports[pid], port)
+			}
+		}
+	}
+	for _, list := range ports {
+		slices.Sort(list)
+	}
+	return ports
 }
