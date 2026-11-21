@@ -114,8 +114,12 @@ func attributeClaude(s claudeSnapshot) claudeAttribution {
 			detached[id] = append(detached[id], pid)
 		}
 	}
+	// A session id may be called closed only when every Claude Code process
+	// shows its session id and s lists each pid once, as one read of the
+	// process table does.
+	closable := !a.NoRecords && len(t.procs) == len(s.Procs)
 	for id, pids := range detached {
-		a.Uncertain += t.placeDetached(id, pids, carriers[id], a.NoRecords, places)
+		a.Uncertain += t.placeDetached(id, pids, carriers[id], closable, places)
 	}
 
 	groups := map[int32][]int32{} // the process groups of each session's Claude Code processes
@@ -177,7 +181,7 @@ type claudeTable struct {
 // newClaudeTable indexes s and finds its Claude Code processes: those with a
 // valid record, and the account's whose argv[0] is claude. One with another
 // above it is part of the topmost one's session, unless a Dock app stands
-// between them. A pid s lists more than once is left out, every time.
+// between them. Of a pid s lists more than once, only the first copy counts.
 func newClaudeTable(s claudeSnapshot) *claudeTable {
 	t := &claudeTable{
 		procs:    make(map[int32]claudeProc, len(s.Procs)),
@@ -188,12 +192,8 @@ func newClaudeTable(s claudeSnapshot) *claudeTable {
 		id:       map[int32]string{},
 		dock:     map[int32]bool{},
 	}
-	listed := make(map[int32]int, len(s.Procs))
 	for _, p := range s.Procs {
-		listed[p.Pid]++
-	}
-	for _, p := range s.Procs {
-		if listed[p.Pid] == 1 {
+		if _, again := t.procs[p.Pid]; !again {
 			t.procs[p.Pid] = p
 			t.children[p.Ppid] = append(t.children[p.Ppid], p.Pid)
 		}
@@ -391,11 +391,11 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 // each candidate it lists into places. carriers are the candidates carrying
 // id that are attached to a session or detached, pids among them. id is open
 // when a Claude Code process has it now or a CLAUDE_PID among carriers names
-// a Claude Code process; it is uncertain when noRecords says a Claude Code
-// process shows no session id, or when a CLAUDE_PID among pids is held by a
-// process older than the candidate carrying it. It returns how many
-// candidates it leaves uncertain.
-func (t *claudeTable) placeDetached(id string, pids, carriers []int32, noRecords bool, places map[int32]claudePlace) (uncertain int) {
+// a Claude Code process; it is uncertain when closable says no session id
+// may be called closed, or when a CLAUDE_PID among pids is held by a process
+// older than the candidate carrying it. It returns how many candidates it
+// leaves uncertain.
+func (t *claudeTable) placeDetached(id string, pids, carriers []int32, closable bool, places map[int32]claudePlace) (uncertain int) {
 	named := map[int32]bool{} // the sessions the CLAUDE_PIDs among carriers point into
 	for _, pid := range carriers {
 		if head, isClaude := t.claude[t.procs[pid].Env.Pid]; isClaude {
@@ -424,7 +424,7 @@ func (t *claudeTable) placeDetached(id string, pids, carriers []int32, noRecords
 				uncertain++
 			}
 		}
-	case noRecords || older:
+	case !closable || older:
 		uncertain = len(pids)
 	default:
 		for _, pid := range pids {

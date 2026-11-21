@@ -419,7 +419,8 @@ func TestClaudeMarkedWithoutSessionID(t *testing.T) {
 
 func TestClaudeOddSnapshots(t *testing.T) {
 	// No consistent process table has loops, duplicate pids or a pid 0
-	// named claude, but nothing panics on them and what is odd is left out.
+	// named claude, but nothing panics on them: what loops and pid 0 are
+	// left out, and of a pid listed twice the first copy counts.
 	const browser = "/p/out/Sample Browser.app/Contents/MacOS/Sample Browser"
 	inBrowser := func(p claudeProc) claudeProc {
 		p.Path = browser
@@ -443,12 +444,36 @@ func TestClaudeOddSnapshots(t *testing.T) {
 		{"a Claude Code process that is its own parent", withRecord(ccProc(100, 100), inBrowser(hidden(101, 100, 101))), "uncertain 0"},
 		{"a loop through an app on the Dock", throughDock, "uncertain 0"},
 		{"a process that is its own parent", ccSnap(marked(120, 120, 120, "S9")), "100:S1 members[] commands[]; uncertain 0"},
-		{"a pid listed twice", ccSnap(marked(120, 1, 120, "S9"), marked(120, 1, 120, "S9")), "100:S1 members[] commands[]; uncertain 0"},
-		{"a Claude Code process listed twice", ccSnap(ccProc(100, 1)), "uncertain 0"},
+		{"a pid listed twice", ccSnap(marked(120, 1, 120, "S9"), marked(120, 1, 120, "S9")), "100:S1 members[] commands[]; uncertain 1"},
+		{"a Claude Code process listed twice", ccSnap(ccProc(100, 1)), "100:S1 members[] commands[]; uncertain 0"},
 		{"pid 0 named claude", ccSnap(ccProc(0, 0)), "100:S1 members[] commands[]; uncertain 0"},
 		{"arguments that cannot be read", ccSnap(unreadable, marked(111, 110, 110, "S1")), "100:S1 members[] commands[110 111]; uncertain 0"},
 	} {
 		t.Run(c.odd, func(t *testing.T) {
+			wantShape(t, attributeClaude(c.s), c.want)
+		})
+	}
+}
+
+func TestClaudePidListedTwiceLeavesNothingBehind(t *testing.T) {
+	// One read of the process table never lists a pid twice. A snapshot
+	// that does counts the first copy of each pid, and calls no session
+	// closed: what would be left behind is only counted.
+	onOlder := marked(120, 1, 120, "S9")
+	onOlder.Env.Pid = 300
+	holder := plain(300, 1, 300)
+	holder.Start = onOlder.Start - time.Second.Microseconds()
+	for _, c := range []struct {
+		twice string
+		s     claudeSnapshot
+		want  string
+	}{
+		{"a Claude Code process", ccSnap(ccProc(100, 1), marked(120, 1, 120, "S1")), "100:S1 members[] commands[120]; uncertain 0"},
+		{"an older process on a CLAUDE_PID", ccSnap(onOlder, holder, holder), "100:S1 members[] commands[]; uncertain 1"},
+		{"Cleanzo", ccSnap(hidden(890, 100, 890), marked(900, 890, 900, "S1"), marked(900, 890, 900, "S1"), marked(901, 900, 901, "S1")), "100:S1 own members[] commands[]; uncertain 0"},
+		{"a process of no session", ccSnap(marked(120, 1, 120, "S9"), plain(130, 1, 130), plain(130, 1, 130)), "100:S1 members[] commands[]; uncertain 1"},
+	} {
+		t.Run(c.twice, func(t *testing.T) {
 			wantShape(t, attributeClaude(c.s), c.want)
 		})
 	}
