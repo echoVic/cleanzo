@@ -541,8 +541,9 @@ func claudeWrapperCommand(args []string) (inner string, ok bool) {
 	return "", false
 }
 
-// maskCommand is args as one line for display, with leading assignments and
-// secret values removed.
+// maskCommand is args as one line for display, with leading assignments
+// dropped and every other assignment, secret value and URL credential
+// hidden.
 func maskCommand(args []string) string {
 	var words []string
 	if inner, ok := claudeWrapperCommand(args); ok {
@@ -556,30 +557,66 @@ func maskCommand(args []string) string {
 	for len(words) > 0 && isAssignment(words[0]) {
 		words = words[1:]
 	}
-	for i := 0; i < len(words); i++ {
-		flag, _, hasValue := strings.Cut(words[i], "=")
-		if !strings.HasPrefix(flag, "-") || !secretFlag(flag) {
-			continue
-		}
-		if hasValue {
-			words[i] = flag + "=…"
-		} else if i+1 < len(words) {
-			words[i+1] = "…"
-			i++
-		}
-	}
+	maskWords(words, false)
 	return oneLine(strings.Join(words, " "), claudeCommandWidth)
+}
+
+// maskWords hides, in place, what words must not show. Each word is one
+// argument as written: a NAME=value becomes NAME=…; a flag whose name says
+// its value is secret hides that value, after its "=" or as the whole next
+// word, whatever that looks like; a flag whose value is a NAME=value hides
+// the value of that; an argument holding white space is a script, masked
+// word by word; and every URL hides its credentials. Every test reads a
+// word as written, with its quotes taken out, never what masking made of
+// it. secret says the word before words is a secret flag waiting for its
+// value; maskWords reports whether the last of words is one.
+func maskWords(words []string, secret bool) bool {
+	for i, word := range words {
+		text := shellValue(word)
+		name, value, inline := strings.Cut(text, "=")
+		flag := strings.HasPrefix(name, "-")
+		next := flag && !inline && secretFlag(name)
+		switch {
+		case secret:
+			words[i] = "…"
+		case isAssignment(text):
+			words[i] = name + "=…"
+		case flag && inline && secretFlag(name):
+			words[i] = name + "=…"
+		case flag && isAssignment(value):
+			variable, _, _ := strings.Cut(value, "=")
+			words[i] = name + "=" + variable + "=…"
+		case strings.ContainsAny(text, shellBlanks):
+			parts := shellWords(word)
+			if len(parts) == 1 {
+				parts = shellWords(text) // one quoted word: what it quotes is the script
+			}
+			masked := slices.Clone(parts)
+			next = maskWords(masked, false) || next
+			if !slices.Equal(masked, parts) {
+				words[i] = strings.Join(masked, " ")
+			}
+		}
+		words[i] = hideCredentials(words[i])
+		secret = next
+	}
+	return secret
 }
 
 // shellBlanks are the characters that end an unquoted shell word.
 const shellBlanks = " \t\n\r\v\f"
 
 // shellWords splits s into words where the shell would, at white space
-// outside quotes, keeping each word as written.
+// outside quotes, keeping each word as written. A backslash ending a line
+// joins the lines, so between words it is no word of its own.
 func shellWords(s string) []string {
 	var words []string
 	for {
 		s = strings.TrimLeft(s, shellBlanks)
+		if rest, joined := strings.CutPrefix(s, "\\\n"); joined {
+			s = rest
+			continue
+		}
 		if s == "" {
 			return words
 		}
@@ -619,6 +656,63 @@ func shellWordLen(s string) int {
 		}
 	}
 	return len(s)
+}
+
+// shellValue is the shell word word with its quotes and backslash escapes
+// taken out, as the shell passes it on; a quote left open runs to the end.
+func shellValue(word string) string {
+	var b strings.Builder
+	for i := 0; i < len(word); i++ {
+		switch c := word[i]; c {
+		case '\\':
+			if i++; i < len(word) && word[i] != '\n' {
+				b.WriteByte(word[i])
+			}
+		case '\'':
+			end := strings.IndexByte(word[i+1:], '\'')
+			if end < 0 {
+				end = len(word) - i - 1
+			}
+			b.WriteString(word[i+1 : i+1+end])
+			i += end + 1
+		case '"':
+			for i++; i < len(word) && word[i] != '"'; i++ {
+				if word[i] == '\\' && i+1 < len(word) && strings.IndexByte("$`\"\\\n", word[i+1]) >= 0 {
+					if i++; word[i] == '\n' {
+						continue
+					}
+				}
+				b.WriteByte(word[i])
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// hideCredentials is word with the credentials of every URL in it hidden:
+// what comes between "://" and the last "@" before the next "/" or white
+// space becomes "…".
+func hideCredentials(word string) string {
+	var b strings.Builder
+	for {
+		start := strings.Index(word, "://") // slash-ok: URL syntax, not a path
+		if start < 0 {
+			b.WriteString(word)
+			return b.String()
+		}
+		b.WriteString(word[:start+3])
+		word = word[start+3:]
+		end := strings.IndexAny(word, "/"+shellBlanks) // slash-ok: URL syntax, not a path
+		if end < 0 {
+			end = len(word)
+		}
+		if at := strings.LastIndexByte(word[:end], '@'); at >= 0 {
+			b.WriteString("…")
+			word = word[at:]
+		}
+	}
 }
 
 // isAssignment reports whether word sets a shell variable: NAME=value.

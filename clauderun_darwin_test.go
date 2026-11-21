@@ -514,6 +514,57 @@ func TestMaskCommandDropsLeadingAssignments(t *testing.T) {
 	}
 }
 
+func TestMaskCommandHidesSecretsAnywhere(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{wrapper(170, 1, "cd /p && API_KEY=hunter2 node x.js").Args, "cd /p && API_KEY=… node x.js"},
+		{[]string{"sh", "-c", "cd web && API_KEY=hunter2 node server.js"}, "sh -c cd web && API_KEY=… node server.js"},
+		{[]string{"docker", "run", "-e", "API_KEY=hunter2", "img"}, "docker run -e API_KEY=… img"},
+		{wrapper(170, 1, `docker run -e "API_KEY=hunter2" img`).Args, "docker run -e API_KEY=… img"},
+		{[]string{"dd", "if=/dev/zero", "of=/tmp/x"}, "dd if=… of=…"},
+		// The value of a secret flag is hidden even when it is a flag itself.
+		{[]string{"curl", "--key", "--token", "hunter2"}, "curl --key … …"},
+		{wrapper(170, 1, `curl "--token=hunter2" x`).Args, "curl --token=… x"},
+		{[]string{"docker", "run", "--env=API_KEY=hunter2", "img"}, "docker run --env=API_KEY=… img"},
+		{[]string{"psql", "postgres://app:hunter2@db.example.invalid/x"}, "psql postgres://…@db.example.invalid/x"},
+		{[]string{"git", "clone", "https://app:hun@ter2@example.invalid/r.git"}, "git clone https://…@example.invalid/r.git"},
+		{[]string{"node", "x.js", "--db=postgres://app:hunter2@db.example.invalid"}, "node x.js --db=postgres://…@db.example.invalid"},
+	} {
+		if got := maskCommand(c.args); got != c.want || strings.Contains(got, "hunter2") {
+			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+func TestMaskCommandMasksAScriptWordByWord(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		// A script quoted inside the shell Claude Code runs a command in.
+		{wrapper(170, 1, `bash -c 'cd web && API_KEY=hunter2 node server.js'`).Args, "bash -c cd web && API_KEY=… node server.js"},
+		{[]string{"sh", "-c", `docker run -e "API_KEY=hunter2 x" img`}, "sh -c docker run -e API_KEY=… img"},
+		{[]string{"node", "--require=cd web && API_KEY=hunter2"}, "node --require=cd web && API_KEY=…"},
+		// Inside double quotes a backslash before a space is kept, so the
+		// space stays in the assignment's value.
+		{wrapper(170, 1, `sh -c "docker run -e API_KEY=hunter2\ x img"`).Args, "sh -c docker run -e API_KEY=… img"},
+		// The value of a secret flag is one argument, script or not.
+		{[]string{"curl", "--token", "hunter2 x"}, "curl --token …"},
+		// A line continuation is no argument.
+		{wrapper(170, 1, "curl --token \\\n  hunter2 https://example.invalid").Args, "curl --token … https://example.invalid"},
+		// A secret flag that ends a script takes the next argument.
+		{[]string{"sh", "-c", "curl --token", "hunter2"}, "sh -c curl --token …"},
+		// A script with nothing to hide is shown as written.
+		{wrapper(170, 1, `git commit -m 'fix the build'`).Args, "git commit -m 'fix the build'"},
+	} {
+		if got := maskCommand(c.args); got != c.want || strings.Contains(got, "hunter2") {
+			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
 func TestMaskCommandIsOneShortLine(t *testing.T) {
 	long := maskCommand([]string{"node", strings.Repeat("x", 5000)})
 	if n := utf8.RuneCountInString(long); n > 300 || !strings.HasSuffix(long, "…") {
@@ -536,6 +587,10 @@ func TestMaskCommandOddInput(t *testing.T) {
 		{wrapper(170, 1, "").Args, ""},
 		{wrapper(170, 1, `API_KEY="a b node x.js`).Args, ""}, // an unclosed quote runs to the end
 		{wrapper(170, 1, `curl --token "a b`).Args, "curl --token …"},
+		{[]string{"x", `a\`}, `x a\`},
+		{[]string{"x", "'"}, "x '"},
+		{[]string{"x", "a://@"}, "x a://…@"},
+		{[]string{"x", `"a b`}, `x "a b`},
 	} {
 		if got := maskCommand(c.args); got != c.want {
 			t.Errorf("maskCommand(%q) = %q, want %q", c.args, got, c.want)
