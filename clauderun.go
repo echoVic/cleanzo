@@ -433,7 +433,64 @@ func claudeListedPorts(ctx context.Context, read func(context.Context, []int32) 
 }
 
 // claudeSummaryWith reads the Running tab's summary from src, without ports
-// or titles.
+// or titles. A row's tags count the Claude Code processes of the long-idle
+// sessions and each process closed sessions left, placed in the process
+// page's rows as the process page places them.
 func claudeSummaryWith(src claudeSource) ClaudeRunSummary {
-	return ClaudeRunSummary{Rows: []ClaudeRowTag{}}
+	sum := ClaudeRunSummary{Rows: []ClaudeRowTag{}}
+	s, err := src.snapshot()
+	if err != nil {
+		return sum
+	}
+	a := attributeClaude(s)
+	now := src.now()
+	var tagged []int32
+	idle := map[int32]bool{} // the tagged Claude Code processes of long-idle sessions
+	for _, open := range a.Sessions {
+		if status, since := claudeStatus(open.Record, now); status == "idle" && now.Sub(time.Unix(since, 0)) >= claudeIdleNote {
+			sum.Idle++
+			tagged = append(tagged, open.Proc.Pid)
+			idle[open.Proc.Pid] = true
+		}
+	}
+	for _, l := range a.Left {
+		sum.Left += len(l.Rows)
+		for _, r := range l.Rows {
+			tagged = append(tagged, claudeRowPids(r)...)
+		}
+	}
+	// The process page places a process by its executable, and a system one
+	// by its responsible process's too.
+	cur := make(map[int32]procReading, 2*len(tagged))
+	read := func(pid int32) {
+		if _, done := cur[pid]; !done {
+			path, name := src.identity(pid)
+			cur[pid] = procReading{Pid: pid, Path: path, Name: name}
+		}
+	}
+	for _, pid := range tagged {
+		read(pid)
+		if owner := src.responsible(pid); owner > 0 && owner != pid {
+			read(owner)
+		}
+	}
+	tags := map[string]*ClaudeRowTag{}
+	for _, pid := range tagged {
+		key, _, _ := ownProcessKey(cur[pid], cur, src.responsible, src.system)
+		tag := tags[key]
+		if tag == nil {
+			tag = &ClaudeRowTag{Key: key}
+			tags[key] = tag
+		}
+		if idle[pid] {
+			tag.Idle++
+		} else {
+			tag.Left++
+		}
+	}
+	for _, tag := range tags {
+		sum.Rows = append(sum.Rows, *tag)
+	}
+	slices.SortFunc(sum.Rows, func(x, y ClaudeRowTag) int { return strings.Compare(x.Key, y.Key) })
+	return sum
 }

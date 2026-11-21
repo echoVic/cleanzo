@@ -389,9 +389,14 @@ func viewFullSnap() claudeSnapshot {
 func TestClaudeRunningJSONHasNoNull(t *testing.T) {
 	full := viewFakeOf(t, viewFullSnap())
 	full.portsNil = true
+	unreadable := viewFakeOf(t, claudeSnapshot{})
+	unreadable.fail = true
 	readings := map[string]any{
-		"empty reading": viewFakeOf(t, claudeSnapshot{}).read(),
-		"full reading":  full.read(),
+		"empty reading":      viewFakeOf(t, claudeSnapshot{}).read(),
+		"full reading":       full.read(),
+		"empty summary":      claudeSummaryWith(viewFakeOf(t, claudeSnapshot{}).source()),
+		"full summary":       claudeSummaryWith(full.source()),
+		"unreadable summary": claudeSummaryWith(unreadable.source()),
 	}
 	for name, v := range readings {
 		data, err := json.Marshal(v)
@@ -404,5 +409,80 @@ func TestClaudeRunningJSONHasNoNull(t *testing.T) {
 	}
 	if r := readings["full reading"].(ClaudeRunning); len(r.Sessions) != 1 || len(r.Sessions[0].Commands) != 1 || len(r.Left) != 1 {
 		t.Errorf("the full reading is not full: %+v", r)
+	}
+	if s := readings["full summary"].(ClaudeRunSummary); s.Idle != 1 || s.Left != 1 || len(s.Rows) == 0 {
+		t.Errorf("the full summary is not full: %+v", s)
+	}
+}
+
+func TestClaudeSummary(t *testing.T) {
+	const cli = "/Users/me/.local/share/claude/versions/2.1.321"
+	const app = "/Applications/Sample Browser.app" // not on the Dock
+	first, second, third := ccProc(100, 1), ccProc(101, 1), ccProc(102, 1)
+	records := map[int32]claudeRecord{
+		100: viewRecord(first, "S1", "idle", viewNow.Add(-3*time.Hour)),
+		101: viewRecord(second, "S2", "idle", viewNow.Add(-3*time.Hour)),
+		102: viewRecord(third, "S3", "idle", viewNow.Add(-time.Hour)),
+	}
+	browser := marked(180, 1, 180, "S9")
+	browser.Path = app + "/Contents/MacOS/Sample Browser"
+	helper := marked(181, 180, 180, "S9")
+	helper.Path = app + "/Contents/Frameworks/Sample Browser Helper.app/Contents/MacOS/Sample Browser Helper"
+	f := viewFakeOf(t, snap(records, first, second, third, marked(150, 1, 150, "S9"), marked(151, 1, 151, "S9"), browser, helper))
+	f.paths = map[int32]string{100: cli, 101: cli, 102: cli, 150: "/opt/homebrew/bin/node", 151: "/opt/homebrew/bin/node", 180: browser.Path, 181: helper.Path}
+	f.names = map[int32]string{100: "2.1.321", 101: "2.1.321", 102: "2.1.321", 150: "node", 151: "node", 180: "Sample Browser", 181: "Sample Browser He"}
+	got := claudeSummaryWith(f.source())
+	want := ClaudeRunSummary{Idle: 2, Left: 3, Rows: []ClaudeRowTag{
+		{Key: "app:/applications/sample browser.app", Left: 2},
+		{Key: "cli:claude", Idle: 2},
+		{Key: "cli:node", Left: 2},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("summary %+v\nwant    %+v", got, want)
+	}
+	if len(f.portCalls) != 0 || len(f.closedFor) != 0 {
+		t.Errorf("the summary read ports %v and titles %q", f.portCalls, f.closedFor)
+	}
+}
+
+func TestClaudeSummaryPlacesSystemProcessesByTheirApp(t *testing.T) {
+	// A system process that works for an app counts in the app's row, as on
+	// the process page, though the app itself is not left behind.
+	const app = "/Applications/Sample Browser.app"
+	service := marked(160, 1, 160, "S9")
+	service.Path = "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent"
+	f := viewFakeOf(t, ccSnap(service))
+	f.owners = map[int32]int32{160: 700}
+	f.paths = map[int32]string{160: service.Path, 700: app + "/Contents/MacOS/Sample Browser"}
+	f.names = map[int32]string{160: "com.apple.WebKi", 700: "Sample Browser"}
+	got := claudeSummaryWith(f.source())
+	want := ClaudeRunSummary{Left: 1, Rows: []ClaudeRowTag{{Key: "app:/applications/sample browser.app", Left: 1}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("summary %+v, want %+v", got, want)
+	}
+}
+
+func TestClaudeSummarySkipsWithoutClaudeCode(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	prev := claudeSourceFn
+	t.Cleanup(func() { claudeSourceFn = prev })
+	claudeSourceFn = func() claudeSource {
+		t.Error("the summary reads processes while Claude Code is not installed")
+		return viewFakeOf(t, claudeSnapshot{}).source()
+	}
+	if got := (Cleaner{}).ClaudeRunSummary(); got.Idle != 0 || got.Left != 0 || got.Rows == nil || len(got.Rows) != 0 {
+		t.Errorf("summary %+v (nil rows %v), want zero counts and no rows", got, got.Rows == nil)
+	}
+	// Once Claude Code keeps its folder here, the summary reads.
+	mustMkdir(t, filepath.Join(home, ".claude"))
+	read := false
+	claudeSourceFn = func() claudeSource {
+		read = true
+		return viewFakeOf(t, claudeSnapshot{}).source()
+	}
+	(Cleaner{}).ClaudeRunSummary()
+	if !read {
+		t.Error("the summary does not read with Claude Code installed")
 	}
 }
