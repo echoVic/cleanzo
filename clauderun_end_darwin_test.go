@@ -35,11 +35,13 @@ const (
 
 // endProc is one process of an endFake.
 type endProc struct {
-	start  int64 // as the snapshot has it
-	how    endHow
-	exited bool
-	exitAt time.Duration // when it exits by itself; 0 for never
-	reused bool          // once it has exited, a newer process has its pid
+	start     int64 // as the snapshot has it
+	how       endHow
+	exited    bool
+	exitAt    time.Duration // when it exits by itself; 0 for never
+	exitLooks int           // it exits by itself right after this many looks at its pid; 0 for never
+	looks     int           // at its pid so far
+	reused    bool          // once it has exited, a newer process has its pid
 }
 
 // endLook is the last answer an endFake's started gave for a pid, and how
@@ -122,6 +124,11 @@ func (f *endFake) state(pid int32) (start int64, ok bool) {
 func (f *endFake) started(pid int32) (int64, bool) {
 	start, ok := f.state(pid)
 	f.looks[pid] = endLook{start: start, ok: ok, sleeps: f.sleeps}
+	if p := f.procs[pid]; p != nil {
+		if p.looks++; p.looks == p.exitLooks {
+			p.exited = true
+		}
+	}
 	return start, ok
 }
 
@@ -253,6 +260,192 @@ func endWant(t *testing.T, f *endFake, res ClaudeEndResult, err error, want, sen
 	}
 	if got := f.sentText(); got != sent {
 		t.Errorf("signals = %s\n     want %s", got, sent)
+	}
+}
+
+// endTarget names the fixture with pid as the page does: by pid and start.
+func endTarget(pid int32) ClaudeTarget {
+	return ClaudeTarget{Pid: pid, Start: testStart(pid)}
+}
+
+// endWantCode fails t unless err is the codeError code.
+func endWantCode(t *testing.T, err error, code string) {
+	t.Helper()
+	if ce, ok := err.(codeError); !ok || ce.Code != code {
+		t.Errorf("err = %v, want %s", err, code)
+	}
+}
+
+// ---- ending processes ------------------------------------------------------
+
+func TestEndClaudeProcsEndsWhatIsListed(t *testing.T) {
+	// 120 is the shell Claude Code ran the command in: it folds into 121's row.
+	s := ccSnap(wrapper(120, 1, "npm run dev"), marked(121, 120, 120, "S9"))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; left S9[121+120]; uncertain 0")
+	f := endFakeOf(t, s)
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(121), endTarget(120)})
+	endWant(t, f, res, err, "121:ended 120:ended; freed 241", "121 TERM@0s 120 TERM@0s")
+}
+
+func TestEndClaudeProcsEndsACommandOfAnOpenSession(t *testing.T) {
+	s := ccSnap(marked(110, 100, 110, "S1"))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[110]; uncertain 0")
+	f := endFakeOf(t, s)
+	f.now = time.UnixMicro(testStart(110)).Add(10 * time.Second) // too young for the page to list it
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S1", []ClaudeTarget{endTarget(110)})
+	endWant(t, f, res, err, "110:ended; freed 110", "110 TERM@0s")
+}
+
+func TestEndClaudeProcsSkipsWhatChanged(t *testing.T) {
+	other := marked(112, 100, 112, "S1")
+	other.UID = 0
+	second := ccProc(200, 1)
+	s := ccSnap(
+		marked(101, 100, 100, "S1"), // in the session's process group: its helper
+		marked(110, 100, 110, "S1"),
+		other,
+		plain(113, 100, 113),
+		marked(120, 1, 120, "S9"),
+		second,
+		marked(210, 200, 210, "S2"),
+	)
+	s.Records[200] = recordOf(second, "S2")
+	wantShape(t, attributeClaude(s), "100:S1 members[101] commands[110]; 200:S2 members[] commands[210]; left S9[120]; uncertain 0")
+	f := endFakeOf(t, s)
+	restarted := endTarget(110)
+	restarted.Start += time.Second.Microseconds()
+	targets := []ClaudeTarget{
+		restarted,      // its start is not the one listed
+		endTarget(130), // gone
+		endTarget(113), // running, not listed
+		endTarget(120), // listed under a closed session
+		endTarget(210), // listed under another open session
+		endTarget(101), // the session's helper
+		endTarget(1),
+		endTarget(112), // another account's
+	}
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S1", targets)
+	endWant(t, f, res, err, "110:changed 130:changed 113:changed 120:changed 210:changed 101:changed 1:changed 112:changed; freed 0", "")
+}
+
+func TestEndClaudeProcsEscalates(t *testing.T) {
+	s := ccSnap(marked(120, 1, 120, "S9"), marked(121, 1, 121, "S9"), marked(122, 1, 122, "S9"))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; left S9[120 121 122]; uncertain 0")
+	f := endFakeOf(t, s)
+	f.procs[121].how = endQuitsOnKill
+	f.procs[122].how = endNeverQuits
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120), endTarget(121), endTarget(122)})
+	endWant(t, f, res, err, "120:ended 121:forced 122:running; freed 241",
+		"120 TERM@0s 121 TERM@0s 122 TERM@0s 121 KILL@2s 122 KILL@2s")
+	if want := claudeTermWait + claudeKillWait; f.clock != want {
+		t.Errorf("ending waited %v, want %v for the process that survives both signals", f.clock, want)
+	}
+}
+
+func TestEndClaudeProcsRechecksBeforeKill(t *testing.T) {
+	// 120 ignores SIGTERM, then exits by itself and a newer process takes
+	// its pid: while ending waits, as the wait ends, or right after the
+	// wait's last look, one every claudePoll.
+	for _, c := range []struct {
+		name      string
+		exitAt    time.Duration
+		exitLooks int
+	}{
+		{"while waiting", 1500 * time.Millisecond, 0},
+		{"as the wait ends", claudeTermWait, 0},
+		{"after the wait's last look", 0, int(claudeTermWait / claudePoll)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9")))
+			p := f.procs[120]
+			p.how, p.exitAt, p.exitLooks, p.reused = endQuitsOnKill, c.exitAt, c.exitLooks, true
+			res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
+			endWant(t, f, res, err, "120:ended; freed 120", "120 TERM@0s")
+		})
+	}
+}
+
+func TestEndClaudeProcsAlreadyGone(t *testing.T) {
+	f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9")))
+	f.procs[120].how = endGoneAtSignal
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
+	endWant(t, f, res, err, "120:ended; freed 120", "120 TERM@0s")
+	if f.clock != 0 {
+		t.Errorf("ending waited %v for a process that was gone", f.clock)
+	}
+}
+
+func TestEndClaudeProcsStopsWaitingWhenCanceled(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		cancelAt time.Duration
+		how      endHow // 121's; 120 exits on SIGTERM
+		sent     string
+	}{
+		{"waiting after SIGTERM", 500 * time.Millisecond, endQuitsOnKill, "120 TERM@0s 121 TERM@0s"},
+		{"waiting after SIGKILL", 2500 * time.Millisecond, endNeverQuits, "120 TERM@0s 121 TERM@0s 121 KILL@2s"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9"), marked(121, 1, 121, "S9")))
+			f.procs[121].how = c.how
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.cancelAt, f.cancel = c.cancelAt, cancel
+			res, err := endClaudeProcsWith(ctx, f.source(), "S9", []ClaudeTarget{endTarget(120), endTarget(121)})
+			endWant(t, f, res, err, "120:ended 121:running; freed 120", c.sent)
+			if f.clock != c.cancelAt {
+				t.Errorf("ending waited %v, want it to stop at %v", f.clock, c.cancelAt)
+			}
+		})
+	}
+}
+
+func TestEndClaudeProcsHandlesEachPidOnce(t *testing.T) {
+	f := endFakeOf(t, ccSnap(wrapper(120, 1, "npm run dev"), marked(121, 120, 120, "S9")))
+	other := endTarget(120)
+	other.Start += time.Second.Microseconds()
+	targets := []ClaudeTarget{endTarget(121), endTarget(120), endTarget(121), other}
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", targets)
+	endWant(t, f, res, err, "121:ended 120:ended; freed 241", "121 TERM@0s 120 TERM@0s")
+}
+
+func TestEndClaudeProcsWhenASignalIsRefused(t *testing.T) {
+	// 120 and 122 refuse every signal; 120 exits by itself while 121 is
+	// waited for.
+	f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9"), marked(121, 1, 121, "S9"), marked(122, 1, 122, "S9")))
+	f.procs[120].how, f.procs[120].exitAt = endRefuses, 500*time.Millisecond
+	f.procs[121].how = endQuitsOnKill
+	f.procs[122].how = endRefuses
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120), endTarget(121), endTarget(122)})
+	endWant(t, f, res, err, "120:ended 121:forced 122:running; freed 241", "120 TERM@0s 121 TERM@0s 122 TERM@0s 121 KILL@2s")
+}
+
+func TestEndClaudeProcsUnreadableSnapshot(t *testing.T) {
+	f := endFakeOf(t, ccSnap(marked(120, 1, 120, "S9")))
+	f.err = errors.New("no process table")
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
+	endWantCode(t, err, "unreadable")
+	if res.Procs == nil || len(res.Procs) != 0 || res.Freed != 0 {
+		t.Errorf("result = %+v, want no processes and nothing freed", res)
+	}
+	if len(f.sent) != 0 {
+		t.Errorf("signals = %s, want none", f.sentText())
+	}
+}
+
+func TestEndClaudeChecksPidAndAccountItself(t *testing.T) {
+	// The rules never list these; ending refuses them on its own as well.
+	other := marked(120, 1, 120, "S9")
+	other.UID = 0
+	for _, p := range []claudeProc{other, {Pid: 1, UID: testUID}, {Pid: 0, UID: testUID}, {Pid: -1, UID: testUID}} {
+		if e := newClaudeEnding(p, testUID); e.result != "changed" {
+			t.Errorf("pid %d of account %d is %q, want changed", p.Pid, p.UID, e.result)
+		}
+	}
+	f := endFakeOf(t, ccSnap())
+	claudeEnd(context.Background(), f.source(), []claudeEnding{{pid: 1, start: testStart(1)}, {pid: 0}, {pid: -4242}})
+	if len(f.sent) != 0 {
+		t.Errorf("signals = %s, want none", f.sentText())
 	}
 }
 
