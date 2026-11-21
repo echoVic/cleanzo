@@ -2,6 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -55,10 +67,329 @@ var worktreePidStart = func(pid int32) (time.Time, bool) {
 	return time.UnixMicro(start), ok
 }
 
+// Time limits of the git commands the worktree rules run.
+const (
+	worktreeStatusLimit = 10 * time.Second
+	worktreeGitLimit    = 5 * time.Second
+)
+
+// worktreeGit runs one git command for the worktree rules. Tests replace it.
+var worktreeGit = func(ctx context.Context, git string, args []string, limit time.Duration) (string, error) {
+	return runToolWith(ctx, git, args, limit, func(cmd *exec.Cmd) ([]byte, error) {
+		// An inherited GIT_DIR or GIT_WORK_TREE would point git at another
+		// repository. Run in a worktree's folder, git never looks above it:
+		// the folder is inside the repository it was made from.
+		cmd.Env = append(slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "GIT_") }),
+			"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
+		if len(args) > 1 && args[0] == "-C" {
+			cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(args[1]))
+		}
+		return runToolCmd(cmd)
+	})
+}
+
+// worktreeGitTool is the git the worktree rules ask, or "" when none can answer.
+func worktreeGitTool() string {
+	env := pathJunkEnv(homeDir())
+	env.findTool = findTool
+	return env.projectGit()
+}
+
+// worktreeLockPid finds the processes a lock reason names, as Claude Code
+// writes them: "claude agent agent-a1b2 (pid 4242)".
+var worktreeLockPid = regexp.MustCompile(`\(pid (\d+)\)`)
+
+// worktreeObjectName matches a full SHA-1 or SHA-256 object name.
+var worktreeObjectName = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// worktreeRefLine matches a ref as for-each-ref prints it by default;
+// warnings git prints in the same stream do not.
+var worktreeRefLine = regexp.MustCompile(`(?m)^(?:[0-9a-f]{40}|[0-9a-f]{64}) [a-z]+\trefs/(?:heads|tags|remotes)/`)
+
+// worktreeOperations are what git keeps in a worktree's record while an
+// operation is half done.
+var worktreeOperations = []string{"rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"}
+
 // findWorktrees lists the worktrees the agents of kind ("claude" or "codex",
 // as in aiTool.Worktrees) made, each with its state.
 func findWorktrees(ctx context.Context, kind string) []agentWorktree {
-	return nil
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	use := worktreeUse()
+	var paths []string
+	dirs, folders := map[string]bool{}, map[string]bool{}
+	for _, dir := range worktreeDirs(ctx, kind) {
+		key := strings.ToLower(resolvePath(dir))
+		if dirs[key] || !safeToClean(dir) {
+			continue
+		}
+		dirs[key] = true
+		for _, p := range subfolders(dir) {
+			if key := strings.ToLower(resolvePath(p)); !folders[key] && safeToClean(p) {
+				folders[key] = true
+				paths = append(paths, homeSpelled(p))
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	git, users := worktreeGitTool(), worktreeUsersOf(use)
+	found := make([]agentWorktree, len(paths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, scanConcurrency)
+	for i, p := range paths {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			w := judgeWorktree(ctx, p, git, users)
+			w.Size, _, _ = measureAI(ctx, p, nil)
+			if changed, ok := lastChange(p); ok {
+				w.Last = changed.Unix()
+			}
+			found[i] = w
+		}()
+	}
+	wg.Wait()
+	slices.SortFunc(found, func(a, b agentWorktree) int { return strings.Compare(a.Path, b.Path) })
+	return found
+}
+
+// worktreeDirs lists the folders the agents of kind keep worktrees in.
+func worktreeDirs(ctx context.Context, kind string) []string {
+	if kind != "claude" {
+		return nil
+	}
+	env := pathJunkEnv(homeDir())
+	env.ctx = ctx
+	_, walked := env.walkHome(claimSet{})
+	return walked
+}
+
+// homeSpelled spells p from the home folder when it is inside it once links
+// are resolved, so a worktree reads the same whichever way it was found.
+func homeSpelled(p string) string {
+	home := homeDir()
+	real, realHome := resolvePath(p), resolvePath(home)
+	if rel, err := filepath.Rel(realHome, real); err == nil && within(real, realHome) {
+		return filepath.Join(home, rel)
+	}
+	return p
+}
+
+// worktreeUsers are the working folders that keep worktrees in use, read
+// once for a pass.
+type worktreeUsers struct {
+	folders []string // resolved and lower-cased
+	known   bool     // false when they could not be read: every worktree is in use then
+}
+
+// worktreeUsersOf resolves what worktreeUse read.
+func worktreeUsersOf(use worktreeUsage) worktreeUsers {
+	users := worktreeUsers{known: use.OK}
+	for _, dir := range slices.Concat(use.Cwds, use.Sessions) {
+		if filepath.IsAbs(dir) {
+			users.folders = append(users.folders, strings.ToLower(resolvePath(dir)))
+		}
+	}
+	return users
+}
+
+// holds reports whether one of the working folders is path or inside it.
+func (u worktreeUsers) holds(path string) bool {
+	if !u.known {
+		return true
+	}
+	key := strings.ToLower(resolvePath(path))
+	return slices.ContainsFunc(u.folders, func(dir string) bool { return within(dir, key) })
+}
+
+// judgeWorktree reads the state of the folder at path, one of an agent's
+// worktrees, asking git only when it must. Size and Last are left to the
+// caller.
+func judgeWorktree(ctx context.Context, path, git string, users worktreeUsers) agentWorktree {
+	w := agentWorktree{Path: path, Name: filepath.Base(path), State: wtUnknown}
+	admin, common, ok := worktreeRecord(path, path)
+	if !ok {
+		return w
+	}
+	w.Admin, w.Common, w.Repo = admin, common, homeSpelled(worktreeRepo(common))
+	head := worktreeLine(filepath.Join(admin, "HEAD"))
+	branch, attached := strings.CutPrefix(head, "ref: refs/heads/")
+	// A repository that keeps its refs in a reftable writes the placeholder
+	// .invalid there, whatever is checked out: HEAD cannot be read then.
+	readable := attached && branch != "" && branch != ".invalid" || !attached && worktreeObjectName.MatchString(head)
+	if attached && readable {
+		w.Branch = branch
+	}
+	switch {
+	case users.holds(path) || worktreeLocked(admin):
+		w.State = wtInUse
+	case worktreeHas(admin, "modules"):
+		w.State = wtSubmodule
+	case slices.ContainsFunc(worktreeOperations, func(name string) bool { return worktreeHas(admin, name) }):
+		w.State = wtMidOp
+	case !readable || git == "":
+		w.State = wtNoGit
+	default:
+		w.State, w.Changes = worktreeAskGit(ctx, git, path, common, head, attached)
+	}
+	return w
+}
+
+// worktreeAskGit judges a worktree by what git says: whether a detached
+// HEAD is on a branch, a tag or a remote's branch, and what is not
+// committed. A command that fails or runs out of time leaves it unjudged.
+func worktreeAskGit(ctx context.Context, git, path, common, head string, attached bool) (state string, changes int) {
+	if !attached {
+		out, err := worktreeGit(ctx, git, []string{"--git-dir=" + common, "-c", "core.fsmonitor=false", "for-each-ref", "--contains", head, "--count=1", "refs/heads", "refs/tags", "refs/remotes"}, worktreeGitLimit)
+		switch {
+		case err != nil:
+			return wtNoGit, 0
+		case !worktreeRefLine.MatchString(out):
+			return wtUnbranched, 0
+		}
+	}
+	out, err := worktreeGit(ctx, git, []string{"-C", path, "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--untracked-files=normal"}, worktreeStatusLimit)
+	if err != nil {
+		return wtNoGit, 0
+	}
+	return worktreeStatus(out)
+}
+
+// worktreeStatus judges what git status --porcelain printed. A line whose
+// first column is a change in the index and whose second is a change on
+// disk holds content only the index has; any other line is an uncommitted
+// change.
+func worktreeStatus(out string) (state string, changes int) {
+	indexOnly := false
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		changes++
+		if len(line) > 1 && !strings.ContainsRune(" ?!", rune(line[0])) && line[1] != ' ' {
+			indexOnly = true
+		}
+	}
+	switch {
+	case indexOnly:
+		return wtIndexOnly, 0
+	case changes > 0:
+		return wtDirty, changes
+	}
+	return wtClean, 0
+}
+
+// worktreeLocked reports whether git's record of a worktree is locked by
+// someone still there: a process the lock names that started before the
+// lock was written, or anyone at all when the lock names no process, as
+// such a lock was taken on purpose. A lock naming only processes that are
+// gone, or newer than it, is stale.
+func worktreeLocked(admin string) bool {
+	lock := filepath.Join(admin, "locked")
+	info, err := os.Lstat(lock)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	reason, ok := worktreeFile(lock)
+	if err != nil || !ok {
+		return true
+	}
+	pids := worktreeLockPid.FindAllStringSubmatch(reason, -1)
+	if len(pids) == 0 {
+		return true
+	}
+	for _, m := range pids {
+		pid, err := strconv.ParseInt(m[1], 10, 32)
+		if err != nil {
+			return true
+		}
+		if start, running := worktreePidStart(int32(pid)); running && start.Before(info.ModTime()) {
+			return true
+		}
+	}
+	return false
+}
+
+// worktreeRecord finds git's record of the worktree whose folder is dir:
+// dir/.git is a file whose gitdir line names a folder in <common>/worktrees,
+// and that folder's gitdir file names <points>/.git, once both are
+// resolved. Relative paths count from the file's folder. It returns the
+// record's folder and the repository's git folder its commondir names.
+func worktreeRecord(dir, points string) (admin, common string, ok bool) {
+	line, isGitDir := strings.CutPrefix(worktreeLine(filepath.Join(dir, ".git")), "gitdir:")
+	admin = worktreePath(dir, strings.TrimSpace(line))
+	if !isGitDir || admin == "" || filepath.Base(filepath.Dir(admin)) != "worktrees" {
+		return "", "", false
+	}
+	if info, err := os.Lstat(admin); err != nil || !info.IsDir() {
+		return "", "", false
+	}
+	back := worktreePath(admin, worktreeLine(filepath.Join(admin, "gitdir")))
+	if back == "" || resolvePath(back) != resolvePath(filepath.Join(points, ".git")) {
+		return "", "", false
+	}
+	common = worktreePath(admin, worktreeLine(filepath.Join(admin, "commondir")))
+	if info, err := os.Stat(common); common == "" || err != nil || !info.IsDir() {
+		return "", "", false
+	}
+	return admin, common, true
+}
+
+// worktreeRepo is the repository's folder for its git folder: the folder
+// holding it, or the git folder itself when it is not named .git (a bare
+// repository).
+func worktreeRepo(common string) string {
+	if filepath.Base(common) == ".git" {
+		return filepath.Dir(common)
+	}
+	return common
+}
+
+// worktreePath is p, read from a file in dir, as an absolute path: a
+// relative one counts from dir as it really is. It is "" for an empty p.
+func worktreePath(dir, p string) string {
+	switch {
+	case p == "":
+		return ""
+	case filepath.IsAbs(p):
+		return filepath.Clean(p)
+	}
+	return filepath.Join(resolvePath(dir), p)
+}
+
+// worktreeFile is the start of the regular file at p, at most 4 KB, and
+// whether it could be read.
+func worktreeFile(p string) (string, bool) {
+	if !regularFile(p) {
+		return "", false
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, 4096))
+	return string(head), err == nil
+}
+
+// worktreeLine is the first line of the regular file at p, trimmed; "" when
+// it cannot be read.
+func worktreeLine(p string) string {
+	head, _ := worktreeFile(p)
+	line, _, _ := strings.Cut(head, "\n")
+	return strings.TrimSpace(line)
+}
+
+// worktreeHas reports whether dir holds an entry named name. One that
+// cannot be looked at counts as there.
+func worktreeHas(dir, name string) bool {
+	_, err := os.Lstat(filepath.Join(dir, name))
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // removeWorktree clears git's record of w and moves its folder to the Trash,

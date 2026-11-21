@@ -210,9 +210,16 @@ func (env junkEnv) gitIgnored(git, root string, folders []string) []string {
 // <project>/.claude/worktrees/*, the latter walked as deep as the project
 // they copy.
 func (env junkEnv) findBuildFolders(claims claimSet) []string {
+	found, _ := env.walkHome(claims)
+	return found
+}
+
+// walkHome is findBuildFolders' walk. It also returns the .claude/worktrees
+// folders it enters, where Claude Code keeps a project's worktrees.
+func (env junkEnv) walkHome(claims claimSet) (found, claudeWorktrees []string) {
 	home := filepath.Clean(env.home)
 	if env.traversalBlocked(home) {
-		return nil
+		return nil, nil
 	}
 	resolvedHome := resolvePath(home)
 	homeKey := strings.ToLower(resolvedHome)
@@ -228,7 +235,6 @@ func (env junkEnv) findBuildFolders(claims claimSet) []string {
 		}
 		return safeResolved(key) || slices.Contains(protectedHomeDirs, strings.TrimPrefix(key, homeKey))
 	}
-	var found []string
 	var walk func(dir string, level int)
 	walk = func(dir string, level int) {
 		if env.toolContext().Err() != nil || !enterable(dir) {
@@ -247,7 +253,12 @@ func (env junkEnv) findBuildFolders(claims claimSet) []string {
 			case buildFolderNames[name]:
 				found = append(found, path)
 			case name == ".claude" && level > 1:
-				for _, worktree := range subfolders(filepath.Join(path, "worktrees")) {
+				worktrees := filepath.Join(path, "worktrees")
+				entered := subfolders(worktrees)
+				if len(entered) > 0 {
+					claudeWorktrees = append(claudeWorktrees, worktrees)
+				}
+				for _, worktree := range entered {
 					walk(worktree, level)
 				}
 			case name == ".codex" && level == 1:
@@ -264,7 +275,7 @@ func (env junkEnv) findBuildFolders(claims claimSet) []string {
 		}
 	}
 	walk(home, 1)
-	return found
+	return found, claudeWorktrees
 }
 
 // subfolders lists the folders in dir, which must be a folder, not a link.
