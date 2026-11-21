@@ -17,9 +17,11 @@ import (
 	"time"
 )
 
-// Tests of the Running tab's native reads. Only TestNativeCwdAndFdPath and
-// TestClaudeSnapshotSeesThisProcess read this machine's process table, and
-// they look only at the test process and the child it starts.
+// Tests of the Running tab's native reads. The ones that read this Mac look
+// only at the test process and the children it starts, though
+// TestClaudeSnapshotSeesThisProcess lists every process to find them; the
+// rest read a temporary home and stand-ins. TestClaudeRunningOnThisMac and
+// TestClaudeRunningBudget read this Mac's sessions, and only when asked.
 
 func TestNativeCwdAndFdPath(t *testing.T) {
 	self := int32(os.Getpid())

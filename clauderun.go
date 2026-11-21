@@ -234,8 +234,8 @@ type claudeView struct {
 	now   time.Time
 }
 
-// session is the open session open as the page lists it, with the command
-// rows it lists.
+// session is how the page lists an open session, with commands as the rows
+// under it.
 func (v claudeView) session(open claudeOpen, commands []claudeRow) ClaudeSession {
 	cwd := open.Record.Cwd
 	if cwd == "" {
