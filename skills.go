@@ -1012,6 +1012,9 @@ func opencodeSkillUsage(ctx context.Context) (map[string]skillTally, int64, int,
 // openFilesHook to skip lsof.
 var openFilesHook func() ([]string, error)
 
+// Serialize skill writes from this Cleanzo process, including other bridge calls.
+var skillMutationMu sync.Mutex
+
 func skillGuard() *usageGuard {
 	if openFilesHook != nil {
 		open, err := openFilesHook()
@@ -1024,10 +1027,11 @@ func skillGuard() *usageGuard {
 }
 
 var (
-	errSkillNotEntry = errors.New("not-a-skill")
-	errSkillLinked   = errors.New("linked")
-	errSkillDiverged = errors.New("diverged")
-	errSkillInUse    = errors.New("in-use")
+	errSkillNotEntry     = errors.New("not-a-skill")
+	errSkillLinked       = errors.New("linked")
+	errSkillDiverged     = errors.New("diverged")
+	errSkillInUse        = errors.New("in-use")
+	errSkillUsageUnknown = errors.New("usage-unknown")
 )
 
 // skillRootOf returns the known skills folder path is a direct entry of.
@@ -1112,14 +1116,18 @@ type SkillTrashResult struct {
 // all those links have moved with it, so no tool is left with a broken link.
 // Folders with files a process has open are left alone.
 func (Cleaner) TrashSkills(paths []string) SkillTrashResult {
+	skillMutationMu.Lock()
+	defer skillMutationMu.Unlock()
 	res := SkillTrashResult{Items: []SkillTrashItem{}}
 	// Links first, so a folder's links are gone before it moves.
 	ordered := slices.Clone(paths)
 	sort.SliceStable(ordered, func(i, j int) bool { return isLink(ordered[i]) && !isLink(ordered[j]) })
 	var guard *usageGuard
+	var origins map[string]SkillOrigin
 	for _, p := range ordered {
 		p = filepath.Clean(p)
 		item := SkillTrashItem{Path: p}
+		var backup skillVersionState
 		if err := skillEntryOK(p); err != nil || !platformRemovalSafe(p) {
 			if err == nil {
 				err = errSkillNotEntry
@@ -1148,8 +1156,25 @@ func (Cleaner) TrashSkills(paths []string) SkillTrashResult {
 				continue
 			}
 			item.Freed, _, _ = measureAI(context.Background(), p, nil)
+			if origins == nil {
+				origins = map[string]SkillOrigin{}
+				if entries, err := skillEntries(context.Background()); err == nil {
+					origins = skillOrigins(context.Background(), entries)
+				}
+			}
+			var err error
+			backup, _, err = createSkillVersion(context.Background(), real, "remove", origins[real])
+			if err != nil {
+				item.Error = "save skill version: " + err.Error()
+				item.Freed = 0
+				res.Items = append(res.Items, item)
+				continue
+			}
 		}
 		if err := trashItem(p); err != nil {
+			if fileExists(p) {
+				discardSkillVersion(backup)
+			}
 			item.Error = err.Error()
 			item.Freed = 0
 		} else {
@@ -1174,6 +1199,8 @@ func (Cleaner) LinkSkillCopy(path, target string) error {
 	if runtime.GOOS == "windows" {
 		return errUnsupported
 	}
+	skillMutationMu.Lock()
+	defer skillMutationMu.Unlock()
 	path, target = filepath.Clean(path), filepath.Clean(target)
 	if err := skillEntryOK(path); err != nil {
 		return err

@@ -14,17 +14,18 @@ import (
 // openFiles lists the files the user's processes have open, lower-cased and
 // sorted, from lsof.
 func openFiles() ([]string, error) {
+	out, err := lsofFields("n")
+	return parseLsofNames(out), err
+}
+
+func lsofFields(fields string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-w", "-Fn")
+	cmd := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-w", "-F"+fields)
 	// Apps started from Finder have no LANG, under which lsof escapes the
 	// bytes of non-ASCII names as \xNN.
 	cmd.Env = append(os.Environ(), "LC_ALL=en_US.UTF-8")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parseLsofNames(out), nil
+	return cmd.Output()
 }
 
 // parseLsofNames extracts the file paths from lsof -Fn output, whose name

@@ -166,7 +166,7 @@ test("a rescan keeps what the last update check found for folders that did not c
 // ---- 页面：升级的确认（无浏览器，见 page-harness.ts） ----
 
 /** 搭好技能页并查过更新：改动都记在 env 里，由测试的 finally 还原。 */
-async function skillsPage(env: Changes, skills: Skill[], checked: SkillUpdate[]) {
+async function skillsPage(env: Changes, skills: Skill[], checked: SkillUpdate[], errors: Record<string, string> = {}) {
   const { textOf } = await import("./page-harness");
   const { t } = await import("../src/i18n");
   const { SkillsPage } = await import("../src/react/skills/SkillsPage");
@@ -177,7 +177,7 @@ async function skillsPage(env: Changes, skills: Skill[], checked: SkillUpdate[])
   env.spy(skillsApi, "checkUpdates").mockImplementation(async () => checked);
   env.spy(skillsApi, "upgrade").mockImplementation(async (reqs) => {
     upgrades.push(reqs);
-    return reqs.map((r) => ({ path: r.path, tree: "tree-2", error: "" }));
+    return reqs.map((r) => ({ path: r.path, tree: "tree-2", error: errors[r.path] ?? "" }));
   });
   const page = env.page(SkillsPage, {});
   await page.settle();
@@ -250,4 +250,43 @@ test("upgrade error codes read as text in both languages; an unknown error shows
       expect(failReason(t, "github 502")).toBe("github 502");
     }
   } finally { setPref("system"); }
+});
+
+test("an archive upgrade shares the submission path and explains macOS read-only use in confirmation", async () => {
+  const env = (await import("./page-harness")).changes();
+  const { setPlatformForTest } = await import("../src/platform");
+  setPlatformForTest("darwin");
+  try {
+    const path = "/Users/a/.agents/skills/x";
+    const sk = await skillsPage(env, [skill("x")], [update(path, { name: "x", status: "update", checkedAt: NOW })]);
+    sk.row("x").props.onUpgrade(path);
+    await sk.page.settle();
+    expect(sk.upgrades).toEqual([[{ path, force: false }]]);
+    sk.summary().props.onUpgradeAll();
+    await sk.page.settle();
+    expect(sk.dialog()).toContain(sk.t("skills.upgradeConfirm.activeRead"));
+  } finally {
+    setPlatformForTest(undefined);
+    env.restore();
+  }
+});
+
+test("a later batch failure keeps its recovery location visible after refresh", async () => {
+  const { changes, textOf } = await import("./page-harness");
+  const env = changes();
+  try {
+    const skills = [skill("first"), skill("second")];
+    const [first, second] = skills.map((s) => s.copies[0]!.real) as [string, string];
+    const recovery = "/tmp/.cleanzo-skill-update-test/second";
+    const sk = await skillsPage(env, skills, [first, second].map((path) => update(path, { status: "update", checkedAt: NOW })), {
+      [first]: "in-use", [second]: `previous skill restored; displaced version kept at ${recovery}`,
+    });
+    sk.summary().props.onUpgradeAll();
+    await sk.page.settle();
+    sk.page.click(sk.t("skills.upgradeConfirm.ok"));
+    await sk.page.settle();
+    const details = sk.page.find((node) => node.type === "li" && textOf(node).includes(recovery));
+    expect(details).toBeDefined();
+    expect(textOf(details!)).toContain("second");
+  } finally { env.restore(); }
 });

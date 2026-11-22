@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -118,7 +119,8 @@ type fakeGitHub struct {
 	lie       bool
 	// listing, when set, lists the written repository instead of hashing it
 	// with the code under test.
-	listing func(dir string) (any, error)
+	listing       func(dir string) (any, error)
+	beforeArchive func()
 }
 
 func newFakeGitHub(t *testing.T, files map[string]string) *fakeGitHub {
@@ -199,6 +201,9 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"sha": root, "tree": tree, "truncated": false})
 	case strings.HasPrefix(r.URL.Path, "/load/acme/skills/tar.gz/"):
 		f.tarCalls.Add(1)
+		if f.beforeArchive != nil {
+			f.beforeArchive()
+		}
 		var buf bytes.Buffer
 		gz := gzip.NewWriter(&buf)
 		tw := tar.NewWriter(gz)
@@ -246,7 +251,7 @@ func installLocked(t *testing.T, home, name string, files map[string]string, tre
 
 // TestSkillUpdatesReadNoTranscripts: listing origins, checking and
 // upgrading need only the skill folders' entries, not the usage records a
-// full scan reads; an upgrade checks what is in use once for all folders.
+// full scan reads. Archive upgrades on macOS probe just before each exchange.
 func TestSkillUpdatesReadNoTranscripts(t *testing.T) {
 	home := skillFixture(t)
 	writeSkillFile(t, opencodeDB(), "")
@@ -277,8 +282,12 @@ func TestSkillUpdatesReadNoTranscripts(t *testing.T) {
 	if queries != 0 {
 		t.Fatalf("usage records read %d times", queries)
 	}
-	if probes != 1 {
-		t.Fatalf("usage probed %d times for one upgrade", probes)
+	wantProbes := 1
+	if runtime.GOOS == "darwin" {
+		wantProbes = 2
+	}
+	if probes != wantProbes {
+		t.Fatalf("usage probed %d times, want %d", probes, wantProbes)
 	}
 }
 

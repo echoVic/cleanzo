@@ -6,6 +6,8 @@ require (
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.9.0
 	github.com/klauspost/compress v1.20.3
+	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	golang.org/x/sys v0.49.0
 )
 

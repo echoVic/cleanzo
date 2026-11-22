@@ -11,10 +11,14 @@ import {
 import { cn } from "../../ui/cn";
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { currentLang } from "../../i18n";
-import { errText, setNavBusy, toast } from "../../shared";
+import { isWindows } from "../../platform";
+import { baseName, errText, setNavBusy, toast } from "../../shared";
 import { human, displayPath } from "../ai/format";
 import { daysAgo, isFolder, linkCandidates, matchFilter, matchQuery, sortSkills, trashPlan, upgradeTargets, windowDays, type SkillFilter, type SkillSort, mergeOrigins } from "./helpers";
 import { skillsApi } from "./api";
+import { SkillCatalog, SkillSourceBinding } from "./SkillCatalog";
+import { SkillDistribution } from "./SkillDistribution";
+import { SkillHistory, SkillUpgradeChanges } from "./SkillHistory";
 
 type Phase = "idle" | "scanning" | "scanned";
 type T = ReturnType<typeof useT>;
@@ -43,6 +47,8 @@ export function SkillsPage() {
   /** 升级确认框要升级的文件夹：「全部升级」是全部，行内的「覆盖并升级」是那一个；null 为关着。 */
   const [upgradeAsk, setUpgradeAsk] = React.useState<SkillUpdate[] | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [upgrading, setUpgrading] = React.useState(false);
+  const [upgradeFailures, setUpgradeFailures] = React.useState<SkillUpgradeResult[]>([]);
   /** 首次扫描失败：持久化内联错误面板（含重试）；已有数据时重扫失败仍走 toast 保留旧数据。 */
   const [scanErr, setScanErr] = React.useState<string | null>(null);
 
@@ -81,22 +87,21 @@ export function SkillsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  const checkUpdates = React.useCallback(async () => {
+  const checkUpdates = React.useCallback(async (showFeedback = true) => {
     setChecking(true);
     try {
       const ups = await skillsApi.checkUpdates();
       setUpdates(mergeUpdates({}, ups));
-      const n = ups.filter((u) => u.status === "update").length;
-      const m = ups.filter((u) => u.modified).length;
-      const e = ups.filter((u) => u.status === "error").length;
-      if (n > 0 || m > 0 || e > 0) {
-        toast(t("skills.updates.found", { n, m, e }), n > 0 ? "ok" : "err");
-      } else {
-        toast(t("skills.updates.none"), "ok");
+      if (showFeedback) {
+        const n = ups.filter((u) => u.status === "update").length;
+        const m = ups.filter((u) => u.modified).length;
+        const e = ups.filter((u) => u.status === "error").length;
+        if (n > 0 || m > 0 || e > 0) toast(t("skills.updates.found", { n, m, e }), n > 0 ? "ok" : "err");
+        else toast(t("skills.updates.none"), "ok");
       }
       setCheckedAt(Date.now());
     } catch (e) {
-      toast(t("skills.updates.failed", { msg: errText(e) }), "err");
+      if (showFeedback) toast(t("skills.updates.failed", { msg: errText(e) }), "err");
     } finally {
       setChecking(false);
     }
@@ -188,32 +193,43 @@ export function SkillsPage() {
   const asked = upgradeAsk ?? [];
   const askedModified = asked.filter((u) => u.modified);
   const askedCCSwitch = asked.some((u) => u.origin.kind === "cc-switch");
-
-  /** 行内升级：要覆盖本地改动的先确认，和「全部升级」同一个确认框；没改过的直接升级。 */
-  const upgradeRow = (path: string, force: boolean) => {
-    if (!force) { void upgradeOne(path, false, { setBusy, scan, checkUpdates, t }); return; }
-    const u = updates[path];
-    if (u) setUpgradeAsk([u]);
-  };
+  const askedMacArchives = !isWindows() && asked.some((u) => u.origin.kind !== "git");
 
   const doUpgrade = async (targets: SkillUpdate[], force: boolean) => {
     setUpgradeAsk(null);
     setBusy(true);
+    setUpgrading(true);
     try {
       const reqs = targets.map((u) => ({ path: u.path, force: force && u.modified }));
       const res: SkillUpgradeResult[] = await skillsApi.upgrade(reqs);
+      setUpgrading(false);
       const failed = res.filter((r) => r.error);
+      const attempted = new Set(res.map((r) => r.path));
+      setUpgradeFailures((prev) => [...prev.filter((r) => !attempted.has(r.path)), ...failed]);
       const firstFail = failed[0];
       toast(failed.length
-        ? t("skills.upgrade.partial", { ok: res.length - failed.length, failed: failed.length, reason: firstFail ? failReason(t, firstFail.error) : "" })
+        ? t("skills.upgrade.partial", { ok: res.length - failed.length, failed: failed.length, reason: firstFail ? `${baseName(firstFail.path)} · ${failReason(t, firstFail.error)}` : "" })
         : t("skills.upgrade.done", { n: res.length }), failed.length ? "err" : "ok");
       await scan();
-      await checkUpdates();
+      await checkUpdates(false);
     } catch (e) {
       toast(errText(e), "err");
     } finally {
+      setUpgrading(false);
       setBusy(false);
     }
+  };
+
+  const upgradeRow = (path: string) => {
+    const update = updates[path];
+    if (!update) return;
+    if (update.modified) setUpgradeAsk([update]);
+    else void doUpgrade([update], false);
+  };
+
+  const refreshManagedSkills = async (update?: SkillUpdate) => {
+    if (update) setUpdates((prev) => mergeUpdates(prev, [update]));
+    await scan();
   };
 
   return (
@@ -224,7 +240,9 @@ export function SkillsPage() {
           <p className="muted">{t("skills.head")}</p>
         </div>
         <div className="head-actions">
-          <Button variant="ghost" size="sm" onClick={checkUpdates} disabled={checking || busy || !data}>
+          <SkillCatalog disabled={busy || checking || phase === "scanning"} onChanged={refreshManagedSkills} />
+          <SkillHistory disabled={busy || checking || phase === "scanning"} onChanged={refreshManagedSkills} />
+          <Button variant="ghost" size="sm" onClick={() => void checkUpdates()} disabled={checking || busy || !data}>
             <ArrowUpToLine className={cn("h-3.5 w-3.5", checking && "animate-pulse")} />
             {checking ? t("skills.updates.checking") : t("skills.updates.check")}
           </Button>
@@ -270,9 +288,23 @@ export function SkillsPage() {
       {data && (
         <>
           <SummaryCard data={data} counts={counts} linkable={linkable.length} busy={busy}
-            updatable={allTargets.length} checking={checking} hasCheck={hasCheck}
+            updatable={allTargets.length} upgrading={upgrading} checking={checking} hasCheck={hasCheck}
             onLinkAll={() => setLinkPairs(linkable)}
             onUpgradeAll={() => setUpgradeAsk(allTargets)} />
+
+          {upgradeFailures.length > 0 && (
+            <Card className="mb-4 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-semibold text-danger-text">{t("skills.upgrade.failureDetails", { n: upgradeFailures.length })}</h2>
+                <Button size="sm" variant="ghost" onClick={() => setUpgradeFailures([])}>{t("btn.close")}</Button>
+              </div>
+              <ul className="mt-2 space-y-1 text-xs">
+                {upgradeFailures.map((r) => (
+                  <li key={r.path} className="break-all"><strong>{displayPath(r.path)}</strong> · {failReason(t, r.error)}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {(["all", "idle", "issues", "updates", "unobserved"] as SkillFilter[]).map((f) => (
@@ -312,10 +344,10 @@ export function SkillsPage() {
             )}
             {visible.map((s) => (
               <SkillRow key={s.name} skill={s} now={now} picked={picked.has(s.name)}
-                expanded={expanded.has(s.name)} busy={busy} ups={updateFor(s)} hasCheck={hasCheck}
+                expanded={expanded.has(s.name)} busy={busy || checking} ups={updateFor(s)} hasCheck={hasCheck}
                 onToggle={(on) => toggle(s.name, on)} onExpand={() => toggleExpand(s.name)}
                 onLink={(pairs) => setLinkPairs(pairs)}
-                onUpgrade={upgradeRow} />
+                onUpgrade={upgradeRow} onManagedChange={refreshManagedSkills} />
             ))}
           </Card>
 
@@ -387,10 +419,13 @@ export function SkillsPage() {
           </DialogHeader>
           <ul className="max-h-[30vh] space-y-1 overflow-auto text-xs">
             {asked.map((u) => (
-              <li key={u.path} className="flex items-center gap-2">
-                <b>{u.name}</b>
-                <span className="min-w-0 truncate text-muted" title={`${u.origin.repo}${u.origin.path ? `/${u.origin.path}` : ""}`}>{u.origin.repo}{u.origin.path ? `/${u.origin.path}` : ""}</span>
-                {u.modified && <span className="tag warn shrink-0">{t("skills.tag.modified")}</span>}
+              <li key={u.path} className="space-y-1 py-1">
+                <div className="flex items-center gap-2">
+                  <b>{u.name}</b>
+                  <span className="min-w-0 truncate text-muted" title={`${u.origin.repo}${u.origin.path ? `/${u.origin.path}` : ""}`}>{u.origin.repo}{u.origin.path ? `/${u.origin.path}` : ""}</span>
+                  {u.modified && <span className="tag warn shrink-0">{t("skills.tag.modified")}</span>}
+                </div>
+                {u.origin.kind !== "git" && <SkillUpgradeChanges path={u.path} />}
               </li>
             ))}
           </ul>
@@ -399,6 +434,9 @@ export function SkillsPage() {
           )}
           {askedCCSwitch && (
             <p className="mt-2 text-xs text-muted">{t("skills.upgradeConfirm.ccswitch")}</p>
+          )}
+          {askedMacArchives && (
+            <p className="mt-2 text-xs text-muted">{t("skills.upgradeConfirm.activeRead")}</p>
           )}
           <p className="mt-3 text-xs text-muted">{t("skills.upgradeConfirm.safety")}</p>
           <div className="mt-4 flex justify-end gap-2">
@@ -422,31 +460,9 @@ function mergeUpdates(prev: Record<string, SkillUpdate>, ups: SkillUpdate[]): Re
   return next;
 }
 
-async function upgradeOne(path: string, force: boolean, deps: {
-  setBusy: (b: boolean) => void; scan: () => Promise<void>; checkUpdates: () => Promise<void>; t: T;
-}) {
-  const { setBusy, scan, checkUpdates, t } = deps;
-  setBusy(true);
-  try {
-    const res = await skillsApi.upgrade([{ path, force }]);
-    const r = res[0];
-    if (r?.error) {
-      toast(failReason(t, r.error), "err");
-    } else {
-      toast(t("skills.upgrade.done", { n: 1 }), "ok");
-      await scan();
-      await checkUpdates();
-    }
-  } catch (e) {
-    toast(errText(e), "err");
-  } finally {
-    setBusy(false);
-  }
-}
-
-function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasCheck, onLinkAll, onUpgradeAll }: {
+function SummaryCard({ data, counts, linkable, busy, updatable, upgrading, checking, hasCheck, onLinkAll, onUpgradeAll }: {
   data: SkillScanResult; counts: Record<SkillFilter, number>; linkable: number; busy: boolean;
-  updatable: number; checking: boolean; hasCheck: boolean;
+  updatable: number; upgrading: boolean; checking: boolean; hasCheck: boolean;
   onLinkAll: () => void; onUpgradeAll: () => void;
 }) {
   const t = useT();
@@ -462,7 +478,8 @@ function SummaryCard({ data, counts, linkable, busy, updatable, checking, hasChe
         <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
           {updatable > 0 && (
             <Button className="max-w-full whitespace-normal" size="sm" disabled={busy || checking} onClick={onUpgradeAll}>
-              <ArrowUpToLine className="h-3.5 w-3.5" />{t("skills.updateAll", { n: updatable })}
+              <ArrowUpToLine className="h-3.5 w-3.5" />
+              {upgrading ? t("skills.upgrade.inProgress") : checking ? t("skills.updates.checking") : t("skills.updateAll", { n: updatable })}
             </Button>
           )}
           {linkable > 0 && (
@@ -496,12 +513,13 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onToggle, onExpand, onLink, onUpgrade }: {
+function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onToggle, onExpand, onLink, onUpgrade, onManagedChange }: {
   skill: Skill; now: number; picked: boolean; expanded: boolean; busy: boolean;
   ups: SkillUpdate[]; hasCheck: boolean;
   onToggle: (on: boolean) => void; onExpand: () => void;
   onLink: (pairs: { path: string; target: string }[]) => void;
-  onUpgrade: (path: string, force: boolean) => void;
+  onUpgrade: (path: string) => void;
+  onManagedChange: (update?: SkillUpdate) => Promise<void>;
 }) {
   const t = useT();
   const removable = s.copies.some((c) => c.removable);
@@ -547,8 +565,9 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
           {s.copies.map((c) => {
             const u = ups.find((x) => c.real && x.path === c.real);
             return <CopyLine key={c.path} copy={c} update={u} hasCheck={hasCheck} busy={busy}
-              onUpgrade={(force) => onUpgrade(c.real, force)} />;
+              onUpgrade={() => onUpgrade(c.real)} onManagedChange={onManagedChange} />;
           })}
+          <SkillDistribution skill={s} disabled={busy} onChanged={onManagedChange} />
           {pairs.length > 0 && (
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => onLink(pairs)}>
               <Link2 className="h-3.5 w-3.5" />{t("skills.link", { n: pairs.length })}
@@ -561,9 +580,10 @@ function SkillRow({ skill: s, now, picked, expanded, busy, ups, hasCheck, onTogg
   );
 }
 
-function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade }: {
+function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade, onManagedChange }: {
   copy: SkillCopy; update?: SkillUpdate; hasCheck: boolean; busy: boolean;
-  onUpgrade: (force: boolean) => void;
+  onUpgrade: () => void;
+  onManagedChange: (update?: SkillUpdate) => Promise<void>;
 }) {
   const t = useT();
   return (
@@ -584,7 +604,9 @@ function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade }: {
       {isFolder(c) && c.linkedBy.length > 0 && (
         <span className="shrink-0 text-muted">{t("skills.linkedBy", { n: c.linkedBy.length })}</span>
       )}
-      <span className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {c.real && isFolder(c) && u?.origin.kind !== "git" && !u?.origin.repo && <SkillSourceBinding folder={c.real} disabled={busy} onChanged={onManagedChange} />}
+        {c.real && isFolder(c) && <SkillHistory path={c.real} disabled={busy} onChanged={onManagedChange} />}
         {u && isFolder(c) && (
           <UpdateState update={u} hasCheck={hasCheck} busy={busy} onUpgrade={onUpgrade} />
         )}
@@ -594,14 +616,14 @@ function CopyLine({ copy: c, update: u, hasCheck, busy, onUpgrade }: {
             <FolderOpen className="h-3.5 w-3.5" />
           </button>
         )}
-      </span>
+      </div>
     </div>
   );
 }
 
 function UpdateState({ update: u, hasCheck, busy, onUpgrade }: {
   update: SkillUpdate; hasCheck: boolean; busy: boolean;
-  onUpgrade: (force: boolean) => void;
+  onUpgrade: () => void;
 }) {
   const t = useT();
   if (!hasCheck || u.status === "unknown") {
@@ -619,7 +641,7 @@ function UpdateState({ update: u, hasCheck, busy, onUpgrade }: {
   // update
   return (
     <Button size="sm" variant={u.modified ? "default" : "ghost"} disabled={busy}
-      onClick={() => onUpgrade(u.modified)}>
+      onClick={onUpgrade}>
       <ArrowUpToLine className="h-3.5 w-3.5" />
       {u.modified ? t("skills.upgrade.forceOne") : t("skills.upgrade.one")}
     </Button>

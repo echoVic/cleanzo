@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Root as TabsRoot, List as TabsList, Trigger as TabsTrigger, Content as TabsContent } from "@radix-ui/react-tabs";
 import { RefreshCw } from "lucide-react";
 import type { AIModelSource, AIPart, AITool } from "../../mygo";
 import { Badge } from "../../ui/components/badge";
@@ -9,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useT, type DictKey } from "../../ui/i18n-react";
 import { errText, human, toast } from "../../shared";
 import { aiSpaceApi } from "./api";
+import { MCPPanel } from "./MCPPanel";
 import { cleanReport, cleanToastText, partKey, pickable, pickedBytes, relTime, rowsChecked, selectionsFor, splitParts, toggleRows, type CleanReport, type PartRow, type Picks } from "./selection";
 
 type Phase = "idle" | "scanning" | "scanned";
@@ -26,6 +28,30 @@ function partName(t: (key: DictKey) => string, part: AIPart): string {
 }
 
 export function AISpacePage() {
+  const t = useT();
+  const [tab, setTab] = React.useState("space");
+  const trigger = "rounded-md px-3 py-1.5 text-sm text-muted data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm";
+  return (
+    <TabsRoot value={tab} onValueChange={setTab} className="cz-react">
+      <header className="view-head">
+        <div>
+          <h1>{t("nav.aispace")}</h1>
+          <p className="muted">{t(tab === "mcp" ? "mcp.subtitle" : "aispace.sub")}</p>
+        </div>
+        <div className="head-actions">
+          <TabsList aria-label={t("nav.aispace")} className="flex gap-0.5 rounded-lg bg-bg-subtle p-0.5">
+            <TabsTrigger className={trigger} value="space">{t("aispace.tab.space")}</TabsTrigger>
+            <TabsTrigger className={trigger} value="mcp">MCP</TabsTrigger>
+          </TabsList>
+        </div>
+      </header>
+      <TabsContent value="space" forceMount hidden={tab !== "space"}><SpaceOverview /></TabsContent>
+      <TabsContent value="mcp">{tab === "mcp" && <MCPPanel />}</TabsContent>
+    </TabsRoot>
+  );
+}
+
+function SpaceOverview() {
   const t = useT();
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [error, setError] = React.useState<string | null>(null);
@@ -221,12 +247,6 @@ export function AISpacePage() {
   if (phase === "idle") {
     return (
       <div className="cz-react">
-        <header className="view-head">
-          <div>
-            <h1>{t("nav.aispace")}</h1>
-            <p className="muted">{t("aispace.sub")}</p>
-          </div>
-        </header>
         {error ? (
           <div className="empty err" role="alert">
             <div className="err-icon">⚠</div>
@@ -250,12 +270,6 @@ export function AISpacePage() {
   if (phase === "scanning") {
     return (
       <div className="cz-react">
-        <header className="view-head">
-          <div>
-            <h1>{t("nav.aispace")}</h1>
-            <p className="muted">{t("aispace.sub")}</p>
-          </div>
-        </header>
         <div className="flex flex-col items-center py-20 text-center">
           <RefreshCw className="h-9 w-9 animate-spin text-primary" />
           <div className="mt-4 text-sm text-muted">{t("aispace.scanning")}</div>
@@ -471,18 +485,12 @@ export function AISpacePage() {
 
   return (
     <div className="cz-react">
-      <header className="view-head">
-        <div>
-          <h1>{t("nav.aispace")}</h1>
-          <p className="muted">{t("aispace.sub")}</p>
-        </div>
-        <div className="head-actions">
-          <Button variant="ghost" size="sm" onClick={() => void scan()} disabled={busy}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            {t("fs.rescan")}
-          </Button>
-        </div>
-      </header>
+      <div className="mb-3 flex justify-end">
+        <Button variant="ghost" size="sm" onClick={() => void scan()} disabled={busy}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          {t("fs.rescan")}
+        </Button>
+      </div>
 
       <span className="sr-only" role="status">
         {done ? t("aispace.done", { size: human(done.freed) }) : ""}

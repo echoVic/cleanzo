@@ -162,3 +162,44 @@ test("the first failure in the toast keeps its path and reads its code in the in
     expect(first("~/.claude/cache: open /Users/a/.claude/cache: permission denied")).toBe("~/.claude/cache: open /Users/a/.claude/cache: permission denied");
   } finally { setLang("zh"); }
 });
+
+test("AI Space opens the MCP tab and leaves the space panel mounted", async () => {
+  const { changes } = await import("./page-harness");
+  const { AISpacePage } = await import("../src/react/aispace/AISpacePage");
+  const { MCPPanel } = await import("../src/react/aispace/MCPPanel");
+  const env = changes();
+  try {
+    const page = env.page(AISpacePage, {});
+    await page.settle();
+    expect(page.find((el) => el.type === MCPPanel)).toBeUndefined();
+    page.find((el) => typeof el.props.onValueChange === "function" && el.props.value === "space")!.props.onValueChange("mcp");
+    await page.settle();
+    expect(page.find((el) => el.type === MCPPanel)).toBeDefined();
+    expect(page.find((el) => el.props.value === "space" && el.props.forceMount === true)?.props.hidden).toBeTrue();
+  } finally { env.restore(); }
+});
+
+test("an MCP toggle sends the config revision and refreshes the inventory", async () => {
+  const { changes } = await import("./page-harness");
+  const { MCPPanel, mcpApi } = await import("../src/react/aispace/MCPPanel");
+  const { t } = await import("../src/i18n");
+  const env = changes();
+  try {
+    let enabled = true;
+    let reads = 0;
+    let sent: Parameters<typeof mcpApi.apply>[0] | undefined;
+    env.spy(mcpApi, "list").mockImplementation(async () => {
+      reads++;
+      return [{ tool: "codex", path: "/Users/a/.codex/config.toml", revision: `revision-${reads}`,
+        exists: true, readOnly: false, canToggle: true, hasBackup: false, error: "",
+        servers: [{ name: "docs", transport: "http", endpoint: "https://example.com", enabled, issue: "", alsoIn: ["claude"] }] }];
+    });
+    env.spy(mcpApi, "apply").mockImplementation(async (request) => { sent = request; enabled = request.enabled; });
+    const page = env.page(MCPPanel, {});
+    await page.settle();
+    page.click(t("mcp.disable"));
+    await page.settle();
+    expect(sent).toMatchObject({ tool: "codex", revision: "revision-1", action: "toggle", name: "docs", enabled: false });
+    expect(reads).toBe(2);
+  } finally { env.restore(); }
+});

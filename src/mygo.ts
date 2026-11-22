@@ -724,6 +724,39 @@ export interface LargeScanResult {
   threshold: number;
 }
 
+export interface MCPChange {
+  tool: string;
+  revision: string;
+  action: string;
+  name: string;
+  transport: string;
+  endpoint: string;
+  args: string[];
+  replaceArgs: boolean;
+  enabled: boolean;
+}
+
+export interface MCPConfig {
+  tool: string;
+  path: string;
+  revision: string;
+  exists: boolean;
+  readOnly: boolean;
+  canToggle: boolean;
+  hasBackup: boolean;
+  error: string;
+  servers: MCPServer[];
+}
+
+export interface MCPServer {
+  name: string;
+  transport: string;
+  endpoint: string;
+  enabled: boolean;
+  issue: string;
+  alsoIn: string[];
+}
+
 /**
  * MachineInfo says what this Mac is. Fields that cannot be read stay zero
  * or empty, and the page leaves them out.
@@ -1010,6 +1043,23 @@ export interface Skill {
   issues: string[];
 }
 
+/** SkillCatalogEntry is one installable skill folder found in a GitHub tree. */
+export interface SkillCatalogEntry {
+  name: string;
+  origin: SkillOrigin;
+  /** roots where the same source is recorded */
+  installed: string[];
+  /** roots where another source or an unknown copy has this name */
+  sameName: string[];
+}
+
+/** SkillCatalogInstallResult reports each destination independently. */
+export interface SkillCatalogInstallResult {
+  tool: string;
+  path: string;
+  error: string;
+}
+
 /** SkillCopy is one entry for a skill in one skills folder. */
 export interface SkillCopy {
   /** the folder's tool */
@@ -1030,6 +1080,55 @@ export interface SkillCopy {
   linkedBy: string[];
   /** passes the safety checks */
   removable: boolean;
+}
+
+/** SkillDeployRequest applies an explicit link or copy, or repairs one observed broken link. */
+export interface SkillDeployRequest {
+  name: string;
+  source: string;
+  tool: string;
+  /** link or copy */
+  mode: string;
+  repair: boolean;
+  previousTarget: string;
+}
+
+/**
+ * SkillDeployment describes the global paths Cleanzo inspected for a tool.
+ * Availability is independent of the direct entry because some tools also
+ * discover skills in shared or other tools' user directories.
+ */
+export interface SkillDeployment {
+  tool: string;
+  label: string;
+  path: string;
+  /** absent, directory, link, broken, conflict, unreadable */
+  state: string;
+  /** absent, direct, shared, unknown */
+  availability: string;
+  shared: boolean;
+  sharedPath: string;
+  linkTarget: string;
+  /** validated direct entry that can be deployed */
+  source: string;
+  canDeploy: boolean;
+  canRepair: boolean;
+}
+
+/** SkillDiscoveryEntry is a skills.sh search result. Its slug is a hint, not an install path. */
+export interface SkillDiscoveryEntry {
+  name: string;
+  slug: string;
+  repo: string;
+  installs: number;
+  installed: string[];
+  sameName: string[];
+}
+
+/** SkillFileChange identifies a changed relative file path. */
+export interface SkillFileChange {
+  path: string;
+  kind: string;
 }
 
 /** SkillOrigin is where a skill folder came from. */
@@ -1110,6 +1209,12 @@ export interface SkillUpdate {
   checkedAt: number;
 }
 
+/** SkillUpgradePreview describes the files changed by an archive upgrade. */
+export interface SkillUpgradePreview {
+  changes: SkillFileChange[];
+  total: number;
+}
+
 /** SkillUpgradeRequest asks to upgrade one folder. */
 export interface SkillUpgradeRequest {
   path: string;
@@ -1132,6 +1237,16 @@ export interface SkillUse {
   count: number;
   /** unix seconds */
   last: number;
+}
+
+/** SkillVersion describes a saved copy that can be restored from the Skills page. */
+export interface SkillVersion {
+  id: string;
+  path: string;
+  name: string;
+  action: string;
+  at: number;
+  exists: boolean;
 }
 
 /** StatusSample is one complete reading, sent every two seconds. */
@@ -1248,6 +1363,21 @@ export const Cleaner = {
   appUninstallDetail(path: string): Promise<UninstallDetail> {
     return call("Cleaner.AppUninstallDetail", path);
   },
+  /**
+   * ApplyMCPChange applies an explicit edit to a supported global configuration.
+   * The revision is required so an edit cannot overwrite a change made after the read.
+   */
+  applyMCPChange(change: MCPChange): Promise<void> {
+    return call("Cleaner.ApplyMCPChange", change);
+  },
+  /** BindCatalogSkillSource records a verified upstream tree and leaves local content in place. */
+  bindCatalogSkillSource(folder: string, chosen: SkillOrigin): Promise<SkillUpdate> {
+    return call("Cleaner.BindCatalogSkillSource", folder, chosen);
+  },
+  /** BrowseSkillRepository lists regular SKILL.md entries without downloading or executing them. */
+  browseSkillRepository(repo: string, ref: string, subdir: string): Promise<SkillCatalogEntry[]> {
+    return call("Cleaner.BrowseSkillRepository", repo, ref, subdir);
+  },
   /** CheckAppUpdates streams the update state of the apps listed by the page. */
   checkAppUpdates(ids: string[], ch: Channel<AppUpdate>): Promise<void> {
     return call("Cleaner.CheckAppUpdates", ids, ch);
@@ -1324,6 +1454,13 @@ export const Cleaner = {
    */
   crashDumps(): Promise<CrashDumpSummary> {
     return call("Cleaner.CrashDumps");
+  },
+  /**
+   * DeploySkill stages one complete entry and publishes to the chosen tool. No
+   * existing file, directory, or live link can be replaced by a normal deploy.
+   */
+  deploySkill(req: SkillDeployRequest): Promise<void> {
+    return call("Cleaner.DeploySkill", req);
   },
   /**
    * DirChildren lists the direct children of path with sizes: directories are
@@ -1406,12 +1543,24 @@ export const Cleaner = {
   growthSummary(): Promise<GrowthSummary> {
     return call("Cleaner.GrowthSummary");
   },
+  /** ImportCatalogSkillFolder copies a local skill into selected roots while preserving the original. */
+  importCatalogSkillFolder(folder: string, tools: string[]): Promise<SkillCatalogInstallResult[]> {
+    return call("Cleaner.ImportCatalogSkillFolder", folder, tools);
+  },
+  /** ImportCatalogSkillZIP installs the single folder containing SKILL.md in a local zip. */
+  importCatalogSkillZIP(file: string, tools: string[]): Promise<SkillCatalogInstallResult[]> {
+    return call("Cleaner.ImportCatalogSkillZIP", file, tools);
+  },
   /**
    * Info returns basic system information, including the About This Mac
    * line the status page's header shows.
    */
   info(): Promise<SystemInfo> {
     return call("Cleaner.Info");
+  },
+  /** InstallCatalogSkill installs the selected, verified tree to each chosen root. */
+  installCatalogSkill(chosen: SkillOrigin, tools: string[]): Promise<SkillCatalogInstallResult[]> {
+    return call("Cleaner.InstallCatalogSkill", chosen, tools);
   },
   /**
    * LargeScan streams per-file results and the final summary of a large-file
@@ -1447,6 +1596,25 @@ export const Cleaner = {
   /** ListApps returns installed applications and whether they are running. */
   listApps(): Promise<AppInfo[]> {
     return call("Cleaner.ListApps");
+  },
+  /**
+   * ListMCPConfigs reports global MCP registrations and local command availability.
+   * It does not load credentials, invoke a server or include config bodies in the bridge.
+   */
+  listMCPConfigs(): Promise<MCPConfig[]> {
+    return call("Cleaner.ListMCPConfigs");
+  },
+  /** ListSkillDistribution inspects one exact folder name across the supported user directories. */
+  listSkillDistribution(name: string): Promise<SkillDeployment[]> {
+    return call("Cleaner.ListSkillDistribution", name);
+  },
+  /** ListSkillHistory lists saved versions, optionally for a single resolved folder. */
+  listSkillHistory(folder: string): Promise<SkillVersion[]> {
+    return call("Cleaner.ListSkillHistory", folder);
+  },
+  /** ListSkillInstallTargets lists supported roots, including roots not yet created. */
+  listSkillInstallTargets(): Promise<SkillRoot[]> {
+    return call("Cleaner.ListSkillInstallTargets");
   },
   /**
    * ListSkillOrigins reports the skills that have an origin, without going
@@ -1489,9 +1657,20 @@ export const Cleaner = {
   photoPreview(path: string): Promise<string> {
     return call("Cleaner.PhotoPreview", path);
   },
+  /** PickCatalogSkillZIP selects a local ZIP archive from the native file dialog. */
+  pickCatalogSkillZIP(): Promise<string> {
+    return call("Cleaner.PickCatalogSkillZIP");
+  },
   /** PickFolder opens a folder panel on the calling window, returning empty on cancel. */
   pickFolder(): Promise<string> {
     return call("Cleaner.PickFolder");
+  },
+  /**
+   * PreviewSkillUpgrade validates and compares the current upstream archive with
+   * the local folder. Preview is advisory and the upgrade revalidates all input.
+   */
+  previewSkillUpgrade(folder: string): Promise<SkillUpgradePreview> {
+    return call("Cleaner.PreviewSkillUpgrade", folder);
   },
   /**
    * QuitApp asks the apps at path to terminate, exactly like choosing Quit
@@ -1505,6 +1684,14 @@ export const Cleaner = {
    */
   quitApp(path: string): Promise<boolean> {
     return call("Cleaner.QuitApp", path);
+  },
+  /**
+   * RestoreSkillVersion restores a saved version to its original path. An explicit
+   * replace confirmation is required for an occupied path, and current contents
+   * are saved in history before being replaced.
+   */
+  restoreSkillVersion(id: string, replace: boolean): Promise<void> {
+    return call("Cleaner.RestoreSkillVersion", id, replace);
   },
   /**
    * RevealInFinder shows path in Finder: plain folders open in place; files
@@ -1576,6 +1763,10 @@ export const Cleaner = {
   /** ScanSkills lists the skills, their copies and problems, and their usage. */
   scanSkills(): Promise<SkillScanResult> {
     return call("Cleaner.ScanSkills");
+  },
+  /** SearchSkillCatalog searches skills.sh and annotates results with already visible local copies. */
+  searchSkillCatalog(query: string): Promise<SkillDiscoveryEntry[]> {
+    return call("Cleaner.SearchSkillCatalog", query);
   },
   /** TrashPath moves a directory (inside the user's home) to the Trash. */
   trashPath(path: string): Promise<TrashResult> {

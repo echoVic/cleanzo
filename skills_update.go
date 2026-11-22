@@ -54,7 +54,7 @@ import (
 //
 // Upgrading downloads the repository archive from codeload.github.com,
 // checks that the extracted folder has exactly the tree GitHub reported,
-// moves the old folder to the Trash and puts the new one in its place.
+// stages the new folder, replaces the live one and sends the old one to the Trash.
 // Links to the folder keep working. A git clone is upgraded with a
 // fast-forward pull instead. CC Switch's database is never written; after
 // an upgrade it may show the skill as changed.
@@ -141,11 +141,12 @@ var (
 )
 
 var (
-	errSkillNoOrigin = errors.New("no-origin")
-	errSkillModified = errors.New("modified")
-	errSkillMismatch = errors.New("mismatch")
-	errSkillNotFound = errors.New("not-found")
-	errSkillRate     = errors.New("rate-limited")
+	errSkillNoOrigin             = errors.New("no-origin")
+	errSkillModified             = errors.New("modified")
+	errSkillMismatch             = errors.New("mismatch")
+	errSkillNotFound             = errors.New("not-found")
+	errSkillRate                 = errors.New("rate-limited")
+	errSkillChangedDuringUpgrade = errors.New("changed-during-upgrade")
 
 	errSkillTooLarge       = errors.New("too-large")        // the archive unpacks past skillUnpackLimit
 	errSkillTooManyEntries = errors.New("too-many-entries") // the archive holds more than skillEntryLimit entries
@@ -881,6 +882,8 @@ type SkillUpgradeResult struct {
 // checked again first; a folder with local changes is upgraded only with
 // Force. Archives are downloaded once per repository.
 func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) ([]SkillUpgradeResult, error) {
+	skillMutationMu.Lock()
+	defer skillMutationMu.Unlock()
 	skills, err := skillEntries(ctx)
 	if err != nil {
 		return nil, err
@@ -893,7 +896,7 @@ func (c Cleaner) UpgradeSkills(ctx context.Context, reqs []SkillUpgradeRequest) 
 			os.RemoveAll(filepath.Dir(dir.root))
 		}
 	}()
-	// What is in use is read once, when the first folder gets that far.
+	// Git and Windows keep the existing batch snapshot of what is in use.
 	var guard *usageGuard
 	inUse := func(folder string) bool {
 		if guard == nil {
@@ -931,7 +934,8 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	if err := skillFolderOK(folder, ctx); err != nil {
 		return err
 	}
-	if inUse(folder) {
+	macArchive := runtime.GOOS == "darwin" && o.Kind != originGit
+	if !macArchive && inUse(folder) {
 		return errSkillInUse
 	}
 	u := checkOne(ctx, folder, filepath.Base(folder), o, cache, true, skillNow().Unix())
@@ -951,28 +955,44 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	if o.Kind == originGit {
 		return upgradeGit(ctx, folder, r.Force, res)
 	}
-	archive, err := extractedRepo(ctx, o.Repo, o.Ref, archives)
+	src, modes, got, err := verifiedSkillArchive(ctx, o, u.Remote, archives)
 	if err != nil {
 		return err
 	}
-	src := filepath.Join(archive.root, filepath.FromSlash(o.Path))
-	modes := map[string]string{}
-	for name, mode := range archive.modes {
-		relative, err := filepath.Rel(src, filepath.Join(archive.root, filepath.FromSlash(name)))
-		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			modes[filepath.ToSlash(relative)] = mode
+	var backup skillVersionState
+	validate := func() error {
+		// The folder may have changed during download or staging. Revisit the
+		// contents and usage as close to the exchange as possible.
+		if macArchive {
+			if err := skillFolderOK(folder, ctx); err != nil {
+				return err
+			}
+			local, err := gitTreeHash(folder, cache.sourceModes(o))
+			if err != nil {
+				return err
+			}
+			if local != u.Local {
+				return errSkillChangedDuringUpgrade
+			}
 		}
+		backup, _, err = createSkillVersion(ctx, folder, "upgrade", o)
+		if err != nil {
+			return fmt.Errorf("save skill version: %w", err)
+		}
+		if macArchive {
+			guard := skillArchiveGuard()
+			if guard.failed {
+				discardSkillVersion(backup)
+				return errSkillUsageUnknown
+			}
+			if guard.inUse(folder) {
+				discardSkillVersion(backup)
+				return errSkillInUse
+			}
+		}
+		return nil
 	}
-	got, err := gitTreeHash(src, modes)
-	if err != nil {
-		return errSkillNotFound
-	}
-	if got != u.Remote {
-		// The branch moved between listing and download, or the archive
-		// lost something (empty folders, export-ignore): don't install it.
-		return errSkillMismatch
-	}
-	if err := swapSkillFolder(folder, src, ctx); err != nil {
+	if err := swapSkillFolder(ctx, folder, src, validate); err != nil {
 		return err
 	}
 	// From now on Cleanzo's record is the folder's origin: it knows the
@@ -987,6 +1007,32 @@ func upgradeOne(ctx context.Context, r SkillUpgradeRequest, origins map[string]S
 	}
 	res.Tree = got
 	return nil
+}
+
+// verifiedSkillArchive is the authoritative archive validation for upgrades and previews.
+func verifiedSkillArchive(ctx context.Context, o SkillOrigin, expected string, archives map[string]skillArchive) (string, map[string]string, string, error) {
+	archive, err := extractedRepo(ctx, o.Repo, o.Ref, archives)
+	if err != nil {
+		return "", nil, "", err
+	}
+	src := filepath.Join(archive.root, filepath.FromSlash(o.Path))
+	modes := map[string]string{}
+	for name, mode := range archive.modes {
+		relative, err := filepath.Rel(src, filepath.Join(archive.root, filepath.FromSlash(name)))
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			modes[filepath.ToSlash(relative)] = mode
+		}
+	}
+	got, err := gitTreeHash(src, modes)
+	if err != nil {
+		return "", nil, "", errSkillNotFound
+	}
+	if got != expected {
+		// The branch moved between listing and download, or the archive
+		// lost something (empty folders, export-ignore): don't install it.
+		return "", nil, "", errSkillMismatch
+	}
+	return src, modes, got, nil
 }
 
 // skillFolderOK checks that folder is a real folder that is, or is linked
@@ -1174,26 +1220,6 @@ func untarSafeModes(r io.Reader, dest string, modes map[string]string) (string, 
 	return filepath.Join(dest, top), nil
 }
 
-// swapSkillFolder replaces folder with a copy of src: the copy is made next
-// to folder first, then folder goes to the Trash and the copy takes its
-// name. If the Trash fails, folder stays as it was.
-func swapSkillFolder(folder, src string, contexts ...context.Context) error {
-	if runtime.GOOS == "windows" {
-		return swapWindowsSkillFolder(folder, src, contexts...)
-	}
-	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
-	os.RemoveAll(staging)
-	if err := copyTree(src, staging); err != nil {
-		os.RemoveAll(staging)
-		return err
-	}
-	if err := trashItem(folder); err != nil {
-		os.RemoveAll(staging)
-		return err
-	}
-	return os.Rename(staging, folder)
-}
-
 // skillRename permits deterministic Windows sharing failures during transactional replacement.
 var skillRename = os.Rename
 
@@ -1203,6 +1229,10 @@ func swapWindowsSkillFolder(folder, src string, contexts ...context.Context) err
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx = contexts[0]
 	}
+	return swapWindowsSkillFolderValidated(ctx, folder, src, nil)
+}
+
+func swapWindowsSkillFolderValidated(ctx context.Context, folder, src string, validate func() error) error {
 	staging := filepath.Join(filepath.Dir(folder), "."+filepath.Base(folder)+".cleanzo-new")
 	os.RemoveAll(staging)
 	if err := copyTree(src, staging); err != nil {
@@ -1215,6 +1245,13 @@ func swapWindowsSkillFolder(folder, src string, contexts ...context.Context) err
 		return err
 	}
 	backup := filepath.Join(backupRoot, filepath.Base(folder))
+	if validate != nil {
+		if err := validate(); err != nil {
+			os.RemoveAll(staging)
+			os.Remove(backupRoot)
+			return err
+		}
+	}
 	if err := skillRename(folder, backup); err != nil {
 		os.RemoveAll(staging)
 		os.Remove(backupRoot)

@@ -4,7 +4,7 @@ import type {
   DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample, TrashReminderConfig,
-  Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate,
+  Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate, MCPConfig,
   AIGroup, AIPart, AIScanResult, AITool, AIToolInfo,
   AIModelEntry, AIModelSource, AIModelSourceInfo, AIModelsResult,
   ClaudeEndResult, ClaudeProc, ClaudeRunning, ClaudeSession, ClaudeTarget,
@@ -381,6 +381,15 @@ function createRuntime(): Runtime {
     { tool: "claude", name: "Claude Code", path: home("~/.claude/skills"), count: 4 },
     { tool: "codex", name: "Codex", path: home("~/.codex/skills"), count: 1 },
   ];
+  let mockMCPRevision = 1;
+  const mockMCPConfigs: MCPConfig[] = [
+    { tool: "codex", path: home("~/.codex/config.toml"), revision: "1", exists: true, readOnly: false, canToggle: true, hasBackup: false, error: "",
+      servers: [{ name: "docs", transport: "http", endpoint: "https://example.com", enabled: true, issue: "", alsoIn: ["claude"] }] },
+    { tool: "claude", path: home("~/.claude.json"), revision: "1", exists: true, readOnly: false, canToggle: false, hasBackup: false, error: "",
+      servers: [{ name: "docs", transport: "http", endpoint: "https://example.com", enabled: true, issue: "", alsoIn: ["codex"] }] },
+  ];
+  const mockMCPBackups = new Map<string, MCPConfig["servers"]>();
+
   const skillSources: SkillSource[] = [
     { tool: "agents", name: "~/.agents", status: "ok", since: now - 120 * DAY, records: 132 },
     { tool: "claude", name: "Claude Code", status: "ok", since: now - 180 * DAY, records: 84 },
@@ -820,10 +829,38 @@ function createRuntime(): Runtime {
     "Cleaner.OpenFullDiskAccessSettings": async () => {},
     "Cleaner.RevealInFinder": async (_path) => {},
     "Cleaner.PickFolder": async () => "",
+    "Cleaner.PickCatalogSkillZIP": async () => home("~/Downloads/sample-skill.zip"),
     "Cleaner.CheckForUpdates": async () => {},
     "Cleaner.ListAITools": async () => aiToolInfos,
     // main.ts 启动时也会探测技能入口；有示例目录时直接显示。
     "Cleaner.ListSkillRoots": async () => skillRoots,
+    "Cleaner.ListMCPConfigs": async () => structuredClone(mockMCPConfigs),
+    "Cleaner.ApplyMCPChange": async (change) => {
+      const config = mockMCPConfigs.find((row) => row.tool === change.tool);
+      if (!config || config.revision !== change.revision) throw new Error("config-changed");
+      const before = structuredClone(config.servers);
+      const existing = config.servers.find((server) => server.name === change.name);
+      if (change.action === "restore") config.servers = mockMCPBackups.get(change.tool) ?? config.servers;
+      if (change.action === "add") config.servers.push({ name: change.name, transport: change.transport, endpoint: change.endpoint, enabled: true, issue: "", alsoIn: [] });
+      if (change.action === "edit" && existing && change.endpoint) existing.endpoint = change.endpoint;
+      if (change.action === "toggle" && existing) existing.enabled = change.enabled;
+      if (change.action === "remove") config.servers = config.servers.filter((server) => server.name !== change.name);
+      mockMCPBackups.set(change.tool, before);
+      config.hasBackup = true;
+      config.revision = String(++mockMCPRevision);
+    },
+    "Cleaner.ListSkillInstallTargets": async () => skillRoots,
+    "Cleaner.BrowseSkillRepository": async (repo, ref, subdir) => [{ name: "example-skill", origin: { kind: "cleanzo", repo, ref, path: [subdir, "example-skill"].filter(Boolean).join("/"), remote: "", tree: "demo" }, installed: [], sameName: [] }],
+    "Cleaner.SearchSkillCatalog": async (query) => [{ name: `${query}-skill`, slug: `${query}-skill`, repo: "example/skills", installs: 24, installed: [], sameName: [] }],
+    "Cleaner.InstallCatalogSkill": async (_origin, tools) => tools.map((tool) => ({ tool, path: home(`~/.${tool}/skills/example-skill`), error: "" })),
+    "Cleaner.ImportCatalogSkillFolder": async (path, tools) => tools.map((tool) => ({ tool, path: home(`~/.${tool}/skills/${path.split("/").pop()}`), error: "" })),
+    "Cleaner.ImportCatalogSkillZIP": async (path, tools) => tools.map((tool) => ({ tool, path: home(`~/.${tool}/skills/${path.split("/").pop()?.replace(/\.zip$/i, "")}`), error: "" })),
+    "Cleaner.BindCatalogSkillSource": async (path, origin) => ({ path, name: path.split("/").pop() ?? path, origin, local: "demo", remote: origin.tree, status: "update", modified: true, error: "", checkedAt: now }),
+    "Cleaner.ListSkillHistory": async (folder) => [{ id: "version-1", name: "example-skill", path: folder || home("~/.agents/skills/example-skill"), action: "upgrade", at: now - 3600, exists: true }],
+    "Cleaner.PreviewSkillUpgrade": async () => ({ changes: [{ path: "SKILL.md", kind: "changed" }, { path: "references/example.md", kind: "added" }], total: 2 }),
+    "Cleaner.RestoreSkillVersion": async () => {},
+    "Cleaner.ListSkillDistribution": async (name) => skillRoots.map(({ tool, name: label, path }) => ({ tool, label, path: `${path}/${name}`, state: "absent", availability: "absent", shared: false, sharedPath: "", linkTarget: "", source: home(`~/.agents/skills/${name}`), canDeploy: tool !== "agents", canRepair: false })),
+    "Cleaner.DeploySkill": async () => {},
     "Cleaner.ScanSkills": async () => { await wait(900); return scanSkills(); },
     "Cleaner.ListSkillOrigins": async () => skillOrigins(),
     "Cleaner.CheckSkillUpdates": async () => { await wait(800); return skillCheckUpdates(); },
