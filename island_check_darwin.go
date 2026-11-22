@@ -58,6 +58,9 @@ type islandCheckIdle struct {
 	Seconds       int     `json:"seconds"`
 	WithoutIsland float64 `json:"withoutIslandCPUSeconds"`
 	Folded        float64 `json:"foldedCPUSeconds"`
+	// MovesHeard counts the moves of the mouse the watch heard while the
+	// island was folded: those of the user, over whatever app is in front.
+	MovesHeard int `json:"movesHeard"`
 }
 
 type nsPoint struct{ X, Y float64 }
@@ -265,8 +268,15 @@ func islandCheckCost(n islandNotch, seconds int, fail func(string, ...any)) *isl
 	if !folded {
 		fail("the island did not fold: the pointer may have been on it")
 	}
+	moves := 0
+	var unwatch func()
+	mygo.RunOnMain(func() { unwatch = watchIslandPointer(func() { moves++ }) })
 	idle.Folded = over()
-	mygo.RunOnMain(func() { r.p.close() })
+	mygo.RunOnMain(func() {
+		unwatch()
+		idle.MovesHeard = moves
+		r.p.close()
+	})
 	select {
 	case <-ended:
 	case <-time.After(5 * time.Second):

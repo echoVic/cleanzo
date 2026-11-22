@@ -210,7 +210,7 @@ func watchIslandPointer(moved func()) (stop func()) {
 			events.Send(nsSel("addLocalMonitorForEventsMatchingMask:handler:"), uint64(mask), local),
 		} {
 			if m != 0 {
-				monitors = append(monitors, m)
+				monitors = append(monitors, m.Send(nsSel("retain")))
 			}
 		}
 	})
@@ -240,6 +240,7 @@ func watchIslandPointer(moved func()) (stop func()) {
 			events := objc.ID(objc.GetClass("NSEvent"))
 			for _, m := range monitors {
 				events.Send(nsSel("removeMonitor:"), m)
+				m.Send(nsSel("release"))
 			}
 		})
 		global.Release()
