@@ -16,9 +16,12 @@ import (
 
 // TrashReminderConfig is independent of junk selection and growth monitoring.
 type TrashReminderConfig struct {
-	Enabled     bool  `json:"enabled"`
-	ThresholdGB int   `json:"thresholdGB"`
-	LastPrompt  int64 `json:"-"`
+	Enabled     bool `json:"enabled"`
+	ThresholdGB int  `json:"thresholdGB"`
+	// Island shows the reminder at the notch of a display that has one,
+	// rather than in a window.
+	Island     bool  `json:"island"`
+	LastPrompt int64 `json:"-"`
 }
 
 type TrashReminderState struct {
@@ -33,15 +36,20 @@ var trashReminderConfigMu sync.Mutex
 
 func trashReminderDir() string { return filepath.Dir(configPath()) }
 func loadTrashReminder(dir string) TrashReminderConfig {
-	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1}
+	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1, Island: true}
 	var saved struct {
 		Enabled     *bool `json:"enabled"`
 		ThresholdGB int   `json:"thresholdGB"`
+		Island      *bool `json:"island"`
 		LastPrompt  int64 `json:"lastPrompt"`
 	}
 	if data, err := os.ReadFile(filepath.Join(dir, "trash-reminder.json")); err == nil && json.Unmarshal(data, &saved) == nil {
 		if saved.Enabled != nil {
 			c.Enabled = *saved.Enabled
+		}
+		// A file saved before the choice existed has none: the notch.
+		if saved.Island != nil {
+			c.Island = *saved.Island
 		}
 		if validTrashThreshold(saved.ThresholdGB) {
 			c.ThresholdGB = saved.ThresholdGB
@@ -56,8 +64,9 @@ func saveTrashReminder(dir string, c TrashReminderConfig) error {
 	data, err := json.Marshal(struct {
 		Enabled     bool  `json:"enabled"`
 		ThresholdGB int   `json:"thresholdGB"`
+		Island      bool  `json:"island"`
 		LastPrompt  int64 `json:"lastPrompt"`
-	}{c.Enabled, c.ThresholdGB, c.LastPrompt})
+	}{c.Enabled, c.ThresholdGB, c.Island, c.LastPrompt})
 	if err != nil {
 		return err
 	}

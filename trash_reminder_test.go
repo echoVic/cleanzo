@@ -97,6 +97,57 @@ func TestTrashReminderConfigAndCooldown(t *testing.T) {
 	}
 }
 
+// TestTrashReminderShowsAtTheNotchUnlessTurnedOff: the reminder shows at the
+// notch by default, for a configuration saved before the choice existed too,
+// and a choice the user made survives a reload and a later save of the page.
+func TestTrashReminderShowsAtTheNotchUnlessTurnedOff(t *testing.T) {
+	dir := t.TempDir()
+	if c := loadTrashReminder(dir); !c.Island {
+		t.Fatalf("defaults: %+v, want the notch", c)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "trash-reminder.json"), []byte(`{"enabled":true,"thresholdGB":2,"lastPrompt":7}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if c := loadTrashReminder(dir); !c.Island || c.ThresholdGB != 2 || c.LastPrompt != 7 {
+		t.Fatalf("a configuration without the choice: %+v, want the notch and what it holds", c)
+	}
+	if err := saveTrashReminder(dir, TrashReminderConfig{Enabled: true, ThresholdGB: 2, LastPrompt: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if c := loadTrashReminder(dir); c.Island || !c.Enabled || c.ThresholdGB != 2 || c.LastPrompt != 7 {
+		t.Fatalf("turned off, then loaded: %+v", c)
+	}
+	if err := saveTrashReminder(dir, TrashReminderConfig{Enabled: true, ThresholdGB: 2, Island: true, LastPrompt: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if c := loadTrashReminder(dir); !c.Island {
+		t.Fatalf("turned on again, then loaded: %+v", c)
+	}
+}
+
+// TestSaveTrashReminderKeepsTheNotchChoice: the page's save carries the
+// choice into the file.
+func TestSaveTrashReminderKeepsTheNotchChoice(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS reminder")
+	}
+	setHome(t, t.TempDir())
+	noMenuBar(t)
+	oldApply, oldChanged, oldLogin := growthApply, growthChanged, growthLoginItem
+	t.Cleanup(func() { growthApply, growthChanged, growthLoginItem = oldApply, oldChanged, oldLogin })
+	growthLoginItem = func() (bool, bool) { return false, true }
+	growthChanged = func(GrowthStatus) {}
+	growthApply = func(GrowthConfig) error { return nil }
+	for _, island := range []bool{false, true} {
+		if err := (Cleaner{}).SaveTrashReminder(TrashReminderConfig{Enabled: true, ThresholdGB: 5, Island: island}); err != nil {
+			t.Fatal(err)
+		}
+		if c := loadTrashReminder(trashReminderDir()); c.Island != island || c.ThresholdGB != 5 {
+			t.Fatalf("saved with the notch %v: %+v", island, c)
+		}
+	}
+}
+
 // TestTrashReminderMonitorSkipsAnUnchangedTrash: while the Trash's own
 // listing is unchanged since a scan found it below the threshold, the monitor
 // does not walk it again; a changed listing, a failed scan or a lower
