@@ -10,14 +10,63 @@ test("trash reminder controls expose threshold and permission, and hide when uns
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { TrashReminderControls } = await import("../src/react/settings/TrashReminderSection");
-  const props = { state: { supported: true, fda: false, config: { enabled: true, thresholdGB: 2 } }, busy: false, onChange: () => {} };
+  const props = { state: { supported: true, fda: false, notch: false, config: { enabled: true, thresholdGB: 2, island: true } }, busy: false, onChange: () => {} };
   const html = renderToStaticMarkup(createElement(TrashReminderControls, props));
   expect(html).toContain('id="trash-threshold"');
   expect(html).toContain('value="2" selected=""');
   expect(html).toContain('完全磁盘访问权限');
   expect(renderToStaticMarkup(createElement(TrashReminderControls, { ...props, state: { ...props.state, supported: false } }))).toBe("");
-  const disabled = renderToStaticMarkup(createElement(TrashReminderControls, { ...props, state: { ...props.state, config: { enabled: false, thresholdGB: 2 } } }));
+  const disabled = renderToStaticMarkup(createElement(TrashReminderControls, { ...props, state: { ...props.state, config: { enabled: false, thresholdGB: 2, island: true } } }));
   expect(disabled).toMatch(/<select[^>]+disabled/);
+});
+
+test("trash reminder controls offer the notch only where a display has one", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { TrashReminderControls } = await import("../src/react/settings/TrashReminderSection");
+  const state = { supported: true, fda: true, notch: true, config: { enabled: true, thresholdGB: 2, island: true } };
+  const render = (over: Partial<typeof state>) =>
+    renderToStaticMarkup(createElement(TrashReminderControls, { state: { ...state, ...over }, busy: false, onChange: () => {} }));
+  const box = (html: string) => html.match(/<button[^>]*id="trash-island"[^>]*>/)?.[0];
+
+  const on = render({});
+  expect(on).toContain("在刘海处提醒");
+  expect(box(on)).toContain('data-state="checked"');
+  expect(box(on)).not.toContain(' disabled=""');
+  expect(box(render({ config: { ...state.config, island: false } }))).toContain('data-state="unchecked"');
+  // The reminder off, the choice says nothing: it shows as it is, and cannot be changed.
+  expect(box(render({ config: { ...state.config, enabled: false } }))).toContain(' disabled=""');
+
+  const without = render({ notch: false });
+  expect(box(without)).toBeUndefined();
+  expect(without).not.toContain("在刘海处提醒");
+  // What the section says about where the reminder shows holds either way.
+  for (const html of [on, without]) expect(html).not.toContain("独立弹窗");
+});
+
+test("the notch choice is saved with the reminder, and the other controls keep it", async () => {
+  await import("./setup-dom");
+  const { pageHarness } = await import("./page-harness");
+  const { TrashReminderControls } = await import("../src/react/settings/TrashReminderSection");
+  const seen: unknown[] = [];
+  const state = { supported: true, fda: true, notch: true, config: { enabled: true, thresholdGB: 2, island: true } };
+  const page = pageHarness(TrashReminderControls, { state, busy: false, onChange: (c: unknown) => { seen.push(c); } });
+  try {
+    await page.settle();
+    page.find((el) => el.props.id === "trash-island")!.props.onCheckedChange(false);
+    page.find((el) => el.props.id === "trash-threshold")!.props.onChange({ target: { value: "5" } });
+    page.setProps({ state: { ...state, config: { ...state.config, island: false } } });
+    await page.settle();
+    page.find((el) => el.props.id === "trash-island")!.props.onCheckedChange(true);
+    page.find((el) => el.props.id === "trash-threshold")!.props.onChange({ target: { value: "10" } });
+    expect(seen).toEqual([
+      { enabled: true, thresholdGB: 2, island: false },
+      { enabled: true, thresholdGB: 5, island: true },
+      { enabled: true, thresholdGB: 2, island: true },
+      { enabled: true, thresholdGB: 10, island: false },
+    ]);
+  } finally { page.close(); }
 });
 
 function settings(over: Partial<Settings> = {}): Settings {

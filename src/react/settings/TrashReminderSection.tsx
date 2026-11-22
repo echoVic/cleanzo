@@ -23,6 +23,15 @@ export function TrashReminderControls({ state, busy, onChange }: {
         <p className="muted small">{t("settings.trash.note")}</p>
         {!state.fda && <p className="muted small">{t("settings.trash.permission")}</p>}
       </div>
+      {/* 只有此刻接着带刘海的屏幕时才有这一项；提醒关着时照原样显示，不能改。 */}
+      {state.notch && <div className="setting-row setting-stack">
+        <label className="check">
+          <Checkbox id="trash-island" checked={config.island} disabled={busy || !config.enabled}
+            onCheckedChange={(v) => onChange({ ...config, island: v === true })} />
+          <span>{t("settings.trash.island")}</span>
+        </label>
+        <p className="muted small">{t("settings.trash.islandNote")}</p>
+      </div>}
       <div className="setting-row">
         <label className="setting-label" htmlFor="trash-threshold">{t("settings.trash.threshold")}</label>
         <select id="trash-threshold" className="select" value={config.thresholdGB} disabled={busy || !config.enabled}

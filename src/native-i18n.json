@@ -172,7 +172,9 @@
     "settings.trash.title": "废纸篓提醒",
     "settings.trash.enabled": "废纸篓占用较大时提醒清理",
     "settings.trash.threshold": "超过以下容量时提醒",
-    "settings.trash.note": "每 5 分钟检查一次，每 24 小时最多提醒一次。确认、进度和结果均在独立弹窗中显示。关闭主窗口后仍在后台运行。",
+    "settings.trash.note": "每 5 分钟检查一次，每 24 小时最多提醒一次。确认、进度和结果都在提醒里完成，不打开主窗口。关闭主窗口后仍在后台运行。",
+    "settings.trash.island": "在刘海处提醒",
+    "settings.trash.islandNote": "提醒从刘海展开，不打断正在做的事。关掉后照旧弹窗口。",
     "settings.trash.permission": "需要完全磁盘访问权限才能检查和清理废纸篓。",
     "settings.trash.retry": "重新读取"
   },
@@ -349,7 +351,9 @@
     "settings.trash.title": "Trash reminders",
     "settings.trash.enabled": "Remind me when Trash uses too much space",
     "settings.trash.threshold": "Remind me above",
-    "settings.trash.note": "Checks every 5 minutes, with at most one reminder per 24 hours. Confirm, track progress, and see results in a separate popup. Keeps running after the main window closes.",
+    "settings.trash.note": "Checks every 5 minutes, with at most one reminder per 24 hours. Confirm, track progress and see the result in the reminder itself, without the main window. Keeps running after the main window closes.",
+    "settings.trash.island": "Remind at the notch",
+    "settings.trash.islandNote": "The reminder grows out of the notch and leaves what you are doing alone. Turned off, it opens its window as before.",
     "settings.trash.permission": "Full Disk Access is required to check and empty Trash.",
     "settings.trash.retry": "Reload"
   }

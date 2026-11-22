@@ -1304,12 +1304,22 @@ export interface TopItem {
 export interface TrashReminderConfig {
   enabled: boolean;
   thresholdGB: number;
+  /**
+   * Island shows the reminder at the notch of a display that has one,
+   * rather than in a window.
+   */
+  island: boolean;
 }
 
 export interface TrashReminderState {
   supported: boolean;
   config: TrashReminderConfig;
   fda: boolean;
+  /**
+   * Notch tells whether a display has a notch now, where the reminder can
+   * show.
+   */
+  notch: boolean;
 }
 
 /** TrashResult reports what TrashPath moved to the Trash. */

@@ -74,8 +74,8 @@ function createRuntime(): Runtime {
   // 占用增长：ToDesk（/Library 下的 dumps 在涨）和飞书（LarkShell）
   let growthConfig: GrowthConfig = { enabled: true, openAtLogin: false, dailyGB: 2, weeklyGB: 10, ignored: [] as string[], asked: true };
   let menuBarItems: string[] = ["cpu", "mem"];
-  // 废纸篓提醒：和 Go 的默认一样，打开、超过 1 GB 提醒。
-  let trashReminder: TrashReminderConfig = { enabled: true, thresholdGB: 1 };
+  // 废纸篓提醒：和 Go 的默认一样，打开、超过 1 GB 提醒、在刘海处显示。
+  let trashReminder: TrashReminderConfig = { enabled: true, thresholdGB: 1, island: true };
   const nowSec = () => Math.floor(Date.now() / 1000);
   const growthApps = (): GrowthApp[] => [
     { key: "app:com.youqu.todesk.mac", name: "ToDesk", kind: "app", orphan: false, appPath: "/Applications/ToDesk.app",
@@ -761,11 +761,12 @@ function createRuntime(): Runtime {
       menuBarItems = ["cpu", "mem", "gpu", "net", "disk", "temp", "battery"].filter((it) => items.includes(it));
       if (menuBarItems.length === 0 && !growthConfig.enabled && !trashReminder.enabled) growthConfig = { ...growthConfig, openAtLogin: false };
     },
-    "Cleaner.TrashReminder": async () => ({ supported: true, config: trashReminder, fda: true }),
+    // 假装接着一块带刘海的屏幕，设置页上才有「在刘海处提醒」。
+    "Cleaner.TrashReminder": async () => ({ supported: true, config: trashReminder, fda: true, notch: true }),
     // 和 Go 一样只收 1 / 2 / 5 / 10 GB；提醒、后台监控、菜单栏读数都关着时取消开机启动。
     "Cleaner.SaveTrashReminder": async (c) => {
       if (![1, 2, 5, 10].includes(c.thresholdGB)) throw new Error("invalid trash reminder threshold");
-      trashReminder = { enabled: c.enabled, thresholdGB: c.thresholdGB };
+      trashReminder = { enabled: c.enabled, thresholdGB: c.thresholdGB, island: c.island };
       if (!c.enabled && !growthConfig.enabled && menuBarItems.length === 0) growthConfig = { ...growthConfig, openAtLogin: false };
     },
     "Cleaner.WatchStatus": async (ch) => stream(ch, async (emit) => {
