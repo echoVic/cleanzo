@@ -279,6 +279,37 @@ func TestTrashIslandShapesAndWhereTheMouseGoes(t *testing.T) {
 	}
 }
 
+// TestTrashIslandOverAWideNotchShowsBesideIt: whatever takes the top of a
+// display, however wide, the island shows to both sides of it, open as well
+// as folded, inside its window and centred on the notch.
+func TestTrashIslandOverAWideNotchShowsBesideIt(t *testing.T) {
+	now := time.Unix(1000, 0)
+	p := &trashReminderPopup{size: 3 * gb, text: panelViewText}
+	s := newTrashIsland(p, islandNotch{X: 600, Y: 0, Width: 420, Height: 36}, func() time.Time { return now })
+	s.appear()
+	now = now.Add(time.Second)
+	s.step(now, true)
+	if s.shape != islandOpen {
+		t.Fatalf("shape %d", s.shape)
+	}
+	w, _ := s.size()
+	f := s.frame()
+	if w != 544 || f.Width < w+60 || f.X+f.Width/2 != 810 || f.Width%2 != 0 {
+		t.Fatalf("open %d wide in a window %+v, want 544 wide, room for the spring, and the notch's middle at 810", w, f)
+	}
+	if r, _ := s.region(); r.X != (f.Width-544)/2 || r.Width != 544 {
+		t.Fatalf("the mouse goes to %+v", r)
+	}
+	tt := ui.NewTester(s.view, f.Width, f.Height)
+	size, ok := tt.Find("3.0 GB")
+	if notchRight := float32(f.Width+420) / 2; !ok || size.X < notchRight {
+		t.Fatalf("the size shows at %+v, under a notch that ends at %.0f", size, notchRight)
+	}
+	if button, ok := tt.Find("清空（永久删除）"); !ok || button.X+button.W > float32(f.Width+544)/2-12 {
+		t.Fatalf("the button that empties shows at %+v", button)
+	}
+}
+
 // islandView is an island that is out and armed, with a tester on its
 // window's content.
 func islandView(t *testing.T, lang string) (*islandRun, *ui.Tester) {

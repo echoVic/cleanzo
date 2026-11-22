@@ -23,7 +23,7 @@ const (
 const (
 	islandWing       = 62  // what the compact shape adds to each side of the notch
 	islandOpenWidth  = 390 // the open shape, a point wider over a notch of odd width
-	islandPanelWidth = 480 // the window: the widest shape and a spring going past it
+	islandPanelSides = 90  // what the window has beside the open shape, for a spring going past it
 	islandPanelBelow = 160 // what the window has under the notch: the tallest body, and the spring
 
 	islandOpenDelay  = 80 * time.Millisecond  // at the notch's own size before it grows
@@ -173,14 +173,20 @@ func (s *trashIsland) step(now time.Time, inside bool) (next time.Time, changed 
 
 // size is the size the island goes to in its shape and phase.
 func (s *trashIsland) size() (w, h int) {
-	odd := s.notch.Width % 2
 	switch s.shape {
 	case islandCompact:
 		return s.notch.Width + 2*islandWing, s.notch.Height
 	case islandOpen:
-		return islandOpenWidth + odd, s.notch.Height + trashIslandBody(s.p.phase)
+		return s.openWidth(), s.notch.Height + trashIslandBody(s.p.phase)
 	}
 	return s.notch.Width, s.notch.Height
+}
+
+// openWidth is the width of the open shape: of the notch's parity, so that
+// it is centred on the notch to the point, and no narrower than the strip,
+// whatever takes the top of the display.
+func (s *trashIsland) openWidth() int {
+	return max(islandOpenWidth+s.notch.Width%2, s.notch.Width+2*islandWing)
 }
 
 // trashIslandBody is the height of what the open shape shows under the
@@ -197,11 +203,10 @@ func trashIslandBody(phase string) int {
 	return 104
 }
 
-// frame is the island's window: as wide as the widest shape and a spring
-// going past it, centred on the notch to the point, which takes a width of
-// the notch's parity.
+// frame is the island's window: as wide as the open shape and a spring
+// going past it, centred on the notch.
 func (s *trashIsland) frame() mygo.Rectangle {
-	w := islandPanelWidth + s.notch.Width%2
+	w := s.openWidth() + islandPanelSides
 	return mygo.Rectangle{X: s.notch.X + (s.notch.Width-w)/2, Y: s.notch.Y, Width: w, Height: s.notch.Height + islandPanelBelow}
 }
 
@@ -235,7 +240,8 @@ var (
 	islandChipOn = ui.RGBA(255, 255, 255, 0.28)
 	islandSpring = ui.Animation{Spring: ui.SpringOptions{Duration: 420 * time.Millisecond, Bounce: 0.18}}
 
-	islandTrashIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`))
+	// A bin: its lid with a handle, its tapering body, two ribs.
+	islandTrashIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V5.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2V7"/><path d="M6.2 7l.9 11.6A2.2 2.2 0 0 0 9.3 20.6h5.4a2.2 2.2 0 0 0 2.2-2l.9-11.6"/><path d="M10.2 11v5.6"/><path d="M13.8 11v5.6"/></svg>`))
 	islandDoneIcon  = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`))
 )
 
@@ -301,7 +307,7 @@ func (s *trashIsland) body(c *ui.Context, t *ui.Theme) {
 	note := func(s string) { ui.Text(c, s).FontSize(12).TextColor(islandMuted) }
 	freed := text("trash.popup.freed", map[string]string{"size": growthSize(p.freed)})
 	fade := ui.ElementTransition{Enter: &ui.Motion{}, Exit: &ui.Motion{}}
-	ui.Column(c.Key("body-"+p.phase)).Width(float32(islandOpenWidth+s.notch.Width%2)).Grow(1).Shrink(0).
+	ui.Column(c.Key("body-"+p.phase)).Width(float32(s.openWidth())).Grow(1).Shrink(0).
 		Padding(4, 18, 16, 18).Gap(6).Transition(fade).Children(func() {
 		switch p.phase {
 		case "":
