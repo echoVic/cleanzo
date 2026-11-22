@@ -55,8 +55,29 @@ type islandCheckReport struct {
 	Ended bool   `json:"ended"`
 	// Idle is the processor time the app took over a stretch with a folded
 	// island waiting and over one without an island, where asked for.
-	Idle     *islandCheckIdle `json:"idle,omitempty"`
-	Failures []string         `json:"failures"`
+	Idle *islandCheckIdle `json:"idle,omitempty"`
+	// Window, Moved and Closed tell how a reminder fared in its window, how
+	// one that went from the island into a window did, and how one whose
+	// island was closed under it, as the app does when it quits. They are
+	// checked where asked for: the window comes to the front.
+	Window   *islandCheckWindowed `json:"window,omitempty"`
+	Moved    *islandCheckWindowed `json:"moved,omitempty"`
+	Closed   *islandCheckWindowed `json:"closed,omitempty"`
+	Failures []string             `json:"failures"`
+}
+
+type islandCheckWindowed struct {
+	// Shown is whether a window showed the reminder.
+	Shown bool `json:"shown"`
+	// Started is whether the cleanup was under way: after a click in the
+	// window, or as the reminder left the island.
+	Started bool `json:"started"`
+	// Phase is where the reminder was at its end, and Ended how many times
+	// it ended, which is once.
+	Phase string `json:"phase"`
+	Ended int    `json:"ended"`
+	// Cancelled is whether the cleanup was told to stop.
+	Cancelled bool `json:"cancelled"`
 }
 
 type islandCheckIdle struct {
@@ -80,6 +101,9 @@ var islandCheckSettled int
 // the system did with its window, writes what it found to that folder, and
 // exits: nothing else of the app starts. CLEANZO_ISLAND_CHECK_IDLE, a number
 // of seconds, adds the measure of what a folded island costs while it waits.
+// CLEANZO_ISLAND_CHECK_WINDOW adds the reminder in its window, which comes
+// to the front, a reminder that moves from the island into a window, and one
+// whose island is closed under it.
 func islandCheck() bool {
 	dir := os.Getenv("CLEANZO_ISLAND_CHECK")
 	if dir == "" {
@@ -117,11 +141,11 @@ func islandCheck() bool {
 	return true
 }
 
-// islandCheckReminder is a reminder at the notch with made-up numbers. Its
-// cleanup takes a little over a second and touches no file.
-func islandCheckReminder(n islandNotch) (r *trashReminderRun, island *trashIslandOnScreen, ended chan struct{}) {
-	ended = make(chan struct{})
-	r = newTrashReminderRun(trashReminderSnapshot{Size: 3 * trashReminderGB}, func() { close(ended) })
+// islandCheckRun is a reminder with made-up numbers, not shown yet. Its
+// cleanup takes a little over a second and touches no file. closed runs on
+// the main thread as the reminder ends.
+func islandCheckRun(closed func()) *trashReminderRun {
+	r := newTrashReminderRun(trashReminderSnapshot{Size: 3 * trashReminderGB}, closed)
 	r.clean = func(ctx context.Context, s trashReminderSnapshot, progress func(int64)) CleanResult {
 		for i := int64(1); i <= 10; i++ {
 			select {
@@ -133,6 +157,13 @@ func islandCheckReminder(n islandNotch) (r *trashReminderRun, island *trashIslan
 		}
 		return CleanResult{Freed: s.Size}
 	}
+	return r
+}
+
+// islandCheckReminder is such a reminder at the notch.
+func islandCheckReminder(n islandNotch) (r *trashReminderRun, island *trashIslandOnScreen, ended chan struct{}) {
+	ended = make(chan struct{})
+	r = islandCheckRun(func() { close(ended) })
 	mygo.RunOnMain(func() {
 		if surface, ok := r.openIsland(n); ok {
 			r.surface, r.island = surface, surface
@@ -190,7 +221,9 @@ func runIslandCheck(dir string) (rep islandCheckReport) {
 		rep.FrontChanged = islandCheckFront() != front
 		islandCheckShot(win, filepath.Join(dir, "island-question.png"), fail)
 		// The button that empties is the last of its row, at the island's
-		// bottom right: a point well inside it, whatever its label.
+		// bottom right: a point well inside it, whatever its label. A tester
+		// would tell where exactly, but one built here shares what draws the
+		// text with the window, whose text then comes out in pieces.
 		at, _ := island.s.region()
 		button = ui.Rect{X: float32(at.X + at.Width - 68), Y: float32(at.Height - 40), W: 20, H: 20}
 		islandCheckClick(win, button)
@@ -243,6 +276,22 @@ func runIslandCheck(dir string) (rep islandCheckReport) {
 
 	if seconds, _ := strconv.Atoi(os.Getenv("CLEANZO_ISLAND_CHECK_IDLE")); seconds > 0 {
 		rep.Idle = islandCheckCost(n, seconds, fail)
+	}
+	if os.Getenv("CLEANZO_ISLAND_CHECK_WINDOW") != "" {
+		rep.Window, rep.Moved, rep.Closed = islandCheckWindows(n, dir, fail)
+		for _, c := range []struct {
+			got  *islandCheckWindowed
+			want islandCheckWindowed
+			what string
+		}{
+			{rep.Window, islandCheckWindowed{Shown: true, Started: true, Phase: "done", Ended: 1}, "in its window"},
+			{rep.Moved, islandCheckWindowed{Shown: true, Started: true, Phase: "done", Ended: 1}, "moved from the island into a window"},
+			{rep.Closed, islandCheckWindowed{Started: true, Phase: "cleaning", Ended: 1, Cancelled: true}, "whose island was closed under it"},
+		} {
+			if *c.got != c.want {
+				fail("the reminder %s: %+v, want %+v", c.what, *c.got, c.want)
+			}
+		}
 	}
 
 	for _, c := range []struct {
@@ -311,6 +360,104 @@ func islandCheckCost(n islandNotch, seconds int, fail func(string, ...any)) *isl
 	return idle
 }
 
+// islandCheckWindows runs a reminder in its window, one that moves from the
+// island into a window while it cleans, and one whose island is closed under
+// it while it cleans.
+func islandCheckWindows(n islandNotch, dir string, fail func(string, ...any)) (window, moved, closed *islandCheckWindowed) {
+	main := mygo.RunOnMain
+	window, moved, closed = &islandCheckWindowed{}, &islandCheckWindowed{}, &islandCheckWindowed{}
+	shown := func(r *trashReminderRun) *mygo.Window {
+		if s, ok := r.surface.(*trashWindowSurface); ok {
+			return s.w
+		}
+		return nil
+	}
+	// The last button of the window's row, at its bottom right: the one
+	// that empties, then the one that closes.
+	last := func(w *mygo.Window) ui.Rect {
+		_, h := w.ContentSize()
+		return ui.Rect{X: trashPopupWidth - 70, Y: float32(h - 45), W: 20, H: 20}
+	}
+	// finish waits for the made-up cleanup, closes the window with its
+	// button, and tells how the reminder ended.
+	finish := func(r *trashReminderRun, got *islandCheckWindowed, ended *int, picture string) {
+		for range 40 {
+			done := false
+			main(func() { done = r.p.phase == "done" })
+			if done {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		main(func() {
+			if w := shown(r); w != nil {
+				islandCheckShot(w, filepath.Join(dir, picture), fail)
+				islandCheckClick(w, last(w))
+			}
+		})
+		time.Sleep(500 * time.Millisecond)
+		main(func() { got.Phase, got.Ended = r.p.phase, *ended })
+	}
+
+	// In its window, from the question to the result.
+	ends := 0
+	r := islandCheckRun(func() { ends++ })
+	main(func() { r.surface = r.openWindow() })
+	time.Sleep(600 * time.Millisecond)
+	main(func() {
+		if w := shown(r); w != nil {
+			window.Shown = true
+			islandCheckShot(w, filepath.Join(dir, "window-question.png"), fail)
+			islandCheckClick(w, last(w))
+		}
+	})
+	time.Sleep(300 * time.Millisecond)
+	main(func() { window.Started = r.p.phase == "cleaning" })
+	finish(r, window, &ends, "window-result.png")
+
+	// From the island into a window, the cleanup under way.
+	moves := 0
+	r, island, _ := islandCheckReminder(n)
+	if island == nil {
+		fail("the island's window could not be kept at the notch a third time")
+		return window, moved, closed
+	}
+	main(func() { r.closed = func() { moves++ } })
+	click := func(island *trashIslandOnScreen) {
+		at, _ := island.s.region()
+		islandCheckClick(island.win.(*islandPanel).win, ui.Rect{X: float32(at.X + at.Width - 68), Y: float32(at.Height - 40), W: 20, H: 20})
+	}
+	time.Sleep(islandOpenDelay + islandArmDelay + 300*time.Millisecond)
+	main(func() { click(island) })
+	time.Sleep(300 * time.Millisecond)
+	main(func() {
+		moved.Started = r.p.phase == "cleaning"
+		r.intoWindow()
+	})
+	time.Sleep(300 * time.Millisecond)
+	main(func() { moved.Shown = shown(r) != nil && island.over })
+	finish(r, moved, &moves, "moved-result.png")
+
+	// The island closed under a cleanup, as the app does when it quits.
+	stops := 0
+	r, island, _ = islandCheckReminder(n)
+	if island == nil {
+		fail("the island's window could not be kept at the notch a fourth time")
+		return window, moved, closed
+	}
+	main(func() { r.closed = func() { stops++ } })
+	time.Sleep(islandOpenDelay + islandArmDelay + 300*time.Millisecond)
+	main(func() { click(island) })
+	time.Sleep(300 * time.Millisecond)
+	main(func() {
+		closed.Started = r.p.phase == "cleaning"
+		island.win.(*islandPanel).win.Destroy()
+	})
+	time.Sleep(500 * time.Millisecond)
+	main(func() { closed.Phase, closed.Ended, closed.Cancelled = r.p.phase, stops, r.ctx.Err() != nil })
+	return window, moved, closed
+}
+
 func islandCheckFront() int32 {
 	ws := objc.ID(objc.GetClass("NSWorkspace")).Send(nsSel("sharedWorkspace"))
 	app := ws.Send(nsSel("frontmostApplication"))
@@ -337,8 +484,9 @@ const islandCheckMouseEvent = "mouseEventWithType:location:modifierFlags:timesta
 // not move.
 func islandCheckClick(w *mygo.Window, r ui.Rect) {
 	h := objc.ID(w.NativeHandle())
-	height := objc.Send[nsRect](h, nsSel("frame")).H
-	at := nsPoint{float64(r.X + r.W/2), height - float64(r.Y+r.H/2)} // AppKit counts from the bottom
+	// AppKit counts from the bottom of the window, where its content is.
+	height := objc.Send[nsRect](h.Send(nsSel("contentView")), nsSel("frame")).H
+	at := nsPoint{float64(r.X + r.W/2), height - float64(r.Y+r.H/2)}
 	number := objc.Send[int64](h, nsSel("windowNumber"))
 	for _, kind := range []uint64{5, 1, 2} { // moved, left button down, left button up
 		ev := objc.ID(objc.GetClass("NSEvent")).Send(nsSel(islandCheckMouseEvent),
