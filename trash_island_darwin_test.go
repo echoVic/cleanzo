@@ -180,6 +180,21 @@ func TestTrashIslandGoesWhenToldEvenUnderThePointer(t *testing.T) {
 	r.want("gone", islandRest, 1)
 }
 
+// TestTrashIslandThatGoesBackStaysGone: a cleanup that ends while the island
+// is on its way back into the notch does not bring it out again.
+func TestTrashIslandThatGoesBackStaysGone(t *testing.T) {
+	for _, phase := range []string{"done", "partial", "cancelled"} {
+		r := newIslandRun(t)
+		r.pass(1200*time.Millisecond, true)
+		r.s.leave()
+		r.p.phase = phase
+		r.pass(100*time.Millisecond, true)
+		r.want(phase+": on its way back", islandRest, 0)
+		r.pass(500*time.Millisecond, true)
+		r.want(phase+": gone", islandRest, 1)
+	}
+}
+
 // TestTrashIslandAsksToBeWokenOnlyWhenSomethingIsDue: nothing polls the
 // island, so a folded one that waits must ask for no wake-up at all.
 func TestTrashIslandAsksToBeWokenOnlyWhenSomethingIsDue(t *testing.T) {
@@ -670,6 +685,24 @@ func TestIslandOnScreenThatOpensUnderThePointerStaysOpen(t *testing.T) {
 	h.pass(2 * time.Second)
 	if h.d.s.shape != islandCompact {
 		t.Fatalf("shape %d once the pointer left", h.d.s.shape)
+	}
+}
+
+// TestIslandOnScreenCancelsAWakeUpThatIsNoLongerDue: the pointer coming on
+// an island that was about to fold leaves no wake-up pending.
+func TestIslandOnScreenCancelsAWakeUpThatIsNoLongerDue(t *testing.T) {
+	h := newIslandShow(t)
+	h.pass(2 * time.Second)
+	if h.wakeAt.IsZero() {
+		t.Fatal("open and untouched, no wake-up is pending for the fold")
+	}
+	h.move(900, 100)
+	if !h.wakeAt.IsZero() {
+		t.Fatalf("the pointer on it, a wake-up is still pending in %v", h.wakeAt.Sub(h.now))
+	}
+	h.pass(time.Minute)
+	if h.d.s.shape != islandOpen {
+		t.Fatalf("shape %d under the pointer a minute later", h.d.s.shape)
 	}
 }
 

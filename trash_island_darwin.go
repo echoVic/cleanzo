@@ -92,10 +92,11 @@ func (s *trashIsland) leave() {
 // what it covers.
 func (s *trashIsland) armed() bool { return !s.now().Before(s.armedAt) }
 
-// unwatched reports whether nobody reads the question now: folded, the
-// pointer elsewhere. Only then may a new measurement replace its numbers.
+// unwatched reports whether nobody reads the question now: it is folded,
+// which it is only while the pointer is elsewhere. Only then may a new
+// measurement replace its numbers.
 func (s *trashIsland) unwatched() bool {
-	return s.p.phase == "" && s.shape == islandCompact && !s.hover && !s.leaving && !s.ended
+	return s.p.phase == "" && s.shape == islandCompact && !s.leaving && !s.ended
 }
 
 // step moves the island on at now, with the pointer on it or not. It returns
@@ -128,9 +129,9 @@ func (s *trashIsland) step(now time.Time, inside bool) (next time.Time, changed 
 	}
 	s.hover = inside
 	switch {
-	case s.leaving:
 	case inside:
-		// The pointer opens the strip and keeps the open shape.
+		// The pointer opens the strip and keeps the open shape. One that
+		// goes back is neither.
 		if s.shape == islandCompact {
 			s.shape = islandOpen
 		}
@@ -484,14 +485,10 @@ func (d *trashIslandShow) advance(draw bool) {
 		return
 	}
 	now := d.s.now()
-	x, y := d.pointer()
-	inside := d.s.contains(x, y)
+	inside := d.s.contains(d.pointer())
+	// A shape that opens under a resting pointer learns of it at its next
+	// wake-up, which every such change has before the shape would fold or go.
 	next, changed := d.s.step(now, inside)
-	// A shape that changed may have come under the pointer, or left it,
-	// without the pointer moving.
-	if again := d.s.contains(x, y); !d.over && changed && again != inside {
-		next, _ = d.s.step(now, again)
-	}
 	if d.over {
 		return // the island was gone at this step
 	}
