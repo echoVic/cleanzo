@@ -42,6 +42,7 @@ func realClaudeSource() claudeSource {
 		system:      systemExecutable,
 		ports:       claudeListenPorts,
 		closed:      claudeClosedSession,
+		transcripts: claudeTranscripts,
 		// One process at a time: a pid of 0 or below would reach a process
 		// group or every process, and pid 1 is launchd.
 		signal: func(pid int32, sig syscall.Signal) error {
@@ -410,6 +411,47 @@ func claudeClosedSession(session string) (project, title string) {
 		return project, claudeLastTitle(path)
 	}
 	return "", ""
+}
+
+// claudeTranscripts reads what the transcripts of sessions tell: of each,
+// ~/.claude/projects/*/<session>.jsonl, the cwd it records first and when
+// its file was made, which is when the session wrote its first line. A
+// session is left out when its id is not a UUID, or when its transcript is
+// not a regular file in exactly one folder.
+func claudeTranscripts(sessions []string) map[string]claudeTranscript {
+	found := map[string]claudeTranscript{}
+	dir := filepath.Join(homeDir(), ".claude", "projects")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return found
+	}
+	for _, session := range sessions {
+		if _, done := found[session]; done || !claudeSessionUUID(session) {
+			continue
+		}
+		var at string
+		var made int64
+		folders := 0
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			path := filepath.Join(dir, e.Name(), session+".jsonl")
+			info, err := os.Lstat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			folders++
+			at = path
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				made = time.Unix(st.Birthtimespec.Sec, st.Birthtimespec.Nsec).UnixMicro()
+			}
+		}
+		if folders == 1 {
+			found[session] = claudeTranscript{Cwd: jsonlField(at, "cwd"), Made: made}
+		}
+	}
+	return found
 }
 
 // claudeLastTitle is the aiTitle of the last line of type ai-title within

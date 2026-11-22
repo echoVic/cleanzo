@@ -36,6 +36,12 @@ type claudeRecord struct {
 	StatusUpdatedAt                                     int64 // milliseconds
 }
 
+// claudeTranscript is what the rules read of a session's transcript.
+type claudeTranscript struct {
+	Cwd  string // the working folder it records first; "" when it records none
+	Made int64  // when its file was made, unix microseconds; 0 when unknown
+}
+
 // claudeSnapshot is everything the rules read, taken at one moment.
 type claudeSnapshot struct {
 	Procs   []claudeProc           // every account's, zombies left out; Path, Args, Env and Out only for UID's
@@ -43,6 +49,11 @@ type claudeSnapshot struct {
 	Apps    []workspaceApp
 	Self    int32 // Cleanzo
 	UID     uint32
+	// Transcripts is what the sessions' transcripts tell, by session id. It
+	// is nil until they are looked at, which happens only once a session id
+	// would be called closed; a session missing from it has no transcript
+	// that could be read.
+	Transcripts map[string]claudeTranscript
 }
 
 // claudeRow is one listed process and what is folded into it.
@@ -171,14 +182,15 @@ type claudePlace struct {
 
 // claudeTable is a snapshot indexed for the attribution rules.
 type claudeTable struct {
-	procs    map[int32]claudeProc
-	children map[int32][]int32
-	claude   map[int32]int32        // each Claude Code process to the one heading its session; 0 for none
-	records  map[int32]claudeRecord // the valid records of Claude Code processes
-	cand     map[int32]bool         // the processes that may be listed
-	id       map[int32]string       // the session id each candidate carries; never ""
-	dock     map[int32]bool         // the apps on the Dock
-	bundles  []string               // their bundles, lower case
+	procs       map[int32]claudeProc
+	children    map[int32][]int32
+	claude      map[int32]int32             // each Claude Code process to the one heading its session; 0 for none
+	records     map[int32]claudeRecord      // the valid records of Claude Code processes
+	cand        map[int32]bool              // the processes that may be listed
+	id          map[int32]string            // the session id each candidate carries; never ""
+	dock        map[int32]bool              // the apps on the Dock
+	bundles     []string                    // their bundles, lower case
+	transcripts map[string]claudeTranscript // by session id; nil while they were not looked at
 }
 
 // newClaudeTable indexes s and finds its Claude Code processes: those with a
@@ -187,13 +199,14 @@ type claudeTable struct {
 // between them. Of a pid s lists more than once, only the first copy counts.
 func newClaudeTable(s claudeSnapshot) *claudeTable {
 	t := &claudeTable{
-		procs:    make(map[int32]claudeProc, len(s.Procs)),
-		children: map[int32][]int32{},
-		claude:   map[int32]int32{},
-		records:  map[int32]claudeRecord{},
-		cand:     map[int32]bool{},
-		id:       map[int32]string{},
-		dock:     map[int32]bool{},
+		procs:       make(map[int32]claudeProc, len(s.Procs)),
+		children:    map[int32][]int32{},
+		claude:      map[int32]int32{},
+		records:     map[int32]claudeRecord{},
+		cand:        map[int32]bool{},
+		id:          map[int32]string{},
+		dock:        map[int32]bool{},
+		transcripts: s.Transcripts,
 	}
 	for _, p := range s.Procs {
 		if _, again := t.procs[p.Pid]; !again {
@@ -400,9 +413,10 @@ func (t *claudeTable) climb(pid int32) (claude int32, ok bool) {
 // carries tells whose session id it was. id is open
 // when a Claude Code process has it now or a CLAUDE_PID among carriers names
 // a Claude Code process; it is uncertain when closable says no session id
-// may be called closed, or when a CLAUDE_PID among pids is held by a process
-// older than the candidate carrying it. It returns how many candidates it
-// leaves uncertain.
+// may be called closed, when a CLAUDE_PID among pids is held by a process
+// older than the candidate carrying it, or when a running Claude Code
+// process may have had id earlier. It returns how many candidates it leaves
+// uncertain.
 func (t *claudeTable) placeDetached(id string, pids, carriers []int32, closable bool, places map[int32]claudePlace) (uncertain int) {
 	named := map[int32]bool{} // the sessions the CLAUDE_PIDs among carriers point into
 	for _, pid := range carriers {
@@ -432,7 +446,7 @@ func (t *claudeTable) placeDetached(id string, pids, carriers []int32, closable 
 				uncertain++
 			}
 		}
-	case !closable || older:
+	case !closable || older || t.earlier(id, carriers):
 		uncertain = len(pids)
 	default:
 		for _, pid := range pids {
@@ -440,6 +454,36 @@ func (t *claudeTable) placeDetached(id string, pids, carriers []int32, closable 
 		}
 	}
 	return uncertain
+}
+
+// earlier reports whether id may be the session id a Claude Code process
+// that is still running had before the one it has now: after /clear it has
+// a new one, and what it started before still carries the old one. Such a
+// process was running when the oldest of carriers started, works in the
+// folder the transcript of id records, and has a session id whose
+// transcript was made after that carrier started. A folder or a time the
+// transcripts do not tell rules no process out. It is false while the
+// transcripts were not looked at.
+func (t *claudeTable) earlier(id string, carriers []int32) bool {
+	if t.transcripts == nil {
+		return false
+	}
+	first := t.procs[carriers[0]].Start
+	for _, pid := range carriers[1:] {
+		first = min(first, t.procs[pid].Start)
+	}
+	folder := t.transcripts[id].Cwd
+	for pid := range t.claude {
+		q, r := t.procs[pid], t.records[pid]
+		switch made := t.transcripts[r.SessionID].Made; {
+		case q.Start > first: // it started after a process carrying id did
+		case folder != "" && r.Cwd != "" && filepath.Clean(folder) != filepath.Clean(r.Cwd): // it works elsewhere
+		case made > 0 && made <= first: // it had its session id by then
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // currentSession finds the session of the oldest Claude Code process, a

@@ -82,6 +82,8 @@ type endFake struct {
 	cancel   context.CancelFunc // called once the clock reaches cancelAt, when that is not 0
 	looks    map[int32]endLook
 	sent     []endSent
+	// transcripts is what the transcripts tell; nil for testTranscripts.
+	transcripts map[string]claudeTranscript
 }
 
 // endFakeOf is an endFake whose snapshot is s and whose processes are those
@@ -102,9 +104,15 @@ func (f *endFake) source() claudeSource {
 		snapshot:  func() (claudeSnapshot, error) { return f.snap, f.err },
 		started:   f.started,
 		footprint: f.footprint,
-		signal:    f.signal,
-		now:       func() time.Time { return f.now.Add(f.clock) },
-		sleep:     f.sleep,
+		transcripts: func(sessions []string) map[string]claudeTranscript {
+			if f.transcripts != nil {
+				return f.transcripts
+			}
+			return testTranscripts(sessions)
+		},
+		signal: f.signal,
+		now:    func() time.Time { return f.now.Add(f.clock) },
+		sleep:  f.sleep,
 	}
 }
 
@@ -348,6 +356,23 @@ func TestEndClaudeProcsSkipsWhatChanged(t *testing.T) {
 	}
 	res, err := endClaudeProcsWith(context.Background(), f.source(), "S1", targets)
 	endWant(t, f, res, err, "110:changed 130:changed 113:changed 120:changed 210:changed 101:changed 1:changed 112:changed; freed 0", "")
+}
+
+func TestEndClaudeProcsLeavesAnEarlierSessionIDAlone(t *testing.T) {
+	// The page listed 120 as left by S9. By now the transcripts show that
+	// the Claude Code process 100 took its session id after 120 started, in
+	// the folder S9 worked in: 120 may be what it started before /clear.
+	s := transcriptSnap(nil, marked(120, 1, 120, "S9"))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; left S9[120]; uncertain 0")
+	f := endFakeOf(t, s)
+	f.transcripts = map[string]claudeTranscript{"S9": {Cwd: "/work/app"}, "S1": transcriptMade(130)}
+	res, err := endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
+	endWant(t, f, res, err, "120:changed; freed 0", "")
+	// While 100 is seen to have had its session id before 120 started, 120
+	// is ended.
+	f.transcripts["S1"] = transcriptMade(110)
+	res, err = endClaudeProcsWith(context.Background(), f.source(), "S9", []ClaudeTarget{endTarget(120)})
+	endWant(t, f, res, err, "120:ended; freed 120", "120 TERM@0s")
 }
 
 func TestEndClaudeProcsEscalates(t *testing.T) {

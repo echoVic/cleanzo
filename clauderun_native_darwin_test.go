@@ -510,6 +510,56 @@ func TestClosedSessionProjectAndTitle(t *testing.T) {
 	}
 }
 
+func TestClaudeTranscriptsTellTheFolderAndWhenTheyWereMade(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	projects := filepath.Join(home, ".claude", "projects")
+	const (
+		used    = "11111111-2222-3333-4444-555555555555"
+		twice   = "22222222-3333-4444-5555-666666666666"
+		missing = "33333333-4444-5555-6666-777777777777"
+		blank   = "44444444-5555-6666-7777-888888888888"
+	)
+	line := func(fields string) string { return "{" + fields + "}\n" }
+	first := line(`"type":"user","cwd":"/Users/me/sample-app"`)
+	usedPath := filepath.Join(projects, "-Users-me-sample-app", used+".jsonl")
+	writeText(t, usedPath, first)
+	// The file is two days old; Claude Code wrote to it again just now.
+	made := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(usedPath, made, made); err != nil {
+		t.Fatal(err)
+	}
+	writeText(t, usedPath, first+line(`"type":"user","cwd":"/Users/me/sample-app/web"`))
+	for _, folder := range []string{"-Users-me-sample-app", "-Users-me-other-app"} {
+		writeText(t, filepath.Join(projects, folder, twice+".jsonl"), first)
+	}
+	before := time.Now().Add(-2 * time.Second)
+	writeText(t, filepath.Join(projects, "-Users-me-other-app", blank+".jsonl"), "")
+	// What the session id "../x" would reach from a project folder.
+	writeText(t, filepath.Join(projects, "x.jsonl"), first)
+	if err := os.Symlink(usedPath, filepath.Join(projects, "-Users-me-other-app", missing+".jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := claudeTranscripts([]string{used, twice, missing, blank, "../x", "S1", used})
+	if len(got) != 2 {
+		t.Errorf("transcripts found for %q, want only the two that lie in one folder as a file", slices.Sorted(maps.Keys(got)))
+	}
+	if tr, want := got[used], (claudeTranscript{Cwd: "/Users/me/sample-app", Made: made.UnixMicro()}); tr != want {
+		t.Errorf("the transcript written to again = %+v, want %+v: its first cwd, and when it was made", tr, want)
+	}
+	if tr := got[blank]; tr.Cwd != "" || tr.Made < before.UnixMicro() || tr.Made > time.Now().Add(2*time.Second).UnixMicro() {
+		t.Errorf("the empty transcript = %+v, want no folder and a file made just now", tr)
+	}
+	if got := claudeTranscripts(nil); got == nil || len(got) != 0 {
+		t.Errorf("transcripts of no session = %v, want an empty map", got)
+	}
+	setHome(t, filepath.Join(home, "nowhere"))
+	if got := claudeTranscripts([]string{used}); got == nil || len(got) != 0 {
+		t.Errorf("transcripts without a projects folder = %v, want an empty map", got)
+	}
+}
+
 func TestRealClaudeSourceReadsThisProcess(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)

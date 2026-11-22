@@ -117,6 +117,7 @@ type claudeSource struct {
 	system      func(path string) bool
 	ports       func(ctx context.Context, pids []int32) map[int32][]int // nil when they cannot be read
 	closed      func(session string) (project, title string)            // a closed session, from its transcript
+	transcripts func(sessions []string) map[string]claudeTranscript     // what their transcripts tell; one that cannot be read is left out
 	signal      func(pid int32, sig syscall.Signal) error
 	now         func() time.Time
 	sleep       func(ctx context.Context, d time.Duration) error
@@ -171,13 +172,44 @@ func (Cleaner) EndClaudeSession(ctx context.Context, target ClaudeTarget, sessio
 	return endClaudeSessionWith(ctx, claudeSourceFn(), target, session, status)
 }
 
+// claudeAttributed takes a snapshot from src and attributes it. Before a
+// session id is called closed, it reads the transcripts of the sessions that
+// would be and of the sessions the Claude Code processes have now, and
+// attributes the snapshot again with what they tell: a session id that a
+// running Claude Code process may have had before /clear is not called
+// closed. The snapshot it returns holds those transcripts.
+func claudeAttributed(src claudeSource) (claudeSnapshot, claudeAttribution, error) {
+	s, err := src.snapshot()
+	if err != nil {
+		return s, claudeAttribution{}, err
+	}
+	a := attributeClaude(s)
+	if len(a.Left) == 0 {
+		return s, a, nil
+	}
+	sessions := make([]string, 0, len(a.Left)+len(s.Records))
+	for _, l := range a.Left {
+		sessions = append(sessions, l.ID)
+	}
+	for _, r := range s.Records {
+		if r.SessionID != "" {
+			sessions = append(sessions, r.SessionID)
+		}
+	}
+	slices.Sort(sessions)
+	s.Transcripts = src.transcripts(slices.Compact(sessions))
+	if s.Transcripts == nil {
+		s.Transcripts = map[string]claudeTranscript{}
+	}
+	return s, attributeClaude(s), nil
+}
+
 // claudeRunningWith reads the Running tab from src.
 func claudeRunningWith(ctx context.Context, src claudeSource) (ClaudeRunning, error) {
-	s, err := src.snapshot()
+	s, a, err := claudeAttributed(src)
 	if err != nil {
 		return ClaudeRunning{Sessions: []ClaudeSession{}, Left: []ClaudeLeft{}}, codeError{Code: "unreadable"}
 	}
-	a := attributeClaude(s)
 	now := src.now()
 	commands := make([][]claudeRow, len(a.Sessions)) // what each open session lists
 	var listed []int32
@@ -441,11 +473,10 @@ func claudeListedPorts(ctx context.Context, read func(context.Context, []int32) 
 // page's rows as the process page places them.
 func claudeSummaryWith(src claudeSource) ClaudeRunSummary {
 	sum := ClaudeRunSummary{Rows: []ClaudeRowTag{}}
-	s, err := src.snapshot()
+	_, a, err := claudeAttributed(src)
 	if err != nil {
 		return sum
 	}
-	a := attributeClaude(s)
 	now := src.now()
 	var tagged []int32
 	idle := map[int32]bool{} // the tagged Claude Code processes of long-idle sessions

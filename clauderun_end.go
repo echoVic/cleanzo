@@ -18,14 +18,14 @@ const (
 
 // endClaudeProcsWith ends the targets that are still listed under session,
 // each checked by pid and start time first: in a row of what an open session
-// with that id started, of any age, or of what the closed session left. A
-// target that is not is "changed" and gets no signal.
+// with that id started, of any age, or of what the closed session left, as
+// the Running tab lists them now. A target that is not is "changed" and gets
+// no signal.
 func endClaudeProcsWith(ctx context.Context, src claudeSource, session string, targets []ClaudeTarget) (ClaudeEndResult, error) {
-	s, err := src.snapshot()
+	s, a, err := claudeAttributed(src)
 	if err != nil {
 		return ClaudeEndResult{Procs: []ClaudeEnded{}}, codeError{Code: "unreadable"}
 	}
-	a := attributeClaude(s)
 	listed := map[int32]claudeProc{} // what the rows under session hold now
 	add := func(rows []claudeRow) {
 		for _, r := range rows {

@@ -25,6 +25,7 @@ func realClaudeSource() claudeSource {
 		system:      func(string) bool { return false },
 		ports:       func(context.Context, []int32) map[int32][]int { return nil },
 		closed:      func(string) (string, string) { return "", "" },
+		transcripts: func([]string) map[string]claudeTranscript { return map[string]claudeTranscript{} },
 		signal:      func(int32, syscall.Signal) error { return nil },
 		now:         func() time.Time { return time.Time{} },
 		sleep:       func(context.Context, time.Duration) error { return nil },

@@ -36,6 +36,9 @@ type viewFake struct {
 	portCalls [][]int32 // the pids of each ports read
 	closed    map[string][2]string
 	closedFor []string // the session of each closed read
+	// transcripts is what the transcripts tell; nil for testTranscripts.
+	transcripts    map[string]claudeTranscript
+	transcriptsFor [][]string // the sessions of each transcripts read
 }
 
 // viewFakeOf is a made-up machine showing s at viewNow, with no ports read
@@ -89,6 +92,13 @@ func (f *viewFake) source() claudeSource {
 			f.closedFor = append(f.closedFor, session)
 			c := f.closed[session]
 			return c[0], c[1]
+		},
+		transcripts: func(sessions []string) map[string]claudeTranscript {
+			f.transcriptsFor = append(f.transcriptsFor, slices.Clone(sessions))
+			if f.transcripts != nil {
+				return f.transcripts
+			}
+			return testTranscripts(sessions)
 		},
 		signal: func(int32, syscall.Signal) error {
 			f.t.Error("the reading sent a signal")
@@ -311,6 +321,49 @@ func TestClaudeRunningOrdersLeftByOldestProcess(t *testing.T) {
 	}
 	if want := []string{"S9", "S8"}; !slices.Equal(got, want) {
 		t.Errorf("left %q, want %q", got, want)
+	}
+}
+
+func TestClaudeRunningHoldsBackAnEarlierSessionID(t *testing.T) {
+	// The Claude Code process 100 took its session id S1 after 150 started,
+	// in the folder S9's transcript records: 150 may be what it started
+	// before /clear. It is counted, not listed, and no title is read for it.
+	cc := ccProc(100, 1)
+	record := recordOf(cc, "S1")
+	record.Cwd = "/Users/me/sample-app"
+	f := viewFakeOf(t, snap(map[int32]claudeRecord{100: record}, cc, marked(150, 1, 150, "S9")))
+	f.transcripts = map[string]claudeTranscript{
+		"S9": {Cwd: "/Users/me/sample-app", Made: testStart(140)},
+		"S1": {Cwd: "/Users/me/sample-app", Made: testStart(160)},
+	}
+	r := f.read()
+	if len(r.Left) != 0 || r.Uncertain != 1 {
+		t.Errorf("left %+v, uncertain %d; want nothing left and 1 uncertain", r.Left, r.Uncertain)
+	}
+	if want := [][]string{{"S1", "S9"}}; !reflect.DeepEqual(f.transcriptsFor, want) {
+		t.Errorf("transcripts read for %q, want %q", f.transcriptsFor, want)
+	}
+	if len(f.closedFor) != 0 || len(f.portCalls) != 0 {
+		t.Errorf("the reading read titles %q and ports %v for a process it does not list", f.closedFor, f.portCalls)
+	}
+	if sum := claudeSummaryWith(f.source()); sum.Left != 0 || len(sum.Rows) != 0 {
+		t.Errorf("summary %+v, want nothing left", sum)
+	}
+	// Once 100 is seen to have had S1 before 150 started, S9 is closed.
+	f.transcripts["S1"] = claudeTranscript{Cwd: "/Users/me/sample-app", Made: testStart(120)}
+	if r := f.read(); len(r.Left) != 1 || r.Left[0].ID != "S9" || r.Uncertain != 0 {
+		t.Errorf("left %+v, uncertain %d; want S9 left and 0 uncertain", r.Left, r.Uncertain)
+	}
+}
+
+func TestClaudeRunningReadsTranscriptsOnlyForWhatWouldBeLeft(t *testing.T) {
+	// Nothing here would be called left behind, so no transcript is looked
+	// for, by the reading or by the summary.
+	f := viewFakeOf(t, ccSnap(marked(110, 100, 110, "S1")))
+	f.read()
+	claudeSummaryWith(f.source())
+	if len(f.transcriptsFor) != 0 {
+		t.Errorf("transcripts read for %q, want none", f.transcriptsFor)
 	}
 }
 

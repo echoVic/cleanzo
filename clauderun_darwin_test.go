@@ -534,6 +534,95 @@ func TestClaudePidListedTwiceLeavesNothingBehind(t *testing.T) {
 	}
 }
 
+// ---- a session id a running Claude Code process had before ------------------
+
+// testTranscripts says every session in ids has a transcript made at
+// testEpoch, before any fixture started: no Claude Code process took its
+// session id after a fixture started.
+func testTranscripts(ids []string) map[string]claudeTranscript {
+	found := map[string]claudeTranscript{}
+	for _, id := range ids {
+		found[id] = claudeTranscript{Made: testEpoch.UnixMicro()}
+	}
+	return found
+}
+
+// transcriptSnap is snap of procs and the Claude Code process 100 under
+// launchd, working in /work/app with session S1 now, with what transcripts
+// tell.
+func transcriptSnap(transcripts map[string]claudeTranscript, procs ...claudeProc) claudeSnapshot {
+	cc := ccProc(100, 1)
+	r := recordOf(cc, "S1")
+	r.Cwd = "/work/app"
+	s := snap(map[int32]claudeRecord{100: r}, append([]claudeProc{cc}, procs...)...)
+	s.Transcripts = transcripts
+	return s
+}
+
+// transcriptMade is a transcript made when the fixture with pid started.
+func transcriptMade(pid int32) claudeTranscript {
+	return claudeTranscript{Made: testStart(pid)}
+}
+
+func TestClaudeEarlierSessionIDIsNotCalledClosed(t *testing.T) {
+	// 120 carries S9 and runs under launchd; no Claude Code process has S9
+	// now. After /clear the Claude Code process 100 has a new session id and
+	// what it started before still carries the old one, so S9 is called
+	// closed only when 100 cannot have had it.
+	in := func(cwd string) claudeTranscript { return claudeTranscript{Cwd: cwd, Made: testStart(60)} }
+	const left, held = "100:S1 members[] commands[]; left S9[120]; uncertain 0", "100:S1 members[] commands[]; uncertain 1"
+	for _, c := range []struct {
+		name        string
+		transcripts map[string]claudeTranscript
+		want        string
+	}{
+		{"transcripts not looked at", nil, left},
+		{"it took its session id after 120 started", map[string]claudeTranscript{"S9": in("/work/app"), "S1": transcriptMade(130)}, held},
+		{"it had its session id when 120 started", map[string]claudeTranscript{"S9": in("/work/app"), "S1": transcriptMade(110)}, left},
+		{"it resumed a session older than itself", map[string]claudeTranscript{"S9": in("/work/app"), "S1": transcriptMade(50)}, left},
+		{"it works in another folder", map[string]claudeTranscript{"S9": in("/work/other"), "S1": transcriptMade(130)}, left},
+		{"the same folder written another way", map[string]claudeTranscript{"S9": in("/work/app/"), "S1": transcriptMade(130)}, held},
+		{"the folder of S9 is not known", map[string]claudeTranscript{"S1": transcriptMade(130)}, held},
+		{"its own transcript is not known", map[string]claudeTranscript{"S9": in("/work/app")}, held},
+		{"its own transcript tells no time", map[string]claudeTranscript{"S9": in("/work/app"), "S1": {Cwd: "/work/app"}}, held},
+		{"no transcript is known", map[string]claudeTranscript{}, held},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wantShape(t, attributeClaude(transcriptSnap(c.transcripts, marked(120, 1, 120, "S9"))), c.want)
+		})
+	}
+}
+
+func TestClaudeEarlierSessionIDNeedsAnOlderClaudeCode(t *testing.T) {
+	cleared := map[string]claudeTranscript{"S9": {Cwd: "/work/app"}, "S1": transcriptMade(130)}
+	// 90 started before the Claude Code process 100 did.
+	wantShape(t, attributeClaude(transcriptSnap(cleared, marked(90, 1, 90, "S9"))), "100:S1 members[] commands[]; left S9[90]; uncertain 0")
+	// So did 95, which is not listed: it runs under 94, which carries no
+	// marker. The oldest process carrying the id decides.
+	s := transcriptSnap(cleared, plain(94, 1, 94), marked(95, 94, 95, "S9"), marked(120, 1, 120, "S9"))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; left S9[120]; uncertain 0")
+}
+
+func TestClaudeEarlierSessionIDHoldsBackEveryProcess(t *testing.T) {
+	// The hidden 121 carries the id of its parent 120: both are counted.
+	cleared := map[string]claudeTranscript{"S9": {Cwd: "/work/app"}, "S1": transcriptMade(130)}
+	s := transcriptSnap(cleared, marked(120, 1, 120, "S9"), hidden(121, 120, 120))
+	wantShape(t, attributeClaude(s), "100:S1 members[] commands[]; uncertain 2")
+}
+
+func TestClaudeEarlierSessionIDOfASubAgent(t *testing.T) {
+	// A sub-agent is a Claude Code process too. 100 had its session id when
+	// 120 started; 105, under it, took S2 after that.
+	cc, sub := ccProc(100, 1), ccProc(105, 100)
+	r100, r105 := recordOf(cc, "S1"), recordOf(sub, "S2")
+	r100.Cwd, r105.Cwd = "/work/app", "/work/app"
+	s := snap(map[int32]claudeRecord{100: r100, 105: r105}, cc, sub, marked(120, 1, 120, "S9"))
+	s.Transcripts = map[string]claudeTranscript{"S9": {Cwd: "/work/app"}, "S1": transcriptMade(110), "S2": transcriptMade(130)}
+	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[]; uncertain 1")
+	s.Transcripts["S2"] = transcriptMade(110)
+	wantShape(t, attributeClaude(s), "100:S1 members[105] commands[]; left S9[120]; uncertain 0")
+}
+
 // ---- records and one session id --------------------------------------------
 
 func TestClaudeRecordMustMatchProcStart(t *testing.T) {
