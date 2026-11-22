@@ -126,6 +126,13 @@ func islandPanelClass() objc.Class {
 	return islandClass
 }
 
+// islandWindows are the windows of the islands on screen. The main thread's.
+var islandWindows = map[*mygo.Window]bool{}
+
+// isIslandWindow reports whether w is the window of an island, which the app
+// does not count among the windows the user has open.
+func isIslandWindow(w *mygo.Window) bool { return islandWindows[w] }
+
 // islandPanel is the window of an island: a panel that neither activates
 // the app nor takes the keyboard, above the menu bar, where the notch is.
 type islandPanel struct {
@@ -150,6 +157,8 @@ func openIslandPanel(frame mygo.Rectangle, title string, view func(*ui.Context))
 		Width: frame.Width, Height: frame.Height, X: frame.X, Y: frame.Y,
 		Content: ui.View(view),
 	})
+	islandWindows[w] = true
+	w.OnClosed(func() { delete(islandWindows, w) })
 	p := &islandPanel{win: w}
 	err := errors.New("the window has no native handle")
 	withPool(func() {

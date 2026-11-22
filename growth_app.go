@@ -49,11 +49,14 @@ func init() { growthApply = applyGrowthLifecycle }
 // With all three off, closing the last window quits (afterLastWindow). On
 // Windows, growthSupported is false, so the app quits too.
 func registerGrowthLifecycle() {
-	mygo.App.OnWindowAllClosed(func() {
+	settle := func() {
 		settleWithoutWindows(mygo.App, afterLastWindow(growthSupported(), residentOn, holdingOpen()))
-	})
+	}
+	mygo.App.OnWindowAllClosed(settle)
+	watchWindowsBesideIslands(settle)
 	mygo.App.OnActivate(func(hasVisibleWindows bool) {
-		if !hasVisibleWindows && mygo.App.IsReady() { // no window can be made before that
+		// An island that shows is no window to come back to.
+		if (!hasVisibleWindows || windowsOpen() == 0) && mygo.App.IsReady() { // no window can be made before that
 			openMainWindow()
 		}
 	})
@@ -149,6 +152,40 @@ func settleWithoutWindows(app windowlessApp, answer string) {
 	}
 }
 
+// closedBesideIslands reports whether the window that just closed was the
+// last one the user had open while an island still shows: island tells
+// whether the closed one was an island, left how many windows are still
+// open, and islands how many of those are islands.
+func closedBesideIslands(island bool, left, islands int) bool {
+	return !island && left > 0 && left == islands
+}
+
+// windowsOpen counts the windows the user has open: every window but the
+// islands at the notch, which the user did not open and cannot close.
+func windowsOpen() int {
+	n := 0
+	for _, w := range mygo.Windows() {
+		if !isIslandWindow(w) {
+			n++
+		}
+	}
+	return n
+}
+
+// watchWindowsBesideIslands calls settle once the last window the user had
+// open closes while an island still shows. An island may wait for hours, and
+// mygo reports that all windows closed only once it is gone too.
+func watchWindowsBesideIslands(settle func()) {
+	mygo.App.OnWindowCreated(func(w *mygo.Window) {
+		w.OnClosed(func() {
+			left := len(mygo.Windows())
+			if closedBesideIslands(isIslandWindow(w), left, left-windowsOpen()) {
+				settle()
+			}
+		})
+	})
+}
+
 // quitIfNoWindow quits when held work has ended with no window open and
 // nothing keeps Cleanzo in the menu bar: the last window closed while the work
 // ran. It does nothing before the app runs, as in a test.
@@ -157,7 +194,7 @@ func quitIfNoWindow() {
 		return
 	}
 	mygo.RunOnMain(func() {
-		if len(mygo.Windows()) == 0 && afterLastWindow(growthSupported(), residentOn, holdingOpen()) == "quit" {
+		if windowsOpen() == 0 && afterLastWindow(growthSupported(), residentOn, holdingOpen()) == "quit" {
 			mygo.App.Quit()
 		}
 	})
@@ -290,7 +327,7 @@ func applyResident(g GrowthConfig, mb menuBarConfig) error {
 		if want := resident && g.OpenAtLogin; mygo.App.OpenAtLogin() != want {
 			loginErr = mygo.App.SetOpenAtLogin(want)
 		}
-		if !resident && len(mygo.Windows()) == 0 {
+		if !resident && windowsOpen() == 0 {
 			settleWithoutWindows(mygo.App, afterLastWindow(true, func() bool { return resident }, holdingOpen()))
 		}
 	})

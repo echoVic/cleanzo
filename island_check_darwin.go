@@ -45,6 +45,11 @@ type islandCheckReport struct {
 	// check sent to this app itself.
 	MovesHeard     int `json:"movesHeard"`
 	SentMovesHeard int `json:"sentMovesHeard"`
+	// How often the app was told that the user has no window open: as a
+	// window closed beside the island, which must tell it once, and as one
+	// closed with no island, which mygo itself reports.
+	SettledBesideIsland  int `json:"settledBesideIsland"`
+	SettledWithoutIsland int `json:"settledWithoutIsland"`
 	// How the reminder ended.
 	Phase string `json:"phase"`
 	Ended bool   `json:"ended"`
@@ -65,6 +70,10 @@ type islandCheckIdle struct {
 
 type nsPoint struct{ X, Y float64 }
 
+// islandCheckSettled counts what watchWindowsBesideIslands told the check.
+// The main thread's.
+var islandCheckSettled int
+
 // islandCheck runs the island check where CLEANZO_ISLAND_CHECK names a
 // folder, and reports that it did. The app then shows a reminder with
 // made-up numbers at the notch, whose cleanup deletes nothing, looks at what
@@ -80,6 +89,7 @@ func islandCheck() bool {
 	// No Dock icon, and the app in front stays there.
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	mygo.App.OnWindowAllClosed(func() {})
+	watchWindowsBesideIslands(func() { islandCheckSettled++ })
 	mygo.App.WhenReady(func() {
 		go func() {
 			rep := runIslandCheck(dir)
@@ -187,7 +197,15 @@ func runIslandCheck(dir string) (rep islandCheckReport) {
 	})
 	// The view takes a click on a later turn of the main thread.
 	time.Sleep(200 * time.Millisecond)
-	main(func() { rep.EarlyClickIgnored = r.p.phase == "" })
+	// A window the user could have opened closes while the island shows.
+	plain := func() {
+		mygo.NewWindow(mygo.WindowOptions{Hidden: true, Width: 200, Height: 120, Content: ui.View(func(*ui.Context) {})}).Destroy()
+	}
+	main(func() {
+		rep.EarlyClickIgnored = r.p.phase == ""
+		plain()
+		rep.SettledBesideIsland = islandCheckSettled
+	})
 
 	// Taking it now.
 	time.Sleep(700 * time.Millisecond)
@@ -215,7 +233,13 @@ func runIslandCheck(dir string) (rep islandCheckReport) {
 		rep.Ended = true
 	case <-time.After(15 * time.Second):
 	}
-	main(func() { rep.Phase = r.p.phase })
+	main(func() {
+		rep.Phase = r.p.phase
+		if rep.Ended {
+			plain()
+			rep.SettledWithoutIsland = islandCheckSettled - rep.SettledBesideIsland
+		}
+	})
 
 	if seconds, _ := strconv.Atoi(os.Getenv("CLEANZO_ISLAND_CHECK_IDLE")); seconds > 0 {
 		rep.Idle = islandCheckCost(n, seconds, fail)
@@ -235,6 +259,8 @@ func runIslandCheck(dir string) (rep islandCheckReport) {
 		{rep.ClickStarted, "a click on the button that empties started nothing"},
 		{rep.SentMovesHeard > 0, "the moves of the mouse sent to the app were not heard"},
 		{rep.Ended && rep.Phase == "done", "the reminder did not end with its cleanup done"},
+		{rep.SettledBesideIsland == 1, "a window closing beside the island did not tell the app it has none left, once"},
+		{rep.SettledWithoutIsland == 0, "a window closing with no island told the app what mygo already reports"},
 	} {
 		if !c.ok {
 			fail("%s", c.what)

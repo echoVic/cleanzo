@@ -263,6 +263,30 @@ func TestAfterLastWindow(t *testing.T) {
 	}
 }
 
+// An island at the notch is no window the user opened. mygo reports that all
+// windows closed only once the island is gone too, which may be hours later:
+// the app settles as after its last window when the last one the user had
+// open closes beside an island.
+func TestClosedBesideIslands(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		island        bool // the window that closed was an island
+		left, islands int  // windows still open, and islands among them
+		want          bool
+	}{
+		{"the last window, no island", false, 0, 0, false}, // mygo reports that one
+		{"the last window, an island left", false, 1, 1, true},
+		{"a window, another and an island left", false, 2, 1, false},
+		{"a window, another left", false, 1, 0, false},
+		{"the island, a window left", true, 1, 0, false},
+		{"the island, nothing left", true, 0, 0, false}, // mygo reports that one
+	} {
+		if got := closedBesideIslands(tc.island, tc.left, tc.islands); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // appRecorder stands in for mygo.App and records what settleWithoutWindows
 // asks of it.
 type appRecorder struct{ calls []string }
