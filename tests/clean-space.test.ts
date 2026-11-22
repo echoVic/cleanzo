@@ -616,3 +616,24 @@ test("once a clean ends the record is read again, so the cleanup just run is in 
     expect(h.all().some((n) => n.props.className === "cat-sub muted history-note")).toBe(false);
   } finally { env.restore(); }
 });
+
+test("a scan reads the record again, so a cleanup made from another page shows on its rows", async () => {
+  const env = changes();
+  try {
+    let stored: CleanRecord[] = [];
+    const stream = fakeStream<JunkScanEvent>();
+    env.assign(cleanApi, { startScan: () => stream, history: async () => stored });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    // 进页面时还没有记录；之后在首页清过一次。
+    stored = [record(Date.now() / 1000, [{ id: "dev.npm", freed: 4 * GB, trashed: 0 }], "low-space")];
+    h.find((n) => n.type?.name === "IdleHero")!.props.onCta();
+    const npm = cache("dev.npm", 1);
+    stream.emit({ kind: "start", items: [{ ...npm, size: -1 }] });
+    stream.emit({ kind: "item", item: npm });
+    stream.finish();
+    await h.settle();
+    const notes = h.all().filter((n) => n.props.className === "cat-sub muted history-note").map((n) => textOf(n.props.children));
+    expect(notes).toEqual([t("history.row", { when: t("history.when.today"), size: human(4 * GB) })]);
+  } finally { env.restore(); }
+});

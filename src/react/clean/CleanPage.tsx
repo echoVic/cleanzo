@@ -287,6 +287,8 @@ export function CleanPage() {
     setProgress({ total: 0, bytes: 0, id: "", path: "", stopped: false, error: "" });
     scannedAtRef.current = Date.now();
     loadDisk();
+    // 别的页面（首页的磁盘不足提示、废纸篓提醒）也会清理：扫描时把记录重读一遍。
+    loadHistory();
     const { ch, done } = cleanApi.startScan();
     chanRef.current = ch;
     let failed = false;
@@ -329,7 +331,7 @@ export function CleanPage() {
         barHoldTimer.current = window.setTimeout(() => setBarHold(false), 450);
       }
     }
-  }, [t, loadDisk]);
+  }, [t, loadDisk, loadHistory]);
 
   const stopScan = React.useCallback(() => {
     stoppedScanRef.current = true;
