@@ -3,9 +3,12 @@
 package main
 
 import (
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 type islandShape int
@@ -40,6 +43,8 @@ type trashIsland struct {
 	now   func() time.Time
 	// gone is called once, when the island is back in the notch for good.
 	gone func()
+	// wake asks whoever drives the island to step it now.
+	wake func()
 
 	shape   islandShape
 	hover   bool   // the pointer is on it
@@ -219,4 +224,152 @@ func (s *trashIsland) contains(x, y int) bool {
 	f := s.frame()
 	x, y = x-f.X-r.X, y-f.Y-r.Y
 	return x >= 0 && x < r.Width && y >= 0 && y < r.Height
+}
+
+var (
+	islandBlack  = ui.RGB(0, 0, 0)
+	islandText   = ui.RGB(255, 255, 255)
+	islandMuted  = ui.RGBA(255, 255, 255, 0.62)
+	islandChip   = ui.RGBA(255, 255, 255, 0.16)
+	islandChipOn = ui.RGBA(255, 255, 255, 0.28)
+	islandSpring = ui.Animation{Spring: ui.SpringOptions{Duration: 420 * time.Millisecond, Bounce: 0.18}}
+
+	islandTrashIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`))
+	islandDoneIcon  = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`))
+)
+
+// view draws the island in its window: black, as the notch it grows from,
+// whatever appearance the app shows. The window does not resize: the island
+// moves in it, and what it leaves free shows what is behind the window.
+func (s *trashIsland) view(c *ui.Context) {
+	t := menuBarPanelTheme(c.Theme(), true)
+	c.SetTheme(t)
+	c.Root().Background(ui.Transparent)
+	w, h := s.size()
+	radius := float32(10)
+	if s.shape == islandOpen {
+		radius = 24
+	}
+	ui.Column(c).Fill().AlignItems(ui.Center).Children(func() {
+		box := ui.Column(c.Key("island"))
+		bw, bh, br := box.AnimateTo("w", float32(w), islandSpring), box.AnimateTo("h", float32(h), islandSpring), box.AnimateTo("r", radius, islandSpring)
+		box.Size(bw, bh).Shrink(0).Radius(0, 0, br, br).Background(islandBlack).Clip().AlignItems(ui.Center).Children(func() {
+			s.strip(c, t)
+			if s.shape == islandOpen {
+				s.body(c, t)
+			}
+		})
+	})
+}
+
+// strip is what shows to both sides of the notch, folded or open: the
+// Trash, and its size, the progress or the outcome.
+func (s *trashIsland) strip(c *ui.Context, t *ui.Theme) {
+	p := s.p
+	ui.Row(c).WidthPercent(100).Height(float32(s.notch.Height)).Shrink(0).PaddingX(16).AlignItems(ui.Center).Children(func() {
+		ui.Icon(c, islandTrashIcon).FontSize(15).TextColor(islandText)
+		ui.Spacer(c).Grow(1)
+		switch p.phase {
+		case "cleaning", "stopping":
+			ui.Text(c, strconv.Itoa(int(100*s.fraction()))+"%").FontSize(12).Bold().TextColor(t.Accent)
+		case "done":
+			ui.Icon(c, islandDoneIcon).FontSize(15).TextColor(t.Accent)
+		case "partial", "cancelled":
+			ui.Text(c, "!").FontSize(13).Bold().TextColor(t.Warning)
+		default:
+			ui.Text(c, growthSize(p.size)).FontSize(12).Bold().TextColor(islandText)
+		}
+	})
+}
+
+// fraction is how much of the Trash the cleanup freed so far.
+func (s *trashIsland) fraction() float64 {
+	return math.Min(1, float64(s.p.freed)/float64(max(1, s.p.size)))
+}
+
+// body is what the open island shows under the notch.
+func (s *trashIsland) body(c *ui.Context, t *ui.Theme) {
+	p, text := s.p, s.p.text
+	title := func(s string) { ui.Text(c, s).FontSize(15).Bold().TextColor(islandText) }
+	note := func(s string) { ui.Text(c, s).FontSize(12).TextColor(islandMuted) }
+	freed := text("trash.popup.freed", map[string]string{"size": growthSize(p.freed)})
+	fade := ui.ElementTransition{Enter: &ui.Motion{}, Exit: &ui.Motion{}}
+	ui.Column(c.Key("body-"+p.phase)).Width(float32(islandOpenWidth+s.notch.Width%2)).Grow(1).Shrink(0).
+		Padding(4, 18, 16, 18).Gap(6).Transition(fade).Children(func() {
+		switch p.phase {
+		case "":
+			title(text("trash.island.title", map[string]string{"size": growthSize(p.size)}))
+			note(text("trash.island.body", nil))
+			ui.Spacer(c).Grow(1)
+			ui.Row(c).Justify(ui.End).Gap(8).Children(func() {
+				s.pill(c, "later", text("trash.popup.later", nil), islandChip, islandChipOn, true, s.dismiss)
+				s.pill(c, "empty", text("trash.popup.empty", nil), t.Danger, t.Danger.Mix(islandText, 0.14), s.armed(), s.empty)
+			})
+		case "cleaning", "stopping":
+			title(text("trash.popup."+p.phase, nil))
+			ui.Row(c).WidthPercent(100).Height(4).Radius(2).Background(islandChip).Children(func() {
+				ui.Box(c).WidthPercent(float32(100 * s.fraction())).Height(4).Radius(2).Background(t.Accent)
+			})
+			ui.Spacer(c).Grow(1)
+			ui.Row(c).AlignItems(ui.Center).Children(func() {
+				note(freed)
+				ui.Spacer(c).Grow(1)
+				s.pill(c, "cancel", text("trash.popup.cancel", nil), islandChip, islandChipOn, p.phase == "cleaning", s.stop)
+			})
+		case "done":
+			title(text("trash.popup.done", nil))
+			note(freed)
+		default: // something was kept: the cleanup stopped, or could not delete it
+			title(text("trash.popup."+p.phase, nil))
+			note(freed)
+			note(text("trash.popup.remaining", nil))
+			ui.Spacer(c).Grow(1)
+			ui.Row(c).Justify(ui.End).Children(func() {
+				s.pill(c, "close", text("trash.popup.close", nil), islandChip, islandChipOn, true, s.dismiss)
+			})
+		}
+	})
+}
+
+// pill is a button of the island. One that takes no click yet shows fainter.
+func (s *trashIsland) pill(c *ui.Context, key, label string, bg, over ui.Color, takes bool, click func()) {
+	b := ui.Row(c.Key(key)).Height(28).PaddingX(14).AlignItems(ui.Center).Radius(14)
+	switch {
+	case !takes:
+		b.Opacity(0.45)
+	case b.Hovered():
+		bg = over
+	}
+	b.Background(bg).OnClick(click).Children(func() {
+		ui.Text(c, label).FontSize(12.5).TextColor(islandText)
+	})
+}
+
+// empty starts the cleanup, once the island takes that click.
+func (s *trashIsland) empty() {
+	if !s.armed() {
+		return
+	}
+	s.p.begin()
+	s.poke()
+}
+
+func (s *trashIsland) stop() {
+	s.p.stop()
+	s.poke()
+}
+
+// dismiss answers "not now", or closes a result.
+func (s *trashIsland) dismiss() {
+	if s.p.close != nil {
+		s.p.close()
+	}
+}
+
+// poke has whoever drives the island step it now, after a click changed what
+// it shows.
+func (s *trashIsland) poke() {
+	if s.wake != nil {
+		s.wake()
+	}
 }

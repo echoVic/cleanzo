@@ -3,10 +3,14 @@
 package main
 
 import (
+	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // islandRun drives an island with a clock of its own. Time passes only as
@@ -269,6 +273,215 @@ func TestTrashIslandShapesAndWhereTheMouseGoes(t *testing.T) {
 	}{{709, 31, true}, {708, 31, false}, {1017, 0, true}, {1018, 0, false}, {863, 32, false}} {
 		if got := r.s.contains(c.x, c.y); got != c.want {
 			t.Errorf("folded: the pointer at %d,%d is on it: %v", c.x, c.y, got)
+		}
+	}
+}
+
+// islandView is an island that is out and armed, with a tester on its
+// window's content.
+func islandView(t *testing.T, lang string) (*islandRun, *ui.Tester) {
+	r := newIslandRun(t)
+	r.p.text = func(key string, vars map[string]string) string { return nativeTextFor(lang, key, vars) }
+	r.pass(1200*time.Millisecond, true)
+	f := r.s.frame()
+	return r, ui.NewTester(r.s.view, f.Width, f.Height)
+}
+
+// TestTrashIslandViewAsksEmptiesAndReports walks the reminder through its
+// phases on the island, by the clicks a user makes.
+func TestTrashIslandViewAsksEmptiesAndReports(t *testing.T) {
+	r, tt := islandView(t, "zh")
+	started, cancelled, closed := 0, 0, 0
+	r.p.start, r.p.cancel, r.p.close = func() { started++ }, func() { cancelled++ }, func() { closed++ }
+	for _, want := range []string{"废纸篓已占用 3.0 GB", "清空将永久删除其中的内容，无法恢复。", "暂不清理", "清空（永久删除）"} {
+		if !tt.HasText(want) {
+			t.Fatalf("the question lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if started != 0 {
+		t.Fatal("drawing it started the cleanup")
+	}
+	if err := tt.Click("清空（永久删除）"); err != nil {
+		t.Fatal(err)
+	}
+	if started != 1 || r.p.phase != "cleaning" {
+		t.Fatalf("after the click: started %d times, phase %q", started, r.p.phase)
+	}
+	r.p.freed = gb
+	tt.Frame()
+	for _, want := range []string{"正在清理，请稍候…", "已释放 1.0 GB", "33%", "取消"} {
+		if !tt.HasText(want) {
+			t.Fatalf("cleaning lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("取消"); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 1 || r.p.phase != "stopping" {
+		t.Fatalf("after cancel: cancelled %d times, phase %q", cancelled, r.p.phase)
+	}
+	tt.Frame()
+	if !tt.HasText("正在停止…") {
+		t.Fatalf("stopping: %q", tt.Texts())
+	}
+	if err := tt.Click("取消"); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 1 {
+		t.Fatal("cancel taken twice")
+	}
+	r.p.finish(CleanResult{Freed: gb}, true)
+	r.pass(0, true)
+	tt.Frame()
+	for _, want := range []string{"已停止清理", "已释放 1.0 GB", "已删除的内容无法恢复；新增、变化或无法删除的内容已保留在废纸篓中。", "关闭"} {
+		if !tt.HasText(want) {
+			t.Fatalf("the stopped result lacks %q: %q", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("关闭"); err != nil {
+		t.Fatal(err)
+	}
+	if closed != 1 {
+		t.Fatalf("closed %d times", closed)
+	}
+}
+
+// TestTrashIslandViewLaterDismisses: the other answer to the question.
+func TestTrashIslandViewLaterDismisses(t *testing.T) {
+	r, tt := islandView(t, "zh")
+	closed, started := 0, 0
+	r.p.close, r.p.start = func() { closed++ }, func() { started++ }
+	if err := tt.Click("暂不清理"); err != nil {
+		t.Fatal(err)
+	}
+	if closed != 1 || started != 0 || r.p.phase != "" {
+		t.Fatalf("closed %d times, started %d times, phase %q", closed, started, r.p.phase)
+	}
+}
+
+// TestTrashIslandViewDoesNotEmptyUntilArmed: a click on the button that
+// empties, in the second after the island came out by itself, deletes
+// nothing; the same click a moment later does.
+func TestTrashIslandViewDoesNotEmptyUntilArmed(t *testing.T) {
+	r := newIslandRun(t)
+	started := 0
+	r.p.start = func() { started++ }
+	r.pass(900*time.Millisecond, true)
+	f := r.s.frame()
+	tt := ui.NewTester(r.s.view, f.Width, f.Height)
+	if err := tt.Click("清空（永久删除）"); err != nil {
+		t.Fatal(err)
+	}
+	if started != 0 || r.p.phase != "" {
+		t.Fatalf("0.9 s after it showed: started %d times, phase %q", started, r.p.phase)
+	}
+	r.pass(300*time.Millisecond, true)
+	tt.Frame()
+	if err := tt.Click("清空（永久删除）"); err != nil {
+		t.Fatal(err)
+	}
+	if started != 1 || r.p.phase != "cleaning" {
+		t.Fatalf("1.2 s after it showed: started %d times, phase %q", started, r.p.phase)
+	}
+}
+
+// TestTrashIslandViewFoldedShowsTheStripAlone: folded, the island shows the
+// size, the progress or the outcome beside the notch, and nothing to click.
+func TestTrashIslandViewFoldedShowsTheStripAlone(t *testing.T) {
+	for _, c := range []struct {
+		phase string
+		freed int64
+		want  string
+	}{{"", 0, "3.0 GB"}, {"cleaning", gb + gb/2, "50%"}, {"stopping", gb + gb/2, "50%"}, {"partial", gb, "!"}, {"cancelled", gb, "!"}} {
+		r := newIslandRun(t)
+		r.pass(11*time.Second, false)
+		r.p.phase, r.p.freed, r.s.seen = c.phase, c.freed, c.phase
+		r.want(c.phase+": folded", islandCompact, 0)
+		f := r.s.frame()
+		tt := ui.NewTester(r.s.view, f.Width, f.Height)
+		if got := tt.Texts(); len(got) != 1 || got[0] != c.want {
+			t.Errorf("%q folded shows %q, want %q alone", c.phase, got, c.want)
+		}
+	}
+}
+
+// TestTrashIslandViewFits: in both languages, what each phase shows stays
+// inside the open island, clear of its rounded bottom and its sides.
+func TestTrashIslandViewFits(t *testing.T) {
+	last := map[string]string{
+		"":          "trash.popup.empty",
+		"cleaning":  "trash.popup.cancel",
+		"stopping":  "trash.popup.cancel",
+		"done":      "trash.popup.freed",
+		"partial":   "trash.popup.close",
+		"cancelled": "trash.popup.close",
+	}
+	for _, lang := range []string{"zh", "en"} {
+		for _, phase := range []string{"", "cleaning", "stopping", "done", "partial", "cancelled"} {
+			r, _ := islandView(t, lang)
+			r.p.phase, r.p.freed, r.s.seen = phase, gb, phase
+			r.s.shape = islandOpen
+			f := r.s.frame()
+			tt := ui.NewTester(r.s.view, f.Width, f.Height)
+			w, h := r.s.size()
+			left := float32(f.Width-w) / 2
+			text := r.p.text(last[phase], map[string]string{"size": growthSize(gb)})
+			at, ok := tt.Find(text)
+			if !ok {
+				t.Fatalf("%s %q: %q is not shown: %q", lang, phase, text, tt.Texts())
+			}
+			if bottom := at.Y + at.H; bottom > float32(h-12) {
+				t.Errorf("%s %q: %q reaches %.1f, into the last 12 points of a height of %d", lang, phase, text, bottom, h)
+			}
+			for _, s := range tt.Texts() {
+				r, ok := tt.Find(s)
+				if !ok {
+					continue
+				}
+				if r.X < left+12 || r.X+r.W > left+float32(w)-12 || r.Y+r.H > float32(h)-8 {
+					t.Errorf("%s %q: %q at %+v is outside the island, %d by %d from x %.1f", lang, phase, s, r, w, h, left)
+				}
+			}
+		}
+	}
+}
+
+// TestTrashIslandPreviews saves a picture of each phase and shape, in both
+// languages, where CLEANZO_TRASH_PREVIEWS names a folder.
+func TestTrashIslandPreviews(t *testing.T) {
+	dir := os.Getenv("CLEANZO_TRASH_PREVIEWS")
+	if dir == "" {
+		t.Skip("set CLEANZO_TRASH_PREVIEWS to save renders of the island")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"zh", "en"} {
+		for _, phase := range []string{"", "cleaning", "done", "partial", "cancelled"} {
+			for _, shape := range []islandShape{islandOpen, islandCompact} {
+				r, _ := islandView(t, lang)
+				r.p.phase, r.p.freed, r.s.seen, r.s.shape = phase, gb, phase, shape
+				name := phase
+				if name == "" {
+					name = "confirm"
+				}
+				form := "open"
+				if shape == islandCompact {
+					form = "folded"
+				}
+				f := r.s.frame()
+				out, err := os.Create(filepath.Join(dir, "island-"+lang+"-"+name+"-"+form+".png"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = png.Encode(out, ui.Render(r.s.view, f.Width, f.Height, 2))
+				if closeErr := out.Close(); err == nil {
+					err = closeErr
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
 	}
 }
