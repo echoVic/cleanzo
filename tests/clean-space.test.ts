@@ -14,7 +14,7 @@ import { diskScale } from "../src/react/clean/disk-scale";
 import { BACK_MIN, cameBack, daysSince, historyTotals, lastCleaned, regrown, whenText } from "../src/react/clean/history";
 import { CleanHistoryBody } from "../src/react/clean/CleanHistory";
 import { Dialog } from "../src/ui/components/dialog";
-import { GiB, goalLabel, goalSel, goalTier, parseGoal, planGoal, planSize } from "../src/react/clean/goal";
+import { GiB, goalLabel, goalPlanLines, goalSel, goalTier, parseGoal, planGoal, planSize } from "../src/react/clean/goal";
 
 beforeEach(() => {
   setLang("zh");
@@ -143,7 +143,7 @@ test("rows fall into four tiers: preselected caches, costly rows that come back,
 
 test("a goal inside what a scan selects narrows to the fewest rows, the last one the smallest that reaches it", () => {
   const plan = planGoal([cache("a", 4), cache("b", 3), cache("c", 2), cache("d", 1)], 5 * GB);
-  expect(plan).toEqual({ target: 5 * GB, ids: ["a", "d"], now: 5 * GB, later: 0, look: 0, reach: null });
+  expect(plan).toEqual({ target: 5 * GB, ids: ["a", "d"], now: 5 * GB, later: 0, look: 0, rough: 0, reach: null });
 });
 
 test("past the preselected rows a goal takes costly rows that come back, the smallest that reaches it", () => {
@@ -178,7 +178,7 @@ test("idle projects go longest untouched first, whatever their size", () => {
 
 test("a goal out of reach selects only what a scan selects by itself and says how much could be reached", () => {
   const plan = planGoal([cache("a", 6), costly("dev.playwright", 2), bin(3)], 50 * GB);
-  expect(plan).toEqual({ target: 50 * GB, ids: ["a"], now: 6 * GB, later: 0, look: 0, reach: 11 * GB });
+  expect(plan).toEqual({ target: 50 * GB, ids: ["a"], now: 6 * GB, later: 0, look: 0, rough: 0, reach: 11 * GB });
 });
 
 test("rows that cannot be cleaned now never enter a plan", () => {
@@ -202,6 +202,20 @@ test("a row with sub-items counts the ones a click on the row would select, and 
   const sel = goalSel(items, plan);
   expect([...sel.subSel.get(support.id)!]).toEqual(["/old"]);
   expect(items.reduce((n, it) => n + chosenSize(it, sel), 0)).toBe(plan.now + plan.later);
+});
+
+test("rows whose size is only an upper bound are counted on last within their class, and the plan says when it leans on one", () => {
+  const items = [cache("a", 3), cache("brew", 5, { estimate: true }), cache("b", 2)];
+  // 5 GB 用量准的两行就够：不动只知道上限的那一行。
+  expect(planGoal(items, 5 * GB)).toMatchObject({ ids: ["a", "b"], rough: 0 });
+  const plan = planGoal(items, 8 * GB);
+  expect(plan).toMatchObject({ ids: ["a", "b", "brew"], rough: 1 });
+  for (const lang of ["zh", "en"] as const) {
+    setLang(lang);
+    expect(goalPlanLines(plan, t, human)).toContain(t("goal.plan.rough", { n: 1 }));
+    expect(goalPlanLines(planGoal(items, 5 * GB), t, human)).not.toContain(t("goal.plan.rough", { n: 1 }));
+  }
+  setLang("zh");
 });
 
 test("a custom amount is a number of gigabytes from 1 up; anything else is no goal", () => {

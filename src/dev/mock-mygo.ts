@@ -854,7 +854,7 @@ function createRuntime(): Runtime {
       const rows = junkItems
         .filter((it) => it.default && !it.trash && !it.running && !it.problem && it.size > 0 && !settings.ignored.includes(it.id))
         .sort((a, b) => b.size - a.size)
-        .map((it) => ({ id: it.id, name: /^(app|custom|project):/.test(it.id) ? it.name : "", size: it.size }));
+        .map((it) => ({ id: it.id, name: /^(app|custom|project):/.test(it.id) ? it.name : "", size: it.size, recovery: it.recovery }));
       return { bytes: sum(rows), rows, at: Date.now() };
     },
     "Cleaner.CleanSafeSpace": async (ids, _measuredAt, ch) => cleanJunkMock(ids.map((id) => ({ id })), ch, "low-space"),

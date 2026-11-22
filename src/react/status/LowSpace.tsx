@@ -1,11 +1,15 @@
 import * as React from "react";
 import type { SafeSpace } from "../../mygo";
 import { errText, toast } from "../../shared";
-import { useT } from "../../ui/i18n-react";
+import { Button } from "../../ui/components/button";
+import {
+  Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "../../ui/components/dialog";
+import { useT, type DictKey } from "../../ui/i18n-react";
 import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import { statusApi } from "./api";
 import { fmtMem } from "./format";
-import { SAFE_ARM_MS, SAFE_FRESH_MS, SAFE_MIN, SAFE_RESULT_MS, safeNames } from "./safe-space";
+import { SAFE_FRESH_MS, SAFE_MIN, SAFE_RESULT_MS, safeDownloadBytes, safeNames, safeRowName } from "./safe-space";
 
 /** 现在几点、过一会儿再做一件事；测试换掉它们来拨钟。 */
 export const lowSpaceClock = {
@@ -24,15 +28,14 @@ export function forgetSafeSpace() {
 
 type State =
   | { kind: "idle" }
-  /** since：按钮出现的时刻。 */
-  | { kind: "ready"; space: SafeSpace; since: number }
+  | { kind: "ready"; space: SafeSpace }
   | { kind: "cleaning"; total: number; bytes: number }
   | { kind: "done"; freed: number; inUse: number };
 
 /**
  * 磁盘不足提示条的内容。停在页面上时量一次「扫描会自己勾上、直接删除」的那些行：
- * 够多就写明有多少、是哪几类，并给一个直接清掉它们的按钮；清理可以停，结果写回这一条。
- * 量不出来或太少时就是原来那一句和「去清理」。
+ * 够多就写明有多少、是哪几类，并给一个清掉它们的按钮。按钮先列出每一行让人确认，确认了才清；
+ * 清理可以停，结果写回这一条。量不出来或太少时就是原来那一句和「去清理」。
  * onHold：清理中和刚清完的一小会儿要求这一条留着，哪怕磁盘已经不算不足了。
  */
 export function LowSpaceNotice({ free, active, onGoClean, onHold }: {
@@ -40,6 +43,11 @@ export function LowSpaceNotice({ free, active, onGoClean, onHold }: {
 }) {
   const t = useT();
   const [state, setState] = React.useState<State>({ kind: "idle" });
+  /** 确认框里列着的那一份：打开时记下，确认以后清的就是它。confirming 是框开着没有。 */
+  const [listed, setListed] = React.useState<SafeSpace | null>(null);
+  const [confirming, setConfirming] = React.useState(false);
+  const listedRef = React.useRef(listed);
+  listedRef.current = listed;
   const stateRef = React.useRef(state);
   stateRef.current = state;
   const chanRef = React.useRef<{ close(): void } | null>(null);
@@ -49,25 +57,27 @@ export function LowSpaceNotice({ free, active, onGoClean, onHold }: {
     if (!active || stateRef.current.kind === "cleaning") return;
     const now = lowSpaceClock.now();
     if (measured && now - measured.when < SAFE_FRESH_MS) {
-      if (stateRef.current.kind === "idle") setState({ kind: "ready", space: measured.space, since: now });
+      if (stateRef.current.kind === "idle") setState({ kind: "ready", space: measured.space });
       return;
     }
     let live = true;
     statusApi.safeSpace().then((space) => {
       measured = { space, when: lowSpaceClock.now() };
-      if (live && stateRef.current.kind !== "cleaning") setState({ kind: "ready", space, since: lowSpaceClock.now() });
+      if (live && stateRef.current.kind !== "cleaning") setState({ kind: "ready", space });
     }, () => { /* 量不出来：留着原来那一句 */ });
     return () => { live = false; };
   }, [active]);
 
+  /** 清掉确认框里列着的那些行。 */
   const clean = async () => {
-    const s = stateRef.current;
-    if (s.kind !== "ready" || lowSpaceClock.now() - s.since < SAFE_ARM_MS) return;
-    const ids = s.space.rows.map((row) => row.id);
-    setState({ kind: "cleaning", total: s.space.bytes, bytes: 0 });
+    const space = listedRef.current;
+    setConfirming(false);
+    if (stateRef.current.kind !== "ready" || !space) return;
+    const ids = space.rows.map((row) => row.id);
+    setState({ kind: "cleaning", total: space.bytes, bytes: 0 });
     stoppedRef.current = false;
     forgetSafeSpace();
-    const { ch, done } = statusApi.cleanSafe(ids, s.space.at);
+    const { ch, done } = statusApi.cleanSafe(ids, space.at);
     chanRef.current = ch;
     let freed = 0, inUse = 0;
     try {
@@ -136,11 +146,49 @@ export function LowSpaceNotice({ free, active, onGoClean, onHold }: {
         )}
       </div>
       <div className="st-callout-actions">
-        {offer && <button className="btn primary small" type="button" onClick={() => void clean()}>{t("status.safe.clean", { size: fmtMem(offer.bytes) })}</button>}
+        {offer && (
+          <button className="btn primary small" type="button" onClick={() => { setListed(offer); setConfirming(true); }}>
+            {t("status.safe.clean", { size: fmtMem(offer.bytes) })}
+          </button>
+        )}
         {state.kind === "cleaning"
           ? <button className="btn ghost small" type="button" onClick={stop}>{t("clean.stop")}</button>
           : <button className="btn ghost small" type="button" onClick={onGoClean}>{t("status.disk.clean")}</button>}
       </div>
+      {listed && (
+        <Dialog open={confirming} onOpenChange={(v) => setConfirming(v)}>
+          <DialogContent className="action-review-dialog">
+            <DialogHeader>
+              <DialogTitle>{t("status.safe.title")}</DialogTitle>
+            </DialogHeader>
+            <DialogDescription>{t("clean.body.inUse")}</DialogDescription>
+            <div className="action-review-list">
+              {listed.rows.map((row) => (
+                <div className="action-review-row" key={row.id}>
+                  <div>
+                    <strong>{safeRowName(row)}</strong>
+                    <span className="tag dim">{t(`clean.recovery.${row.recovery}` as DictKey)}</span>
+                  </div>
+                  <span className="action-review-size">{fmtMem(row.size)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="action-review-total"><strong>{t("fs.review.total")}</strong><strong>{fmtMem(listed.bytes)}</strong></div>
+            <div className="action-review-cost small">
+              <p className="muted">
+                {safeDownloadBytes(listed.rows) > 0
+                  ? t("clean.cost.download", { size: fmtMem(safeDownloadBytes(listed.rows)) })
+                  : t("clean.cost.none")}
+              </p>
+            </div>
+            <p className="muted small">{t("clean.explain.deleteEffect")}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
+              <Button variant="destructive" onClick={() => void clean()}>{t("clean.confirm")}</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

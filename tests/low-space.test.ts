@@ -3,11 +3,12 @@ import "./setup-dom";
 import { setLang } from "./setup-dom";
 import type { JunkCleanEvent, SafeSpace } from "../src/mygo";
 import { ruleName, t } from "../src/i18n";
-import { changes, fakeStream, textOf } from "./page-harness";
+import { changes, fakeStream, nodes, textOf } from "./page-harness";
+import { Dialog } from "../src/ui/components/dialog";
 import { LowSpaceNotice, lowSpaceClock, forgetSafeSpace } from "../src/react/status/LowSpace";
 import { statusApi } from "../src/react/status/api";
 import { fmtMem } from "../src/react/status/format";
-import { SAFE_ARM_MS, SAFE_FRESH_MS, SAFE_MIN, safeNames } from "../src/react/status/safe-space";
+import { SAFE_FRESH_MS, SAFE_MIN, safeNames } from "../src/react/status/safe-space";
 
 beforeEach(() => {
   setLang("zh");
@@ -19,13 +20,13 @@ const GB = 2 ** 30;
 const space = (over: Partial<SafeSpace> = {}): SafeSpace => ({
   bytes: 6.5 * GB, at: 1_800_000_000_000,
   rows: [
-    { id: "dev.xcode", name: "", size: 3 * GB }, { id: "dev.npm", name: "", size: 2 * GB },
-    { id: "app:com.example.notes", name: "Notes", size: GB }, { id: "sys.logs", name: "", size: 0.5 * GB },
+    { id: "dev.xcode", name: "", size: 3 * GB, recovery: "rebuild" }, { id: "dev.npm", name: "", size: 2 * GB, recovery: "download" },
+    { id: "app:com.example.notes", name: "Notes", size: GB, recovery: "download" }, { id: "sys.logs", name: "", size: 0.5 * GB, recovery: "leftover" },
   ],
   ...over,
 });
 
-/** 一只可以拨的钟：按钮刚出现的那一下不接受点击。 */
+/** 一只可以拨的钟：量到的结果留多久看它。 */
 function clockAt(env: ReturnType<typeof changes>, start = 1_000_000) {
   let now = start;
   env.assign(lowSpaceClock, { now: () => now });
@@ -33,7 +34,22 @@ function clockAt(env: ReturnType<typeof changes>, start = 1_000_000) {
 }
 
 type Notice = ReturnType<ReturnType<typeof changes>["page"]>;
-const buttons = (h: Notice) => h.all().filter((n) => typeof n.props.onClick === "function").map((n) => textOf(n.props.children));
+/** 提示条上的按钮（确认框里的不算）。 */
+const buttons = (h: Notice) => h.all().filter((n) => typeof n.props.onClick === "function" && n.props.className?.startsWith("btn ")).map((n) => textOf(n.props.children));
+/** 确认框：开着没有，里面的文字和标签。 */
+function confirmBox(h: Notice) {
+  const box = h.ofType(Dialog)[0];
+  if (!box) return { open: false, text: "", tags: [] as string[] };
+  const tags = nodes(box.props.children).filter((n) => n.props.className === "tag dim").map((n) => textOf(n.props.children));
+  return { open: !!box.props.open, text: textOf(box.props.children), tags };
+}
+/** 点提示条上的清理按钮，再在确认框里确认。 */
+async function cleanConfirmed(h: Notice) {
+  h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
+  await h.settle();
+  h.click(t("clean.confirm"));
+  await h.settle();
+}
 
 test("low on space, the notice measures what a scan would select and delete, and offers it with the rows it holds", async () => {
   for (const lang of ["zh", "en"] as const) {
@@ -89,23 +105,34 @@ test("nothing is measured while the page is not showing", async () => {
   } finally { env.restore(); }
 });
 
-test("the offer takes no click in its first moment; then one press cleans the rows it showed and says what was freed", async () => {
+test("the offer cleans nothing by itself: it opens a list of every row with what brings it back, and cleans once that is confirmed", async () => {
   const env = changes();
   try {
-    const clock = clockAt(env);
     const cleanup = fakeStream<JunkCleanEvent>();
     let sent: unknown;
     env.assign(statusApi, { safeSpace: async () => space(), cleanSafe: (ids: string[], at: number) => { sent = { ids, at }; return cleanup; } });
     const h = env.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {} });
     await h.settle();
-    const label = t("status.safe.clean", { size: fmtMem(6.5 * GB) });
-    clock.advance(SAFE_ARM_MS - 1);
-    h.click(label);
+    expect(confirmBox(h).open).toBe(false);
+    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
     await h.settle();
     expect(sent).toBeUndefined();
-    clock.advance(1);
-    h.click(label);
+    const box = confirmBox(h);
+    expect(box.open).toBe(true);
+    for (const name of [ruleName("dev.xcode"), ruleName("dev.npm"), "Notes", ruleName("sys.logs")]) expect(box.text).toContain(name);
+    for (const size of [3 * GB, 2 * GB, GB, 0.5 * GB]) expect(box.text).toContain(fmtMem(size));
+    expect(box.tags).toEqual([t("clean.recovery.rebuild"), t("clean.recovery.download"), t("clean.recovery.download"), t("clean.recovery.leftover")]);
+    expect(box.text).toContain(t("clean.cost.download", { size: fmtMem(3 * GB) }));
+    expect(box.text).toContain(t("clean.explain.deleteEffect"));
+    // 取消：什么都不清。
+    expect(box.text).toContain(t("btn.cancel"));
+    h.ofType(Dialog)[0]!.props.onOpenChange(false);
     await h.settle();
+    expect(confirmBox(h).open).toBe(false);
+    expect(sent).toBeUndefined();
+    expect(buttons(h)).toEqual([t("status.safe.clean", { size: fmtMem(6.5 * GB) }), t("status.disk.clean")]);
+    await cleanConfirmed(h);
+    expect(confirmBox(h).open).toBe(false);
     expect(sent).toEqual({ ids: ["dev.xcode", "dev.npm", "app:com.example.notes", "sys.logs"], at: 1_800_000_000_000 });
     expect(buttons(h)).toEqual([t("clean.stop")]);
     cleanup.emit({ kind: "removed", id: "dev.xcode", path: "/x", bytes: 2 * GB });
@@ -126,17 +153,27 @@ test("the offer takes no click in its first moment; then one press cleans the ro
   } finally { env.restore(); }
 });
 
+test("rows that all come back without a network say so in the confirmation", async () => {
+  const env = changes();
+  try {
+    const rows = [{ id: "dev.xcode", name: "", size: 3 * GB, recovery: "rebuild" }, { id: "sys.logs", name: "", size: GB, recovery: "leftover" }];
+    env.assign(statusApi, { safeSpace: async () => space({ bytes: 4 * GB, rows }) });
+    const h = env.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {} });
+    await h.settle();
+    h.click(t("status.safe.clean", { size: fmtMem(4 * GB) }));
+    await h.settle();
+    expect(confirmBox(h).text).toContain(t("clean.cost.none"));
+  } finally { env.restore(); }
+});
+
 test("stopping ends the cleanup and keeps what was freed; a cleanup that fails says why", async () => {
   const env = changes();
   try {
-    const clock = clockAt(env);
     let cleanup = fakeStream<JunkCleanEvent>();
     env.assign(statusApi, { safeSpace: async () => space(), cleanSafe: () => cleanup });
     const h = env.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {} });
     await h.settle();
-    clock.advance(SAFE_ARM_MS);
-    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
-    await h.settle();
+    await cleanConfirmed(h);
     cleanup.emit({ kind: "done", id: "dev.xcode", bytes: 3 * GB, result: { name: "dev.xcode", freed: 3 * GB, trashed: 0, files: 9, inUse: 0, failed: [] } });
     await h.settle();
     h.click(t("clean.stop"));
@@ -150,14 +187,11 @@ test("stopping ends the cleanup and keeps what was freed; a cleanup that fails s
   const failing = changes();
   try {
     forgetSafeSpace();
-    const clock = clockAt(failing);
     const cleanup = fakeStream<JunkCleanEvent>();
     failing.assign(statusApi, { safeSpace: async () => space(), cleanSafe: () => cleanup });
     const h = failing.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {} });
     await h.settle();
-    clock.advance(SAFE_ARM_MS);
-    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
-    await h.settle();
+    await cleanConfirmed(h);
     cleanup.fail(new Error("disk error"));
     cleanup.end();
     await h.settle();
@@ -189,9 +223,7 @@ test("a measure is kept for ten minutes across visits, and taken again once it i
     await h.settle();
     expect(calls).toBe(2);
     // 清理过以后，量到的已经不作数。
-    clock.advance(SAFE_ARM_MS);
-    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
-    await h.settle();
+    await cleanConfirmed(h);
     cleanup.finish();
     await h.settle();
     h.setProps({ active: false });
@@ -205,7 +237,6 @@ test("a measure is kept for ten minutes across visits, and taken again once it i
 test("the notice asks to stay while it cleans and for a moment after, even once the disk is no longer low", async () => {
   const env = changes();
   try {
-    const clock = clockAt(env);
     const later: (() => void)[] = [];
     env.assign(lowSpaceClock, { later: (fn: () => void) => { later.push(fn); return 0; }, cancel: () => {} });
     const cleanup = fakeStream<JunkCleanEvent>();
@@ -214,9 +245,7 @@ test("the notice asks to stay while it cleans and for a moment after, even once 
     const h = env.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {}, onHold: (hold: boolean) => { holds.push(hold); } });
     await h.settle();
     expect(holds.at(-1) ?? false).toBe(false);
-    clock.advance(SAFE_ARM_MS);
-    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
-    await h.settle();
+    await cleanConfirmed(h);
     expect(holds.at(-1)).toBe(true);
     cleanup.emit({ kind: "done", id: "dev.xcode", bytes: 3 * GB, result: { name: "dev.xcode", freed: 3 * GB, trashed: 0, files: 9, inUse: 0, failed: [] } });
     cleanup.finish();
@@ -233,15 +262,12 @@ test("the notice asks to stay while it cleans and for a moment after, even once 
 test("a notice taken off the page while it cleans no longer asks to stay", async () => {
   const env = changes();
   try {
-    const clock = clockAt(env);
     const cleanup = fakeStream<JunkCleanEvent>();
     const holds: boolean[] = [];
     env.assign(statusApi, { safeSpace: async () => space(), cleanSafe: () => cleanup });
     const h = env.page(LowSpaceNotice, { free: 15 * GB, active: true, onGoClean: () => {}, onHold: (hold: boolean) => { holds.push(hold); } });
     await h.settle();
-    clock.advance(SAFE_ARM_MS);
-    h.click(t("status.safe.clean", { size: fmtMem(6.5 * GB) }));
-    await h.settle();
+    await cleanConfirmed(h);
     expect(holds.at(-1)).toBe(true);
     h.close();
     expect(holds.at(-1)).toBe(false);

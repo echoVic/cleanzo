@@ -45,10 +45,14 @@ function classKey(it: JunkItem): string {
   return `${goalTier(it)}${it.default ? 0 : 1}${recoveryOf(it) === "gone" ? 1 : 0}`;
 }
 
-/** 取用顺序：先比类，再比闲置（越久没动越靠前，不知道的排在知道的后面），再比大小（大的在前）。 */
+/**
+ * 取用顺序：先比类；同一类里量准的在前，大小只是上限（「最多」）的在后；
+ * 再比闲置（越久没动越靠前，不知道的排在知道的后面），再比大小（大的在前）。
+ */
 export function goalOrder(items: JunkItem[]): JunkItem[] {
   return items.filter((it) => planSize(it) > 0).sort((a, b) =>
     Number(classKey(a)) - Number(classKey(b))
+    || Number(a.estimate) - Number(b.estimate)
     || (b.idleDays ?? -1) - (a.idleDays ?? -1)
     || planSize(b) - planSize(a)
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -65,6 +69,8 @@ export interface GoalPlan {
   later: number;
   /** 其中扫描自己不会勾的行数：需要你确认。 */
   look: number;
+  /** 其中大小只是上限的行数：实际腾出的可能少一些。 */
+  rough: number;
   /** 够不着目标时，全部能清的加起来是多少；够得着时为 null。 */
   reach: number | null;
 }
@@ -72,7 +78,8 @@ export interface GoalPlan {
 /**
  * 按目标算出要勾的行。
  * 够得着：按取用顺序一行行取到够为止；最后一行换成同一类里刚好够的最小一行（有闲置天数的类不换，
- * 那里越久没动越先取）；再从最后往前，把去掉以后仍然够的行去掉。
+ * 那里越久没动越先取）；再从最后往前，把去掉以后仍然够的行去掉。量准的行只有在别的量准的行
+ * 加起来已经够时才去掉：不靠只知道上限的行来顶它的位置。
  * 够不着：只勾扫描自己会勾的那些，其余的留给用户选。
  */
 export function planGoal(items: JunkItem[], target: number): GoalPlan {
@@ -93,15 +100,18 @@ export function planGoal(items: JunkItem[], target: number): GoalPlan {
     if (last && last.idleDays == null) {
       const need = left + planSize(last);
       const fit = order.slice(order.indexOf(last) + 1)
-        .filter((it) => classKey(it) === classKey(last) && it.idleDays == null && planSize(it) >= need)
+        .filter((it) => classKey(it) === classKey(last) && it.estimate === last.estimate && it.idleDays == null && planSize(it) >= need)
         .pop();
       if (fit) taken[taken.length - 1] = fit;
     }
     let sum = taken.reduce((n, it) => n + planSize(it), 0);
+    let exact = taken.filter((it) => !it.estimate).reduce((n, it) => n + planSize(it), 0);
     for (let i = taken.length - 1; i >= 0; i--) {
-      const size = planSize(taken[i]!);
-      if (sum - size >= target) {
+      const row = taken[i]!;
+      const size = planSize(row);
+      if (row.estimate ? sum - size >= target : exact - size >= target) {
         sum -= size;
+        if (!row.estimate) exact -= size;
         taken.splice(i, 1);
       }
     }
@@ -112,6 +122,7 @@ export function planGoal(items: JunkItem[], target: number): GoalPlan {
     now: taken.filter((it) => !it.trash).reduce((n, it) => n + planSize(it), 0),
     later: taken.filter((it) => it.trash).reduce((n, it) => n + planSize(it), 0),
     look: taken.filter((it) => !it.default).length,
+    rough: taken.filter((it) => it.estimate).length,
     reach: reach < target ? reach : null,
   };
 }
@@ -146,5 +157,6 @@ export function goalPlanLines(plan: GoalPlan, t: TFn, human: (n: number) => stri
     plan.look === 0 && plan.later === 0 ? t("goal.plan.safe") : "",
     plan.look > 0 ? t("goal.plan.look", { n: plan.look }) : "",
     plan.later > 0 ? t("goal.plan.later", { size: human(plan.later) }) : "",
+    plan.rough > 0 ? t("goal.plan.rough", { n: plan.rough }) : "",
   ].filter(Boolean);
 }

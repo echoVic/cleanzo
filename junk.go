@@ -612,12 +612,12 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 	}
 	for _, folder := range env.settings.Custom {
+		if !folder.Enabled || env.traversalBlocked(folder.Path) || !safeToClean(folder.Path) || env.protected(folder.Path) {
+			continue
+		}
 		if env.safeOnly {
 			// A custom folder goes to the Trash: it is no safe row, and stays whole.
 			claims.claim(folder.Path)
-			continue
-		}
-		if !folder.Enabled || env.traversalBlocked(folder.Path) || !safeToClean(folder.Path) || env.protected(folder.Path) {
 			continue
 		}
 		spec := itemSpec{item: JunkItem{ID: "custom:" + folder.Path, Group: string(groupCustom), Name: folder.Name, Size: -1, Default: true, Trash: true, Recovery: string(customRecovery)}}

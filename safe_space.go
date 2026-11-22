@@ -19,9 +19,10 @@ type SafeSpace struct {
 
 // SafeSpaceRow is a row of the measure.
 type SafeSpaceRow struct {
-	ID   string `json:"id"`
-	Name string `json:"name"` // the name to show, for a row that is no catalog rule
-	Size int64  `json:"size"`
+	ID       string `json:"id"`
+	Name     string `json:"name"` // the name to show, for a row that is no catalog rule
+	Size     int64  `json:"size"`
+	Recovery string `json:"recovery"` // what brings the contents back, as JunkItem.Recovery
 }
 
 // measureSafeSpace measures the rows a scan selects by itself and deletes
@@ -36,7 +37,7 @@ func measureSafeSpace(ctx context.Context, env junkEnv) SafeSpace {
 		if it.Size <= 0 || it.Running || it.Denied || it.Problem != "" {
 			continue
 		}
-		space.Rows = append(space.Rows, SafeSpaceRow{ID: it.ID, Name: it.Name, Size: it.Size})
+		space.Rows = append(space.Rows, SafeSpaceRow{ID: it.ID, Name: it.Name, Size: it.Size, Recovery: it.Recovery})
 		space.Bytes += it.Size
 	}
 	slices.SortStableFunc(space.Rows, func(a, b SafeSpaceRow) int { return cmp.Compare(b.Size, a.Size) })

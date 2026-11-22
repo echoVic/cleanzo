@@ -115,8 +115,9 @@ func cleanJunkRecorded(ctx context.Context, env junkEnv, selections []JunkSelect
 // recordCleanup adds a cleanup that just ended to the record, when it
 // removed anything.
 func recordCleanup(source string, results []CleanResult, names map[string]string) {
-	if rec, ok := newCleanRecord(source, results, names, now()); ok {
-		_ = appendCleanRecord(cleanHistoryPath(), rec, now())
+	at := now()
+	if rec, ok := newCleanRecord(source, results, names, at); ok {
+		_ = appendCleanRecord(cleanHistoryPath(), rec, at)
 	}
 }
 

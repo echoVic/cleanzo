@@ -9,9 +9,6 @@ export const SAFE_MIN = 500 * 2 ** 20;
 /** 量过一次以后这么久以内再进页面不重新量。 */
 export const SAFE_FRESH_MS = 10 * 60_000;
 
-/** 按钮是自己冒出来的：出现后这么久以内不接受点击，免得原本点别处的一下点到它。 */
-export const SAFE_ARM_MS = 600;
-
 /** 清完以后结果在提示条上留这么久；磁盘还是不足的话这一条本来就在。 */
 export const SAFE_RESULT_MS = 8000;
 
@@ -20,6 +17,11 @@ type T = (key: DictKey, vars?: Record<string, string | number>) => string;
 /** 行的名字：规则行按当前语言取名，应用缓存用后端给的名字。 */
 export function safeRowName(row: SafeSpaceRow): string {
   return row.name || ruleName(row.id);
+}
+
+/** 清掉以后要联网才会回来的那一份有多大。 */
+export function safeDownloadBytes(rows: readonly SafeSpaceRow[]): number {
+  return rows.filter((row) => row.recovery === "download").reduce((n, row) => n + row.size, 0);
 }
 
 /** 提示里点名最大的几行；还有别的就补上一共几类。 */

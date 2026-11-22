@@ -54,6 +54,10 @@ func TestSafeSpaceIsWhatAScanSelectsAndDeletes(t *testing.T) {
 	if space.Rows[1].Name != "com.example.notes" || space.Rows[0].Name != "" {
 		t.Fatalf("names = %+v", space.Rows)
 	}
+	// Each row says what brings it back, and none stays gone.
+	if got := []string{space.Rows[0].Recovery, space.Rows[1].Recovery, space.Rows[2].Recovery}; !slices.Equal(got, []string{string(recoverDownload), string(recoverDownload), string(recoverLeftover)}) {
+		t.Fatalf("recovery = %v", got)
+	}
 	// What a full scan selects by itself and deletes is the same set.
 	items, _ := scanJunk(context.Background(), env, nil, nil)
 	var want []string

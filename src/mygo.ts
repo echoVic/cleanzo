@@ -1031,6 +1031,8 @@ export interface SafeSpaceRow {
   /** the name to show, for a row that is no catalog rule */
   name: string;
   size: number;
+  /** what brings the contents back, as JunkItem.Recovery */
+  recovery: string;
 }
 
 /** ScanSummary closes a junk scan. */

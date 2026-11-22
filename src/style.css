@@ -1040,6 +1040,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .clean-history-back h3 { margin: 0 0 2px; font-size: 13px; font-weight: 620; }
 .clean-history-list { max-height: 38vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 0 14px; }
 .clean-history-list summary .tag { margin-left: 8px; }
+.action-review-row strong + .tag { margin-left: 8px; }
 .action-review-cost { margin-top: 8px; }
 .action-review-cost p { margin: 0; line-height: 1.6; }
 .cleanup-results { margin: 20px 0; padding: 18px 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
