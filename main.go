@@ -2008,6 +2008,9 @@ func cleanzoContextMenu(e *mygo.ContextMenuEvent, locale string) {
 }
 
 func main() {
+	if islandCheck() {
+		return
+	}
 	// Apply the saved appearance before the first window paints.
 	setThemeSource(mygo.ThemeSource(loadThemePreference()))
 	mygo.App.SetLanguages("en", "zh-Hans")
