@@ -254,7 +254,13 @@ func (s *trashIsland) view(c *ui.Context) {
 	ui.Column(c).Fill().AlignItems(ui.Center).Children(func() {
 		box := ui.Column(c.Key("island"))
 		bw, bh, br := box.AnimateTo("w", float32(w), islandSpring), box.AnimateTo("h", float32(h), islandSpring), box.AnimateTo("r", radius, islandSpring)
-		box.Size(bw, bh).Shrink(0).Radius(0, 0, br, br).Background(islandBlack).Clip().AlignItems(ui.Center).Children(func() {
+		box.Size(bw, bh).Shrink(0).Radius(0, 0, br, br).Clip().AlignItems(ui.Center)
+		// Its window shows a moment before the island comes out, so that it
+		// grows from the notch's own size: nothing is drawn until then.
+		if s.shape == islandRest && !s.leaving {
+			return
+		}
+		box.Background(islandBlack).Children(func() {
 			s.strip(c, t)
 			if s.shape == islandOpen {
 				s.body(c, t)
@@ -539,12 +545,17 @@ func (o *trashIslandOnScreen) unwatch() {
 	o.stops = nil
 }
 
+// islandPanelError is why the last island could not be placed. The main
+// thread's.
+var islandPanelError error
+
 // openIsland shows the reminder at the notch n. It reports false where the
 // island's window cannot be kept there.
 func (r *trashReminderRun) openIsland(n islandNotch) (trashIslandSurface, bool) {
 	island := newTrashIsland(r.p, n, time.Now)
-	panel, ok := openIslandPanel(island.frame(), nativeText("trash.popup.title", nil), island.view)
-	if !ok {
+	panel, err := openIslandPanel(island.frame(), nativeText("trash.popup.title", nil), island.view)
+	if err != nil {
+		islandPanelError = err
 		return nil, false
 	}
 	o := &trashIslandOnScreen{trashIslandShow: &trashIslandShow{
@@ -586,5 +597,13 @@ func (r *trashReminderRun) openIsland(n islandNotch) (trashIslandSurface, bool) 
 	r.p.close, r.p.resize = o.leave, nil
 	o.stops = []func(){watchIslandPointer(o.pointerMoved), mygo.Screen.OnDisplaysChanged(r.displaysChanged)}
 	o.start()
+	// The system settles where the window is on the turn after it shows,
+	// and may one day keep it under the menu bar: the reminder then goes on
+	// in a window, before the island would come out.
+	o.after(islandOpenDelay/2, func() {
+		if !o.over && panel.win.Bounds() != o.s.frame() {
+			r.islandMisplaced()
+		}
+	})
 	return o, true
 }

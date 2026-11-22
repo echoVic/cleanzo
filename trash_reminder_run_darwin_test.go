@@ -311,3 +311,25 @@ func TestTrashReminderTellsThePageWhetherADisplayHasANotch(t *testing.T) {
 		t.Fatalf("without a notch: %+v", got)
 	}
 }
+
+// TestTrashReminderWhoseIslandIsNotAtTheNotchGoesOnInAWindow: where the
+// system did not leave the island's window at the notch, the reminder shows
+// in a window, and so do the reminders after it.
+func TestTrashReminderWhoseIslandIsNotAtTheNotchGoesOnInAWindow(t *testing.T) {
+	s := fakeTrashScreen(t)
+	ended := 0
+	r := newTrashReminderRun(trashReminderSnapshot{Size: 2 * gb}, func() { ended++ })
+	r.show()
+	r.islandMisplaced()
+	if got := s.kinds(); !slices.Equal(got, []string{"island", "window"}) || !s.opened[0].discarded || ended != 0 {
+		t.Fatalf("shown on %v, the island discarded: %v, ended %d times", got, s.opened[0].discarded, ended)
+	}
+	r.islandMisplaced()
+	if got := s.kinds(); len(got) != 2 {
+		t.Fatalf("told twice: shown on %v", got)
+	}
+	newTrashReminderRun(trashReminderSnapshot{Size: 2 * gb}, func() {}).show()
+	if got := s.kinds(); !slices.Equal(got, []string{"island", "window", "window"}) {
+		t.Fatalf("the next reminder shows on %v", got)
+	}
+}

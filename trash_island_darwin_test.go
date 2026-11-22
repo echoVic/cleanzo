@@ -348,6 +348,32 @@ func TestTrashIslandViewAsksEmptiesAndReports(t *testing.T) {
 	}
 }
 
+// TestTrashIslandViewShowsNothingUntilItComesOut: its window shows a moment
+// before the island grows out of the notch, and must show nothing then,
+// wherever the system put it.
+func TestTrashIslandViewShowsNothingUntilItComesOut(t *testing.T) {
+	r := newIslandRun(t)
+	f := r.s.frame()
+	tt := ui.NewTester(r.s.view, f.Width, f.Height)
+	at := func() uint8 { return tt.Image().RGBAAt(f.Width/2, r.s.notch.Height/2).A }
+	if a := at(); a != 0 {
+		t.Fatalf("before it comes out, the middle of the notch is drawn with alpha %d", a)
+	}
+	if got := tt.Texts(); len(got) != 0 {
+		t.Fatalf("before it comes out it shows %q", got)
+	}
+	r.pass(time.Second, false)
+	tt.Frame()
+	if a := at(); a != 255 {
+		t.Fatalf("out of the notch, the middle of the notch is drawn with alpha %d", a)
+	}
+	r.s.leave()
+	tt.Frame()
+	if a := at(); a != 255 {
+		t.Fatalf("going back, the middle of the notch is drawn with alpha %d", a)
+	}
+}
+
 // TestTrashIslandViewLaterDismisses: the other answer to the question.
 func TestTrashIslandViewLaterDismisses(t *testing.T) {
 	r, tt := islandView(t, "zh")

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"math"
 	"sync"
 	"time"
@@ -132,15 +133,16 @@ type islandPanel struct {
 }
 
 // openIslandPanel shows a panel at frame, whose top is the top of the
-// display with the notch. It reports false where the panel cannot be kept
-// there, as AppKit or mygo may one day decide; nothing shows then.
-func openIslandPanel(frame mygo.Rectangle, title string, view func(*ui.Context)) (*islandPanel, bool) {
+// display with the notch. It fails where mygo's panel cannot be made one
+// that stays there; nothing shows then. Where the window is settles on the
+// turn after this one: AppKit has it under the menu bar until then.
+func openIslandPanel(frame mygo.Rectangle, title string, view func(*ui.Context)) (*islandPanel, error) {
 	if !appKitInit() {
-		return nil, false
+		return nil, errors.New("AppKit is not there")
 	}
 	class := islandPanelClass()
 	if class == 0 {
-		return nil, false
+		return nil, errors.New("mygo's panel is not the class it was")
 	}
 	w := mygo.NewWindow(mygo.WindowOptions{
 		Title: title, Panel: true, Hidden: true, Frameless: true, Transparent: true,
@@ -149,7 +151,7 @@ func openIslandPanel(frame mygo.Rectangle, title string, view func(*ui.Context))
 		Content: ui.View(view),
 	})
 	p := &islandPanel{win: w}
-	placed := false
+	err := errors.New("the window has no native handle")
 	withPool(func() {
 		h := objc.ID(w.NativeHandle())
 		if h == 0 {
@@ -163,13 +165,13 @@ func openIslandPanel(frame mygo.Rectangle, title string, view func(*ui.Context))
 		w.SetBounds(frame)
 		w.ShowInactive()
 		h.Send(nsSel("setLevel:"), islandLevel)
-		placed = w.Bounds() == frame
+		err = nil
 	})
-	if !placed {
+	if err != nil {
 		w.Destroy()
-		return nil, false
+		return nil, err
 	}
-	return p, true
+	return p, nil
 }
 
 func (p *islandPanel) place(r mygo.Rectangle) { p.win.SetBounds(r) }

@@ -108,6 +108,23 @@ func (r *trashReminderRun) displaysChanged() {
 		r.island.moveTo(n)
 		return
 	}
+	r.intoWindow()
+}
+
+// islandMisplaced is told once the system did not leave the island's window
+// at the notch: this reminder goes on in a window, and those after it show
+// in one.
+func (r *trashReminderRun) islandMisplaced() {
+	islandUnplaceable.Store(true)
+	r.intoWindow()
+}
+
+// intoWindow takes a reminder at the notch into a window, where it goes on
+// from where it was.
+func (r *trashReminderRun) intoWindow() {
+	if r.island == nil || !r.alive.Load() {
+		return
+	}
 	old := r.island
 	r.island = nil
 	r.surface = openTrashWindow(r)
