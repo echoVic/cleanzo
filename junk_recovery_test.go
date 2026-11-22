@@ -3,7 +3,8 @@ package main
 import "testing"
 
 // TestEveryRuleSaysWhatBringsItBack checks that both catalogs' rules each
-// have one recovery kind, and that the table names no rule that is gone.
+// have one recovery kind, and that the table names no rule that is in
+// neither catalog.
 func TestEveryRuleSaysWhatBringsItBack(t *testing.T) {
 	known := map[string]bool{}
 	for _, rules := range [][]Rule{darwinJunkRules, windowsJunkRules} {

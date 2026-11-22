@@ -28,12 +28,12 @@ Or download from [Releases](https://github.com/echoVic/cleanzo/releases):
 
 ## Features
 
-- **Junk cleanup**: grouped into system junk, app caches, browser caches, update leftovers, developer tools, items that need confirmation, and custom folders. Expand each item and stop at any time. Regenerable caches are deleted; your own files only go to the Trash.
+- **Junk cleanup**: grouped into system junk, app caches, browser caches, update leftovers, developer tools, items that need confirmation, and custom folders. Expand each item and stop at any time. Regenerable caches are deleted; your own files only go to the Trash. Name an amount to free up (say 20 GB) and it selects just enough rows; the confirmation says what brings each row back; a row cleaned before says how many days ago and whether it grew back.
 - **AI and developer tools**: sessions and caches from Claude Code, Codex and TRAE, local models for Ollama, HuggingFace and LM Studio, and caches from npm, pnpm, Bun, uv, pip, Cargo, Go and Xcode. Models are unchecked by default.
 - **Claude Code's Running tab and agent worktrees** (macOS): lists open sessions and the processes closed sessions left running (dev servers and the like, with their ports), each ended by hand after a confirmation; worktrees that Claude Code and Codex made in your repositories can be moved to the Trash whole, with the branch left in the repository, uncommitted changes called out, and worktrees in use left unselectable.
 - **Space and files**: disk usage and the largest folders, which can be expanded and moved to the Trash; large-file scans by size and groups of similar photos.
 - **Apps**: one list with version, size, last opened and seven-day growth; update checks through the App Store, Homebrew, Sparkle and electron-updater, plus uninstalling and finding leftovers.
-- **System status and processes** (macOS): chip, memory, disk, network, battery and thermal readings; processes are merged by app so you can see what is using CPU and memory; the menu bar can show CPU, memory, network and more.
+- **System status and processes** (macOS): chip, memory, disk, network, battery and thermal readings; processes are merged by app so you can see what is using CPU and memory; the menu bar can show CPU, memory, network and more. When the disk is nearly full, the status page says how much in caches and logs is safe to clean and cleans it there, after listing it for you to confirm.
 - **Skills**: collects skill folders from `~/.agents`, Claude Code, Codex, Gemini CLI, OpenCode and others, and marks broken symlinks, duplicates and diverged copies.
 - **Chinese and English interfaces** that can follow the system; light, dark and system appearance.
 

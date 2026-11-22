@@ -12,7 +12,18 @@
   Gradle, Maven, Homebrew downloads) and items that need review (iOS backups,
   Xcode archives, DeviceSupport, installers found in Downloads/Desktop/Documents,
   unfinished downloads, Mail attachments, unavailable simulators). Items that do
-  not exist are not listed; items that measure to zero are hidden.
+  not exist are not listed; items that measure to zero are hidden. After a
+  scan, naming an amount to free up (5, 10, 20, 50 GB or any number) selects
+  just enough rows: the ones a scan selects by itself first, then rows that
+  come back at the cost of a download, then the Trash, and rows bound for the
+  Trash last. It only selects; cleaning still goes through the confirmation,
+  which says for each row what brings it back (rebuilds itself, downloads
+  again, no longer needed, stays gone) and adds up what needs a network and
+  what stays gone. A bar places the selection inside the whole disk.
+- **Cleanup history**: what each cleanup removed is kept on the computer only,
+  for a year at most, and can be cleared. A row cleaned before says how many
+  days ago and how much; one that holds most of that again within two weeks is
+  marked as grown back.
 - **Space analysis**: disk usage on entry, largest folders ranked, expandable,
   selectable and movable to the Trash, with streaming progress that can be
   stopped.
@@ -27,7 +38,11 @@
 - **System status (macOS)**: model, chip, cores, GPU, memory, disk, displays;
   thermal state, chip temperature, fan speed and package power; per-core CPU,
   GPU, memory, SSD health/wear/writes/temperature/throughput, network and
-  battery. No admin rights required.
+  battery. No admin rights required. With less than 20 GB free, the low disk
+  space notice measures the caches and logs a scan would select by itself and
+  delete outright, names them, and cleans them from there after listing every
+  row and asking; it reads neither Downloads, Desktop, Documents nor the Trash
+  to do so.
 - **Processes (macOS)**: CPU and memory grouped by app, quit and force-quit, and
   a per-app disk growth tab built from daily snapshots (today / 7 days /
   30 days). Claude Code's processes are one row, tagged with how many sessions
