@@ -132,9 +132,9 @@ function createRuntime(): Runtime {
   };
 
   const installers: SubItem[] = [
-    { path: home("~/Downloads/Xcode_26.xip"), name: "Xcode_26.xip", detail: "~/Downloads", size: 2.9 * GB, default: false, ageDays: 41 },
-    { path: home("~/Downloads/Docker.dmg"), name: "Docker.dmg", detail: "~/Downloads", size: 486 * MB, default: false, ageDays: 12 },
-    { path: home("~/Desktop/Cleanzo 0.2.3 arm64.dmg"), name: "Cleanzo 0.2.3 arm64.dmg", detail: "~/Desktop", size: 18 * MB, default: false, ageDays: 0 },
+    { path: home("~/Downloads/Xcode_26.xip"), name: "Xcode_26.xip", detail: "~/Downloads", size: 2.9 * GB, default: true, ageDays: 41 },
+    { path: home("~/Downloads/Docker.dmg"), name: "Docker.dmg", detail: "~/Downloads", size: 486 * MB, default: true, ageDays: 12 },
+    { path: home("~/Desktop/Cleanzo 0.2.3 arm64.dmg"), name: "Cleanzo 0.2.3 arm64.dmg", detail: "~/Desktop", size: 18 * MB, default: true, ageDays: 0 },
   ];
   // nvm 的默认版本不列出；其余每个版本是一个子项，子项默认勾上，整行不预选。
   const nodeVersions: SubItem[] = [
@@ -158,7 +158,7 @@ function createRuntime(): Runtime {
     ] }),
     junk("sys.temp", "system", "临时文件", 860 * MB, "/private/var/folders/demo/T/TemporaryItems"),
     junk("sys.apple", "system", "系统服务缓存", 2.4 * GB, "~/Library/Caches/com.apple.Music"),
-    junk("sys.trash", "system", "废纸篓", 1.8 * GB, "~/.Trash"),
+    junk("sys.trash", "system", "废纸篓", 1.8 * GB, "~/.Trash", { default: false }),
     junk("app:com.microsoft.vscode", "apps", "Visual Studio Code", 740 * MB, "~/Library/Application Support/Code/Cache"),
     junk("app:com.tencent.xinwechat", "apps", "微信", 1.9 * GB, "~/Library/Containers/com.tencent.xinWeChat/Data/Library/Caches"),
     junk("app:com.bytedance.lark", "apps", "飞书", 3.1 * GB, "~/Library/Caches/com.bytedance.lark"),

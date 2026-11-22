@@ -398,13 +398,13 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   color: var(--fg);
+  /* 上下两行：.hero-main 是数字和主按钮，.hero-more 是整盘比例和「腾出」的档位 */
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  flex-direction: column;
   position: relative;
   overflow: hidden;
 }
+.hero-main { display: flex; align-items: center; justify-content: space-between; gap: 20px; position: relative; }
 .hero::before {
   content: "";
   position: absolute;
@@ -459,7 +459,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .banner-actions { position: relative; z-index: 1; flex-shrink: 0; }
 .hero-spark {
   position: absolute;
-  right: 190px;
+  right: 164px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--accent);
@@ -469,7 +469,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .hero-spark svg { width: 120px; height: 120px; }
 
 @media (max-width: 760px) {
-  .hero { flex-wrap: wrap; }
+  .hero-main { flex-wrap: wrap; }
   .banner-actions { width: 100%; }
   .banner-actions .btn { width: 100%; }
 }
@@ -2019,6 +2019,20 @@ img.cz-app-img { background: none; border-radius: 0; box-shadow: none; object-fi
 .hero-prog-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; max-width: 520px; }
 .hero-prog-row .hero-progress { margin-top: 0; flex: 1; width: auto; }
 .hero-prog-count { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hero-more { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.hero-goal { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.hero-goal-label { margin-right: 2px; color: var(--muted); font-weight: 590; }
+.goal-chip { padding: 3px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--btn-bg); color: var(--fg); font-size: 12px; font-weight: 590; font-variant-numeric: tabular-nums; cursor: pointer; transition: background var(--t-fade) ease, border-color var(--t-fade) ease, color var(--t-fade) ease; }
+.goal-chip:hover:not(:disabled) { background: var(--hover); }
+.goal-chip:disabled { opacity: 0.45; cursor: default; }
+.goal-chip[aria-pressed="true"] { border-color: var(--accent-solid); background: var(--accent-soft); color: var(--accent-strong); }
+.goal-chip:focus-visible, .goal-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.goal-custom { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; }
+.goal-input { width: 52px; padding: 3px 7px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--card); color: var(--fg); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.goal-unit { color: var(--muted); }
+.goal-plan { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bg-subtle); border-left: 3px solid var(--accent-solid); font-size: 12px; line-height: 1.7; }
+.goal-plan .btn { flex-shrink: 0; }
+:lang(en) .goal-plan-text span + span { margin-left: 0.3em; }
 .junk-row { transition: opacity var(--t-state) linear; }
 .junk-fold svg, .junk-expand svg { transition: transform var(--t-layout) var(--e-move); }
 .cat-note-text.ok { display: inline-flex; align-items: center; gap: 4px; }

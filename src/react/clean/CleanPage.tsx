@@ -29,8 +29,9 @@ import {
   isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible, problemKey, projectPath,
   recoveryOf, removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
-  type CleanPlan, type RowState, type ScanState, emptySel,
+  type CleanPlan, type JunkSel, type RowState, type ScanState, emptySel,
 } from "./helpers";
+import { GOAL_PRESETS, GiB, goalPlanLines, goalSel, parseGoal, planGoal, planSize, type GoalPlan } from "./goal";
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";
 
@@ -105,6 +106,9 @@ export function CleanPage() {
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [plan, setPlan] = React.useState<CleanPlan | null>(null);
   const [barHold, setBarHold] = React.useState(false);
+  /** 按目标勾选的计划：sel 是它给出的勾选，before 是用计划之前的勾选（撤销时放回）。 */
+  const [goal, setGoal] = React.useState<{ plan: GoalPlan; sel: JunkSel; before: JunkSel } | null>(null);
+  const [goalText, setGoalText] = React.useState("");
   const heroRef = React.useRef<HTMLDivElement>(null);
   const heroNumRef = React.useRef<HTMLSpanElement>(null);
   const appsRowsRef = React.useRef<HTMLDivElement>(null);
@@ -248,6 +252,8 @@ export function CleanPage() {
     setScanStopped(false);
     setScanningPath("");
     setMenuID(null);
+    setGoal(null);
+    setGoalText("");
     setExpanded(new Set());
     setRowStates(new Map());
     setProgress({ total: 0, bytes: 0, id: "", path: "", stopped: false, error: "" });
@@ -412,6 +418,34 @@ export function CleanPage() {
     document.querySelector<HTMLButtonElement>('.nav-item[data-view="settings"]')?.click();
   };
 
+  // ---- 按目标腾空间 ----
+
+  // 计划只在勾选还是它给出的那一份时算数：手动改过一次，它就不再是「计划」。
+  const goalOn = phase === "scanned" && goal !== null && goal.sel === st.sel;
+
+  /** 按要腾出的量（GB）重新勾选；只勾选，清理仍然走确认框。 */
+  const applyGoal = (gb: number) => {
+    if (phase !== "scanned" || ignoring) return;
+    const plan = planGoal(st.items, gb * GiB);
+    const sel = goalSel(st.items, plan);
+    setGoal({ plan, sel, before: goalOn ? goal.before : st.sel });
+    setSt((prev) => ({ ...prev, sel }));
+    // 需要确认的行要让人看得见：所在的分组展开，应用缓存里排在后面的也露出来。
+    const look = st.items.filter((it) => plan.ids.includes(it.id) && !it.default);
+    if (look.length > 0) {
+      setCollapsed((prev) => new Set([...prev].filter((g) => !look.some((it) => it.group === g))));
+      if (look.some((it) => it.group === "apps")) setShowAllApps(true);
+    }
+  };
+
+  /** 放回用计划之前的勾选。 */
+  const undoGoal = () => {
+    if (!goalOn) return;
+    const before = goal.before;
+    setGoal(null);
+    setSt((prev) => ({ ...prev, sel: before }));
+  };
+
   // ---- hero 派生 ----
 
   const eligible = st.items.filter(isSelectable);
@@ -507,6 +541,9 @@ export function CleanPage() {
           : phase === "cleaned"
             ? [heroValue === null ? "" : `${heroPrefix} ${human(heroValue)}`, heroSub, heroStatus].filter(Boolean).join(t("phrase.sep"))
             : "";
+
+  const goalShown = phase === "scanned" && scanFailed === null && eligible.some((it) => planSize(it) > 0);
+  const customGoal = parseGoal(goalText);
 
   const barShown = (phase === "scanning" && prog.total > 0) || (phase === "scanned" && barHold) || phase === "cleaning" || phase === "cleaned";
   const barWidth = phase === "scanning" || (phase === "scanned" && barHold)
@@ -737,6 +774,7 @@ export function CleanPage() {
       {phase !== "idle" && (
         <div className="hero cz-enter" ref={heroRef}>
           <div className="hero-sweep" aria-hidden="true"><i /></div>
+          <div className="hero-main">
           <div className="hero-left">
             <div className="banner-title">
               <span>{heroPrefix}</span>
@@ -767,6 +805,45 @@ export function CleanPage() {
               <circle cx="6.4" cy="17.6" r="1.2" />
             </svg>
           </div>
+          </div>
+          {goalShown && (
+            <div className="hero-more">
+              <div className="hero-goal" role="group" aria-label={t("goal.aria")}>
+                <span className="hero-goal-label">{t("goal.label")}</span>
+                {GOAL_PRESETS.map((gb) => (
+                  <button
+                    key={gb}
+                    type="button"
+                    className="goal-chip"
+                    aria-pressed={goalOn && goal.plan.target === gb * GiB}
+                    disabled={ignoring}
+                    onClick={() => applyGoal(gb)}
+                  >
+                    {t("goal.preset", { n: gb })}
+                  </button>
+                ))}
+                <form
+                  className="goal-custom"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (customGoal !== null) applyGoal(customGoal);
+                  }}
+                >
+                  <input
+                    className="goal-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={goalText}
+                    placeholder={t("goal.custom.hint")}
+                    aria-label={t("goal.custom.aria")}
+                    onChange={(e) => setGoalText(e.target.value)}
+                  />
+                  <span className="goal-unit">GB</span>
+                  <button className="btn small ghost" type="submit" disabled={customGoal === null || ignoring}>{t("goal.custom.go")}</button>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -799,6 +876,14 @@ export function CleanPage() {
               <span>{t("junk.stale")}</span>
               <button className="btn small ghost" type="button" onClick={() => void startScan()}>{t("fs.rescan")}</button>
             </div>
+          </Collapse>
+          <Collapse open={goalOn}>
+            {goal && (
+              <div className="goal-plan" role="status">
+                <span className="goal-plan-text">{goalPlanLines(goal.plan, t, human).map((line) => <span key={line}>{line}</span>)}</span>
+                <button className="btn small ghost" type="button" onClick={undoGoal}>{t("goal.undo")}</button>
+              </div>
+            )}
           </Collapse>
           {groupsP.map(({ key, leaving, item: { g, members } }, index) => {
             const items = members.map((p) => p.item);
