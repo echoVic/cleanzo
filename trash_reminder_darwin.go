@@ -3,10 +3,8 @@
 package main
 
 import (
-	"context"
 	"math"
 	"sync/atomic"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -140,59 +138,54 @@ func showTrashReminder(s trashReminderSnapshot, closed func()) {
 			closed()
 			return
 		}
-		p := &trashReminderPopup{size: s.Size, text: nativeText, dark: menuBarAppDark}
-		w := mygo.NewWindow(mygo.WindowOptions{
-			Title: nativeText("trash.popup.title", nil),
-			Width: trashPopupWidth, Height: trashPopupHeight(""), UseContentSize: true,
-			DisableResize: true, DisableMinimize: true, DisableMaximize: true,
-			Content: ui.View(p.view),
-		})
-		// The window takes the height each phase needs: it changes only when
-		// a result explains what was kept, and stays put while cleaning.
-		p.resize = func() {
-			if _, h := w.ContentSize(); h != trashPopupHeight(p.phase) {
-				w.SetContentSize(trashPopupWidth, trashPopupHeight(p.phase))
-			}
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		var alive atomic.Bool
-		alive.Store(true)
-		update := func(fn func()) {
-			w.Update(func() {
-				if alive.Load() {
-					fn()
-				}
-			})
-		}
-		p.close = w.Close
-		p.cancel = cancel
-		p.start = func() {
-			go func() {
-				if !trashCleanupGate.TryLock() {
-					update(func() { p.finish(CleanResult{Skipped: "busy"}, false) })
-					return
-				}
-				defer trashCleanupGate.Unlock()
-				defer userScan()()
-				last := time.Time{}
-				r := cleanTrashReminder(ctx, trashReminderEnv(true), s, func(b int64) {
-					if time.Since(last) < 50*time.Millisecond {
-						return
-					}
-					last = time.Now()
-					update(func() { p.freed = b })
-				})
-				update(func() { p.finish(r, ctx.Err() != nil) })
-			}()
-		}
-		w.OnClose(func(e *mygo.CloseEvent) {
-			if !trashReminderQuitting.Load() && (p.phase == "cleaning" || p.phase == "stopping") {
-				e.PreventDefault()
-				p.stop()
-				w.Invalidate()
-			}
-		})
-		w.OnClosed(func() { alive.Store(false); cancel(); closed() })
-		w.Focus()
+		newTrashReminderRun(s, closed).show()
 	})
+}
+
+// trashWindowSurface is the reminder's own window.
+type trashWindowSurface struct {
+	w         *mygo.Window
+	discarded bool // closed as another surface took the reminder
+}
+
+func (s *trashWindowSurface) redraw() { s.w.Invalidate() }
+
+func (s *trashWindowSurface) discard() {
+	s.discarded = true
+	s.w.Destroy()
+}
+
+// openWindow shows the reminder in a window of its own, which comes to the
+// front.
+func (r *trashReminderRun) openWindow() trashSurface {
+	p := r.p
+	w := mygo.NewWindow(mygo.WindowOptions{
+		Title: nativeText("trash.popup.title", nil),
+		Width: trashPopupWidth, Height: trashPopupHeight(p.phase), UseContentSize: true,
+		DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Content: ui.View(p.view),
+	})
+	// The window takes the height each phase needs: it changes only when
+	// a result explains what was kept, and stays put while cleaning.
+	p.resize = func() {
+		if _, h := w.ContentSize(); h != trashPopupHeight(p.phase) {
+			w.SetContentSize(trashPopupWidth, trashPopupHeight(p.phase))
+		}
+	}
+	p.close = w.Close
+	s := &trashWindowSurface{w: w}
+	w.OnClose(func(e *mygo.CloseEvent) {
+		if !trashReminderQuitting.Load() && (p.phase == "cleaning" || p.phase == "stopping") {
+			e.PreventDefault()
+			p.stop()
+			w.Invalidate()
+		}
+	})
+	w.OnClosed(func() {
+		if !s.discarded {
+			r.end()
+		}
+	})
+	w.Focus()
+	return s
 }

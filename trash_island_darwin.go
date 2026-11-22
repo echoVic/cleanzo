@@ -5,6 +5,7 @@ package main
 import (
 	"math"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -510,4 +511,80 @@ func (d *trashIslandShow) wakeFor(now, next time.Time) {
 		d.stopWake, d.wakeAt = nil, time.Time{}
 		d.sync()
 	})
+}
+
+// trashIslandOnScreen is a reminder's island in its window, with what feeds
+// it: the moves of the mouse, and the changes of the displays.
+type trashIslandOnScreen struct {
+	*trashIslandShow
+	stops []func()
+}
+
+func (o *trashIslandOnScreen) unwatched() bool { return o.s.unwatched() }
+
+func (o *trashIslandOnScreen) leave() {
+	o.s.leave()
+	o.sync()
+}
+
+func (o *trashIslandOnScreen) discard() {
+	o.unwatch()
+	o.trashIslandShow.discard()
+}
+
+func (o *trashIslandOnScreen) unwatch() {
+	for _, stop := range o.stops {
+		stop()
+	}
+	o.stops = nil
+}
+
+// openIsland shows the reminder at the notch n. It reports false where the
+// island's window cannot be kept there.
+func (r *trashReminderRun) openIsland(n islandNotch) (trashIslandSurface, bool) {
+	island := newTrashIsland(r.p, n, time.Now)
+	panel, ok := openIslandPanel(island.frame(), nativeText("trash.popup.title", nil), island.view)
+	if !ok {
+		return nil, false
+	}
+	o := &trashIslandOnScreen{trashIslandShow: &trashIslandShow{
+		s: island, win: panel,
+		pointer: func() (int, int) {
+			p := mygo.Screen.CursorScreenPoint()
+			return p.X, p.Y
+		},
+		after: func(d time.Duration, fn func()) func() {
+			var stopped atomic.Bool
+			t := time.AfterFunc(d, func() {
+				runOnMain(func() {
+					if !stopped.Load() {
+						fn()
+					}
+				})
+			})
+			return func() {
+				stopped.Store(true)
+				t.Stop()
+			}
+		},
+	}}
+	// Back in the notch for good, the reminder is over.
+	o.ended = func() {
+		o.unwatch()
+		r.end()
+	}
+	// The app closes the window under the island as it quits.
+	panel.win.OnClosed(func() {
+		if o.over {
+			return
+		}
+		o.over = true
+		o.unwatch()
+		o.wakeFor(time.Time{}, time.Time{})
+		r.end()
+	})
+	r.p.close, r.p.resize = o.leave, nil
+	o.stops = []func(){watchIslandPointer(o.pointerMoved), mygo.Screen.OnDisplaysChanged(r.displaysChanged)}
+	o.start()
+	return o, true
 }

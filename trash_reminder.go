@@ -28,6 +28,9 @@ type TrashReminderState struct {
 	Supported bool                `json:"supported"`
 	Config    TrashReminderConfig `json:"config"`
 	FDA       bool                `json:"fda"`
+	// Notch tells whether a display has a notch now, where the reminder can
+	// show.
+	Notch bool `json:"notch"`
 }
 
 const trashReminderGB int64 = 1 << 30
@@ -81,7 +84,7 @@ func trashReminderDue(c TrashReminderConfig, size int64, now time.Time) bool {
 }
 
 func (Cleaner) TrashReminder() TrashReminderState {
-	return TrashReminderState{Supported: runtime.GOOS == "darwin", Config: loadTrashReminder(trashReminderDir()), FDA: fullDiskAccess()}
+	return TrashReminderState{Supported: runtime.GOOS == "darwin", Config: loadTrashReminder(trashReminderDir()), FDA: fullDiskAccess(), Notch: trashNotchPresent()}
 }
 
 // SaveTrashReminder keeps the persisted cooldown, which a page cannot reset.
@@ -328,8 +331,10 @@ func startTrashReminder() {
 			scan: func(ctx context.Context) (trashReminderSnapshot, error) {
 				return scanTrashReminder(ctx, trashReminderEnv(false))
 			},
-			show:  showTrashReminder,
-			stamp: func() (time.Time, bool) { return trashStamp(homeDir()) },
+			show:    showTrashReminder,
+			stamp:   func() (time.Time, bool) { return trashStamp(homeDir()) },
+			waiting: trashReminderWaiting,
+			revise:  reviseTrashReminder,
 		}
 		go func() {
 			timer := time.NewTimer(time.Minute)
