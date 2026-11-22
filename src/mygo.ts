@@ -1013,6 +1013,26 @@ export interface SSDInfo {
   written: number;
 }
 
+/**
+ * SafeSpace is what the rows a scan selects by itself would give back at
+ * once: the status page offers it when the disk runs low.
+ */
+export interface SafeSpace {
+  bytes: number;
+  /** largest first */
+  rows: SafeSpaceRow[];
+  /** unix milliseconds: when the rows were measured */
+  at: number;
+}
+
+/** SafeSpaceRow is a row of the measure. */
+export interface SafeSpaceRow {
+  id: string;
+  /** the name to show, for a row that is no catalog rule */
+  name: string;
+  size: number;
+}
+
 /** ScanSummary closes a junk scan. */
 export interface ScanSummary {
   fullDiskAccess: boolean;
@@ -1489,6 +1509,13 @@ export const Cleaner = {
     return call("Cleaner.CleanPaths", paths);
   },
   /**
+   * CleanSafeSpace deletes rows SafeSpace measured, streaming as CleanJunk
+   * does.
+   */
+  cleanSafeSpace(ids: string[], measuredAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
+    return call("Cleaner.CleanSafeSpace", ids, measuredAt, ch);
+  },
+  /**
    * CrashDumps measures every app's crash dump queues quickly with du, for the
    * status page to point out runaway ones when Cleanzo opens. Nothing is
    * listed file by file and nothing is changed.
@@ -1745,6 +1772,13 @@ export const Cleaner = {
    */
   revealInFinder(path: string): Promise<void> {
     return call("Cleaner.RevealInFinder", path);
+  },
+  /**
+   * SafeSpace measures what cleaning the rows a scan selects by itself would
+   * free now. Nothing is deleted.
+   */
+  safeSpace(): Promise<SafeSpace> {
+    return call("Cleaner.SafeSpace");
   },
   /**
    * SaveGrowthConfig changes the monitor's settings as p asks, validates and

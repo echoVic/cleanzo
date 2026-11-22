@@ -84,8 +84,9 @@ export interface PickedAlert {
 /**
  * 压力 warn/crit 置顶（swap≥1GB 附 swapLine）；压力正常且 swap≥8GB 独立一条；
  * 磁盘可用<20GB 一条；前三条互斥取其一，内存条固定在上；同屏最多 2 条。
+ * holdDisk：磁盘那一条正在清理或刚清完，磁盘已经不算不足了也留着，好把进度和结果说完。
  */
-export function pickAlerts(s: StatusSample): PickedAlert[] {
+export function pickAlerts(s: StatusSample, holdDisk = false): PickedAlert[] {
   const items: PickedAlert[] = [];
   const p = s.memory.pressure;
   // 占磁盘用 swapTotal：macOS 交换文件占用 / Windows 页面文件分配量。
@@ -100,7 +101,7 @@ export function pickAlerts(s: StatusSample): PickedAlert[] {
   } else if (swapDisk >= STATUS_ALERT.swapStandaloneGB * GiB) {
     items.push({ kind: "swapOnly", swapDisk });
   }
-  if (s.disk.free > 0 && s.disk.free < STATUS_ALERT.diskFreeWarnGB * GiB) {
+  if (s.disk.free > 0 && (holdDisk || s.disk.free < STATUS_ALERT.diskFreeWarnGB * GiB)) {
     items.push({ kind: "diskLow", free: s.disk.free, action: "clean" });
   }
   return items.slice(0, 2);

@@ -123,11 +123,18 @@ test("alerts: pressure warn + swap line, critical, swap-only, disk low; at most 
   expect(a[1]!.action).toBe("clean");
 
   // 压力正常、磁盘充足：无提示条
-  a = pickAlerts(sample({
+  const calm = sample({
     memory: { ...sample().memory, pressure: 1, swapUsed: 0, swapTotal: 0 },
     disk: { total: 460 * GB, used: 100 * GB, free: 360 * GB },
-  }));
+  });
+  a = pickAlerts(calm);
   expect(a).toEqual([]);
+
+  // 磁盘不足提示正在清理或刚清完：磁盘已经不算不足了也留着这一条，内存条照旧在前
+  a = pickAlerts(calm, true);
+  expect(a).toEqual([{ kind: "diskLow", free: 360 * GB, action: "clean" }]);
+  a = pickAlerts(sample({ disk: { total: 460 * GB, used: 100 * GB, free: 360 * GB } }), true);
+  expect(a.map((x) => x.kind)).toEqual(["memWarn", "diskLow"]);
 });
 
 test("sortApps sorts by memory or CPU desc without mutating the sample", () => {

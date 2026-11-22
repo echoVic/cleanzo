@@ -1,7 +1,7 @@
 import type { Runtime, Channel } from "mygo-runtime";
 import type {
   Cleaner, LanguageSettings, ThemeSettings, AppInfo, AppUpdate, BigItem, CleanResult, DirItem,
-  DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings, CleanRecord,
+  DiskStat, JunkItem, JunkCleanEvent, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings, CleanRecord,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample, TrashReminderConfig,
   Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate, MCPConfig,
@@ -110,7 +110,9 @@ function createRuntime(): Runtime {
     displaySig: "1,2",
     ssd: { model: "APPLE SSD AP0512Z", capacity: 500_277_792_768, smart: true, warning: 0, tempC: 33, spare: 100, used: 26, written: 624.5e12 },
   };
-  const disk: DiskStat = { total: 460 * GB, used: 369 * GB, free: 91 * GB };
+  // ?mock=lowdisk：磁盘只剩十几 GB，用来看首页的磁盘不足提示。
+  const lowDisk = new URLSearchParams(location.search).get("mock") === "lowdisk";
+  const disk: DiskStat = lowDisk ? { total: 460 * GB, used: 446 * GB, free: 14 * GB } : { total: 460 * GB, used: 369 * GB, free: 91 * GB };
   const gone = new Set<string>();
   const sizes = new Map<string, number>();
   const isGone = (path: string) => [...gone].some((p) => path === p || path.startsWith(p + "/"));
@@ -196,6 +198,28 @@ function createRuntime(): Runtime {
       { id: "app:com.bytedance.lark", name: "飞书", freed: 2.8 * GB, trashed: 0 }, { id: "sys.logs", freed: 400 * MB, trashed: 0 },
     ]),
   ];
+  // 清理流：垃圾清理页和首页磁盘不足提示共用，结束时记进清理记录。
+  const cleanJunkMock = (selections: { id: string; paths?: string[] }[], ch: Channel<JunkCleanEvent>, source: string) => stream(ch, async (emit) => {
+    let bytes = 0;
+    const rows: CleanRecord["rows"] = [];
+    for (const [i, sel] of selections.entries()) {
+      const item = junkItems.find((it) => it.id === sel.id);
+      if (!item) throw new Error(`mock: unknown junk id ${sel.id}`);
+      const subs = item.subs.filter((sub) => sel.paths?.includes(sub.path));
+      const size = item.subs.length ? sum(subs) : item.size;
+      await emit({ kind: "start", id: sel.id });
+      for (let j = 0; j < 2; j++) await emit({ kind: "checking", id: sel.id, path: subs[j]?.path ?? item.paths[0] }, 90);
+      await emit({ kind: "removed", id: sel.id, bytes: bytes + size, path: item.paths[0] }, 70 + (i % 3) * 100);
+      bytes += size;
+      const result: CleanResult = { name: item.name, freed: item.trash ? 0 : size, trashed: item.trash ? size : 0, files: subs.length || item.files, inUse: 0, failed: [] };
+      item.size = Math.max(0, item.size - size);
+      item.subs = item.subs.filter((sub) => !sel.paths?.includes(sub.path));
+      freedDisk(size);
+      rows.push({ id: sel.id, name: /^(app|custom|project):/.test(sel.id) ? item.name : undefined, freed: result.freed, trashed: result.trashed });
+      await emit({ kind: "done", id: sel.id, bytes, result });
+    }
+    if (rows.length) cleanups.push(cleanup(0, source, rows));
+  });
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });
   const bigItems: BigItem[] = [
     big("~/Downloads", 22.4 * GB), big("~/Library/Caches", 6.4 * GB), big("~/Movies", 37.9 * GB),
@@ -824,30 +848,20 @@ function createRuntime(): Runtime {
       }
       await emit({ kind: "done", summary: { checked: items.length, fullDiskAccess: true, containers: 12, ignored: settings.ignored.length, leftovers: 3, leftoversSize: sum(orphans) } });
     }),
-    "Cleaner.CleanJunk": async (selections, _scannedAt, ch) => stream(ch, async (emit) => {
-      let bytes = 0;
-      const rows: CleanRecord["rows"] = [];
-      for (const [i, sel] of selections.entries()) {
-        const item = junkItems.find((it) => it.id === sel.id);
-        if (!item) throw new Error(`mock: unknown junk id ${sel.id}`);
-        const subs = item.subs.filter((sub) => sel.paths?.includes(sub.path));
-        const size = item.subs.length ? sum(subs) : item.size;
-        await emit({ kind: "start", id: sel.id });
-        for (let j = 0; j < 2; j++) await emit({ kind: "checking", id: sel.id, path: subs[j]?.path ?? item.paths[0] }, 90);
-        await emit({ kind: "removed", id: sel.id, bytes: bytes + size, path: item.paths[0] }, 70 + (i % 3) * 100);
-        bytes += size;
-        const result: CleanResult = { name: item.name, freed: item.trash ? 0 : size, trashed: item.trash ? size : 0, files: subs.length || item.files, inUse: 0, failed: [] };
-        item.size = Math.max(0, item.size - size);
-        item.subs = item.subs.filter((sub) => !sel.paths?.includes(sub.path));
-        freedDisk(size);
-        rows.push({ id: sel.id, name: /^(app|custom|project):/.test(sel.id) ? item.name : undefined, freed: result.freed, trashed: result.trashed });
-        await emit({ kind: "done", id: sel.id, bytes, result });
-      }
-      if (rows.length) cleanups.push(cleanup(0, "clean", rows));
-    }),
+    // 扫描会自己勾上、直接删除、现在能清的行，大的在前：首页磁盘不足提示用。
+    "Cleaner.SafeSpace": async () => {
+      await wait(900);
+      const rows = junkItems
+        .filter((it) => it.default && !it.trash && !it.running && !it.problem && it.size > 0 && !settings.ignored.includes(it.id))
+        .sort((a, b) => b.size - a.size)
+        .map((it) => ({ id: it.id, name: /^(app|custom|project):/.test(it.id) ? it.name : "", size: it.size }));
+      return { bytes: sum(rows), rows, at: Date.now() };
+    },
+    "Cleaner.CleanSafeSpace": async (ids, _measuredAt, ch) => cleanJunkMock(ids.map((id) => ({ id })), ch, "low-space"),
+    "Cleaner.CleanJunk": async (selections, _scannedAt, ch) => cleanJunkMock(selections, ch, "clean"),
+    "Cleaner.GetSettings": async () => settings,
     "Cleaner.CleanHistory": async () => [...cleanups].reverse(),
     "Cleaner.ForgetCleanHistory": async () => { cleanups.length = 0; },
-    "Cleaner.GetSettings": async () => settings,
     "Cleaner.SaveSettings": async (s) => { settings = structuredClone(s); },
     "Cleaner.FullDiskAccess": async () => true,
     "Cleaner.OpenFullDiskAccessSettings": async () => {},

@@ -1501,6 +1501,7 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .st-callout-body { flex: 1 1 200px; min-width: 0; font-size: 13px; line-height: 1.55; }
 .st-callout-body .st-extra { display: block; color: var(--muted); margin-top: 2px; }
 .st-callout > .btn { flex: none; align-self: center; margin-left: auto; }
+.st-callout-actions { display: flex; flex: none; align-self: center; gap: 8px; margin-left: auto; }
 @media (prefers-color-scheme: dark) {
   .st-callout { border-color: rgba(255, 159, 10, 0.28); }
   .st-callout.crit { border-color: rgba(255, 69, 58, 0.28); }

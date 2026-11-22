@@ -101,6 +101,7 @@ type junkEnv struct {
 	walked                map[string]bool // cleaning only: the rules whose recursiveFiles targets are walked; nil walks every rule's
 	unwalked              []string        // cleaning only: the folders (comparison form) of the recursiveFiles targets left unwalked
 	skipProjects          bool            // cleaning only: no project row is selected, so projects are not looked for
+	safeOnly              bool            // the low disk space notice: only rows a scan selects by itself and deletes outright
 }
 
 // currentJunkEnv probes the settings, apps, usage and permissions for a pass.
@@ -514,6 +515,16 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			break
 		}
 		sum.Checked++
+		if env.safeOnly && !safeRule(r) {
+			// The rule's folders are held back whole, so that no app's row
+			// offers what lies in them. Finding them lists none of them.
+			for _, pattern := range slices.Concat(targetPatterns(r), r.Reserve) {
+				for _, root := range env.resolve(pattern) {
+					claims.claim(root)
+				}
+			}
+			continue
+		}
 		if r.RecycleBin {
 			emit(itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group), Recovery: string(recoveryOf(r.ID))}})
 			continue
@@ -601,6 +612,11 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 	}
 	for _, folder := range env.settings.Custom {
+		if env.safeOnly {
+			// A custom folder goes to the Trash: it is no safe row, and stays whole.
+			claims.claim(folder.Path)
+			continue
+		}
 		if !folder.Enabled || env.traversalBlocked(folder.Path) || !safeToClean(folder.Path) || env.protected(folder.Path) {
 			continue
 		}
@@ -612,7 +628,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 	}
 	// Build folders of idle projects. Finding them walks the home folder, so a
 	// clean looks for them only when a project row is selected.
-	if !env.skipProjects && !slices.Contains(env.settings.DisabledGroups, string(groupProjects)) {
+	if !env.skipProjects && !env.safeOnly && !slices.Contains(env.settings.DisabledGroups, string(groupProjects)) {
 		for _, p := range env.idleProjects(claims) {
 			spec := itemSpec{item: JunkItem{ID: projectIDPrefix + p.root, Group: string(groupProjects), Name: filepath.Base(p.root), Size: -1, Trash: true, IdleDays: p.idleDays, Recovery: string(projectRecovery)}}
 			for _, dir := range p.folders {
@@ -729,9 +745,27 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 	}
 	for _, id := range appOrder {
+		if env.safeOnly && !apps[id].item.Default {
+			continue
+		}
 		emit(*apps[id])
 	}
 	return specs, sum
+}
+
+// safeRule reports whether a rule's row is one a scan selects by itself and
+// deletes outright, by removing files and not by running a tool.
+func safeRule(r *Rule) bool {
+	return r.Default && !r.Trash && r.Command == nil && !r.RecycleBin
+}
+
+// targetPatterns lists the patterns of a rule's targets.
+func targetPatterns(r *Rule) []string {
+	patterns := make([]string, len(r.Targets))
+	for i, target := range r.Targets {
+		patterns[i] = target.Pattern
+	}
+	return patterns
 }
 
 // itemPlan holds what cleaning an item would remove now, largest first.
@@ -1162,8 +1196,9 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 			env.guard = env.refreshGuard()
 		}
 		spec, ok := byID[sel.ID]
-		// A selected command still needs a result if its tool or estimate vanished.
-		if !ok {
+		// A selected command still needs a result if its tool or estimate
+		// vanished. It is no safe row.
+		if !ok && !env.safeOnly {
 			rules := env.catalog()
 			for i := range rules {
 				rule := &rules[i]

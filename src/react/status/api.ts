@@ -1,5 +1,6 @@
+import { Channel } from "mygo-runtime";
 import { Cleaner } from "../../mygo";
-import type { MachineInfo, StatusSample, SystemInfo } from "../../mygo";
+import type { JunkCleanEvent, MachineInfo, SafeSpace, StatusSample, SystemInfo } from "../../mygo";
 
 /** 系统状态页用到的全部 Cleaner 调用集中在此，组件不直接碰桥。 */
 export const statusApi = {
@@ -11,4 +12,12 @@ export const statusApi = {
   watch: (ch: import("mygo-runtime").Channel<StatusSample>): Promise<void> => Cleaner.watchStatus(ch),
   /** 退出应用；返回 false = 5s 超时仍在跑（多半在等未保存内容的确认）。 */
   quitApp: (path: string): Promise<boolean> => Cleaner.quitApp(path),
+  /** 磁盘不足时量一次：扫描会自己勾上、直接删除的那些行现在能腾出多少。只量，不删。 */
+  safeSpace: (): Promise<SafeSpace> => Cleaner.safeSpace(),
+  /** 清掉量到的那些行；事件和垃圾清理页的清理流一样。 */
+  cleanSafe(ids: string[], measuredAt: number): { ch: Channel<JunkCleanEvent>; done: Promise<void> } {
+    const ch = new Channel<JunkCleanEvent>();
+    const done = Cleaner.cleanSafeSpace(ids, measuredAt, ch);
+    return { ch, done };
+  },
 };

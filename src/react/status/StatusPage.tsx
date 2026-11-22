@@ -20,6 +20,7 @@ import { errText, focusNextAfter, human, toast } from "../../shared";
 import { statusApi } from "./api";
 import { aiSpaceApi } from "../aispace/api";
 import { SparkSvg } from "./Spark";
+import { LowSpaceNotice } from "./LowSpace";
 import { crashDumps, oversized } from "../list/crash-dumps";
 import { growthApi } from "../growth/api";
 import { growthHint } from "../growth/hint";
@@ -366,6 +367,8 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
   const [hl, setHl] = React.useState(false);
   const [quit, setQuit] = React.useState<QuitState>(emptyQuit());
   const [quitTarget, setQuitTarget] = React.useState<AppUsage | null>(null);
+  /** 磁盘不足那一条正在清理或刚清完：磁盘回到充足也先留着它。 */
+  const [lowHold, setLowHold] = React.useState(false);
   // 崩溃转储只在打开 Cleanzo 后量一次（du），超过阈值才提示。
   const [crashSum, setCrashSum] = React.useState<CrashDumpSummary | null>(null);
   React.useEffect(() => {
@@ -635,7 +638,7 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
     if (!freezing || frozenRowsRef.current.length === 0) frozenRowsRef.current = rows;
   }
 
-  const alerts = error || !sample ? [] : pickAlerts(sample);
+  const alerts = error || !sample ? [] : pickAlerts(sample, lowHold);
   const bigDumps = oversized(crashSum);
   const growthTop = growthHint(growthState, bigDumps.map((d) => d.app));
   const alertItems = [...alerts.map((a) => ({ key: a.kind, a })),
@@ -694,13 +697,15 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
       <div className="st-alerts">
         {alertsP.map(({ item: { a }, key, leaving }) => (
           <Collapse key={key} open={!leaving} appear>
-            {a ? <div className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
+            {a?.kind === "diskLow" ? <div className="st-callout warn" role="status">
+              <CalloutIcon />
+              <LowSpaceNotice free={a.free ?? 0} active={active} onGoClean={() => goCleanRef.current()} onHold={setLowHold} />
+            </div> : a ? <div className={`st-callout ${a.kind === "memCrit" ? "crit" : "warn"}`} role="status">
               <CalloutIcon />
               <div className="st-callout-body">
                 {a.kind === "memWarn" && t("status.alert.memWarn")}
                 {a.kind === "memCrit" && t("status.alert.memCrit")}
                 {a.kind === "swapOnly" && t("status.alert.swapOnly", { size: fmtMem(a.swapDisk ?? 0) })}
-                {a.kind === "diskLow" && t("status.alert.diskLow", { size: fmtMem(a.free ?? 0) })}
                 {a.swapDisk != null && (a.kind === "memWarn" || a.kind === "memCrit") && (
                   <span className="st-extra num">{t("status.alert.swapLine", { size: fmtMem(a.swapDisk) })}</span>
                 )}
@@ -709,9 +714,9 @@ export function StatusPage({ active, goClean, goProcess, goAISpace }: StatusPage
                 <button
                   className="btn ghost small"
                   type="button"
-                  onClick={() => (a.action !== "apps" ? goCleanRef.current() : isWindows() ? viewApps() : goProcess("mem"))}
+                  onClick={() => (isWindows() ? viewApps() : goProcess("mem"))}
                 >
-                  {a.action !== "apps" ? t("status.disk.clean") : isWindows() ? t("status.alert.viewApps") : t("status.alert.viewInProcess")}
+                  {isWindows() ? t("status.alert.viewApps") : t("status.alert.viewInProcess")}
                 </button>
               )}
             </div> : key === "crashDumps" && bigDumps[0] ? <div className="st-callout warn" role="status">
