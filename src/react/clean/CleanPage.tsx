@@ -1,6 +1,6 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { JunkItem, ScanSummary } from "../../mygo";
+import type { DiskStat, JunkItem, ScanSummary } from "../../mygo";
 import { ruleName } from "../../i18n";
 import { Button } from "../../ui/components/button";
 import {
@@ -31,6 +31,7 @@ import {
   toggleSub, withIgnored, withIgnoredSummary,
   type CleanPlan, type JunkSel, type RowState, type ScanState, emptySel,
 } from "./helpers";
+import { diskScale } from "./disk-scale";
 import { GOAL_PRESETS, GiB, goalPlanLines, goalSel, parseGoal, planGoal, planSize, type GoalPlan } from "./goal";
 
 type Phase = "idle" | "scanning" | "scanned" | "cleaning" | "cleaned";
@@ -109,6 +110,8 @@ export function CleanPage() {
   /** 按目标勾选的计划：sel 是它给出的勾选，before 是用计划之前的勾选（撤销时放回）。 */
   const [goal, setGoal] = React.useState<{ plan: GoalPlan; sel: JunkSel; before: JunkSel } | null>(null);
   const [goalText, setGoalText] = React.useState("");
+  /** 磁盘容量：扫描开始和清理结束时各读一次；读不到就不画比例条。 */
+  const [disk, setDisk] = React.useState<DiskStat | null>(null);
   const heroRef = React.useRef<HTMLDivElement>(null);
   const heroNumRef = React.useRef<HTMLSpanElement>(null);
   const appsRowsRef = React.useRef<HTMLDivElement>(null);
@@ -215,6 +218,10 @@ export function CleanPage() {
     };
   }, [menuID]);
 
+  const loadDisk = React.useCallback(() => {
+    cleanApi.disk().then((d) => setDisk(d), () => setDisk(null));
+  }, []);
+
   // ---- 扫描流 ----
 
   const startScan = React.useCallback(async () => {
@@ -258,6 +265,7 @@ export function CleanPage() {
     setRowStates(new Map());
     setProgress({ total: 0, bytes: 0, id: "", path: "", stopped: false, error: "" });
     scannedAtRef.current = Date.now();
+    loadDisk();
     const { ch, done } = cleanApi.startScan();
     chanRef.current = ch;
     let failed = false;
@@ -300,7 +308,7 @@ export function CleanPage() {
         barHoldTimer.current = window.setTimeout(() => setBarHold(false), 450);
       }
     }
-  }, [t]);
+  }, [t, loadDisk]);
 
   const stopScan = React.useCallback(() => {
     stoppedScanRef.current = true;
@@ -364,6 +372,7 @@ export function CleanPage() {
       if (stopped) setProgress((pr) => ({ ...pr, stopped: true }));
       // 清过崩溃转储后，状态页 / Codex 页的提示下次进入时重新量。
       if (p.selections.some((x) => x.id === CRASH_RULE_ID)) forgetCrashDumps();
+      loadDisk();
       setPhase("cleaned");
     }
   };
@@ -543,6 +552,11 @@ export function CleanPage() {
             : "";
 
   const goalShown = phase === "scanned" && scanFailed === null && eligible.some((it) => planSize(it) > 0);
+  // 整盘比例：清理结束后候选已经过时，只画已用和可用。
+  const planning = phase === "scanning" || phase === "scanned" || phase === "cleaning";
+  const pickedNow = st.items.filter((it) => !it.trash).reduce((n, it) => n + chosenSize(it, st.sel), 0);
+  const scale = scanFailed !== null ? null
+    : diskScale(disk, planning ? foundBytes : 0, planning ? selectedBytes : 0, planning ? pickedNow : 0);
   const customGoal = parseGoal(goalText);
 
   const barShown = (phase === "scanning" && prog.total > 0) || (phase === "scanned" && barHold) || phase === "cleaning" || phase === "cleaned";
@@ -806,8 +820,32 @@ export function CleanPage() {
             </svg>
           </div>
           </div>
-          {goalShown && (
+          {(scale !== null || goalShown) && (
             <div className="hero-more">
+              {scale !== null && disk !== null && (
+                <div
+                  className="disk-scale-bar"
+                  role="img"
+                  aria-label={t("disk.scale.aria", {
+                    total: human(disk.total), free: human(disk.free), picked: human(scale.pickedBytes), rest: human(scale.restBytes),
+                  })}
+                >
+                  <i className="ds-other" style={{ width: `${scale.other}%` }} />
+                  <i className="ds-rest" style={{ width: `${scale.rest}%` }} />
+                  <i className="ds-pick" style={{ width: `${scale.picked}%` }} />
+                </div>
+              )}
+              <div className="hero-more-row">
+              {scale !== null && disk !== null && (
+                <div className="disk-scale-key">
+                  <span>{t("disk.scale.total", { total: human(disk.total) })}</span>
+                  {scale.pickedBytes > 0 && <span><i className="ds-dot ds-pick" />{t("disk.scale.picked", { size: human(scale.pickedBytes) })}</span>}
+                  {scale.restBytes > 0 && <span><i className="ds-dot ds-rest" />{t("disk.scale.rest", { size: human(scale.restBytes) })}</span>}
+                  <span><i className="ds-dot ds-free" />{t("disk.scale.free", { size: human(disk.free) })}</span>
+                  {phase === "scanned" && scale.pickedBytes > 0 && <span className="ds-after">{t("disk.scale.after", { size: human(scale.after) })}</span>}
+                </div>
+              )}
+              {goalShown && (
               <div className="hero-goal" role="group" aria-label={t("goal.aria")}>
                 <span className="hero-goal-label">{t("goal.label")}</span>
                 {GOAL_PRESETS.map((gb) => (
@@ -841,6 +879,8 @@ export function CleanPage() {
                   <span className="goal-unit">GB</span>
                   <button className="btn small ghost" type="submit" disabled={customGoal === null || ignoring}>{t("goal.custom.go")}</button>
                 </form>
+              </div>
+              )}
               </div>
             </div>
           )}

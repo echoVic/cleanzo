@@ -1,6 +1,6 @@
 import { Channel } from "mygo-runtime";
 import { Cleaner } from "../../mygo";
-import type { JunkCleanEvent, JunkScanEvent, JunkSelection, Settings } from "../../mygo";
+import type { DiskStat, JunkCleanEvent, JunkScanEvent, JunkSelection, Settings } from "../../mygo";
 
 /** 垃圾清理页用到的全部 Cleaner 调用集中在此，组件不直接碰桥。 */
 export const cleanApi = {
@@ -16,6 +16,8 @@ export const cleanApi = {
     const done = Cleaner.cleanJunk(selections, scannedAt, ch);
     return { ch, done };
   },
+  /** 磁盘容量：横幅里把候选放进整盘比例用。 */
+  disk: (): Promise<DiskStat> => Cleaner.disk(),
   getSettings: (): Promise<Settings> => Cleaner.getSettings(),
   saveSettings: (s: Settings): Promise<void> => Cleaner.saveSettings(s),
   reveal: (path: string): Promise<void> => Cleaner.revealInFinder(path),

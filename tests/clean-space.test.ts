@@ -10,6 +10,7 @@ import { NumberTicker } from "../src/ui/motion/NumberTicker";
 import { CleanPage } from "../src/react/clean/CleanPage";
 import { cleanApi } from "../src/react/clean/api";
 import { buildCleanPlan, chosenSize, finalizeScan, recoveryOf, scanItem, scanStart, toggleRow } from "../src/react/clean/helpers";
+import { diskScale } from "../src/react/clean/disk-scale";
 import { GiB, goalLabel, goalSel, goalTier, parseGoal, planGoal, planSize } from "../src/react/clean/goal";
 
 beforeEach(() => {
@@ -334,4 +335,85 @@ test("the amounts show once a scan found something that can be cleaned, and go w
     const h = await scannedPage(empty, [cache("dev.npm", 6, { running: true })]);
     expect(h.all().some((n) => n.props.className === "goal-chip")).toBe(false);
   } finally { empty.restore(); }
+});
+
+// ---- 整盘比例 ----
+
+test("candidates are placed inside the whole disk: other used space, unselected candidates, the selection, and what is free", () => {
+  const disk = { total: 500 * GB, used: 400 * GB, free: 100 * GB };
+  expect(diskScale(disk, 40 * GB, 15 * GB, 10 * GB)).toEqual({
+    other: 72, rest: 5, picked: 3, restBytes: 25 * GB, pickedBytes: 15 * GB, after: 110 * GB,
+  });
+});
+
+test("readings that disagree are capped rather than drawn past the disk, and a disk that cannot be read draws nothing", () => {
+  const disk = { total: 100 * GB, used: 30 * GB, free: 70 * GB };
+  // 候选比已用还多、勾选比候选还多：都按上一层封顶。
+  expect(diskScale(disk, 50 * GB, 80 * GB, 80 * GB)).toEqual({
+    other: 0, rest: 0, picked: 30, restBytes: 0, pickedBytes: 30 * GB, after: 100 * GB,
+  });
+  expect(diskScale(null, GB, GB, GB)).toBeNull();
+  expect(diskScale({ total: 0, used: 0, free: 0 }, GB, GB, GB)).toBeNull();
+});
+
+/** 比例条各段的宽度和图例里的文字。 */
+function scaleOf(h: Page) {
+  const width = (cls: string) => h.find((n) => n.props.className === cls)?.props.style?.width;
+  const key = h.find((n) => n.props.className === "disk-scale-key");
+  return { other: width("ds-other"), rest: width("ds-rest"), picked: width("ds-pick"), key: key ? textOf(key.props.children) : null };
+}
+
+test("after a scan the hero shows the selection inside the whole disk, and what would be free after cleaning", async () => {
+  const env = changes();
+  try {
+    const disk = { total: 500 * GB, used: 400 * GB, free: 100 * GB };
+    const h = await scannedPage(env, [cache("dev.npm", 10), costly("dev.playwright", 5), trashBound("review.installers", 25)], { disk: async () => disk });
+    expect(scaleOf(h)).toEqual({ other: "72%", rest: "6%", picked: "2%", key: [
+      t("disk.scale.total", { total: human(500 * GB) }), t("disk.scale.picked", { size: human(10 * GB) }),
+      t("disk.scale.rest", { size: human(30 * GB) }), t("disk.scale.free", { size: human(100 * GB) }),
+      t("disk.scale.after", { size: human(110 * GB) }),
+    ].join("") });
+    // 进废纸篓的不算进「清理后」：清空废纸篓以后才腾出来。
+    check(h, "review.installers", true);
+    await h.settle();
+    expect(scaleOf(h)).toMatchObject({ rest: "1%", picked: "7%" });
+    expect(scaleOf(h).key).toContain(t("disk.scale.after", { size: human(110 * GB) }));
+    // 一行都不勾：没有「清理后」。
+    check(h, "review.installers", false);
+    check(h, "dev.npm", false);
+    await h.settle();
+    expect(scaleOf(h).key).not.toContain(t("disk.scale.after", { size: human(100 * GB) }));
+    expect(scaleOf(h).picked).toBe("0%");
+  } finally { env.restore(); }
+});
+
+test("a disk that cannot be read leaves the bar out and the page as it was", async () => {
+  const env = changes();
+  try {
+    const h = await scannedPage(env, [cache("dev.npm", 10)], { disk: async () => { throw new Error("no disk"); } });
+    expect(scaleOf(h).key).toBeNull();
+    expect(headline(h)).toBe(10 * GB);
+    expect(h.all().some((n) => n.props.className === "goal-chip")).toBe(true);
+  } finally { env.restore(); }
+});
+
+test("once a clean ends the disk is read again, and the bar shows the new free space without the old candidates", async () => {
+  const env = changes();
+  try {
+    const cleanup = fakeStream<import("../src/mygo").JunkCleanEvent>();
+    const disk = { total: 500 * GB, used: 400 * GB, free: 100 * GB };
+    const h = await scannedPage(env, [cache("dev.npm", 10)], { disk: async () => ({ ...disk }), startClean: () => cleanup });
+    h.click(t("clean.now"));
+    await h.settle();
+    h.click(t("clean.confirm"));
+    await h.settle();
+    disk.used -= 10 * GB;
+    disk.free += 10 * GB;
+    cleanup.emit({ kind: "done", id: "dev.npm", bytes: 10 * GB, result: { name: "dev.npm", freed: 10 * GB, trashed: 0, files: 1, inUse: 0, failed: [] } });
+    cleanup.finish();
+    await h.settle();
+    expect(scaleOf(h)).toEqual({ other: "78%", rest: "0%", picked: "0%", key: [
+      t("disk.scale.total", { total: human(500 * GB) }), t("disk.scale.free", { size: human(110 * GB) }),
+    ].join("") });
+  } finally { env.restore(); }
 });
