@@ -3,9 +3,11 @@
 package main
 
 import (
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -483,5 +485,182 @@ func TestTrashIslandPreviews(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// fakeIslandWindow records what an island asks of its window.
+type fakeIslandWindow struct {
+	mouse    []string // each change of where the mouse goes
+	draws    int
+	placed   []mygo.Rectangle
+	closedBy int
+}
+
+func (w *fakeIslandWindow) place(r mygo.Rectangle) { w.placed = append(w.placed, r) }
+func (w *fakeIslandWindow) takeMouse(r mygo.Rectangle, ok bool) {
+	if !ok {
+		w.mouse = append(w.mouse, "none")
+		return
+	}
+	w.mouse = append(w.mouse, fmt.Sprintf("%d,%d %dx%d", r.X, r.Y, r.Width, r.Height))
+}
+func (w *fakeIslandWindow) redraw() { w.draws++ }
+func (w *fakeIslandWindow) close()  { w.closedBy++ }
+
+// islandShow is an island on a fake window, with a clock, a pointer and
+// wake-ups the test holds.
+type islandShow struct {
+	t       *testing.T
+	d       *trashIslandShow
+	p       *trashReminderPopup
+	win     *fakeIslandWindow
+	now     time.Time
+	x, y    int
+	wakeAt  time.Time // the one wake-up pending; zero when none is
+	wake    func()
+	stopped int // wake-ups cancelled
+	ended   int
+}
+
+func newIslandShow(t *testing.T) *islandShow {
+	h := &islandShow{t: t, win: &fakeIslandWindow{}, now: time.Unix(1000, 0), x: 100, y: 500}
+	h.p = &trashReminderPopup{size: 3 * gb, text: panelViewText}
+	s := newTrashIsland(h.p, islandNotch{X: 771, Y: 0, Width: 185, Height: 32}, func() time.Time { return h.now })
+	h.d = &trashIslandShow{
+		s: s, win: h.win,
+		pointer: func() (int, int) { return h.x, h.y },
+		after: func(d time.Duration, fn func()) func() {
+			if !h.wakeAt.IsZero() {
+				t.Fatalf("a second wake-up asked for while one is pending at %v", h.wakeAt.Sub(h.now))
+			}
+			h.wakeAt, h.wake = h.now.Add(d), fn
+			return func() { h.wakeAt, h.wake = time.Time{}, nil; h.stopped++ }
+		},
+		ended: func() { h.ended++ },
+	}
+	h.d.start()
+	return h
+}
+
+// pass lets d go by, waking the island when it asked to be.
+func (h *islandShow) pass(d time.Duration) {
+	end := h.now.Add(d)
+	for !h.wakeAt.IsZero() && !h.wakeAt.After(end) {
+		wake := h.wake
+		h.now, h.wakeAt, h.wake = h.wakeAt, time.Time{}, nil
+		wake()
+	}
+	h.now = end
+}
+
+// move puts the pointer somewhere, as a move of the mouse tells the island.
+func (h *islandShow) move(x, y int) {
+	h.x, h.y = x, y
+	h.d.pointerMoved()
+}
+
+func (h *islandShow) wantMouse(what string, want ...string) {
+	h.t.Helper()
+	if !slices.Equal(h.win.mouse, want) {
+		h.t.Fatalf("%s: the mouse went to %q, want %q", what, h.win.mouse, want)
+	}
+}
+
+// TestIslandOnScreenTakesTheMouseInItsShapeAlone: the window gives the mouse
+// to the island's shape as it changes, and to nothing before and after.
+func TestIslandOnScreenTakesTheMouseInItsShapeAlone(t *testing.T) {
+	h := newIslandShow(t)
+	if len(h.win.placed) != 1 || h.win.placed[0] != (mygo.Rectangle{X: 623, Y: 0, Width: 481, Height: 192}) {
+		t.Fatalf("placed at %+v", h.win.placed)
+	}
+	h.wantMouse("as it shows", "none")
+	h.pass(100 * time.Millisecond)
+	h.wantMouse("open", "none", "45,0 391x136")
+	h.pass(11 * time.Second)
+	h.wantMouse("folded", "none", "45,0 391x136", "86,0 309x32")
+	h.move(720, 10)
+	h.wantMouse("the pointer on the strip", "none", "45,0 391x136", "86,0 309x32", "45,0 391x136")
+	h.move(720, 300)
+	h.pass(2 * time.Second)
+	h.wantMouse("the pointer gone", "none", "45,0 391x136", "86,0 309x32", "45,0 391x136", "86,0 309x32")
+	h.p.close = func() { h.d.s.leave(); h.d.sync() }
+	h.d.s.dismiss()
+	h.wantMouse("told to go", "none", "45,0 391x136", "86,0 309x32", "45,0 391x136", "86,0 309x32", "none")
+	if h.win.closedBy != 0 || h.ended != 0 {
+		t.Fatalf("closed %d times and ended %d times while going back", h.win.closedBy, h.ended)
+	}
+	h.pass(time.Second)
+	if h.win.closedBy != 1 || h.ended != 1 || !h.wakeAt.IsZero() {
+		t.Fatalf("gone: closed %d times, ended %d times, a wake-up pending: %v", h.win.closedBy, h.ended, !h.wakeAt.IsZero())
+	}
+	h.move(720, 10)
+	h.d.sync()
+	if h.win.closedBy != 1 || h.ended != 1 || !h.wakeAt.IsZero() {
+		t.Fatal("an island that is gone woke again")
+	}
+}
+
+// TestIslandOnScreenThatOpensUnderThePointerStaysOpen: the pointer does not
+// have to move for the island to know it opened under it.
+func TestIslandOnScreenThatOpensUnderThePointerStaysOpen(t *testing.T) {
+	h := newIslandShow(t)
+	h.x, h.y = 900, 100 // where the open island will be, not the notch
+	h.pass(30 * time.Second)
+	if h.d.s.shape != islandOpen {
+		t.Fatalf("shape %d after 30 s under a pointer that never moved", h.d.s.shape)
+	}
+	h.move(900, 400)
+	h.pass(2 * time.Second)
+	if h.d.s.shape != islandCompact {
+		t.Fatalf("shape %d once the pointer left", h.d.s.shape)
+	}
+}
+
+// TestIslandOnScreenDrawsOnlyWhatChanged: a move of the mouse that changes
+// nothing draws nothing, and a folded island that waits has no wake-up
+// pending.
+func TestIslandOnScreenDrawsOnlyWhatChanged(t *testing.T) {
+	h := newIslandShow(t)
+	h.pass(11 * time.Second)
+	if !h.wakeAt.IsZero() {
+		t.Fatalf("folded and waiting, a wake-up is pending in %v", h.wakeAt.Sub(h.now))
+	}
+	draws := h.win.draws
+	for x := 0; x < 600; x += 7 {
+		h.move(x, 400)
+	}
+	if h.win.draws != draws {
+		t.Fatalf("%d frames drawn for moves of the mouse elsewhere", h.win.draws-draws)
+	}
+	h.move(720, 10)
+	if h.win.draws == draws {
+		t.Fatal("opening under the pointer drew nothing")
+	}
+	draws = h.win.draws
+	h.d.redraw()
+	if h.win.draws != draws+1 {
+		t.Fatalf("a change of the reminder's state drew %d frames, want 1", h.win.draws-draws)
+	}
+}
+
+// TestIslandOnScreenFollowsANotchThatMoved: a new arrangement of the
+// displays moves the island's window to where the notch is now.
+func TestIslandOnScreenFollowsANotchThatMoved(t *testing.T) {
+	h := newIslandShow(t)
+	h.pass(time.Second)
+	h.d.moveTo(islandNotch{X: 2691, Y: 0, Width: 185, Height: 32})
+	if got := h.win.placed[len(h.win.placed)-1]; got != (mygo.Rectangle{X: 2543, Y: 0, Width: 481, Height: 192}) {
+		t.Fatalf("placed at %+v", got)
+	}
+	h.move(2700, 10)
+	h.pass(time.Second)
+	h.move(2700, 400)
+	h.pass(2 * time.Second)
+	if h.d.s.shape != islandCompact {
+		t.Fatalf("shape %d: the pointer is not followed where the notch is now", h.d.s.shape)
+	}
+	h.move(720, 10)
+	if h.d.s.shape != islandCompact {
+		t.Fatal("the pointer where the notch was still opens the island")
 	}
 }

@@ -373,3 +373,141 @@ func (s *trashIsland) poke() {
 		s.wake()
 	}
 }
+
+// islandWindow is what an island asks of its window.
+type islandWindow interface {
+	// place puts the window somewhere on screen.
+	place(mygo.Rectangle)
+	// takeMouse gives the mouse to r, from the window's top-left corner, and
+	// lets it through everywhere else; to nothing at all when ok is false.
+	takeMouse(r mygo.Rectangle, ok bool)
+	redraw()
+	close()
+}
+
+// trashIslandShow is an island on screen: it steps the island as the pointer
+// moves and as the island asks to be woken, and has its window follow. It
+// runs on the main thread.
+type trashIslandShow struct {
+	s   *trashIsland
+	win islandWindow
+	// pointer tells where the pointer is on screen.
+	pointer func() (x, y int)
+	// after runs fn on the main thread once d went by, unless stopped.
+	after func(d time.Duration, fn func()) (stop func())
+	// ended is called once, when the island is back in the notch for good
+	// and its window is closed.
+	ended func()
+
+	stopWake func()    // cancels the wake-up pending for wakeAt
+	wakeAt   time.Time // zero when none is pending
+	mouse    mygo.Rectangle
+	hasMouse bool
+	told     bool // the window knows where the mouse goes
+	over     bool // off the screen for good
+}
+
+// start brings the island out of the notch.
+func (d *trashIslandShow) start() {
+	d.s.gone, d.s.wake = d.finish, d.sync
+	d.win.place(d.s.frame())
+	d.s.appear()
+	d.advance(true)
+}
+
+// sync steps the island with the pointer where it is now.
+func (d *trashIslandShow) sync() { d.advance(false) }
+
+// redraw steps the island after the reminder's state changed, and draws it.
+func (d *trashIslandShow) redraw() { d.advance(true) }
+
+// pointerMoved follows a move of the mouse. Most change nothing, and cost
+// one comparison.
+func (d *trashIslandShow) pointerMoved() {
+	if d.over {
+		return
+	}
+	if x, y := d.pointer(); d.s.contains(x, y) != d.s.hover {
+		d.sync()
+	}
+}
+
+// moveTo follows the notch to where a new arrangement of the displays put
+// it.
+func (d *trashIslandShow) moveTo(n islandNotch) {
+	if d.over || n == d.s.notch {
+		return
+	}
+	d.s.notch = n
+	d.win.place(d.s.frame())
+	d.told = false
+	d.advance(true)
+}
+
+// discard takes the island off the screen at once, as something else takes
+// its place: ended is not called.
+func (d *trashIslandShow) discard() {
+	if d.over {
+		return
+	}
+	d.over = true
+	d.wakeFor(time.Time{}, time.Time{})
+	d.win.close()
+}
+
+// finish closes the window of an island that is back in the notch.
+func (d *trashIslandShow) finish() {
+	if d.over {
+		return
+	}
+	d.discard()
+	if d.ended != nil {
+		d.ended()
+	}
+}
+
+func (d *trashIslandShow) advance(draw bool) {
+	if d.over {
+		return
+	}
+	now := d.s.now()
+	x, y := d.pointer()
+	inside := d.s.contains(x, y)
+	next, changed := d.s.step(now, inside)
+	// A shape that changed may have come under the pointer, or left it,
+	// without the pointer moving.
+	if again := d.s.contains(x, y); !d.over && changed && again != inside {
+		next, _ = d.s.step(now, again)
+	}
+	if d.over {
+		return // the island was gone at this step
+	}
+	if r, ok := d.s.region(); !d.told || ok != d.hasMouse || r != d.mouse {
+		d.told, d.mouse, d.hasMouse = true, r, ok
+		d.win.takeMouse(r, ok)
+	}
+	if changed || draw {
+		d.win.redraw()
+	}
+	d.wakeFor(now, next)
+}
+
+// wakeFor has the island woken at next, and at no other time: one wake-up
+// is pending at most, none while the island has nothing due.
+func (d *trashIslandShow) wakeFor(now, next time.Time) {
+	if next.Equal(d.wakeAt) {
+		return
+	}
+	if d.stopWake != nil {
+		d.stopWake()
+		d.stopWake = nil
+	}
+	d.wakeAt = next
+	if next.IsZero() {
+		return
+	}
+	d.stopWake = d.after(max(0, next.Sub(now)), func() {
+		d.stopWake, d.wakeAt = nil, time.Time{}
+		d.sync()
+	})
+}
