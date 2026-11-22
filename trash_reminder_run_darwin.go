@@ -66,7 +66,9 @@ func newTrashReminderRun(s trashReminderSnapshot, closed func()) *trashReminderR
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.alive.Store(true)
 	r.clean = func(ctx context.Context, s trashReminderSnapshot, progress func(int64)) CleanResult {
-		return cleanTrashReminder(ctx, trashReminderEnv(true), s, progress)
+		res := cleanTrashReminder(ctx, trashReminderEnv(true), s, progress)
+		recordCleanup("trash-reminder", []CleanResult{res}, nil)
+		return res
 	}
 	r.p = &trashReminderPopup{size: s.Size, text: nativeText, dark: menuBarAppDark, start: r.start, cancel: r.cancel}
 	return r

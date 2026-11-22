@@ -1,16 +1,19 @@
 import { beforeEach, expect, test } from "bun:test";
 import "./setup-dom";
 import { setLang } from "./setup-dom";
-import type { JunkItem, JunkScanEvent } from "../src/mygo";
+import type { CleanRecord, JunkItem, JunkScanEvent } from "../src/mygo";
 import { ruleName, t } from "../src/i18n";
 import { human } from "../src/shared";
-import { changes, fakeStream, textOf } from "./page-harness";
+import { changes, fakeStream, nodes, textOf } from "./page-harness";
 import { Collapse } from "../src/ui/motion/Collapse";
 import { NumberTicker } from "../src/ui/motion/NumberTicker";
 import { CleanPage } from "../src/react/clean/CleanPage";
 import { cleanApi } from "../src/react/clean/api";
 import { buildCleanPlan, chosenSize, finalizeScan, recoveryOf, scanItem, scanStart, toggleRow } from "../src/react/clean/helpers";
 import { diskScale } from "../src/react/clean/disk-scale";
+import { BACK_MIN, cameBack, daysSince, historyTotals, lastCleaned, regrown, whenText } from "../src/react/clean/history";
+import { CleanHistoryBody } from "../src/react/clean/CleanHistory";
+import { Dialog } from "../src/ui/components/dialog";
 import { GiB, goalLabel, goalSel, goalTier, parseGoal, planGoal, planSize } from "../src/react/clean/goal";
 
 beforeEach(() => {
@@ -415,5 +418,187 @@ test("once a clean ends the disk is read again, and the bar shows the new free s
     expect(scaleOf(h)).toEqual({ other: "78%", rest: "0%", picked: "0%", key: [
       t("disk.scale.total", { total: human(500 * GB) }), t("disk.scale.free", { size: human(110 * GB) }),
     ].join("") });
+  } finally { env.restore(); }
+});
+
+// ---- 清理记录 ----
+
+const DAY = 86400;
+/** 本地时间的某一天中午（秒），免得时区让「昨天」跨不过去。 */
+const noon = (day: number) => new Date(2026, 10, day, 12).getTime() / 1000;
+const record = (at: number, rows: CleanRecord["rows"], source = "clean"): CleanRecord => ({
+  at, source, rows, freed: rows.reduce((n, r) => n + r.freed, 0), trashed: rows.reduce((n, r) => n + r.trashed, 0),
+});
+
+test("days are counted by the calendar: late last night is yesterday, and the words follow", () => {
+  expect(daysSince(noon(22), noon(22))).toBe(0);
+  expect(daysSince(new Date(2026, 10, 21, 23, 50).getTime() / 1000, new Date(2026, 10, 22, 0, 10).getTime() / 1000)).toBe(1);
+  expect(daysSince(noon(12), noon(22))).toBe(10);
+  // 时钟被调回去过：记录比现在还晚，算今天。
+  expect(daysSince(noon(23), noon(22))).toBe(0);
+  for (const lang of ["zh", "en"] as const) {
+    setLang(lang);
+    expect(whenText(noon(22), noon(22), t)).toBe(t("history.when.today"));
+    expect(whenText(noon(21), noon(22), t)).toBe(t("history.when.yesterday"));
+    expect(whenText(noon(12), noon(22), t)).toBe(t("history.when.days", { n: 10 }));
+  }
+});
+
+test("the last time a row was cleaned is its newest record that removed something, deleted and trashed together", () => {
+  const history = [
+    record(noon(22), [{ id: "dev.pip", freed: GB, trashed: 0 }]),
+    record(noon(20), [{ id: "dev.npm", freed: 3 * GB, trashed: 0 }, { id: "review.installers", freed: 0, trashed: 2 * GB }]),
+    record(noon(10), [{ id: "dev.npm", freed: 9 * GB, trashed: 0 }]),
+  ];
+  expect(lastCleaned(history, "dev.npm")).toEqual({ at: noon(20), bytes: 3 * GB });
+  expect(lastCleaned(history, "review.installers")).toEqual({ at: noon(20), bytes: 2 * GB });
+  expect(lastCleaned(history, "dev.uv")).toBeNull();
+});
+
+test("a row grew back when, within two weeks of a cleanup, it holds most of what was cleaned again and no trifle; the Trash never counts", () => {
+  const last = { at: noon(12), bytes: 4 * GB };
+  expect(cameBack(last, cache("dev.npm", 3.2), noon(22))).toBe(true);
+  expect(cameBack(last, cache("dev.npm", 3.1), noon(22))).toBe(false);
+  expect(cameBack({ at: noon(22) - 14 * DAY, bytes: 4 * GB }, cache("dev.npm", 4), noon(22))).toBe(true);
+  expect(cameBack({ at: noon(22) - 15 * DAY, bytes: 4 * GB }, cache("dev.npm", 4), noon(22))).toBe(false);
+  expect(cameBack(null, cache("dev.npm", 4), noon(22))).toBe(false);
+  // 上次只清了一点：现在和那时一样多也不到下限，不算长回来。
+  expect(cameBack({ at: noon(12), bytes: BACK_MIN - 1 }, item("dev.npm", "dev", BACK_MIN - 1), noon(22))).toBe(false);
+  expect(cameBack({ at: noon(12), bytes: BACK_MIN }, item("dev.npm", "dev", BACK_MIN), noon(22))).toBe(true);
+  expect(cameBack(last, bin(4), noon(22))).toBe(false);
+  // 运行中的行量到了、只是现在不能清：照样算。
+  expect(cameBack(last, item("dev.npm", "dev", 0, { running: true, foundSize: 3.5 * GB }), noon(22))).toBe(true);
+});
+
+test("the record's totals cover the last thirty days, and the rows that grew back are listed largest first", () => {
+  const history = [
+    record(noon(21), [{ id: "dev.npm", freed: 3 * GB, trashed: 0 }, { id: "review.installers", freed: 0, trashed: 2 * GB }]),
+    record(noon(15), [{ id: "dev.pip", freed: GB, trashed: 0 }], "low-space"),
+    record(noon(22) - 40 * DAY, [{ id: "dev.uv", freed: 9 * GB, trashed: 0 }]),
+  ];
+  expect(historyTotals(history, noon(22))).toEqual({ count: 2, freed: 4 * GB, trashed: 2 * GB });
+  const items = [cache("dev.npm", 2.5), cache("dev.pip", 3), cache("dev.uv", 9)];
+  expect(regrown(history, items, noon(22)).map((r) => [r.item.id, r.cleaned, r.size])).toEqual([
+    ["dev.pip", GB, 3 * GB], ["dev.npm", 3 * GB, 2.5 * GB],
+  ]);
+});
+
+test("the record lists each cleanup with where it started, what it removed and the rows that grew back, in both languages", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const history = [
+    record(noon(21), [{ id: "dev.npm", freed: 3 * GB, trashed: 0 }, { id: "app:com.example.notes", name: "Notes", freed: 0, trashed: 2 * GB }]),
+    record(noon(15), [{ id: "dev.pip", freed: GB, trashed: 0 }], "low-space"),
+    record(noon(14), [{ id: "sys.trash", freed: 5 * GB, trashed: 0 }], "trash-reminder"),
+  ];
+  for (const lang of ["zh", "en"] as const) {
+    setLang(lang);
+    const html = renderToStaticMarkup(createElement(CleanHistoryBody, { history, items: [cache("dev.npm", 2.5)], now: noon(22) }));
+    expect(html).toContain(t("history.summary", { n: 3, size: human(9 * GB) }));
+    expect(html).toContain(t("history.summaryTrash", { size: human(2 * GB) }));
+    expect(html).toContain(t("history.backTitle"));
+    expect(html).toContain(t("history.backRow", { when: t("history.when.yesterday"), cleaned: human(3 * GB), size: human(2.5 * GB) }));
+    expect(html).toContain(t("history.source.low-space"));
+    expect(html).toContain(t("history.source.trash-reminder"));
+    expect(html).toContain(ruleName("dev.npm"));
+    expect(html).toContain("Notes");
+    expect(html).toContain(t("clean.done.freed", { size: human(3 * GB) }));
+    expect(html).toContain(t("cat.trashed", { size: human(2 * GB) }));
+    expect(html).toContain(t("history.local"));
+    const empty = renderToStaticMarkup(createElement(CleanHistoryBody, { history: [], items: [], now: noon(22) }));
+    expect(empty).toContain(t("history.empty"));
+    expect(empty).not.toContain(t("history.backTitle"));
+  }
+  setLang("zh");
+});
+
+/** 记录弹窗是不是开着。 */
+const historyOpen = (h: Page) => !!h.ofType(Dialog).find((d) => nodes(d.props.children).some((n) => n.type === CleanHistoryBody))?.props.open;
+
+test("a row cleaned before says when and how much, and is marked when it grew back", async () => {
+  const env = changes();
+  try {
+    const now = Date.now() / 1000;
+    const history = [record(now - 3 * DAY, [{ id: "dev.npm", freed: 4 * GB, trashed: 0 }, { id: "dev.pip", freed: 4 * GB, trashed: 0 }])];
+    const h = await scannedPage(env, [cache("dev.npm", 3.5), cache("dev.pip", 1), cache("dev.uv", 2)], { history: async () => history });
+    const note = t("history.row", { when: t("history.when.days", { n: 3 }), size: human(4 * GB) });
+    const notes = h.all().filter((n) => n.props.className === "cat-sub muted history-note");
+    expect(notes.map((n) => textOf(n.props.children))).toEqual([note, note]);
+    // 只有差不多长满了的那一行带「又长回来了」的标签。
+    expect(notes.map((n) => nodes(n.props.children).filter((x) => x.props.text === t("history.back")).length)).toEqual([1, 0]);
+  } finally { env.restore(); }
+});
+
+test("before a scan the page says when the last cleanup was, and the record opens from there", async () => {
+  const env = changes();
+  try {
+    const now = Date.now() / 1000;
+    const history = [record(now - DAY, [{ id: "dev.npm", freed: 4 * GB, trashed: 0 }]), record(now - 9 * DAY, [{ id: "dev.pip", freed: GB, trashed: 0 }])];
+    env.assign(cleanApi, { history: async () => history });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    expect(h.text()).toContain(t("history.last", { when: t("history.when.yesterday"), size: human(4 * GB) }));
+    expect(historyOpen(h)).toBe(false);
+    h.click(t("history.open"));
+    await h.settle();
+    expect(historyOpen(h)).toBe(true);
+    expect(h.ofType(CleanHistoryBody)[0]!.props.history).toBe(history);
+  } finally { env.restore(); }
+});
+
+test("with nothing on record the page shows no line about a last cleanup and no way into an empty record", async () => {
+  const env = changes();
+  try {
+    env.assign(cleanApi, { history: async () => [] });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    expect(h.all().some((n) => typeof n.props.onClick === "function" && textOf(n.props.children) === t("history.open"))).toBe(false);
+  } finally { env.restore(); }
+});
+
+test("clearing the record empties it on the page and says so; a failure keeps it and says why", async () => {
+  const env = changes();
+  try {
+    const now = Date.now() / 1000;
+    let stored = [record(now - DAY, [{ id: "dev.npm", freed: 4 * GB, trashed: 0 }])];
+    let fail = true;
+    env.assign(cleanApi, {
+      history: async () => stored,
+      forgetHistory: async () => { if (fail) throw new Error("disk full"); stored = []; },
+    });
+    const h = env.page(CleanPage, {});
+    await h.settle();
+    h.click(t("history.open"));
+    await h.settle();
+    h.click(t("history.forget"));
+    await h.settle();
+    expect(h.toasts.at(-1)).toEqual({ text: t("history.forgetFail", { msg: "disk full" }), kind: "err" });
+    expect(h.ofType(CleanHistoryBody)[0]!.props.history).toHaveLength(1);
+    fail = false;
+    h.click(t("history.forget"));
+    await h.settle();
+    expect(h.toasts.at(-1)).toEqual({ text: t("history.forgot"), kind: "ok" });
+    expect(h.ofType(CleanHistoryBody)[0]!.props.history).toHaveLength(0);
+    expect(historyOpen(h)).toBe(false);
+  } finally { env.restore(); }
+});
+
+test("once a clean ends the record is read again, so the cleanup just run is in it", async () => {
+  const env = changes();
+  try {
+    const cleanup = fakeStream<import("../src/mygo").JunkCleanEvent>();
+    let stored: CleanRecord[] = [];
+    const h = await scannedPage(env, [cache("dev.npm", 10)], { history: async () => stored, startClean: () => cleanup });
+    h.click(t("clean.now"));
+    await h.settle();
+    h.click(t("clean.confirm"));
+    await h.settle();
+    stored = [record(Date.now() / 1000, [{ id: "dev.npm", freed: 10 * GB, trashed: 0 }])];
+    cleanup.emit({ kind: "done", id: "dev.npm", bytes: 10 * GB, result: { name: "dev.npm", freed: 10 * GB, trashed: 0, files: 1, inUse: 0, failed: [] } });
+    cleanup.finish();
+    await h.settle();
+    expect(h.ofType(CleanHistoryBody)[0]!.props.history).toBe(stored);
+    // 刚清完的行不再写「今天清过」：结果已经写在这一行上。
+    expect(h.all().some((n) => n.props.className === "cat-sub muted history-note")).toBe(false);
   } finally { env.restore(); }
 });

@@ -1032,6 +1032,14 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .action-review-row .small { margin-top: 3px; }
 .action-review-size { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .action-review-total { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; font-size: 14px; }
+.clean-last { display: flex; justify-content: center; gap: 10px; margin: 14px 0 0; }
+/* 标签的 grow 类名和 Tailwind 的 grow 工具类同名：在弹性行里不让它撑开 */
+.history-note .tag { flex: none; }
+.clean-history { display: flex; flex-direction: column; gap: 12px; min-height: 0; font-size: 13px; }
+.clean-history > p { margin: 0; }
+.clean-history-back h3 { margin: 0 0 2px; font-size: 13px; font-weight: 620; }
+.clean-history-list { max-height: 38vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 0 14px; }
+.clean-history-list summary .tag { margin-left: 8px; }
 .action-review-cost { margin-top: 8px; }
 .action-review-cost p { margin: 0; line-height: 1.6; }
 .cleanup-results { margin: 20px 0; padding: 18px 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }

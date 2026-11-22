@@ -1,6 +1,6 @@
 import { isWindows } from "../../platform";
 import * as React from "react";
-import type { DiskStat, JunkItem, ScanSummary } from "../../mygo";
+import type { CleanRecord, DiskStat, JunkItem, ScanSummary } from "../../mygo";
 import { ruleName } from "../../i18n";
 import { Button } from "../../ui/components/button";
 import {
@@ -23,6 +23,8 @@ import { CRASH_RULE_ID, forgetCrashDumps } from "../list/crash-dumps";
 import { playCleanFocal, shouldPlayFocal } from "./focal";
 import { cleanupExplanation, commandTool } from "./explanations";
 import { CleanResults } from "./CleanResults";
+import { CleanHistoryBody } from "./CleanHistory";
+import { cameBack, lastCleaned, whenText } from "./history";
 import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
@@ -112,6 +114,9 @@ export function CleanPage() {
   const [goalText, setGoalText] = React.useState("");
   /** 磁盘容量：扫描开始和清理结束时各读一次；读不到就不画比例条。 */
   const [disk, setDisk] = React.useState<DiskStat | null>(null);
+  /** 清理记录（新的在前）：进页面和每次清理结束时读；读不到按没有记录算。 */
+  const [history, setHistory] = React.useState<CleanRecord[]>([]);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
   const heroRef = React.useRef<HTMLDivElement>(null);
   const heroNumRef = React.useRef<HTMLSpanElement>(null);
   const appsRowsRef = React.useRef<HTMLDivElement>(null);
@@ -221,6 +226,22 @@ export function CleanPage() {
   const loadDisk = React.useCallback(() => {
     cleanApi.disk().then((d) => setDisk(d), () => setDisk(null));
   }, []);
+
+  const loadHistory = React.useCallback(() => {
+    cleanApi.history().then((records) => setHistory(records ?? []), () => {});
+  }, []);
+  React.useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const forgetHistory = () => {
+    cleanApi.forgetHistory().then(
+      () => {
+        setHistory([]);
+        setHistoryOpen(false);
+        toast(t("history.forgot"));
+      },
+      (e) => toast(t("history.forgetFail", { msg: errText(e) }), "err"),
+    );
+  };
 
   // ---- 扫描流 ----
 
@@ -373,6 +394,7 @@ export function CleanPage() {
       // 清过崩溃转储后，状态页 / Codex 页的提示下次进入时重新量。
       if (p.selections.some((x) => x.id === CRASH_RULE_ID)) forgetCrashDumps();
       loadDisk();
+      loadHistory();
       setPhase("cleaned");
     }
   };
@@ -611,6 +633,11 @@ export function CleanPage() {
     return cleanupExplanation(it, t).content;
   };
 
+  const nowSec = Date.now() / 1000;
+  const historyLink = history.length > 0
+    ? <button className="junk-link" type="button" onClick={() => setHistoryOpen(true)}>{t("history.open")}</button>
+    : null;
+
   const renderRow = (it: JunkItem) => {
     const locked = phase !== "scanned" || !isSelectable(it);
     const row = rowStates.get(it.id);
@@ -621,6 +648,8 @@ export function CleanPage() {
     const open = expanded.has(it.id);
     const noteKey = row ? `row:${row.state}` : st.pending.has(it.id) ? "pending" : "size";
     const project = projectPath(it);
+    // 以前清过的行写明什么时候清过、清了多少；刚清完的行不写，结果已经在这一行上。
+    const last = !row && !st.pending.has(it.id) && (phase === "scanning" || phase === "scanned") ? lastCleaned(history, it.id) : null;
     return (
       <div className={`junk-item${dimmed ? " is-dim" : ""}`} key={it.id} data-key={it.id}>
         <div className="cat-row junk-row">
@@ -646,6 +675,12 @@ export function CleanPage() {
             {used > 0 ? <div className="cat-sub muted">{t("junk.inUse", { n: used })}</div> : null}
             {it.size >= 0 && !it.running && discoveredSize(it) > it.size ? <div className="cat-sub muted">{t("junk.availableTotal", { size: human(it.size) })}</div> : null}
             {(it.readErrors ?? 0) > 0 ? <div className="cat-sub muted">{t("junk.readErrors", { n: it.readErrors! })}</div> : null}
+            {last ? (
+              <div className="cat-sub muted history-note">
+                {t("history.row", { when: whenText(last.at, nowSec, t), size: human(last.bytes) })}
+                {cameBack(last, it, nowSec) ? <Tag text={t("history.back")} kind="grow" /> : null}
+              </div>
+            ) : null}
           </div>
           <div className="cat-note"><span key={noteKey} className="cz-fade-in">{rowNote(it, row)}</span></div>
           <div className="junk-row-actions">
@@ -890,6 +925,7 @@ export function CleanPage() {
       {phase === "cleaned" && <CleanResults rows={rowStates} items={st.items} />}
 
       {phase === "idle" ? (
+        <>
         <IdleHero
           label={t("hero.ready")}
           value="--"
@@ -900,6 +936,15 @@ export function CleanPage() {
           chips={[t("clean.chip.caches"), t("clean.chip.logs"), t("clean.chip.temp")]}
           onCta={() => void startScan()}
         />
+        {history[0] && (
+          <p className="clean-last muted small">
+            {t(history[0].freed > 0 ? "history.last" : "history.lastTrash", {
+              when: whenText(history[0].at, nowSec, t), size: human(history[0].freed > 0 ? history[0].freed : history[0].trashed),
+            })}
+            {historyLink}
+          </p>
+        )}
+        </>
       ) : scanFailed !== null ? (
         <div className="empty err" role="alert">
           <div className="err-icon">⚠</div>
@@ -1011,6 +1056,7 @@ export function CleanPage() {
               )}
             </div>
           )}
+          {historyLink && <div className="junk-foot muted small">{historyLink}</div>}
           {scanStopped && <div className="junk-foot muted small">{t("scan.stopped")}</div>}
         </div>
       )}
@@ -1044,6 +1090,19 @@ export function CleanPage() {
           <div className="mt-4 flex justify-end gap-2">
             <DialogClose asChild><Button variant="ghost">{t("btn.cancel")}</Button></DialogClose>
             <Button variant="destructive" onClick={() => void doClean()}>{t("clean.confirm")}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={(v) => setHistoryOpen(v)}>
+        <DialogContent className="action-review-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("history.title")}</DialogTitle>
+          </DialogHeader>
+          <CleanHistoryBody history={history} items={phase === "scanning" || phase === "scanned" ? st.items : []} now={nowSec} />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" disabled={history.length === 0} onClick={forgetHistory}>{t("history.forget")}</Button>
+            <DialogClose asChild><Button>{t("history.close")}</Button></DialogClose>
           </div>
         </DialogContent>
       </Dialog>

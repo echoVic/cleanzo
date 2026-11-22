@@ -1149,6 +1149,9 @@ func cleanJunk(ctx context.Context, env junkEnv, selections []JunkSelection, sca
 			continue
 		}
 		seen[sel.ID] = true
+		if title := byID[sel.ID].item.Name; title != "" && hooks.named != nil {
+			hooks.named(sel.ID, title)
+		}
 		if hooks.started != nil {
 			hooks.started(sel.ID)
 		}
@@ -1422,7 +1425,7 @@ func (Cleaner) CleanJunk(ctx context.Context, selections []JunkSelection, scanne
 			_ = junkCleanSend(ch, event)
 		}
 	}
-	cleanJunk(ctx, env, selections, since, cleanHooks{
+	cleanJunkRecorded(ctx, env, selections, since, cleanHooks{
 		started:  func(id string) { _ = junkCleanSend(ch, JunkCleanEvent{Kind: "start", ID: id}) },
 		checking: func(id, path string) { every(JunkCleanEvent{Kind: "checking", ID: id, Path: path}) },
 		removed: func(id, path string, bytes int64) {
@@ -1432,7 +1435,7 @@ func (Cleaner) CleanJunk(ctx context.Context, selections []JunkSelection, scanne
 		finished: func(res CleanResult) {
 			_ = junkCleanSend(ch, JunkCleanEvent{Kind: "done", ID: res.Name, Bytes: cleaned, Result: &res})
 		},
-	})
+	}, "clean")
 	return ctx.Err()
 }
 

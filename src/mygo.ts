@@ -408,6 +408,31 @@ export interface ClaudeTarget {
   start: number;
 }
 
+/**
+ * CleanRecord is one cleanup the user ran: when it ended, where it was
+ * started, and what each row gave back.
+ */
+export interface CleanRecord {
+  /** unix seconds */
+  at: number;
+  /** "clean": the junk page; "low-space": the status page's low disk space notice; "trash-reminder": the Trash reminder */
+  source: string;
+  /** bytes deleted */
+  freed: number;
+  /** bytes moved to the Trash */
+  trashed: number;
+  rows: CleanRecordRow[];
+}
+
+/** CleanRecordRow is a row of a cleanup that removed something. */
+export interface CleanRecordRow {
+  id: string;
+  /** the name shown then, for a row that is no catalog rule */
+  name?: string;
+  freed: number;
+  trashed: number;
+}
+
 /** CleanResult reports what a clean pass did. */
 export interface CleanResult {
   name: string;
@@ -1447,6 +1472,10 @@ export const Cleaner = {
   cleanAppCache(path: string): Promise<UninstallResult> {
     return call("Cleaner.CleanAppCache", path);
   },
+  /** CleanHistory returns the cleanups on record, newest first. */
+  cleanHistory(): Promise<CleanRecord[]> {
+    return call("Cleaner.CleanHistory");
+  },
   /** CleanJunk streams progress, refreshing file usage before each selected item. */
   cleanJunk(selections: JunkSelection[], scannedAt: number, ch: Channel<JunkCleanEvent>): Promise<void> {
     return call("Cleaner.CleanJunk", selections, scannedAt, ch);
@@ -1520,6 +1549,10 @@ export const Cleaner = {
    */
   forceQuitApp(path: string): Promise<boolean> {
     return call("Cleaner.ForceQuitApp", path);
+  },
+  /** ForgetCleanHistory empties the record. */
+  forgetCleanHistory(): Promise<void> {
+    return call("Cleaner.ForgetCleanHistory");
   },
   /** FullDiskAccess reports whether macOS allows reading protected folders. */
   fullDiskAccess(): Promise<boolean> {

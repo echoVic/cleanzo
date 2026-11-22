@@ -405,6 +405,7 @@ var trashWithContext = func(_ context.Context, path string) error { return trash
 // cleanHooks report a clean pass's progress. Each may be nil; they are
 // called one at a time.
 type cleanHooks struct {
+	named    func(name, title string)             // an item that is no catalog rule tells the name it shows
 	started  func(name string)                    // an item starts
 	checking func(name, path string)              // an entry is measured before removal
 	removed  func(name, path string, bytes int64) // an entry is gone; bytes: cleaned so far in the pass

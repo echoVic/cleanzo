@@ -1,7 +1,7 @@
 import type { Runtime, Channel } from "mygo-runtime";
 import type {
   Cleaner, LanguageSettings, ThemeSettings, AppInfo, AppUpdate, BigItem, CleanResult, DirItem,
-  DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings,
+  DiskStat, JunkItem, LargeFile, OrphanItem, PhotoCluster, PhotoItem, Settings, CleanRecord,
   MachineInfo, StatusSample, SubItem, SystemInfo, UninstallDetail, GrowthApp, GrowthConfig, GrowthSummary,
   ProcessRow, ProcessSample, TrashReminderConfig,
   Skill, SkillCopy, SkillOrigin, SkillRoot, SkillScanResult, SkillSource, SkillUpdate, MCPConfig,
@@ -182,6 +182,19 @@ function createRuntime(): Runtime {
     junk("review.node-versions", "review", "旧的 Node 版本", sum(nodeVersions), "~/.nvm/versions/node", {
       default: false, trash: true, paths: nodeVersions.map((s) => s.path), subs: nodeVersions,
     }),
+  ];
+  // 清理记录（旧的在前）：几天前清过的行，扫描后会写「N 天前清过」。
+  const cleanup = (daysAgo: number, source: string, rows: CleanRecord["rows"]): CleanRecord => ({
+    at: Math.floor(Date.now() / 1000) - daysAgo * 86400, source, rows,
+    freed: rows.reduce((n, r) => n + r.freed, 0), trashed: rows.reduce((n, r) => n + r.trashed, 0),
+  });
+  const cleanups: CleanRecord[] = [
+    cleanup(20, "clean", [{ id: "dev.xcode", freed: 9.8 * GB, trashed: 0 }, { id: "review.installers", freed: 0, trashed: 1.1 * GB }]),
+    cleanup(12, "trash-reminder", [{ id: "sys.trash", freed: 6.2 * GB, trashed: 0 }]),
+    cleanup(3, "clean", [
+      { id: "dev.npm", freed: 3.1 * GB, trashed: 0 }, { id: "browser.chrome", freed: 2.4 * GB, trashed: 0 },
+      { id: "app:com.bytedance.lark", name: "飞书", freed: 2.8 * GB, trashed: 0 }, { id: "sys.logs", freed: 400 * MB, trashed: 0 },
+    ]),
   ];
   const big = (path: string, size: number, trashable = true): BigItem => ({ path: home(path), size, trashable });
   const bigItems: BigItem[] = [
@@ -813,6 +826,7 @@ function createRuntime(): Runtime {
     }),
     "Cleaner.CleanJunk": async (selections, _scannedAt, ch) => stream(ch, async (emit) => {
       let bytes = 0;
+      const rows: CleanRecord["rows"] = [];
       for (const [i, sel] of selections.entries()) {
         const item = junkItems.find((it) => it.id === sel.id);
         if (!item) throw new Error(`mock: unknown junk id ${sel.id}`);
@@ -826,9 +840,13 @@ function createRuntime(): Runtime {
         item.size = Math.max(0, item.size - size);
         item.subs = item.subs.filter((sub) => !sel.paths?.includes(sub.path));
         freedDisk(size);
+        rows.push({ id: sel.id, name: /^(app|custom|project):/.test(sel.id) ? item.name : undefined, freed: result.freed, trashed: result.trashed });
         await emit({ kind: "done", id: sel.id, bytes, result });
       }
+      if (rows.length) cleanups.push(cleanup(0, "clean", rows));
     }),
+    "Cleaner.CleanHistory": async () => [...cleanups].reverse(),
+    "Cleaner.ForgetCleanHistory": async () => { cleanups.length = 0; },
     "Cleaner.GetSettings": async () => settings,
     "Cleaner.SaveSettings": async (s) => { settings = structuredClone(s); },
     "Cleaner.FullDiskAccess": async () => true,
