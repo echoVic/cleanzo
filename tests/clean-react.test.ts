@@ -145,7 +145,7 @@ test("cache explanations preserve known browser scope and avoid inferring custom
 
 const item = (id: string, group: string, size: number, extra: Partial<JunkItem> = {}): JunkItem => ({
   id, group, size, name: id, files: 1, default: true, trash: false, running: false,
-  denied: false, estimate: false, inUse: 0, paths: [`~/cache/${id}`], top: [], subs: [], ...extra,
+  denied: false, estimate: false, inUse: 0, paths: [`~/cache/${id}`], top: [], subs: [], recovery: "download", ...extra,
 });
 
 /** 模拟一轮完整扫描：start 全量骨架 → 逐项 measured → done。 */

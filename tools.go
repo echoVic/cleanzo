@@ -388,7 +388,7 @@ func estimateCommand(env junkEnv, command *toolCommand, tool string) (int64, boo
 
 // expandCommand builds a pending command row when its tool exists.
 func expandCommand(env junkEnv, rule *Rule) itemSpec {
-	spec := itemSpec{rule: rule, item: JunkItem{ID: rule.ID, Group: string(rule.Group), Default: rule.Default, Trash: rule.Trash, Running: env.running(commandOwners(rule))}}
+	spec := itemSpec{rule: rule, item: JunkItem{ID: rule.ID, Group: string(rule.Group), Default: rule.Default, Trash: rule.Trash, Running: env.running(commandOwners(rule)), Recovery: string(recoveryOf(rule.ID))}}
 	if env.findTool(rule.Command.Tool) != "" {
 		spec.item.Size = -1
 	}

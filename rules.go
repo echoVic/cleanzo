@@ -76,6 +76,78 @@ type Rule struct {
 	RecycleBin bool
 }
 
+// recoveryKind says what brings back what a row removes.
+type recoveryKind string
+
+// Recovery kinds, from what costs nothing to what stays gone.
+const (
+	recoverRebuild  recoveryKind = "rebuild"  // made again on this computer as the app or tool runs
+	recoverDownload recoveryKind = "download" // fetched again when it is needed, which takes a network
+	recoverLeftover recoveryKind = "leftover" // nothing uses it again
+	recoverGone     recoveryKind = "gone"     // stays gone until the user gets it again
+)
+
+// Rows that are no catalog rule: an app re-downloads or regenerates its
+// caches, a project installs its dependencies again, and nothing is known of
+// what a custom folder holds.
+const (
+	appCacheRecovery = recoverDownload
+	projectRecovery  = recoverDownload
+	customRecovery   = recoverGone
+)
+
+// ruleRecovery groups the rules of both catalogs by what brings their
+// contents back. Where a rule's contents differ, it takes the kind that
+// costs the user more.
+var ruleRecovery = map[recoveryKind][]string{
+	recoverRebuild: {
+		"sys.apple", "sys.shadercache",
+		"dev.go-build", "dev.xcode", "dev.simulator-caches", "dev.android",
+		// Xcode copies a device's support files again the next time it connects.
+		"review.device-support",
+	},
+	recoverDownload: {
+		"browser.chrome", "browser.chromium", "browser.edge", "browser.brave", "browser.arc", "browser.dia",
+		"browser.safari", "browser.firefox", "browser.opera", "browser.vivaldi", "browser.qq",
+		"app.lark", "app.doubao-work", "app.doubao", "app.aime",
+		// An app downloads its update again while it still wants it.
+		"update.shipit", "update.sparkle", "update.updaters",
+		"dev.npm", "dev.npx", "dev.pnpm", "dev.pnpm-store", "dev.pnpm-store-home", "dev.yarn", "dev.bun",
+		"dev.corepack", "dev.node-gyp", "dev.electron", "dev.typescript", "dev.puppeteer", "dev.playwright",
+		"dev.pip", "dev.uv", "dev.poetry", "dev.conda", "dev.cargo", "dev.go-mod",
+		"dev.cocoapods", "dev.swiftpm", "dev.carthage", "dev.gradle", "dev.maven", "dev.homebrew", "dev.nuget",
+		// Finder downloads the firmware again when a device is restored.
+		"review.ipsw",
+	},
+	recoverLeftover: {
+		"sys.crashdumps", "sys.wer", "sys.logs", "sys.temp",
+		"dev.homebrew-old",
+		// A simulator whose runtime is gone cannot start.
+		"review.simulators",
+	},
+	recoverGone: {
+		"sys.trash",
+		"review.ios-backups", "review.xcode-archives", "review.mail-downloads",
+		// The user downloads or installs these again by hand.
+		"review.installers", "review.partial-downloads", "review.node-versions", "review.rust-toolchains",
+	},
+}
+
+// ruleRecoveryByID is ruleRecovery by rule.
+var ruleRecoveryByID = func() map[string]recoveryKind {
+	byID := map[string]recoveryKind{}
+	for kind, ids := range ruleRecovery {
+		for _, id := range ids {
+			byID[id] = kind
+		}
+	}
+	return byID
+}()
+
+// recoveryOf is the recovery kind of a catalog rule, empty for an ID that is
+// none.
+func recoveryOf(id string) recoveryKind { return ruleRecoveryByID[id] }
+
 // darwinJunkRules is the macOS rule table, in claim order: a path matched by an earlier
 // rule is left out of every later rule and of the generic app caches.
 var darwinJunkRules = []Rule{

@@ -41,6 +41,7 @@ type JunkItem struct {
 	Details        []JunkDetail `json:"details,omitempty"`
 	DetailsDropped int          `json:"detailsDropped,omitempty"`
 	IdleDays       int          `json:"idleDays,omitempty"`      // project rows: whole days since anything in the project changed
+	Recovery       string       `json:"recovery"`                // what brings the contents back: "rebuild", "download", "leftover" or "gone"
 	Problem        string       `json:"problem,omitempty"`       // why the row cannot be cleaned now: "tool-failed" or "tool-timeout"
 	ProblemDetail  string       `json:"problemDetail,omitempty"` // the line of the tool's output that says what went wrong, if any
 }
@@ -514,7 +515,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		}
 		sum.Checked++
 		if r.RecycleBin {
-			emit(itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group)}})
+			emit(itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group), Recovery: string(recoveryOf(r.ID))}})
 			continue
 		}
 		if r.Command != nil {
@@ -522,7 +523,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 			emit(expandCommand(*env, r))
 			continue
 		}
-		spec := itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group), Size: -1, Default: r.Default, Trash: r.Trash, Running: env.running(r.Owners)}}
+		spec := itemSpec{rule: r, item: JunkItem{ID: r.ID, Group: string(r.Group), Size: -1, Default: r.Default, Trash: r.Trash, Running: env.running(r.Owners), Recovery: string(recoveryOf(r.ID))}}
 		if !env.fda && slices.Contains([]string{"sys.trash", "review.ios-backups", "review.mail-downloads"}, r.ID) {
 			spec.item.Denied = true
 			emit(spec)
@@ -603,7 +604,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		if !folder.Enabled || env.traversalBlocked(folder.Path) || !safeToClean(folder.Path) || env.protected(folder.Path) {
 			continue
 		}
-		spec := itemSpec{item: JunkItem{ID: "custom:" + folder.Path, Group: string(groupCustom), Name: folder.Name, Size: -1, Default: true, Trash: true}}
+		spec := itemSpec{item: JunkItem{ID: "custom:" + folder.Path, Group: string(groupCustom), Name: folder.Name, Size: -1, Default: true, Trash: true, Recovery: string(customRecovery)}}
 		spec.addRoot(*env, folder.Path)
 		env.collectDir(folder.Path, nil, 0, claims, &spec)
 		claims.claim(folder.Path)
@@ -613,7 +614,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 	// clean looks for them only when a project row is selected.
 	if !env.skipProjects && !slices.Contains(env.settings.DisabledGroups, string(groupProjects)) {
 		for _, p := range env.idleProjects(claims) {
-			spec := itemSpec{item: JunkItem{ID: projectIDPrefix + p.root, Group: string(groupProjects), Name: filepath.Base(p.root), Size: -1, Trash: true, IdleDays: p.idleDays}}
+			spec := itemSpec{item: JunkItem{ID: projectIDPrefix + p.root, Group: string(groupProjects), Name: filepath.Base(p.root), Size: -1, Trash: true, IdleDays: p.idleDays, Recovery: string(projectRecovery)}}
 			for _, dir := range p.folders {
 				n := len(spec.cands)
 				env.collect(dir, 0, claims, &spec)
@@ -656,7 +657,7 @@ func expandItems(env *junkEnv) ([]itemSpec, ScanSummary) {
 		if env.windowsLayout {
 			owners = []string{strings.TrimSuffix(strings.ToLower(name), ".exe")}
 		}
-		spec := itemSpec{owners: owners, item: JunkItem{ID: id, Group: string(groupApps), Name: display, Size: -1, Default: !unselectedApps[strings.ToLower(owner.BundleID)], Running: env.running(owners)}}
+		spec := itemSpec{owners: owners, item: JunkItem{ID: id, Group: string(groupApps), Name: display, Size: -1, Default: !unselectedApps[strings.ToLower(owner.BundleID)], Running: env.running(owners), Recovery: string(appCacheRecovery)}}
 		if whole {
 			env.collect(root, 0, claims, &spec)
 		} else {

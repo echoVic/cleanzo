@@ -677,6 +677,8 @@ export interface JunkItem {
   detailsDropped?: number;
   /** project rows: whole days since anything in the project changed */
   idleDays?: number;
+  /** what brings the contents back: "rebuild", "download", "leftover" or "gone" */
+  recovery: string;
   /** why the row cannot be cleaned now: "tool-failed" or "tool-timeout" */
   problem?: string;
   /** the line of the tool's output that says what went wrong, if any */

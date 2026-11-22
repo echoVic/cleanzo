@@ -191,6 +191,18 @@ export function finalizeScan(prev: ScanState): ScanState {
   return { items: prev.items.filter((it) => !prev.pending.has(it.id)), pending: new Set(), sel: prev.sel };
 }
 
+// ---- 清掉以后靠什么回来 ----
+
+/** rebuild 本机自己重建；download 用到时重新下载；leftover 用不到了；gone 不会自己回来。 */
+export type Recovery = "rebuild" | "download" | "leftover" | "gone";
+
+const RECOVERIES: readonly string[] = ["rebuild", "download", "leftover", "gone"];
+
+/** 行清掉以后靠什么回来；后端没给、或给了不认识的值时按「不会自己回来」算。 */
+export function recoveryOf(it: JunkItem): Recovery {
+  return RECOVERIES.includes(it.recovery) ? (it.recovery as Recovery) : "gone";
+}
+
 // ---- 清理计划（确认弹层）----
 
 export interface CleanPlan {
@@ -199,13 +211,26 @@ export interface CleanPlan {
   deleteItems: JunkItem[];
   trashItems: JunkItem[];
   review: { item: JunkItem; bytes: number; paths: string[] }[];
+  /** 要付的代价：要联网才回来的、不会自己回来的，以及后者里先进废纸篓的部分。 */
+  cost: { download: number; gone: number; goneToTrash: number };
 }
 
 /** 由当前勾选生成清理计划；没有勾中字节时返回 null（弹层不出现）。 */
 export function buildCleanPlan(items: JunkItem[], sel: JunkSel): CleanPlan | null {
   const chosen = items.filter((it) => chosenSize(it, sel) > 0);
   if (chosen.length === 0) return null;
+  const cost = { download: 0, gone: 0, goneToTrash: 0 };
+  for (const it of chosen) {
+    const bytes = chosenSize(it, sel);
+    const kind = recoveryOf(it);
+    if (kind === "download") cost.download += bytes;
+    if (kind === "gone") {
+      cost.gone += bytes;
+      if (it.trash) cost.goneToTrash += bytes;
+    }
+  }
   return {
+    cost,
     selections: chosen.map((it) => (hasSubs(it)
       ? { id: it.id, paths: [...(sel.subSel.get(it.id) ?? [])] }
       : { id: it.id })),

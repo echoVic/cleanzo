@@ -27,7 +27,7 @@ import {
   GROUPS, createCleanRowTracker, buildCleanPlan, canStartScan, chosenSize, cleanBarWidth, cleanTotals,
   finalizeScan, groupCheckState, groupToggleOn, hasSubs, heroTotals, discoveredSize,
   isPartial, isSelectable, isVisible, isDynamicId, itemTitle, keepLatestVisible, problemKey, projectPath,
-  removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
+  recoveryOf, removeFromSel, rowStateNote, scanItem, scanStart, scanProgress, scanPhase, splitApps, subsOf, toggleGroup, toggleRow,
   toggleSub, withIgnored, withIgnoredSummary,
   type CleanPlan, type RowState, type ScanState, emptySel,
 } from "./helpers";
@@ -899,6 +899,7 @@ export function CleanPage() {
           <div className="action-review-list">
             {(plan?.review ?? []).map(({ item: it, bytes, paths }) => <div className="action-review-row" key={it.id}>
               <div><strong>{itemTitle(it, ruleName)}</strong>
+                <Tag text={t(`clean.recovery.${recoveryOf(it)}`)} kind={recoveryOf(it) === "gone" ? "warn" : "dim"} />
                 <div className="muted small">{cleanupExplanation(it, t).method}</div>
                 {paths.map((path) => <div className="muted small" key={path}><PathText path={displayPath(path)} /></div>)}
               </div>
@@ -906,6 +907,13 @@ export function CleanPage() {
             </div>)}
           </div>
           <div className="action-review-total"><strong>{t("fs.review.total")}</strong><strong>{human(plan?.bytes ?? 0)}</strong></div>
+          {plan && (
+            <div className="action-review-cost small">
+              {plan.cost.download === 0 && plan.cost.gone === 0 && <p className="muted">{t("clean.cost.none")}</p>}
+              {plan.cost.download > 0 && <p className="muted">{t("clean.cost.download", { size: human(plan.cost.download) })}</p>}
+              {plan.cost.gone > 0 && <p>{goneCostText(plan.cost, t)}</p>}
+            </div>
+          )}
           {plan?.deleteItems.length ? <p className="muted small">{t("clean.explain.deleteEffect")}</p> : null}
           {plan?.trashItems.length ? <p className="muted small">{t("clean.result.trashNote")}</p> : null}
           <div className="mt-4 flex justify-end gap-2">
@@ -916,6 +924,13 @@ export function CleanPage() {
       </Dialog>
     </div>
   );
+}
+
+/** 确认框里「不会自己回来」那一句：全都直接删、全都先进废纸篓、或两样都有。 */
+function goneCostText(cost: CleanPlan["cost"], t: ReturnType<typeof useT>): string {
+  if (cost.goneToTrash === 0) return t("clean.cost.gone", { size: human(cost.gone) });
+  if (cost.goneToTrash === cost.gone) return t("clean.cost.goneTrash", { size: human(cost.gone) });
+  return t("clean.cost.goneMixed", { size: human(cost.gone), trash: human(cost.goneToTrash) });
 }
 
 /** macOS 的扫描授权提示。 */

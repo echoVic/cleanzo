@@ -1032,6 +1032,8 @@ button, a, summary, label, select, [role="button"], [role="tab"], [role="menuite
 .action-review-row .small { margin-top: 3px; }
 .action-review-size { flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .action-review-total { display: flex; justify-content: space-between; gap: 16px; margin-top: 12px; font-size: 14px; }
+.action-review-cost { margin-top: 8px; }
+.action-review-cost p { margin: 0; line-height: 1.6; }
 .cleanup-results { margin: 20px 0; padding: 18px 20px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
 .cleanup-results h2 { margin: 0; font-size: 16px; font-weight: 620; }
 .cleanup-results > p { margin: 8px 0 12px; }

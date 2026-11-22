@@ -141,9 +141,14 @@ function createRuntime(): Runtime {
     { path: home("~/.nvm/versions/node/v18.20.4"), name: "v18.20.4", detail: "2025-03-14", size: 186 * MB, default: true },
     { path: home("~/.nvm/versions/node/v20.11.0"), name: "v20.11.0", detail: "2025-06-02", size: 203 * MB, default: true },
   ];
+  // 清掉以后靠什么回来：和后端 rules.go 的分类一致。
+  const recoveryOf = (id: string) => (
+    ["sys.logs", "sys.temp"].includes(id) ? "leftover"
+      : ["sys.apple", "dev.xcode"].includes(id) ? "rebuild"
+        : id === "sys.trash" || id.startsWith("review.") || id.startsWith("custom:") ? "gone" : "download");
   const junk = (id: string, group: string, name: string, size: number, path: string, extra: Partial<JunkItem> = {}): JunkItem => ({
     id, group, name, size, files: size > 0 ? 240 : 0, default: true, trash: false,
-    running: false, inUse: 0, denied: false, estimate: false, paths: [home(path)], top: [], subs: [], ...extra,
+    running: false, inUse: 0, denied: false, estimate: false, paths: [home(path)], top: [], subs: [], recovery: recoveryOf(id), ...extra,
   });
   const junkItems: JunkItem[] = [
     junk("sys.logs", "system", "用户日志", 1.3 * GB, "~/Library/Logs", { top: [
