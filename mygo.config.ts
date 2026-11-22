@@ -2,7 +2,7 @@ import { defineConfig } from "mygo-cli";
 
 // The one place the version lives: the app reads it at run time, and the
 // disk image's volume carries it, so mounted versions are told apart.
-const version = "0.6.0";
+const version = "0.6.1";
 
 export default defineConfig({
   name: "Cleanzo",
@@ -34,7 +34,7 @@ export default defineConfig({
   macos: {
     dmgTitle: `Cleanzo ${version}`,
     signingIdentity: "Developer ID Application: Zijie Hu (8LH7PFQJ89)",
-    notarize: { keychainProfile: "clipnest-notary" },
+    notarize: { keychainProfile: "notary" },
   },
   // Windows 签名：certificate（密码 MYGO_WINDOWS_CERTIFICATE_PASSWORD）或 signCommand。
   windows: {},
