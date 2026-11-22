@@ -190,6 +190,105 @@ func TestTrashReminderMonitorSkipsAnUnchangedTrash(t *testing.T) {
 	}
 }
 
+// TestTrashReminderMonitorFollowsTheTrashWhileAReminderWaits: a reminder
+// that waits for its answer is offered a new measurement once the Trash's
+// listing changed, and only then; one it could not take is offered again.
+func TestTrashReminderMonitorFollowsTheTrashWhileAReminderWaits(t *testing.T) {
+	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1}
+	now := time.Now()
+	stamp := now.Add(-time.Hour)
+	size, scans, shown := 2*gb, 0, 0
+	var scanErr error
+	waiting, takes := true, true
+	type offer struct {
+		size int64
+		over bool
+	}
+	var offers []offer
+	m := trashReminderMonitor{
+		load:  func() TrashReminderConfig { return c },
+		stamp: func() (time.Time, bool) { return stamp, true },
+		scan: func(context.Context) (trashReminderSnapshot, error) {
+			scans++
+			return trashReminderSnapshot{Size: size}, scanErr
+		},
+		reserve: func(time.Time, int64) bool { return true },
+		show:    func(trashReminderSnapshot, func()) { shown++ },
+		waiting: func() bool { return waiting },
+		revise: func(s trashReminderSnapshot, over bool) bool {
+			offers = append(offers, offer{s.Size, over})
+			return takes
+		},
+	}
+	step := func(why string, wantScans int, want ...offer) {
+		t.Helper()
+		m.tick(now)
+		if scans != wantScans || !slices.Equal(offers, want) {
+			t.Fatalf("%s: %d scans and offers %v, want %d and %v", why, scans, offers, wantScans, want)
+		}
+	}
+	step("the reminder shows", 1)
+	if shown != 1 {
+		t.Fatalf("shown %d", shown)
+	}
+	step("an unchanged Trash", 1)
+
+	stamp, size = now, gb/2
+	emptied := offer{gb / 2, false}
+	step("emptied elsewhere", 2, emptied)
+	step("what the reminder took is not measured again", 2, emptied)
+
+	stamp, size, takes = now.Add(time.Minute), 3*gb, false
+	grown := offer{3 * gb, true}
+	step("more in the Trash, the reminder in the user's sight", 3, emptied, grown)
+	takes = true
+	step("offered again, taken", 4, emptied, grown, grown)
+	step("then left alone", 4, emptied, grown, grown)
+
+	stamp, scanErr = now.Add(2*time.Minute), os.ErrPermission
+	step("a measurement that failed is not offered", 5, emptied, grown, grown)
+	scanErr = nil
+	step("and is made again", 6, emptied, grown, grown, grown)
+
+	stamp, waiting = now.Add(3*time.Minute), false
+	step("a reminder that no longer waits", 6, emptied, grown, grown, grown)
+
+	waiting = true
+	userScans.Add(1)
+	m.tick(now)
+	userScans.Add(-1)
+	if scans != 6 {
+		t.Fatalf("measured during a user's scan: %d scans", scans)
+	}
+	if shown != 1 {
+		t.Fatalf("shown %d, want the one reminder", shown)
+	}
+}
+
+// TestTrashReminderMonitorMeasuresAgainWithoutAStamp: where the listing's
+// time cannot be read, a waiting reminder is measured on every check.
+func TestTrashReminderMonitorMeasuresAgainWithoutAStamp(t *testing.T) {
+	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1}
+	scans, offers := 0, 0
+	m := trashReminderMonitor{
+		load: func() TrashReminderConfig { return c },
+		scan: func(context.Context) (trashReminderSnapshot, error) {
+			scans++
+			return trashReminderSnapshot{Size: 2 * gb}, nil
+		},
+		reserve: func(time.Time, int64) bool { return true },
+		show:    func(trashReminderSnapshot, func()) {},
+		waiting: func() bool { return true },
+		revise:  func(trashReminderSnapshot, bool) bool { offers++; return true },
+	}
+	for range 3 {
+		m.tick(time.Now())
+	}
+	if scans != 3 || offers != 2 {
+		t.Fatalf("%d scans and %d offers, want 3 and 2", scans, offers)
+	}
+}
+
 func TestTrashReminderMonitorSuppressesDuplicatesAndDefers(t *testing.T) {
 	c := TrashReminderConfig{Enabled: true, ThresholdGB: 1}
 	now := time.Now()

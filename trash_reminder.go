@@ -216,6 +216,18 @@ type trashReminderMonitor struct {
 		stamp time.Time
 		size  int64
 	}
+	// shown is the stamp read before the measurement the reminder shows.
+	// Only the tick holding checking uses it.
+	shown struct {
+		set   bool
+		stamp time.Time
+	}
+	// waiting reports whether the reminder that shows still asks its
+	// question and follows the Trash while it does; revise offers it a newer
+	// measurement, over the threshold or not, and reports whether the
+	// reminder took it. Without them a reminder keeps what it showed.
+	waiting func() bool
+	revise  func(s trashReminderSnapshot, over bool) bool
 }
 
 func (m *trashReminderMonitor) tick(now time.Time) {
@@ -226,7 +238,11 @@ func (m *trashReminderMonitor) tick(now time.Time) {
 	m.mu.Lock()
 	open := m.open
 	m.mu.Unlock()
-	if open || userScans.Load() > 0 {
+	if userScans.Load() > 0 {
+		return
+	}
+	if open {
+		m.follow()
 		return
 	}
 	c := m.load()
@@ -258,7 +274,36 @@ func (m *trashReminderMonitor) tick(now time.Time) {
 	m.mu.Lock()
 	m.open = true
 	m.mu.Unlock()
+	m.shown.set, m.shown.stamp = stamped, stamp
 	m.show(s, func() { m.mu.Lock(); m.open = false; m.mu.Unlock() })
+}
+
+// follow has the reminder that waits for its answer keep up with the Trash:
+// once the Trash's listing changed since the measurement the reminder
+// shows, it measures again and offers that. A reminder may wait for hours,
+// and the Trash may be emptied elsewhere meanwhile.
+func (m *trashReminderMonitor) follow() {
+	if m.waiting == nil || m.revise == nil || !m.waiting() {
+		return
+	}
+	var stamp time.Time
+	stamped := false
+	if m.stamp != nil {
+		stamp, stamped = m.stamp()
+	}
+	if stamped && m.shown.set && m.shown.stamp.Equal(stamp) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	s, err := m.scan(ctx)
+	if err != nil || userScans.Load() > 0 {
+		return
+	}
+	// A reminder that could not take it now is offered it at the next check.
+	if m.revise(s, s.Size > int64(m.load().ThresholdGB)*trashReminderGB) {
+		m.shown.set, m.shown.stamp = stamped, stamp
+	}
 }
 
 var trashReminderStart sync.Once
