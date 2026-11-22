@@ -65,7 +65,7 @@ func catalogRepo(value string) (string, error) {
 	if !ok || !catalogOwner.MatchString(owner) || !catalogRepositoryName.MatchString(repo) || repo == "." || repo == ".." {
 		return "", errors.New("invalid-repository")
 	}
-	return owner + "/" + repo, nil
+	return owner + "/" + repo, nil // slash-ok: GitHub owner/repository identifier
 }
 
 func catalogRef(value string) (string, error) {
@@ -77,7 +77,7 @@ func catalogRef(value string) (string, error) {
 		return "", errors.New("invalid-ref")
 	}
 	if value != "" {
-		for _, part := range strings.Split(value, "/") {
+		for _, part := range strings.Split(value, "/") { // slash-ok: Git ref names use slash-separated components
 			if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
 				return "", errors.New("invalid-ref")
 			}
@@ -93,7 +93,7 @@ func catalogRelativePath(value string) error {
 	if len(value) > 2000 || strings.ContainsAny(value, `\:`) || strings.ContainsFunc(value, unicode.IsControl) {
 		return errors.New("invalid-skill-path")
 	}
-	for _, part := range strings.Split(value, "/") {
+	for _, part := range strings.Split(value, "/") { // slash-ok: paths inside a repository always use slash-separated components
 		if part == "" || strings.HasPrefix(part, ".") {
 			return errors.New("invalid-skill-path")
 		}
@@ -229,7 +229,7 @@ func (Cleaner) BrowseSkillRepository(ctx context.Context, repo, ref, subdir stri
 		if entry.Path == "." {
 			entry.Path = ""
 		}
-		if sub := origin.Path; sub != "" && entry.Path != sub && !strings.HasPrefix(entry.Path, sub+"/") {
+		if sub := origin.Path; sub != "" && entry.Path != sub && !strings.HasPrefix(entry.Path, sub+"/") { // slash-ok: Git tree paths always use slash-separated components
 			continue
 		}
 		entry.Tree = trees[entry.Path]
@@ -365,7 +365,7 @@ func searchSkillCatalog(ctx context.Context, endpoint, query string) ([]SkillDis
 	seen := map[string]bool{}
 	for _, entry := range payload.Skills {
 		repo, err := catalogRepo(entry.Source)
-		key := strings.ToLower(repo + "/" + entry.Slug)
+		key := strings.ToLower(repo + "/" + entry.Slug) // slash-ok: a lookup key built on the GitHub owner/repository identifier
 		if err != nil || !catalogNameOK(entry.Slug) || seen[key] {
 			continue
 		}

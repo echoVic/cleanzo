@@ -119,7 +119,7 @@ func extractCatalogZIP(ctx context.Context, archive *zip.Reader, stage string) (
 			return "", err
 		}
 		name := strings.TrimSuffix(entry.Name, "/")
-		if isCatalogZIPArtifact(name) || skill != "." && name != skill && !strings.HasPrefix(name, skill+"/") {
+		if isCatalogZIPArtifact(name) || skill != "." && name != skill && !strings.HasPrefix(name, skill+"/") { // slash-ok: ZIP entry names always use slash-separated components
 			continue
 		}
 		destination := filepath.Join(stage, filepath.FromSlash(name))
@@ -139,7 +139,7 @@ func extractCatalogZIP(ctx context.Context, archive *zip.Reader, stage string) (
 }
 
 func validCatalogZIPPath(name string) bool {
-	for _, part := range strings.Split(name, "/") {
+	for _, part := range strings.Split(name, "/") { // slash-ok: ZIP entry names always use slash-separated components
 		// Hidden files such as .gitignore can ship with a skill. Git database
 		// content and traversal components are rejected by component validation.
 		if part == "." || part == ".." || strings.EqualFold(part, ".git") || !catalogNameOK(strings.TrimPrefix(part, ".")) {

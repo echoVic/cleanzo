@@ -273,7 +273,7 @@ func mcpRemote(entry map[string]any) string {
 }
 
 func mcpExecutable(command string) bool {
-	if strings.HasPrefix(command, "~/") || strings.HasPrefix(command, `~\`) {
+	if strings.HasPrefix(command, "~/") || strings.HasPrefix(command, `~\`) { // slash-ok: accepts the user-facing home notation on every platform
 		command = filepath.Join(homeDir(), command[2:])
 	}
 	if _, err := exec.LookPath(command); err == nil {

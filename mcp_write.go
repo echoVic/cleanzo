@@ -298,7 +298,7 @@ func restoreMCPEntries(client mcpClient, raw, backup []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("invalid-config")
 	}
-	path := "/" + pointerMCP(client.Field)
+	path := "/" + pointerMCP(client.Field) // slash-ok: a JSON Pointer, not a path
 	var patchOperations []map[string]any
 	if client.opencode() && openCodeJSONV2(value, path) {
 		if value.Find(path) == nil {
@@ -358,7 +358,7 @@ func mutateMCPJSON(client mcpClient, raw []byte, change MCPChange) ([]byte, erro
 	if err != nil {
 		return nil, errors.New("invalid-config")
 	}
-	rootPath := "/" + pointerMCP(client.Field)
+	rootPath := "/" + pointerMCP(client.Field) // slash-ok: a JSON Pointer, not a path
 	basePath := rootPath
 	if client.opencode() && openCodeJSONV2(value, basePath) {
 		rootPath += "/servers"
@@ -367,7 +367,7 @@ func mutateMCPJSON(client mcpClient, raw []byte, change MCPChange) ([]byte, erro
 			fields["disabled"] = !change.Enabled
 		}
 	}
-	entryPath := rootPath + "/" + pointerMCP(change.Name)
+	entryPath := rootPath + "/" + pointerMCP(change.Name) // slash-ok: a JSON Pointer, not a path
 	type patchOperation struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
@@ -389,7 +389,7 @@ func mutateMCPJSON(client mcpClient, raw []byte, change MCPChange) ([]byte, erro
 		if old, ok := entries[change.Name].(map[string]any); ok {
 			for field, val := range fields {
 				if !reflect.DeepEqual(old[field], val) {
-					patch = append(patch, patchOperation{"add", entryPath + "/" + pointerMCP(field), val})
+					patch = append(patch, patchOperation{"add", entryPath + "/" + pointerMCP(field), val}) // slash-ok: a JSON Pointer, not a path
 				}
 			}
 		} else {
