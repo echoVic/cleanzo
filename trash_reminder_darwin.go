@@ -57,6 +57,17 @@ func (p *trashReminderPopup) finish(r CleanResult, cancelled bool) {
 	}
 }
 
+// begin starts the cleanup the user confirmed.
+func (p *trashReminderPopup) begin() {
+	if p.phase != "" {
+		return
+	}
+	p.phase = "cleaning"
+	if p.start != nil {
+		p.start()
+	}
+}
+
 func (p *trashReminderPopup) stop() {
 	if p.phase != "cleaning" {
 		return
@@ -107,15 +118,7 @@ func (p *trashReminderPopup) view(c *ui.Context) {
 			switch p.phase {
 			case "":
 				ui.Button(c.Key("later"), text("trash.popup.later", nil)).OnClick(p.close)
-				ui.PrimaryButton(c.Key("confirm"), text("trash.popup.empty", nil)).OnClick(func() {
-					if p.phase != "" {
-						return
-					}
-					p.phase = "cleaning"
-					if p.start != nil {
-						p.start()
-					}
-				})
+				ui.PrimaryButton(c.Key("confirm"), text("trash.popup.empty", nil)).OnClick(p.begin)
 			case "cleaning", "stopping":
 				ui.Button(c.Key("cancel"), text("trash.popup.cancel", nil)).Disabled(p.phase == "stopping").OnClick(p.stop)
 			default:
