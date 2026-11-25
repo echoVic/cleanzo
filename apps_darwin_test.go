@@ -13,6 +13,36 @@ func resetUninstallListed() {
 	uninstallListed.apps = nil
 }
 
+func TestUninstallKeepsDataWhenNotSelected(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	stubUsage(t, &usageGuard{running: map[string]bool{}})
+	resetUninstallListed()
+	t.Cleanup(resetUninstallListed)
+	app := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
+	files := []string{
+		filepath.Join(home, "Library", "Preferences", "com.example.testapp.plist"),
+		filepath.Join(home, "Library", "Application Support", "TestApp", "history"),
+		filepath.Join(home, "Library", "Caches", "com.example.testapp", "entry"),
+	}
+	for _, file := range files {
+		writeFile(t, file, 256)
+	}
+	detail := Cleaner{}.AppUninstallDetail(app)
+	if len(detail.Items) != 4 {
+		t.Fatalf("detail should list all four items: %+v", detail.Items)
+	}
+	res := Cleaner{}.UninstallApp(app, false, "")
+	if res.Moved != 1 || res.Freed != detail.Items[0].Size || len(res.Failed) != 0 || exists(app) {
+		t.Errorf("uninstall should move only the bundle: %+v", res)
+	}
+	for _, file := range files {
+		if !exists(file) {
+			t.Errorf("file was not preserved: %s", file)
+		}
+	}
+}
+
 // The confirm lists what the uninstall detail found. A folder of the app's
 // that appears after that stays where it is and is not counted; with no
 // detail on record, as after that uninstall, everything found then is moved.
@@ -32,7 +62,7 @@ func TestUninstallMovesOnlyWhatItsDetailListed(t *testing.T) {
 	}
 	cache := filepath.Join(home, "Library", "Caches", "com.example.testapp")
 	writeFile(t, filepath.Join(cache, "a"), 8192)
-	res := Cleaner{}.UninstallApp(app)
+	res := Cleaner{}.UninstallApp(app, true, "")
 	if res.Moved != 2 || res.Freed != d.TotalSize || len(res.Failed) != 0 {
 		t.Fatalf("uninstall = %+v, want the 2 listed items, %d bytes", res, d.TotalSize)
 	}
@@ -43,7 +73,7 @@ func TestUninstallMovesOnlyWhatItsDetailListed(t *testing.T) {
 	// The uninstall dropped the record: the next one, without a detail, moves
 	// what it finds.
 	app = makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
-	res = Cleaner{}.UninstallApp(app)
+	res = Cleaner{}.UninstallApp(app, true, "")
 	if res.Moved != 2 || len(res.Failed) != 0 || exists(app) || exists(cache) {
 		t.Fatalf("without a detail: %+v, cache exists %v", res, exists(cache))
 	}
@@ -74,11 +104,11 @@ func TestRefusedUninstallKeepsItsDetail(t *testing.T) {
 			writeFile(t, filepath.Join(cache, "a"), 8192)
 
 			stubUsage(t, tc.refuse)
-			if res := (Cleaner{}).UninstallApp(app); res.Moved != 0 || len(res.Failed) != 1 || !exists(app) {
+			if res := (Cleaner{}).UninstallApp(app, true, ""); res.Moved != 0 || len(res.Failed) != 1 || !exists(app) {
 				t.Fatalf("refused: %+v", res)
 			}
 			stubUsage(t, &usageGuard{running: map[string]bool{}})
-			res := Cleaner{}.UninstallApp(app)
+			res := Cleaner{}.UninstallApp(app, true, "")
 			if res.Moved != 2 || res.Freed != d.TotalSize || len(res.Failed) != 0 || exists(app) || exists(pref) || !exists(cache) {
 				t.Fatalf("again: %+v, want the 2 listed items, %d bytes; cache appeared since exists %v", res, d.TotalSize, exists(cache))
 			}

@@ -34,7 +34,9 @@
   leftovers), sorted by name, size, last opened or 7-day growth; checks for
   updates from the App Store, Homebrew cask, Sparkle and electron-updater; can
   run `brew upgrade --cask` itself, shows bundle/data/cache sizes, quits apps,
-  uninstalls, and finds leftover Library data.
+  uninstalls, and finds leftover Library data. Uninstalling keeps app data by
+  default. Removing data and ejecting a matching installer disk are separate
+  opt-in choices.
 - **System status (macOS)**: model, chip, cores, GPU, memory, disk, displays;
   thermal state, chip temperature, fan speed and package power; per-core CPU,
   GPU, memory, SSD health/wear/writes/temperature/throughput, network and

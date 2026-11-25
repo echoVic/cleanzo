@@ -123,7 +123,7 @@ func TestUninstallApp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res := Cleaner{}.UninstallApp(appPath)
+	res := Cleaner{}.UninstallApp(appPath, true, "")
 	if res.Moved < 2 {
 		t.Fatalf("want >=2 items moved, got %d, failed=%v", res.Moved, res.Failed)
 	}
@@ -591,7 +591,7 @@ func TestUninstallProbeFailureIsNotInUse(t *testing.T) {
 	setHome(t, home)
 	appPath := makeFakeApp(t, filepath.Join(home, "Applications"), "TestApp")
 	stubUsage(t, &usageGuard{failed: true})
-	res := Cleaner{}.UninstallApp(appPath)
+	res := Cleaner{}.UninstallApp(appPath, true, "")
 	if res.Moved != 0 || !slices.Equal(res.Failed, []string{appPath + ": usage-unknown"}) || !exists(appPath) {
 		t.Fatalf("failed probe must refuse with usage-unknown: %+v", res)
 	}
@@ -850,7 +850,7 @@ func TestUninstallOnlyInstalledApps(t *testing.T) {
 	writeFile(t, filepath.Join(docs, "a.txt"), 10)
 	notInApps := makeFakeApp(t, home, "Stray")
 	for _, p := range []string{docs, notInApps} {
-		res := Cleaner{}.UninstallApp(p)
+		res := Cleaner{}.UninstallApp(p, true, "")
 		if res.Moved != 0 || len(res.Failed) == 0 {
 			t.Errorf("UninstallApp(%s) = %+v, want a refusal", p, res)
 		}
@@ -873,7 +873,7 @@ func TestUninstallStopsWhenAppCannotMove(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(apps, 0o755) })
-	res := Cleaner{}.UninstallApp(appPath)
+	res := Cleaner{}.UninstallApp(appPath, true, "")
 	if res.Moved != 0 || len(res.Failed) != 1 {
 		t.Fatalf("res = %+v", res)
 	}
@@ -1181,7 +1181,7 @@ func TestUninstallRefusesAppInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := Cleaner{}.UninstallApp(appPath)
+	res := Cleaner{}.UninstallApp(appPath, true, "")
 	f.Close()
 	if res.Moved != 0 || len(res.Failed) != 1 || !exists(appPath) {
 		t.Fatalf("running app: %+v", res)
@@ -1194,7 +1194,7 @@ func TestUninstallRefusesAppInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer g.Close()
-	res = Cleaner{}.UninstallApp(appPath)
+	res = Cleaner{}.UninstallApp(appPath, true, "")
 	if exists(appPath) || !exists(container) || len(res.Failed) != 1 {
 		t.Fatalf("app with an open container: %+v", res)
 	}
@@ -1536,7 +1536,7 @@ func TestUninstallAppNotAppCode(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
 	path := makeApp(t, filepath.Join(home, "Downloads"), "Fake.app", "dev.cleanzo.fake", "Fake")
-	got := Cleaner{}.UninstallApp(path)
+	got := Cleaner{}.UninstallApp(path, true, "")
 	if !slices.Equal(got.Failed, []string{path + ": not-app"}) {
 		t.Fatalf("Failed = %q", got.Failed)
 	}

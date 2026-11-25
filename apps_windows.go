@@ -155,7 +155,7 @@ func appUninstallDetail(id string) UninstallDetail {
 }
 
 // uninstallApp launches only the freshly reread registry command, never deleting files.
-func uninstallApp(id string) UninstallResult {
+func uninstallApp(id string, _ bool, _ string) UninstallResult {
 	result := UninstallResult{Path: id, Failed: []string{}}
 	fail := func(err error) UninstallResult {
 		result.Failed = append(result.Failed, id+": "+err.Error())

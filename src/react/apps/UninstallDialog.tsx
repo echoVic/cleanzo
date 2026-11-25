@@ -2,6 +2,7 @@ import { isWindows } from "../../platform";
 import { Loader2 } from "lucide-react";
 import type { UninstallDetail } from "../../mygo";
 import { Button } from "../../ui/components/button";
+import { Checkbox } from "../../ui/components/checkbox";
 import { PathText } from "../../ui/components/path-text";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose,
@@ -27,6 +28,10 @@ interface UninstallDialogProps {
   stage: UninstallStage;
   detail: UninstallDetail | null;
   failMsg: string | null;
+  removeData: boolean;
+  onRemoveDataChange: (removeData: boolean) => void;
+  ejectInstaller: boolean;
+  onEjectInstallerChange: (eject: boolean) => void;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   onRefresh?: () => void;
@@ -37,13 +42,13 @@ interface UninstallDialogProps {
  * 「关闭」不提供卸载确认；异步晚到结果由调用方按 seq 丢弃。
  */
 export function UninstallDialog({
-  open, stage, detail, failMsg, onOpenChange, onConfirm, onRefresh,
+  open, onOpenChange, ...body
 }: UninstallDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent animateHeight>
-        <div key={stage} className="cz-fade-in">
-          <UninstallDialogBody stage={stage} detail={detail} failMsg={failMsg} onConfirm={onConfirm} onRefresh={onRefresh} />
+        <div key={body.stage} className="cz-fade-in">
+          <UninstallDialogBody {...body} />
         </div>
       </DialogContent>
     </Dialog>
@@ -51,10 +56,15 @@ export function UninstallDialog({
 }
 
 // 弹层正文复用同一状态，供页面和事件夹具渲染。
-export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefresh }:
+export function UninstallDialogBody({ stage, detail, failMsg, removeData, onRemoveDataChange, ejectInstaller, onEjectInstallerChange, onConfirm, onRefresh }:
   Omit<UninstallDialogProps, "open" | "onOpenChange">) {
   const t = useT();
   const running = detail?.app.running ?? false;
+  const win = isWindows();
+  const items = detail?.items ?? [];
+  const hasRelatedFiles = items.some((it) => it.kind !== "app");
+  const selectedItems = removeData ? items : items.filter((it) => it.kind === "app");
+  const selectedSize = selectedItems.reduce((sum, it) => sum + it.size, 0);
   return (
     <>
       {stage === "launched" && (
@@ -100,8 +110,20 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
           <DialogHeader>
             <DialogTitle>{t("apps.title", { name: detail.app.name })}</DialogTitle>
           </DialogHeader>
-          {!isWindows() && <div className="detail-list">
-            {uninstallGroups(detail.items).map((group) => <section className="uninstall-review-group" key={group.key}>
+          {!win && !running && hasRelatedFiles && (
+            <label className="check mt-3 mb-2">
+              <Checkbox checked={removeData} onCheckedChange={(value) => onRemoveDataChange(value === true)} />
+              <span>{t("apps.removeData")}</span>
+            </label>
+          )}
+          {!win && !running && detail.installerId && detail.installerMount && (
+            <label className="check mt-3 mb-2" title={detail.installerMount}>
+              <Checkbox checked={ejectInstaller} onCheckedChange={(value) => onEjectInstallerChange(value === true)} />
+              <span>{t("apps.ejectInstaller", { name: detail.installerMount.split("/").at(-1) ?? "" })}</span>
+            </label>
+          )}
+          {!win && <div className="detail-list">
+            {uninstallGroups(selectedItems).map((group) => <section className="uninstall-review-group" key={group.key}>
               <h3><span>{t(`apps.review.${group.key}`)}</span><span>{human(group.bytes)}</span></h3>
               {group.key === "data" && <p className="muted small">{t("apps.review.dataNote")}</p>}
               {group.items.map((it) => (
@@ -116,7 +138,7 @@ export function UninstallDialogBody({ stage, detail, failMsg, onConfirm, onRefre
           <DialogDescription className="warn-text">
             {running
               ? t("apps.inUse", { name: detail.app.name })
-              : t("apps.body", { n: detail.items.length, size: human(detail.totalSize) })}
+              : t("apps.body", { n: selectedItems.length, size: human(selectedSize) })}
           </DialogDescription>
           <div className="mt-4 flex justify-end gap-2">
             {running ? (

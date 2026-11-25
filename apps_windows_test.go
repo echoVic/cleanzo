@@ -197,7 +197,7 @@ func TestWindowsUninstallLaunchNoTrash(t *testing.T) {
 	trashItem = func(p string) error { calls = append(calls, "trash:"+p); return nil }
 	removeAll = func(p string) error { calls = append(calls, "remove:"+p); return nil }
 	t.Cleanup(func() { trashItem, removeAll = savedTrash, savedRemove })
-	result := (Cleaner{}).UninstallApp("hkcu:picked")
+	result := (Cleaner{}).UninstallApp("hkcu:picked", false, "")
 	if !result.Launched || result.Moved != 0 || result.Freed != 0 || len(result.Failed) != 0 {
 		t.Fatalf("result=%+v", result)
 	}
@@ -230,7 +230,7 @@ func TestWindowsUninstallInUse(t *testing.T) {
 	if !(Cleaner{}).AppUninstallDetail("hkcu:busy").App.Running {
 		t.Fatal("running app not detected")
 	}
-	result := (Cleaner{}).UninstallApp("hkcu:busy")
+	result := (Cleaner{}).UninstallApp("hkcu:busy", false, "")
 	if result.Launched || !reflect.DeepEqual(result.Failed, []string{"hkcu:busy: in-use"}) {
 		t.Fatalf("result=%+v", result)
 	}
@@ -241,7 +241,7 @@ func TestWindowsUninstallFailsClosed(t *testing.T) {
 	roots := testUninstallRegistry(t)
 	key := seedUninstallKey(t, roots[0], "bad", map[string]string{"DisplayName": "Bad", "UninstallString": "garbage"})
 	for id, code := range map[string]string{"hkcu:missing": "gone", "hkcu:bad": "blocked", `hkcu:..\bad`: "blocked", `hklm64:bad`: "blocked", `C:\Apps`: "blocked"} {
-		result := (Cleaner{}).UninstallApp(id)
+		result := (Cleaner{}).UninstallApp(id, false, "")
 		if result.Launched || !reflect.DeepEqual(result.Failed, []string{id + ": " + code}) {
 			t.Fatalf("%s: %+v", id, result)
 		}
@@ -249,7 +249,7 @@ func TestWindowsUninstallFailsClosed(t *testing.T) {
 	if err := key.DeleteValue("UninstallString"); err != nil {
 		t.Fatal(err)
 	}
-	if result := (Cleaner{}).UninstallApp("hkcu:bad"); result.Launched || !strings.HasSuffix(strings.Join(result.Failed, ""), ": blocked") {
+	if result := (Cleaner{}).UninstallApp("hkcu:bad", false, ""); result.Launched || !strings.HasSuffix(strings.Join(result.Failed, ""), ": blocked") {
 		t.Fatalf("missing command: %+v", result)
 	}
 	if err := key.SetStringValue("UninstallString", "garbage"); err != nil {
@@ -261,7 +261,7 @@ func TestWindowsUninstallFailsClosed(t *testing.T) {
 	if detail := (Cleaner{}).AppUninstallDetail("hkcu:bad"); detail.App.Running {
 		t.Fatal("failed snapshot is not evidence of a running app")
 	}
-	if result := (Cleaner{}).UninstallApp("hkcu:bad"); result.Launched || !reflect.DeepEqual(result.Failed, []string{"hkcu:bad: usage-unknown"}) {
+	if result := (Cleaner{}).UninstallApp("hkcu:bad", false, ""); result.Launched || !reflect.DeepEqual(result.Failed, []string{"hkcu:bad: usage-unknown"}) {
 		t.Fatalf("failed probe: %+v", result)
 	}
 }
@@ -281,7 +281,7 @@ func TestWindowsUninstallLaunchFailed(t *testing.T) {
 		return windows.ERROR_CANCELLED
 	}
 	t.Cleanup(func() { runUninstaller = saved })
-	result := (Cleaner{}).UninstallApp("hkcu:declined")
+	result := (Cleaner{}).UninstallApp("hkcu:declined", false, "")
 	if result.Launched || !reflect.DeepEqual(result.Failed, []string{"hkcu:declined: launch-failed"}) {
 		t.Fatalf("result=%+v", result)
 	}

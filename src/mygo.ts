@@ -1382,6 +1382,8 @@ export interface UninstallDetail {
   app: AppInfo;
   items: UninstallItem[];
   totalSize: number;
+  installerMount?: string;
+  installerId?: string;
 }
 
 /** UninstallItem is one file or folder associated with an app. */
@@ -1393,6 +1395,8 @@ export interface UninstallItem {
 
 /** UninstallResult reports what a single uninstall pass did. */
 export interface UninstallResult {
+  installerEjected?: boolean;
+  installerEjectFailed?: boolean;
   launched: boolean;
   path: string;
   moved: number;
@@ -1866,11 +1870,12 @@ export const Cleaner = {
     return call("Cleaner.TrashSkills", paths);
   },
   /**
-   * UninstallApp uninstalls the selected app: macOS moves its bundle and related
-   * files to the Trash; Windows opens only its registry-declared uninstaller.
+   * UninstallApp moves the bundle to the Trash on macOS. Related files are
+   * included only when removeData is true. A non-empty installerID requests
+   * ejection of the previewed installer. Windows opens the app's uninstaller.
    */
-  uninstallApp(path: string): Promise<UninstallResult> {
-    return call("Cleaner.UninstallApp", path);
+  uninstallApp(path: string, removeData: boolean, installerID: string): Promise<UninstallResult> {
+    return call("Cleaner.UninstallApp", path, removeData, installerID);
   },
   /** UpgradeApp uses only the action remembered by the Go update check. */
   upgradeApp(id: string): Promise<AppUpgradeResult> {

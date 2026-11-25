@@ -6,7 +6,7 @@ import type { AppInfo, AppUpdate, AppUpgradeResult, GrowthSummary, GrowthState, 
 export const appsApi = {
   listApps: (): Promise<AppInfo[]> => Cleaner.listApps(),
   uninstallDetail: (path: string): Promise<UninstallDetail> => Cleaner.appUninstallDetail(path),
-  uninstallApp: (path: string): Promise<UninstallResult> => Cleaner.uninstallApp(path),
+  uninstallApp: (path: string, removeData: boolean, installerId: string): Promise<UninstallResult> => Cleaner.uninstallApp(path, removeData, installerId),
   /** 启动残留流式扫描；返回 Channel 与完成 Promise。 */
   startOrphanScan(): { ch: Channel<OrphanItem>; done: Promise<void> } {
     const ch = new Channel<OrphanItem>();

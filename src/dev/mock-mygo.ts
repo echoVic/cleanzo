@@ -99,7 +99,7 @@ function createRuntime(): Runtime {
       folder: "/Library/Application Support/ToDesk/dumps", total: 152 * GB, at: nowSec() - 3600 }],
   });
   const info: SystemInfo = {
-    version: "0.6.2", chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
+    version: "0.6.3", chip: "Apple M2 Pro", memory: 32 * GB, cores: 12, osVersion: "26.6.2", bootTime: now - 4 * 86400,
   };
   const machineInfo: MachineInfo = {
     model: "MacBook Pro (16-inch, 2023)", modelId: "Mac14,10", perfCores: 8, effCores: 4, gpuCores: 19,
@@ -1027,10 +1027,10 @@ function createRuntime(): Runtime {
       return { launched: false, path, moved: r.removed.length, freed: r.freed, failed: [] };
     },
     "Cleaner.AppUninstallDetail": async (path) => { await wait(800); return detail(path); },
-    "Cleaner.UninstallApp": async (path) => {
+    "Cleaner.UninstallApp": async (path, removeData) => {
       await wait(700);
       const d = detail(path);
-      const r = remove(d.items.map((it) => it.path));
+      const r = remove(d.items.filter((it) => removeData || it.kind === "app").map((it) => it.path));
       quitted.add(path);
       return { launched: false, path, moved: r.removed.length, freed: r.freed, failed: [] };
     },

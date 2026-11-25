@@ -216,6 +216,40 @@ test("Windows app row displays publisher and version and sends only its registry
   } finally { setPlatformForTest(undefined); setPref("system"); }
 });
 
+test("macOS 卸载确认按勾选状态显示文件和总量", async () => {
+  await import("./setup-dom");
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { Dialog } = await import("../src/ui/components/dialog");
+  const { UninstallDialogBody } = await import("../src/react/apps/UninstallDialog");
+  const { setPlatformForTest } = await import("../src/platform");
+  const { setPref, t } = await import("../src/i18n");
+  const detail = { app: app({ name: "A", path: "/Applications/A.app" }), items: [
+    { path: "/Applications/A.app", kind: "app", size: 800 },
+    { path: "/private-history", kind: "support", size: 200 },
+    { path: "/private-settings", kind: "prefs", size: 16 },
+  ], totalSize: 1016, installerId: "test-preview", installerMount: "/Volumes/A Installer" };
+  try {
+    setPlatformForTest("darwin");
+    setPref("zh");
+    const render = (removeData: boolean) => renderToStaticMarkup(createElement(Dialog, { open: true },
+      createElement(UninstallDialogBody, { stage: "detail", detail, failMsg: null, removeData, onRemoveDataChange() {}, ejectInstaller: false, onEjectInstallerChange() {}, onConfirm() {} })));
+    const kept = render(false);
+    expect(kept).toContain(t("apps.removeData"));
+    expect(kept).toContain(t("apps.ejectInstaller", { name: "A Installer" }));
+    expect(kept).toContain('aria-checked="false"');
+    expect(kept).toContain(t("apps.body", { n: 1, size: "800 B" }));
+    expect(kept).not.toContain("/private-history");
+    expect(kept).not.toContain("/private-settings");
+    const removed = render(true);
+    expect(removed).toContain('aria-checked="true"');
+    expect(removed).toContain('aria-checked="false"'); // 数据复选框与安装盘选项独立
+    expect(removed).toContain(t("apps.body", { n: 3, size: "1016 B" }));
+    expect(removed).toContain("/private-history");
+    expect(removed).toContain("/private-settings");
+  } finally { setPlatformForTest(undefined); setPref("system"); }
+});
+
 test("Windows uninstall dialog hides related files and offers refresh after launch in zh/en", async () => {
   await import("./setup-dom");
   const { createElement } = await import("react");
@@ -229,10 +263,11 @@ test("Windows uninstall dialog hides related files and offers refresh after laun
     setPlatformForTest("win32");
     for (const lang of ["zh", "en"] as const) {
       setPref(lang);
-      const props = { detail, failMsg: null, onConfirm() {}, onRefresh() {} };
+      const props = { detail, failMsg: null, removeData: false, onRemoveDataChange() {}, ejectInstaller: false, onEjectInstallerChange() {}, onConfirm() {}, onRefresh() {} };
       const render = (stage: "detail" | "launched") => renderToStaticMarkup(createElement(Dialog, { open: true }, createElement(UninstallDialogBody, { ...props, stage })));
       expect(render("detail")).toContain(t("apps.body", { n: 1, size: "4 B" }));
       expect(render("detail")).not.toContain("private-related-file");
+      expect(render("detail")).not.toContain('role="checkbox"');
       const confirm = lang === "zh" ? "打开卸载程序" : "Open Uninstaller";
       expect(render("detail")).toMatch(new RegExp(`<button[^>]*>${confirm}</button>`));
       for (const stage of ["detail", "launched"] as const) {
@@ -1025,6 +1060,37 @@ test("卸载确认每次重读详情：读到前显示分析中，读到后展�
     resolve(later); await h.flush();
     expect(h.dialog().stage).toBe("detail"); expect(h.dialog().detail.items).toEqual(later.items); expect(h.dialog().detail.totalSize).toBe(1100);
     expect(h.expanded(a.id).usage).toEqual({ app: 800, data: 300, cache: 0, cachePaths: [] });
+  } finally { h.dispose(); }
+});
+
+test("卸载数据每次默认不勾选，仅在本次确认时传给后端", async () => {
+  const a = app({ name: "A", path: "/Applications/A.app" });
+  const stream = updateStream();
+  const choices: [boolean, string][] = [];
+  const h = await appsHarness({
+    listApps: async () => [a], startUpdateCheck: () => stream as any,
+    uninstallDetail: async () => ({ app: a, items: [
+      { kind: "app", path: a.id, size: 800 }, { kind: "prefs", path: "/prefs", size: 200 },
+    ], totalSize: 1000, installerId: "test-preview", installerMount: "/Volumes/A Installer" }),
+    uninstallApp: async (path, removeData, installerId) => {
+      choices.push([removeData, installerId]);
+      return uninstall({ path, failed: [`${path}: in-use`] });
+    },
+  });
+  try {
+    await h.flush({ active: true }); stream.finish(); await h.flush();
+    h.rows()[0].props.onToggle(a.id); await h.flush();
+    const open = async () => { h.expanded(a.id).onUninstall(a.id); await h.flush(); };
+    await open(); expect(h.dialog().removeData).toBe(false); expect(h.dialog().ejectInstaller).toBe(false);
+    h.dialog().onEjectInstallerChange(true);
+    h.dialog().onRemoveDataChange(true); await h.flush();
+    expect(h.dialog().removeData).toBe(true);
+    h.dialog().onOpenChange(false); await h.flush(); expect(choices).toEqual([]);
+    await open(); expect(h.dialog().removeData).toBe(false);
+    h.dialog().onConfirm(); await h.flush(); expect(choices).toEqual([[false, ""]]);
+    await open(); h.dialog().onRemoveDataChange(true); h.dialog().onEjectInstallerChange(true); await h.flush();
+    h.dialog().onConfirm(); await h.flush(); expect(choices).toEqual([[false, ""], [true, "test-preview"]]);
+    await open(); expect(h.dialog().removeData).toBe(false); expect(h.dialog().ejectInstaller).toBe(false);
   } finally { h.dispose(); }
 });
 

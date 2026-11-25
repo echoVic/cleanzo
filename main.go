@@ -78,18 +78,22 @@ type UninstallItem struct {
 
 // UninstallDetail is everything that would be removed for an app.
 type UninstallDetail struct {
-	App       AppInfo         `json:"app"`
-	Items     []UninstallItem `json:"items"`
-	TotalSize int64           `json:"totalSize"`
+	App            AppInfo         `json:"app"`
+	Items          []UninstallItem `json:"items"`
+	TotalSize      int64           `json:"totalSize"`
+	InstallerMount string          `json:"installerMount,omitempty"`
+	InstallerID    string          `json:"installerId,omitempty"`
 }
 
 // UninstallResult reports what a single uninstall pass did.
 type UninstallResult struct {
-	Launched bool     `json:"launched"`
-	Path     string   `json:"path"`
-	Moved    int64    `json:"moved"`
-	Freed    int64    `json:"freed"`
-	Failed   []string `json:"failed"`
+	InstallerEjected     bool     `json:"installerEjected,omitempty"`
+	InstallerEjectFailed bool     `json:"installerEjectFailed,omitempty"`
+	Launched             bool     `json:"launched"`
+	Path                 string   `json:"path"`
+	Moved                int64    `json:"moved"`
+	Freed                int64    `json:"freed"`
+	Failed               []string `json:"failed"`
 }
 
 // LargeFile is a single large file discovered by the large-file scan.
@@ -933,10 +937,11 @@ func (Cleaner) AppUninstallDetail(path string) UninstallDetail {
 	return appUninstallDetail(path)
 }
 
-// UninstallApp uninstalls the selected app: macOS moves its bundle and related
-// files to the Trash; Windows opens only its registry-declared uninstaller.
-func (Cleaner) UninstallApp(path string) UninstallResult {
-	return uninstallApp(path)
+// UninstallApp moves the bundle to the Trash on macOS. Related files are
+// included only when removeData is true. A non-empty installerID requests
+// ejection of the previewed installer. Windows opens the app's uninstaller.
+func (Cleaner) UninstallApp(path string, removeData bool, installerID string) UninstallResult {
+	return uninstallApp(path, removeData, installerID)
 }
 
 // codeError is an error the UI translates: its text is the JSON object

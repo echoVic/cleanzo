@@ -73,6 +73,8 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   const [forceTarget, setForceTarget] = React.useState<AppInfo | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [dialog, setDialog] = React.useState<DialogState>(DIALOG_IDLE);
+  const [removeData, setRemoveData] = React.useState(false);
+  const [ejectInstaller, setEjectInstaller] = React.useState(false);
   const [focusRequest, setFocusRequest] = React.useState<string | null>(null);
   const chRef = React.useRef<{ close(): void } | null>(null);
   const runRef = React.useRef(0);
@@ -377,8 +379,10 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
   }, []);
   const openDetail = async (id: string) => {
     const seq = ++seqRef.current;
-    // 确认框列的是要移走的文件：每次打开都重读，读到前停在「分析中」。
+    // 每次卸载都重新读取可移走的文件，数据需要在本次确认时勾选。
     setDialog(DIALOG_IDLE);
+    setRemoveData(false);
+    setEjectInstaller(false);
     setDialogOpen(true);
     try {
       const d = await ensureDetail(id, true);
@@ -396,9 +400,12 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
     const path = d.app.id;
     const seq = seqRef.current;
     try {
-      const res = await appsApi.uninstallApp(path);
+      const res = await appsApi.uninstallApp(path, removeData, ejectInstaller ? d.installerId ?? "" : "");
       const name = d.app.name;
       const outcome = classifyUninstall(res);
+      const ejectMessage = res.installerEjected ? t("apps.installerEjected")
+        : res.installerEjectFailed ? t("apps.installerEjectFailed") : "";
+      const withEject = (message: string) => ejectMessage ? `${message} ${ejectMessage}` : message;
       if (outcome === "launched") {
         if (seq === seqRef.current) {
           setDialog({ stage: "launched", detail: d, failMsg: null });
@@ -412,10 +419,12 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
         if (isWindows()) {
           toast(t("apps.fail", { msg: errText(res.failed[0]?.slice(res.path.length + 2) ?? "blocked") }), "err");
         } else {
-          toast(t("apps.partial", { name, n: res.failed.length }), "err");
+          toast(withEject(t("apps.partial", { name, n: res.failed.length })), "err");
         }
       } else {
-        toast(t("apps.ok", { name, size: human(res.freed) }));
+        const message = withEject(t("apps.ok", { name, size: human(res.freed) }));
+        if (res.installerEjectFailed) toast(message, "err");
+        else toast(message);
       }
       if (!bundleFailed(res)) {
         appsRef.current = appsRef.current.filter((a) => a.id !== res.path);
@@ -495,7 +504,19 @@ export function AppsList({ active, filter, onBusyChange, onCounts, uninstallPath
           </AnimatedAppRow>;
         })}
       </div>}
-      <UninstallDialog open={dialogOpen} stage={dialog.stage} detail={dialog.detail} failMsg={dialog.failMsg} onOpenChange={(v) => { if (!v) closeDialog(); }} onConfirm={() => void confirmUninstall()} onRefresh={() => { closeDialog(); void loadApps(); }} />
+      <UninstallDialog
+        open={dialogOpen}
+        stage={dialog.stage}
+        detail={dialog.detail}
+        failMsg={dialog.failMsg}
+        removeData={removeData}
+        onRemoveDataChange={setRemoveData}
+        ejectInstaller={ejectInstaller}
+        onEjectInstallerChange={setEjectInstaller}
+        onOpenChange={(v) => { if (!v) closeDialog(); }}
+        onConfirm={() => void confirmUninstall()}
+        onRefresh={() => { closeDialog(); void loadApps(); }}
+      />
       <Dialog open={quitTarget !== null} onOpenChange={(v) => { if (!v) setQuitTarget(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>{t("status.quit.title", { name: quitTarget?.name ?? "" })}</DialogTitle><DialogDescription>{t("status.quit.body", { name: quitTarget?.name ?? "" })}</DialogDescription></DialogHeader>

@@ -36,8 +36,12 @@ func appUninstallDetail(path string) UninstallDetail {
 	}
 	app := apps[0]
 	items := uninstallPaths(app)
+	var installer appInstaller
 	if len(items) > 0 && items[0].Kind == "app" {
 		app.Size = items[0].Size
+		if app.BundleID != "" && !app.Running {
+			installer = findAppInstaller(app.BundleID, mountedInstallers())
+		}
 	} else {
 		app.Size, _ = scanPath(path)
 	}
@@ -46,7 +50,7 @@ func appUninstallDetail(path string) UninstallDetail {
 		total += it.Size
 	}
 	rememberUninstallListed(path, items)
-	return UninstallDetail{App: app, Items: items, TotalSize: total}
+	return UninstallDetail{App: app, Items: items, TotalSize: total, InstallerMount: installer.mount, InstallerID: installer.id()}
 }
 
 // uninstallListedMax bounds how many apps' last uninstall details are kept.
@@ -100,12 +104,12 @@ func takeUninstallListed(app string) (map[string]bool, bool) {
 	return paths, true
 }
 
-// uninstallApp moves the app's bundle and its related files to the Trash.
+// uninstallApp moves the app bundle and, on request, related files to the Trash.
 // They are found again, and when a detail of the app is on record, only those
 // it listed are moved: one that appeared since its confirm stays. An
 // uninstall refused before moving anything leaves the detail on record for
 // the next try; one that goes ahead drops it.
-func uninstallApp(path string) UninstallResult {
+func uninstallApp(path string, removeData bool, installerID string) UninstallResult {
 	name, bid, _ := readBundleInfo(filepath.Join(path, "Contents", "Info.plist"))
 	app := AppInfo{ID: path, Publisher: "", Name: name, Path: path, BundleID: bid}
 	res := UninstallResult{Path: path}
@@ -113,6 +117,9 @@ func uninstallApp(path string) UninstallResult {
 	if len(items) == 0 || items[0].Kind != "app" {
 		res.Failed = append(res.Failed, path+": not-app")
 		return res
+	}
+	if !removeData {
+		items = items[:1]
 	}
 	// A running app would recreate what is removed under it, or keep its
 	// moved bundle running. A failed probe says nothing about whether it runs.
@@ -146,6 +153,10 @@ func uninstallApp(path string) UninstallResult {
 		}
 		res.Moved++
 		res.Freed += item.Size
+	}
+	if installerID != "" && res.Moved > 0 {
+		res.InstallerEjected = ejectAppInstaller(app.BundleID, installerID)
+		res.InstallerEjectFailed = !res.InstallerEjected
 	}
 	return res
 }
